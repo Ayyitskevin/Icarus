@@ -1,0 +1,15 @@
+{
+  "name": "@icarus/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "icarus": "./dist/main.js"
+  },
+  "dependencies": {
+    "@icarus/core": "workspace:*"
+  },
+  "scripts": {
+    "start": "node dist/main.js"
+  }
+}

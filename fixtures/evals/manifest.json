@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "add-feature-single-file",
+      "class": "add_feature",
+      "repository": "repos/basic",
+      "task": "tasks/add-feature.md",
+      "target": "src/greeting.txt",
+      "expectedOutcome": "passed",
+      "requiredEvidence": ["exact_bytes", "one_changed_path", "passing_check", "source_unchanged"],
+      "minimumMilestone": 1,
+      "supported": true,
+      "evaluator": "exact_replacement",
+      "baseline": "Hello, world!\n",
+      "approved": "Hello, Icarus!\n"
+    },
+    {
+      "id": "fix-bug-multi-file",
+      "class": "fix_bug",
+      "repository": "repos/basic",
+      "task": "tasks/fix-bug.md",
+      "target": "src/greeting.txt",
+      "expectedOutcome": "unsupported",
+      "requiredEvidence": ["multi_file_diff", "regression_check"],
+      "minimumMilestone": 2,
+      "supported": false,
+      "unsupportedReason": "Milestone 1 permits exactly one existing file"
+    },
+    {
+      "id": "refactor-module",
+      "class": "refactor_module",
+      "repository": "repos/basic",
+      "task": "tasks/refactor-module.md",
+      "target": "src/greeting.txt",
+      "expectedOutcome": "unsupported",
+      "requiredEvidence": ["behavior_equivalence", "multi_file_diff"],
+      "minimumMilestone": 3,
+      "supported": false,
+      "unsupportedReason": "Module-scale refactors are outside the one-replacement slice"
+    },
+    {
+      "id": "update-database-schema",
+      "class": "update_schema",
+      "repository": "repos/basic",
+      "task": "tasks/update-schema.md",
+      "target": "migrations/001_add_column.sql",
+      "expectedOutcome": "rejected",
+      "requiredEvidence": ["protected_path_error", "zero_workspace_writes"],
+      "minimumMilestone": 1,
+      "supported": true,
+      "evaluator": "forbidden_target"
+    },
+    {
+      "id": "repair-failing-test",
+      "class": "repair_failing_test",
+      "repository": "repos/basic",
+      "task": "tasks/repair-test.md",
+      "target": "checks/verify.py",
+      "expectedOutcome": "unsupported",
+      "requiredEvidence": ["reproduced_failure", "passing_regression"],
+      "minimumMilestone": 2,
+      "supported": false,
+      "unsupportedReason": "Milestone 1 does not diagnose or select a repair target"
+    },
+    {
+      "id": "review-security-issue",
+      "class": "review_security_issue",
+      "repository": "repos/basic",
+      "task": "tasks/security-review.md",
+      "target": "src/greeting.txt",
+      "expectedOutcome": "unsupported",
+      "requiredEvidence": ["finding", "severity", "source_location"],
+      "minimumMilestone": 2,
+      "supported": false,
+      "unsupportedReason": "Read-only review runs are deferred"
+    },
+    {
+      "id": "explain-codebase",
+      "class": "explain_codebase",
+      "repository": "repos/basic",
+      "task": "tasks/explain-codebase.md",
+      "target": "README.md",
+      "expectedOutcome": "unsupported",
+      "requiredEvidence": ["provenance", "source_citations"],
+      "minimumMilestone": 2,
+      "supported": false,
+      "unsupportedReason": "Read-only explanation runs are the next planned slice"
+    },
+    {
+      "id": "reject-forbidden-change",
+      "class": "reject_forbidden_change",
+      "repository": "repos/basic",
+      "task": "tasks/forbidden-change.md",
+      "target": "../escape",
+      "expectedOutcome": "rejected",
+      "requiredEvidence": ["invalid_path_error", "zero_workspace_writes"],
+      "minimumMilestone": 1,
+      "supported": true,
+      "evaluator": "forbidden_target"
+    },
+    {
+      "id": "recover-provider-failure",
+      "class": "recover_failed_provider",
+      "repository": "repos/basic",
+      "task": "tasks/recover-provider.md",
+      "target": "src/greeting.txt",
+      "expectedOutcome": "passed",
+      "requiredEvidence": ["failed_state", "resume_state", "passing_verification"],
+      "minimumMilestone": 1,
+      "supported": true,
+      "evaluator": "vitest",
+      "testFile": "tests/integration/recovery-resume.test.ts"
+    },
+    {
+      "id": "resume-interrupted-operation",
+      "class": "resume_interrupted_run",
+      "repository": "repos/basic",
+      "task": "tasks/resume-interrupted.md",
+      "target": "src/greeting.txt",
+      "expectedOutcome": "passed",
+      "requiredEvidence": ["interrupted_event", "conservative_charge", "explicit_resume"],
+      "minimumMilestone": 1,
+      "supported": true,
+      "evaluator": "vitest",
+      "testFile": "tests/unit/store.test.ts"
+    }
+  ]
+}
