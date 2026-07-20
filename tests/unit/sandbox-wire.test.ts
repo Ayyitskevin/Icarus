@@ -290,8 +290,10 @@ describe("Docker sandbox wire contract", () => {
 
   it("bounds a hanging check and still removes its managed container", async () => {
     const { docker, evidence } = await runScenario(
-      { imageConfig: { Volumes: null }, run: { delayMs: 1_000 } },
-      { ceiling: { ...CEILING, commandTimeoutMs: 40 } },
+      { imageConfig: { Volumes: null }, run: { delayMs: 10_000 } },
+      // Leave room for cold Node startup on hosted runners while keeping the
+      // controller timeout far below the fake command's deliberate hang.
+      { ceiling: { ...CEILING, commandTimeoutMs: 1_000 } },
     );
 
     expect(evidence).toHaveLength(1);
@@ -311,9 +313,9 @@ describe("Docker sandbox wire contract", () => {
     const { evidence } = await runScenario(
       {
         imageConfig: { Volumes: null },
-        run: { delayMs: 1_000, sigtermExitCode: 0 },
+        run: { delayMs: 10_000, sigtermExitCode: 0 },
       },
-      { ceiling: { ...CEILING, commandTimeoutMs: 40 } },
+      { ceiling: { ...CEILING, commandTimeoutMs: 1_000 } },
     );
 
     expect(evidence).toHaveLength(1);
