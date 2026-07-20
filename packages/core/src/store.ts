@@ -41,6 +41,16 @@ export const CANCELLATION_RECOVERY_OPERATION_KIND = "cancellation.recovery";
 export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
 
+function isSqliteBusy(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { readonly code?: unknown }).code === "string" &&
+    (error as { readonly code: string }).code.startsWith("SQLITE_BUSY")
+  );
+}
+
 function emergencyOperationDetail(detail: JsonValue): JsonValue {
   if (typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
     return { ...detail, budgetClass: "emergency" };
@@ -215,7 +225,10 @@ export class IcarusStore {
   readonly #now: () => string;
   readonly #id: () => string;
 
-  constructor(databasePath: string, options: { now?: () => string; id?: () => string } = {}) {
+  constructor(
+    databasePath: string,
+    options: { now?: () => string; id?: () => string; busyTimeoutMs?: number } = {},
+  ) {
     const parent = path.dirname(databasePath);
     const parentStat = lstatSync(parent);
     invariant(
@@ -223,12 +236,18 @@ export class IcarusStore {
       "UNSAFE_STATE_ROOT",
       "Database parent must be a real directory",
     );
+    const busyTimeoutMs = options.busyTimeoutMs ?? 5_000;
+    invariant(
+      Number.isSafeInteger(busyTimeoutMs) && busyTimeoutMs >= 0 && busyTimeoutMs <= 60_000,
+      "INVALID_DATABASE_CONFIGURATION",
+      "SQLite busy timeout is invalid",
+    );
     this.#database = new Database(databasePath);
     chmodSync(databasePath, 0o600);
+    this.#database.pragma(`busy_timeout = ${busyTimeoutMs}`);
     this.#database.pragma("foreign_keys = ON");
     this.#database.pragma("journal_mode = WAL");
     this.#database.pragma("synchronous = FULL");
-    this.#database.pragma("busy_timeout = 5000");
     this.#database.exec(SCHEMA);
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#id = options.id ?? randomUUID;
@@ -1082,6 +1101,7 @@ export class IcarusStore {
     reservedCostUsd: number,
     reservedTokens: number,
     reservedRuntimeMs: number,
+    expectedState?: RunState,
   ): OperationToken {
     return this.#beginOperation(
       runId,
@@ -1090,6 +1110,7 @@ export class IcarusStore {
       reservedTokens,
       reservedRuntimeMs,
       "ordinary",
+      expectedState,
     );
   }
 
@@ -1111,6 +1132,7 @@ export class IcarusStore {
     reservedTokens: number,
     reservedRuntimeMs: number,
     budgetClass: "ordinary" | "emergency",
+    expectedState?: RunState,
   ): OperationToken {
     invariant(
       Number.isFinite(reservedCostUsd) && reservedCostUsd >= 0,
@@ -1130,6 +1152,11 @@ export class IcarusStore {
     let token: OperationToken | undefined;
     const transaction = this.#database.transaction(() => {
       const run = this.getRun(runId);
+      invariant(
+        expectedState === undefined || run.state === expectedState,
+        "RUN_BUSY",
+        "Run state changed before operation admission",
+      );
       invariant(
         this.#database
           .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
@@ -1228,7 +1255,14 @@ export class IcarusStore {
         reservedRuntimeMs,
       };
     });
-    transaction();
+    try {
+      transaction.immediate();
+    } catch (error) {
+      if (isSqliteBusy(error)) {
+        throw new IcarusError("RUN_BUSY", "Another process is updating run state");
+      }
+      throw error;
+    }
     invariant(token !== undefined, "DATABASE_ERROR", "Operation token was not created");
     return token;
   }

@@ -36,7 +36,7 @@ approval commands are authoritative; the browser is review-only.
 | Threat | Control | Required evidence |
 | --- | --- | --- |
 | Remote access or DNS rebinding reaches local authority | production bind is fixed to `127.0.0.1`; UI/API are same-origin; Host and Origin must be loopback; no CORS permission is emitted | hostile Host/Origin and absent-CORS integration tests |
-| Oversized, malformed, or ambiguous mutation | exact route/method/content-type schemas, unknown-field rejection, and bounded JSON bodies fail before service calls | content-type, body-limit, and invalid-contract tests with unchanged state |
+| Oversized, malformed, or ambiguous mutation | exact route/method/content-type schemas, unknown-field rejection, and bounded JSON bodies fail before service calls | content-type, body-limit, invalid-contract, malformed-provider-URL, and missing-repository tests with useful errors and unchanged state |
 | Raw state leaks context/source blobs, private runtime paths, or credentials | API presenters allowlist fields and omit raw blobs plus private cache/worktree/artifact paths; explicit diff/check output stays bounded and redacted | serialization tests scan responses for private paths, raw source bytes, and credential material |
 | Repository/provider text executes in the browser | React renders values as text under a restrictive content-security policy; no raw HTML injection contract exists | presenter allowlist test carrying adversarial strings plus package-wide static no-raw-HTML-sink scan |
 | Browser widens execution authority | no approval, edit, check, arbitrary-command, commit, push, or deploy route exists | route inventory/static assertions and negative HTTP tests |
@@ -44,9 +44,9 @@ approval commands are authoritative; the browser is review-only.
 | Prompt injection expands authority | Host policy is outside prompts; model can only return one typed proposal | malicious `AGENTS.md` instruction reaches the real prompt but an expanded target is rejected |
 | Path traversal or absolute write | lexical containment plus protected-path policy | traversal tests |
 | Symlink escape | reject symlinks in every existing component and target | symlink test |
-| State initialization writes inside a repository | canonical prospective-path overlap check runs before state-root creation | nested-state rejection plus source fingerprint |
+| State initialization writes inside a Git checkout | lexical and canonical ancestor walks reject any `.git` marker before state-root creation; registration separately rejects repository/state containment in both directions | symlinked nested-state rejection, absent prospective directory, and source fingerprint |
 | Source checkout/Git corruption | private no-hardlink cache owns all worktrees | source refs/config/status digest |
-| Concurrent cooperative mutators or stale-owner deletion | stable single-link lease inode plus kernel `flock`; malformed metadata fails closed; v1-to-v2 upgrade is stop-the-world | live-owner, legacy-owner, malformed, crash-recovery, and forced-replacement tests |
+| Concurrent planning or Linux mutation, or stale-owner deletion | an atomic SQLite partial unique index admits one started operation per run before portable planning work; Linux approval/execution additionally use a stable single-link lease inode plus kernel `flock`; malformed metadata fails closed; v1-to-v2 upgrade is stop-the-world | Linux/macOS/Windows planning-admission coverage plus live-owner, legacy-owner, malformed, crash-recovery, and forced-replacement tests |
 | Arbitrary host execution | project code runs only in fail-closed no-network sandbox | real-container probes deny public, host-loopback, and Tailscale-address-space connections |
 | Secret leakage to history | credentials are environment-only; one bounded span scanner supplies detection and constant-marker redaction; reflected provider credentials are discarded; HTTP error bodies are not retained | provider reflection/error tests plus persisted-tree scan |
 | Secret leakage to provider or derived copies | the complete tracked tree is audited before artifacts, egress, caches, or worktrees; edit, model-visibility, and intrinsic-secret path rules are distinct | unrelated-secret no-side-effect test plus safe `.npmrc` sandbox test |
@@ -54,7 +54,7 @@ approval commands are authoritative; the browser is review-only.
 | Provider/context credential exfiltration | exact pre-egress approval, secret/path filtering, reject URL user info and redirects | endpoint/egress tests |
 | Interrupted atomic write strands an unreviewed path | temporary file is private and outside the worktree; rename is the only worktree mutation | failed-rename cleanup and changed-path tests |
 | TOCTOU path swap | isolated single-operator worktree; `O_NOFOLLOW` descriptor read with identity checks; component checks, atomic write, and final changed-set verification | adversarial test |
-| Misleading success | timeout/cancellation cannot pass on exit zero; exact internal state stays visible; absent provider/execution is `unconfigured`; absent checks are `not_run`; history is append-only | timeout-trap, phase mapping, empty/error state, restart, history, drift, and measured-eval tests |
+| Misleading success | timeout/cancellation cannot pass on exit zero; exact internal state stays visible; absent provider/execution is `unconfigured`; absent checks are `not_run`; history is append-only | timeout-trap, phase mapping, restart-before-plan, populated completed-run HTTP evidence, real-Chromium smoke, history, drift, and measured-eval tests |
 | Destructive rollback | rollback touches only the approved path in the owned worktree and retains checkpoint | rollback/restore test |
 | SQLite tampering/corruption | local file permissions, foreign keys, WAL, transaction boundaries, backups documented | operations drill |
 
@@ -91,17 +91,22 @@ is held. ADR 0010 records the options without changing the workflow.
   future schema version still needs an explicit migration and recovery drill.
 - Redaction is defense in depth, not proof that arbitrary repository content has
   no secrets. Provider choice must match the project's privacy class.
-- Run leases defend cooperating Icarus processes and accidental stale state,
-  not an attacker with arbitrary same-UID write access to `ICARUS_HOME` during
-  a run. The state-root ownership/mode boundary must prevent that access.
-- The HTTP/UI, import, preview, and draft-inspection paths use platform-neutral
-  primitives, but Windows and macOS have not been verified. Guarded planning and
-  execution depend on Linux `/usr/bin/flock` and `/proc`; execution also
-  depends on a local Docker daemon.
+- SQLite operation admission defends cooperating planners by allowing only one
+  started operation per run. Linux run leases additionally defend approval and
+  execution from cooperating Icarus processes and accidental stale state, not an
+  attacker with arbitrary same-user write access to `ICARUS_HOME` during a run.
+  POSIX owner/mode checks and Windows current-user-profile containment rely on
+  the operating system's local account boundary to prevent that access.
+- The HTTP/UI, import, preview, draft-persistence, and loopback-planning paths
+  support Linux, macOS, and Windows. Support assumes the platform's ordinary
+  local filesystem, user-profile ACL, and SQLite locking semantics. Native
+  macOS/Windows acceptance remains to be recorded.
+- Guarded approval and execution remain Linux-only through `/usr/bin/flock` and
+  `/proc`; execution also depends on a local Docker daemon.
 
 ## Security non-goals
 
 No claim of hostile multi-user isolation, microVM isolation, production
 deployment safety, remote API authentication/authorization, tenant isolation,
-portable guarded execution, account security, telemetry security, or remote
-worker security is made by Milestone 1 or the first M3 workspace slice.
+portable guarded approval/execution, account security, telemetry security, or
+remote worker security is made by Milestone 1 or the first M3 workspace slice.

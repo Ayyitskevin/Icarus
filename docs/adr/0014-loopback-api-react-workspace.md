@@ -12,11 +12,13 @@ plans, approval gates, and verification evidence without inventing a second
 control plane. A browser also creates Host, Origin, request-size, serialization,
 and source-data rendering boundaries that the CLI did not have.
 
-The existing guarded planner and executor remain Linux-specific because their
-cooperative run leases use `/usr/bin/flock` and `/proc`; the check adapter also
-requires a local Docker daemon. This slice does not claim that guarded planning
-or execution is portable, add a daemon, or replace the lease protocol described
-by ADR 0011.
+Registration, context preview, draft persistence, and loopback planning create
+no private worktree and execute no project code, so this bounded path supports
+Linux, macOS, and Windows. SQLite atomically admits one started operation per run
+before planning work. Guarded approval and execution remain Linux-specific
+because their cooperative run leases use `/usr/bin/flock` and `/proc`; the check
+adapter also requires a local Docker daemon. This slice does not add a daemon or
+replace the stronger mutating-lifecycle lease protocol described by ADR 0011.
 
 ## Decision
 
@@ -34,12 +36,15 @@ into success.
 
 The first browser slice is review-only:
 
-- repository registration, project creation, and context preview are read-only
-  with respect to the imported source checkout;
-- a task is persisted as a draft before planning starts;
+- repository registration, project creation, context preview, draft persistence,
+  and planning are read-only with respect to the imported source checkout;
+- a task is persisted as a draft before planning starts and survives an API
+  process restart;
 - planning may use only an explicitly configured loopback Ollama endpoint;
+- SQLite operation admission rejects concurrent planning before duplicate
+  provider work on Linux, macOS, and Windows;
 - the browser exposes no plan-approval, edit, check-execution, commit, push, or
-  deployment route;
+  deployment route; guarded approval/execution stay in the Linux CLI;
 - missing providers and execution are shown as `unconfigured`, and absent
   checks are shown as `not_run` rather than passed.
 
@@ -56,11 +61,18 @@ review path against real local state without gaining filesystem-write or shell
 authority. Existing completed CLI runs remain inspectable through the same safe
 view, including diffs and redacted check output.
 
+Acceptance coverage includes useful malformed-provider-URL and
+missing-repository errors without persistence, state-root rejection inside a
+Git checkout before any write, populated HTTP evidence for a completed CLI run,
+and a production-asset golden path driven through real headless Chromium with a
+browser reload before planning.
+
 There is no background job system, terminal streaming, filesystem picker,
 provider registry, arbitrary command endpoint, or alternate persistence model.
-Planning requests remain synchronous and durable. The HTTP/UI, import, preview,
-and draft-inspection paths use portable Node/browser primitives and no
-fleet-specific dependency, but guarded planning and execution are supported
-only on Linux and are reported separately. Windows/macOS planning or execution,
-a persistent daemon, or a new lease mechanism requires a later ADR and
-dedicated acceptance evidence.
+Planning requests remain synchronous and durable. The HTTP/UI, registration,
+preview, draft, and loopback-planning paths support Linux, macOS, and Windows
+through portable Node/browser primitives and SQLite operation admission, with
+no fleet-specific dependency. Guarded approval and execution are supported only
+on Linux and are reported separately; execution retains its Docker boundary. A
+persistent daemon, portable guarded approval/execution, or a replacement for
+the kernel lease requires a later ADR and dedicated acceptance evidence.

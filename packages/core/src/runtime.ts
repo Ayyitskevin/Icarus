@@ -1,4 +1,5 @@
 import { chmod, lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import { ArtifactStore } from "./artifacts.js";
@@ -18,6 +19,14 @@ const STATE_MARKER = '{"application":"icarus","format":1}\n';
 function isStrictlyOutside(base: string, candidate: string): boolean {
   const relative = path.relative(base, candidate);
   return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+}
+
+function pathsMatch(left: string, right: string, platform: NodeJS.Platform): boolean {
+  const resolvedLeft = path.resolve(left);
+  const resolvedRight = path.resolve(right);
+  return platform === "win32"
+    ? resolvedLeft.toLowerCase() === resolvedRight.toLowerCase()
+    : resolvedLeft === resolvedRight;
 }
 
 async function canonicalProspectivePath(requestedPath: string): Promise<string> {
@@ -44,6 +53,53 @@ async function canonicalProspectivePath(requestedPath: string): Promise<string> 
   }
 }
 
+async function gitMarkerExists(directory: string): Promise<boolean> {
+  try {
+    await lstat(path.join(directory, ".git"));
+    return true;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function assertStateRootOutsideGitCheckout(requestedPath: string): Promise<void> {
+  const lexical = path.resolve(requestedPath);
+  const canonical = await canonicalProspectivePath(lexical);
+  for (const start of new Set([lexical, canonical])) {
+    let current = start;
+    while (true) {
+      invariant(
+        !(await gitMarkerExists(current)),
+        "STATE_REPOSITORY_OVERLAP",
+        "Icarus state may not be created inside a Git worktree",
+      );
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  }
+}
+
+async function assertWindowsStateRootInUserProfile(requestedPath: string): Promise<void> {
+  const [profile, prospectiveRoot] = await Promise.all([
+    realpath(os.homedir()),
+    canonicalProspectivePath(requestedPath),
+  ]);
+  invariant(
+    !pathsMatch(prospectiveRoot, profile, "win32") && !isStrictlyOutside(profile, prospectiveRoot),
+    "UNSAFE_STATE_ROOT",
+    "On Windows, Icarus state must be inside the current user profile",
+  );
+}
+
 export async function assertRegistrationStateSeparation(
   requestedStateRoot: string,
   repositoryPath: string,
@@ -68,15 +124,19 @@ export async function assertRegistrationStateSeparation(
   );
 }
 
-async function prepareStateRoot(requestedRoot: string): Promise<string> {
+async function prepareStateRoot(requestedRoot: string, platform: NodeJS.Platform): Promise<string> {
   const root = path.resolve(requestedRoot);
   invariant(root !== path.parse(root).root, "UNSAFE_STATE_ROOT", "State root must be dedicated");
+  await assertStateRootOutsideGitCheckout(root);
+  if (platform === "win32") {
+    await assertWindowsStateRootInUserProfile(root);
+  }
 
   const parent = path.dirname(root);
   await mkdir(parent, { recursive: true, mode: 0o700 });
   const canonicalParent = await realpath(parent);
   invariant(
-    canonicalParent === parent,
+    pathsMatch(canonicalParent, parent, platform),
     "UNSAFE_STATE_ROOT",
     "State root may not traverse a symbolic-link parent",
   );
@@ -104,13 +164,15 @@ async function prepareStateRoot(requestedRoot: string): Promise<string> {
     "UNSAFE_STATE_ROOT",
     "Icarus state root is owned by another user",
   );
+  if (platform !== "win32") {
+    invariant(
+      (stateStat.mode & 0o077) === 0,
+      "UNSAFE_STATE_ROOT",
+      "Icarus state root must not grant group or world access",
+    );
+  }
   invariant(
-    (stateStat.mode & 0o077) === 0,
-    "UNSAFE_STATE_ROOT",
-    "Icarus state root must not grant group or world access",
-  );
-  invariant(
-    (await realpath(root)) === path.join(canonicalParent, path.basename(root)),
+    pathsMatch(await realpath(root), path.join(canonicalParent, path.basename(root)), platform),
     "UNSAFE_STATE_ROOT",
     "Icarus state root changed during validation",
   );
@@ -162,7 +224,7 @@ export async function createIcarusRuntime(
   stateRoot: string,
   options: { readonly dockerBinary?: string; readonly gatewayFactory?: GatewayFactory } = {},
 ): Promise<IcarusRuntime> {
-  const root = await prepareStateRoot(stateRoot);
+  const root = await prepareStateRoot(stateRoot, process.platform);
   const controllerHome = path.join(root, "controller-home");
   const runsRoot = path.join(root, "runs");
   await mkdir(controllerHome, { recursive: true, mode: 0o700 });

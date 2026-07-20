@@ -2,9 +2,9 @@
 
 ## Current plan: first M3 local workspace vertical slice
 
-Status values are evidence claims. The bounded implementation and local
-verification are complete on this branch, with exact evidence prepared for the
-handoff. This is not a claim that full M3 is complete.
+Status values are evidence claims. The bounded implementation and acceptance
+coverage passed on the final working tree on 2026-07-20. This accepts the first
+workspace slice; it is not a claim that full M3 is complete.
 
 ### Product and persistence
 
@@ -17,6 +17,10 @@ handoff. This is not a claim that full M3 is complete.
       secret-content filtering
 - [x] Keep imported source repositories read-only and keep context previews
       non-persisted
+- [x] Reject a state root inside any Git checkout before creating the directory
+- [x] Support registration, context preview, draft persistence, and loopback
+      planning on Linux, macOS, and Windows, with atomic SQLite operation
+      admission before planning work
 
 ### Browser authority and evidence
 
@@ -27,18 +31,42 @@ handoff. This is not a claim that full M3 is complete.
       evidence, explicit `unconfigured` capabilities, and `not_run` checks
 - [x] Expose no browser route for approval, edit/check execution, arbitrary
       commands, commit, push, deployment, accounts, telemetry, or fleet services
+- [x] Return useful errors without persistence for malformed provider URLs and
+      missing repositories
+- [x] Present populated, bounded evidence for an already completed CLI run
+      without exposing private runtime paths
 
-### Verification and handoff
+### Acceptance coverage and commands
 
-- [x] Reinstall from the updated lockfile with the frozen/offline dependency path
-- [x] Run formatting, lint, type checking, and production builds
-- [x] Run the complete unit, integration, evaluation, and security gate
-- [x] Run the loopback API/production-asset restart smoke against a temporary Git repo
-- [x] Prove the imported source checkout fingerprint remains unchanged
-- [x] Record the intentionally skipped networked dependency audit and run
-      `git diff --check`
-- [x] Prepare exact command output, counts, and limitations for the local commit
-      and M3 handoff
+The focused suites cover state-root rejection before any write, portable
+planning admission, draft restart before planning, malformed provider URLs,
+missing repositories, and populated completed-run HTTP evidence. The production
+browser smoke drives compiled React in real Chromium through project creation,
+deterministic context, draft, browser reload, plan, and truthful evidence
+while proving the imported source fingerprint remains unchanged.
+
+Fresh acceptance recorded on 2026-07-20:
+
+- [x] `pnpm exec vitest run tests/unit tests/provider --reporter=dot`: 99/99
+      tests passed across 13 files
+- [x] `pnpm exec vitest run tests/integration --reporter=dot`: 31/31 tests
+      passed across 7 files
+- [x] `pnpm smoke:workspace`: persisted draft and plan survived restarts,
+      provider requests were exactly one, verification remained `not_run`, and
+      the source fingerprint was unchanged
+- [x] `ICARUS_CHROMIUM_EXECUTABLE=/absolute/path/to/chromium pnpm smoke:workspace:browser`:
+      compiled React completed the real Chromium workflow with zero browser
+      errors, zero blocked external requests, one provider request, persisted
+      reload state, `not_run` verification, and unchanged source
+- [x] `pnpm check`: exit 0; formatting, lint, typecheck, 99 unit/provider tests,
+      31 integration tests, evaluation (5 passed, 0 failed, 5 unsupported), 109
+      security tests, 17 static security assertions, and the 17-module build
+      passed
+- [x] `git diff --check`: no errors
+
+Native macOS and Windows host runs remain unrecorded; platform-policy paths are
+covered on the Linux test host. Registry dependency audit is intentionally not
+part of this no-network local slice.
 
 ## Prior plan: Milestone 0 plus minimal Milestone 1
 
@@ -203,7 +231,7 @@ Final adversarial candidate local evidence on 2026-07-20:
 ## Deferred plan
 
 The inherited ADR 0010 security hold remains separate from this local feature
-branch. After the first workspace slice passes its gate, continue M3 with
-read-only repository status, live event/evidence navigation, file/diff views,
-and server-held provider profiles. Browser approval and execution remain a
-later, explicitly reviewed authority expansion. See `docs/ROADMAP.md`.
+branch. After the first workspace slice passes its gate, the next bounded M3
+feature is read-only repository status plus live event and evidence navigation.
+Patch materialization, file/diff editing, browser approval, and execution remain
+later, explicitly reviewed authority expansions. See `docs/ROADMAP.md`.

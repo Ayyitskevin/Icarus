@@ -64,11 +64,14 @@ derived phases are `planned`, `awaiting_approval`, `running`, `completed`,
 `failed`, and `cancelled`, while the exact internal state remains visible. An
 approval/recovery state is never flattened into completion.
 
-The HTTP/UI shell, repository import, context preview, and draft inspection use
-platform-neutral Node/browser primitives and have no fleet or cloud dependency.
-Guarded planning and execution inherit Linux-only leases using
-`/usr/bin/flock` and `/proc`; execution checks also require a local Docker
-daemon. Windows and macOS planning/execution are not yet verified or supported.
+The HTTP/UI shell, repository import, context preview, draft persistence, and
+loopback planning support Linux, macOS, and Windows with no fleet or cloud
+dependency. Planning creates no private worktree and executes no project code.
+Before each bounded context/provider operation, SQLite atomically admits one
+`started` operation per run; a concurrent planner receives `RUN_BUSY`.
+Approval and execution remain Linux-only and use the stronger kernel lease
+through `/usr/bin/flock` and `/proc`; execution checks also require a local
+Docker daemon.
 
 ## State and feedback
 
@@ -87,13 +90,18 @@ and the same durable event/evidence records. Provider and command output is
 bounded and redacted before storage; raw domain records are never serialized
 directly to the browser.
 
-Before `repo add` creates or opens the state root, the CLI resolves the existing
-repository and the prospective state path through their nearest existing
-ancestors. It rejects either path containing the other. The registered source
-repository is then read-only from Icarus's perspective and
-never owns an Icarus worktree. A copied Git cache and mutable worktree live only
-below `ICARUS_HOME/runs/<run-id>/`, whose ownership is proved by generated IDs,
-path containment, and the persisted run record.
+Before state-root initialization creates or opens the requested directory, it
+walks both lexical and canonical ancestors and rejects a `.git` marker. A state
+root inside any Git checkout therefore fails before Icarus writes the directory.
+POSIX roots additionally require current-user ownership and mode `0700`.
+Windows roots must remain strictly beneath the current user profile and inherit
+that profile's ACL because POSIX mode bits are unavailable there.
+During `repo add`, the CLI also resolves the existing repository and prospective
+state path through their nearest existing ancestors and rejects either path
+containing the other. The registered source repository is then read-only from
+Icarus's perspective and never owns an Icarus worktree. A copied Git cache and
+mutable worktree live only below `ICARUS_HOME/runs/<run-id>/`, whose ownership
+is proved by generated IDs, path containment, and the persisted run record.
 Before any artifact, provider request, cache, or worktree is created,
 preparation audits the complete tracked tree directly through bounded Git object
 reads. A file larger than 16 MiB, more than 64 MiB of tracked content, an
@@ -131,18 +139,27 @@ failed --explicit resume--> persisted preparing/planned/running/verifying/recove
 ```
 
 Every transition is validated and written with an event in the same database
-transaction. Waiting for a human is not active runtime. Stable per-run files use
-kernel `flock(2)` on a retained descriptor, with descriptor/path inode checks;
-process death releases exclusion without pathname cleanup. These leases prevent
-concurrent cooperative current-version mutators inside the private state-root
-boundary; online mixed-version upgrades and arbitrary same-UID state tampering
-are outside that guarantee. Resume re-enters only a persisted safe stage. Exact writes
-are replay-safe: a retry may accept baseline or identical approved bytes, but
-unexpected bytes are preserved and fail closed.
+transaction. Waiting for a human is not active runtime. Planning creates no
+worktree and executes no project code. Before its bounded context and provider
+work, a SQLite transaction inserts a `started` operation; a partial unique index
+permits only one such operation for a run. That admission supplies portable
+cross-process exclusion on Linux, macOS, and Windows.
+
+On Linux, planning also nests under the stable kernel lease used by the mutating
+lifecycle. Approval and execution require that lease and are not offered on
+other platforms. Stable per-run files use `flock(2)` on a retained descriptor,
+with descriptor/path inode checks; process death releases exclusion without
+pathname cleanup. These leases prevent concurrent cooperative current-version
+mutators inside the private state-root boundary; online mixed-version upgrades
+and arbitrary same-UID state tampering are outside that guarantee. Resume
+re-enters only a persisted safe stage. Exact writes are replay-safe: a retry may
+accept baseline or identical approved bytes, but unexpected bytes are preserved
+and fail closed.
 
 ## Guarded CLI golden-path sequence
 
-1. Registration first rejects lexical or canonical repository/state overlap
+1. State-root initialization first rejects a location inside any Git checkout,
+   and registration rejects lexical or canonical repository/state overlap,
    without creating the requested state root. It then canonicalizes a clean
    repository, stores its device/inode, and project creation stores a
    syntactically valid base ref and exact check arrays.
@@ -207,11 +224,20 @@ visible in usage. No other productive operation receives that exception.
 3. Context preview resolves the clean base commit and produces deterministic
    filtered metadata without persisting source text or touching the checkout.
 4. Task submission persists a `preparing` run before provider work. A separate
-   plan request runs the existing context/planning service with explicit loopback
-   Ollama configuration and lands at the real guarded approval state.
-5. Restarted API processes rediscover the project and run. The presenter reports
-   real plan/action/file/check/output/warning/timestamp evidence; absent work
-   remains absent and the UI offers no control that can execute it.
+   plan request runs the existing context/planning service with explicit
+   loopback Ollama configuration and lands at the real guarded approval state.
+   Linux, macOS, and Windows use the same SQLite started-operation admission
+   before provider work.
+5. Restarted API processes rediscover a draft before planning and can then plan
+   it. The presenter also reads an already completed CLI run with populated,
+   bounded plan/action/file/check/output/approval/usage/timestamp evidence.
+   Absent work remains absent and the UI offers no control that can execute it.
+
+Focused API coverage asserts useful `INVALID_PROVIDER_URL` and
+`INVALID_REPOSITORY` responses without persistence, plus restart-before-plan
+durability and completed-run evidence. A production-asset smoke drives the
+project → context → draft → browser reload → plan → evidence flow in real
+headless Chromium and rechecks the imported source fingerprint.
 
 ## Provider contract
 
@@ -307,7 +333,8 @@ fail-closed audit or make imported repositories writable.
   inventing results.
 - **Deletion coupling:** removing SQLite, a private cache, or a worktree destroys local run
   recovery, so cleanup is never automatic in Milestone 1.
-- **Timing:** a workspace task draft is persisted before planning, and all other
+- **Timing:** a workspace task draft is persisted before planning; SQLite admits
+  one started operation per run before portable planning work; all other
   run/operation intent precedes bounded external actions; approval pauses are
   excluded from active budgets; interrupted reservations are charged
   conservatively; cancellation intent precedes rollback writes; a fixed,

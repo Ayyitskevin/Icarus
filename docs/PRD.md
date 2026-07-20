@@ -29,9 +29,10 @@ roll it back, or restore the recorded checkpoint.
 
 ## Functional requirements
 
-1. Before creating or opening the requested state root, reject lexical or
-   canonical containment between it and the repository. Then register the
-   canonical local Git repository and create an Icarus project.
+1. Before creating or opening the requested state root, reject any lexical or
+   canonical path inside a Git checkout and reject containment between state
+   and the repository. Then register the canonical local Git repository and
+   create an Icarus project.
 2. Persist project checks, sandbox limits, and run ceilings. Milestone 1 path,
    network, shell, and approval policy is fixed host policy, not project data.
 3. Start a run with a task, existing tracked target, provider, model, and bounded
@@ -94,7 +95,10 @@ The first browser path is intentionally narrower than the guarded CLI lifecycle:
 4. Submitting a task first persists a `preparing` draft without context, provider
    work, cache creation, worktree creation, or source mutation. Planning is a
    separate request and accepts only an explicitly configured loopback Ollama
-   endpoint.
+   endpoint. Registration, context preview, draft persistence, and loopback
+   planning support Linux, macOS, and Windows. An atomic SQLite started-operation
+   admission prevents concurrent planning work for the same run on every
+   platform.
 5. The workspace presents the exact internal state and derives only these product
    phases: `draft`, `planned`, `awaiting_approval`, `running`, `completed`,
    `failed`, and `cancelled`. The mapping never turns an approval, recovery, or
@@ -107,7 +111,8 @@ The first browser path is intentionally narrower than the guarded CLI lifecycle:
    missing provider/execution capability is `unconfigured`.
 7. The browser has no approval, edit, check-execution, arbitrary-shell, commit,
    push, deployment, account, telemetry, cloud-control, or fleet-control route.
-   Guarded approval and execution remain CLI-only.
+   Guarded approval and execution remain Linux CLI-only under the kernel lease;
+   execution also remains inside the Docker sandbox boundary.
 
 ## Sun ceiling
 
@@ -140,11 +145,13 @@ additional tool calls and runtime remain visible.
 - Known credentials and detected spans are redacted with constant markers.
   Non-success provider HTTP response bodies are not surfaced or persisted, and
   transport errors are sanitized before crossing the provider adapter boundary.
-- The HTTP/UI shell, repository import, context preview, and draft inspection
-  use platform-neutral Node/browser primitives. Guarded planning and execution
-  are supported only on Linux because they inherit `/usr/bin/flock` and
-  `/proc`; execution also inherits Docker requirements. Windows and macOS are
-  not planning/execution support claims.
+- The HTTP/UI shell, repository import, context preview, draft persistence, and
+  loopback planning support Linux, macOS, and Windows. Planning is read-only
+  with respect to the imported checkout, and SQLite atomically admits one
+  started operation per run before provider work.
+- Approval and execution are supported only on Linux because they inherit the
+  kernel lease through `/usr/bin/flock` and `/proc`; execution also inherits
+  the Docker sandbox requirements.
 
 ## Explicit non-goals
 
@@ -183,8 +190,8 @@ exist in Milestone 1:
 - A fixture golden path completes in the sandbox with the source checkout and
   source Git metadata unchanged.
 - A traversal or symlink proposal is rejected before write.
-- Repository/state overlap is rejected before the requested state root is
-  created.
+- A state root inside any Git checkout, or overlapping a repository in either
+  direction, is rejected before the requested state root is created.
 - A timed-out check is failed even if it handles termination and exits zero.
 - A failing provider call leaves a resumable run with an audit event.
 - Multiple verification attempts remain independently inspectable in history.
@@ -195,9 +202,16 @@ exist in Milestone 1:
   as successes.
 - The workspace API rejects non-loopback Host/Origin requests, oversized or
   malformed mutations, and remote planning endpoints without mutating state.
+  Malformed provider URLs and missing repositories return useful
+  `INVALID_PROVIDER_URL` and `INVALID_REPOSITORY` errors without persistence.
 - Context preview is deterministic for one commit and target, returns metadata
   rather than source contents, and omits every prohibited path/content class.
 - A task draft survives process restart before planning, and unavailable
   providers/execution or absent checks are never presented as completion or pass.
 - Project import, context preview, draft, and planning leave the source checkout
   content and Git metadata unchanged.
+- A production-asset smoke drives the golden path in real Chromium through a
+  draft reload, planning, and truthful evidence.
+- The HTTP presenter exposes populated, bounded plan, action, file, verification,
+  check-output, approval, usage, and timestamp evidence for a completed CLI run
+  without exposing private runtime paths.

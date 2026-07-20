@@ -171,6 +171,30 @@ describe("loopback local workspace API", () => {
     expect(provider.requests).toHaveLength(0);
     expect(runtime.service.getRun(runId).state).toBe("preparing");
 
+    await server.close();
+    runtime.close();
+    runtime = undefined;
+    runtime = await createIcarusRuntime(fixture.stateRoot);
+    server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    const persistedDraft = await responseJson(await fetch(`${server.url}/api/runs/${runId}`));
+    expect(persistedDraft).toMatchObject({
+      id: runId,
+      projectId,
+      phase: "draft",
+      state: "preparing",
+      plan: null,
+      action: null,
+      verification: { outcome: "not_run" },
+    });
+    expect(provider.requests).toHaveLength(0);
+    const reopenedWorkspace = await responseJson(await fetch(`${server.url}/api/workspace`));
+    expect(reopenedWorkspace.runs).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: runId, phase: "draft" })]),
+    );
+
     const plannedResponse = await postJson(`${server.url}/api/runs/${runId}/plan`, {});
     expect(plannedResponse.status).toBe(200);
     const planned = await responseJson(plannedResponse);
@@ -404,6 +428,23 @@ describe("loopback local workspace API", () => {
     expect(missingRun.status).toBe(404);
     expect(JSON.stringify(await responseJson(missingRun))).toContain("NOT_FOUND");
 
+    const invalidRepository = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "missing-repository", path: path.join(fixture.root, "does-not-exist") },
+      project: {
+        name: "missing-repository",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    expect(invalidRepository.status).toBe(422);
+    expect(await responseJson(invalidRepository)).toMatchObject({
+      error: { code: "INVALID_REPOSITORY" },
+    });
+    expect(runtime.service.listRepositories()).toEqual([]);
+    expect(runtime.service.listProjects()).toEqual([]);
+    expect(runtime.service.listRuns()).toEqual([]);
+
     const emptyProject = await postJson(`${server.url}/api/projects`, {
       repository: { name: "fixture", path: fixture.repository },
       project: {
@@ -413,7 +454,20 @@ describe("loopback local workspace API", () => {
         checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
       },
     });
+    expect(emptyProject.status).toBe(201);
     const projectId = String((await responseJson(emptyProject)).id);
+    const malformedProvider = await postJson(`${server.url}/api/runs`, {
+      projectId,
+      task: "Reject a malformed provider URL without creating a draft.",
+      target: "src/greeting.txt",
+      provider: { model: "invalid", baseUrl: "not a URL" },
+    });
+    expect(malformedProvider.status).toBe(422);
+    expect(await responseJson(malformedProvider)).toMatchObject({
+      error: { code: "INVALID_PROVIDER_URL" },
+    });
+    expect(runtime.service.listRuns()).toEqual([]);
+
     const remoteProvider = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Do not send this task remotely.",

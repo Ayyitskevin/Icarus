@@ -10,6 +10,10 @@ import { runControllerProcess } from "./process.js";
 
 const GIT_OUTPUT_LIMIT = 8 * 1024 * 1024;
 
+function nullDevice(): string {
+  return process.platform === "win32" ? "NUL" : "/dev/null";
+}
+
 export interface TreeEntry {
   readonly mode: string;
   readonly type: "blob" | "tree" | "commit";
@@ -31,16 +35,17 @@ export interface PrivateWorkspace {
 
 function gitEnvironment(home: string): Record<string, string> {
   return {
-    PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+    PATH: process.env.PATH ?? "",
     HOME: home,
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
     GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_GLOBAL: nullDevice(),
     GIT_TERMINAL_PROMPT: "0",
-    GIT_ASKPASS: "/bin/false",
-    GIT_SSH_COMMAND: "false",
-    GIT_PAGER: "cat",
+    GIT_ASKPASS: process.platform === "win32" ? process.execPath : "/bin/false",
+    GIT_SSH_COMMAND:
+      process.platform === "win32" ? `"${process.execPath.replaceAll('"', '\\"')}"` : "false",
+    GIT_PAGER: "",
     GIT_OPTIONAL_LOCKS: "0",
   };
 }
@@ -59,7 +64,7 @@ export class GitController {
       "-c",
       "core.fsmonitor=false",
       "-c",
-      "core.hooksPath=/dev/null",
+      `core.hooksPath=${nullDevice()}`,
       "-c",
       "credential.helper=",
       "-c",
@@ -92,8 +97,17 @@ export class GitController {
     repositoryPath: string,
     signal?: AbortSignal,
   ): Promise<RepositoryInspection> {
-    const canonicalPath = await realpath(repositoryPath);
-    const repositoryStat = await stat(canonicalPath);
+    const { canonicalPath, repositoryStat } = await (async () => {
+      try {
+        const resolved = await realpath(repositoryPath);
+        return { canonicalPath: resolved, repositoryStat: await stat(resolved) };
+      } catch {
+        throw new IcarusError(
+          "INVALID_REPOSITORY",
+          "Repository path could not be inspected as a local directory",
+        );
+      }
+    })();
     invariant(
       repositoryStat.isDirectory(),
       "INVALID_REPOSITORY",
@@ -382,7 +396,7 @@ export class GitController {
     );
     await this.#run(
       this.#controlHome,
-      ["--git-dir", cachePath, "config", "core.hooksPath", "/dev/null"],
+      ["--git-dir", cachePath, "config", "core.hooksPath", nullDevice()],
       signal,
     );
     await this.#run(

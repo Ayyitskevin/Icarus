@@ -41,6 +41,7 @@ import type {
   ContextEntry,
   ContextManifest,
   JsonValue,
+  OperationToken,
   ProjectRecord,
   ProviderConfig,
   RepositoryRecord,
@@ -318,6 +319,7 @@ export class IcarusService {
   readonly #gatewayFactory: GatewayFactory;
   readonly #id: () => string;
   readonly #leases: RunLeaseManager;
+  readonly #platform: NodeJS.Platform;
 
   constructor(options: IcarusServiceOptions) {
     this.#stateRoot = path.resolve(options.stateRoot);
@@ -329,6 +331,7 @@ export class IcarusService {
       options.gatewayFactory ?? ((config) => createGateway(config, process.env));
     this.#id = options.id ?? randomUUID;
     this.#leases = new RunLeaseManager(this.#stateRoot);
+    this.#platform = process.platform;
   }
 
   async initialize(): Promise<void> {
@@ -494,12 +497,24 @@ export class IcarusService {
   }
 
   async planDraftRun(runId: string, signal?: AbortSignal): Promise<RunRecord> {
+    const plan = (): Promise<RunRecord> => {
+      const run = this.#store.getRun(runId);
+      invariant(run.state === "preparing", "INVALID_STATE", "Run draft is not preparing");
+      return this.#guarded(
+        runId,
+        "preparing",
+        async () => {
+          const operation = this.#beginPreparationOperation(runId);
+          return this.#prepareRun(runId, signal, operation);
+        },
+        signal,
+      );
+    };
     try {
-      return await this.#leases.withLease(runId, () => {
-        const run = this.#store.getRun(runId);
-        invariant(run.state === "preparing", "INVALID_STATE", "Run draft is not preparing");
-        return this.#guarded(runId, "preparing", () => this.#prepareRun(runId, signal), signal);
-      });
+      // Planning never creates a worktree or executes project code. SQLite's atomic
+      // operation admission provides portable cross-process exclusion for this bounded
+      // stage; Linux keeps the stronger kernel lease used by the mutating lifecycle.
+      return this.#platform === "linux" ? await this.#leases.withLease(runId, plan) : await plan();
     } catch (error) {
       const failure = asIcarusError(error, "RUN_PREPARATION_FAILED");
       throw new IcarusError(failure.code, failure.message, { runId });
@@ -724,11 +739,9 @@ export class IcarusService {
     return contextBundleFromArtifact(value, run);
   }
 
-  async #prepareRun(runId: string, signal?: AbortSignal): Promise<RunRecord> {
-    let run = this.#store.getRun(runId);
-    invariant(run.state === "preparing", "INVALID_STATE", "Run is not being prepared");
+  #beginPreparationOperation(runId: string): OperationToken {
+    const run = this.#store.getRun(runId);
     const project = this.#store.getProject(run.projectId);
-    const repository = this.#store.getRepository(project.repositoryId);
     const preparationRuntime = Math.min(
       project.ceiling.maxActiveRuntimeMs - run.usage.activeRuntimeMs,
       project.ceiling.commandTimeoutMs + 2_000,
@@ -738,14 +751,27 @@ export class IcarusService {
       "RUNTIME_BUDGET_EXCEEDED",
       "Insufficient active runtime remains to prepare the run",
     );
-    const operation = this.#store.beginOperation(
+    return this.#store.beginOperation(
       runId,
       "context.prepare",
       0,
       0,
       preparationRuntime,
+      "preparing",
     );
-    const preparationWorkRuntime = preparationRuntime - 1_000;
+  }
+
+  async #prepareRun(
+    runId: string,
+    signal?: AbortSignal,
+    admittedOperation?: OperationToken,
+  ): Promise<RunRecord> {
+    let run = this.#store.getRun(runId);
+    invariant(run.state === "preparing", "INVALID_STATE", "Run is not being prepared");
+    const project = this.#store.getProject(run.projectId);
+    const repository = this.#store.getRepository(project.repositoryId);
+    const operation = admittedOperation ?? this.#beginPreparationOperation(runId);
+    const preparationWorkRuntime = operation.reservedRuntimeMs - 1_000;
     const startedAt = performance.now();
     const preparationSignal = boundedSignal(signal, preparationWorkRuntime);
     try {

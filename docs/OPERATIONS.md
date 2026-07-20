@@ -8,11 +8,14 @@ workspace is a foreground process fixed to `127.0.0.1`; it does not install a
 daemon, accept remote traffic, depend on fleet/homelab/cloud services, or touch
 production systems.
 
-The HTTP/UI shell, repository import, context preview, and draft inspection use
-platform-neutral Node/browser primitives. Guarded planning and execution remain
-Linux-only because leases require `/usr/bin/flock` and `/proc`; execution
-checks also require a local Docker daemon. Windows and macOS planning/execution
-are not verified or supported.
+The HTTP/UI shell, repository import, context preview, draft persistence, and
+loopback planning support Linux, macOS, and Windows using platform-neutral
+Node/browser primitives. Planning creates no private worktree and executes no
+project code. SQLite atomically admits one started operation per run before
+bounded context/provider work and rejects a concurrent planner. Approval and
+execution remain Linux-only because they require the stronger kernel lease
+through `/usr/bin/flock` and `/proc`; execution checks also require a local
+Docker daemon.
 
 Default state layout:
 
@@ -27,16 +30,20 @@ ICARUS_HOME/
   snapshots/<run-id>/                 # temporary, removed after checks
 ```
 
-The state root must be dedicated, current-user-owned, mode `0700`, and reached
-without a symlink parent. A pre-existing root must be empty or contain the exact
-Icarus marker. Broad directories such as `/` and `/tmp` are refused; Icarus
-never chmods an unowned/general-purpose root. Do not place state inside a
-registered repository or place a repository inside state. Avoid network,
-shared, or synced filesystems for SQLite and private worktrees.
+On POSIX systems, the state root must be dedicated, current-user-owned, mode
+`0700`, and reached without a symlink parent. On Windows, it must be strictly
+beneath the current user profile and inherit that profile's ACL; a location
+outside the profile is refused. A pre-existing root must be empty or contain the
+exact Icarus marker. Icarus never repurposes a broad or general-purpose root.
+Never place a state root inside any Git checkout, even before that repository is
+registered. Avoid network, shared, or synced filesystems for SQLite and private
+worktrees.
 
-For `repo add`, repository/state lexical and canonical overlap is checked
-before Icarus creates or opens the requested state root. A rejected nested path
-must therefore leave both the repository and prospective state path untouched.
+Before state-root initialization writes anything, Icarus walks the lexical and
+canonical ancestors and rejects any `.git` marker. During `repo add`, it also
+checks repository/state containment in both directions before creating or
+opening the requested state root. A rejected path therefore leaves both the
+repository and prospective state path untouched.
 
 ## Local workspace runbook
 
@@ -46,6 +53,13 @@ foreground server:
 
 ```text
 ICARUS_HOME=/private/dedicated/icarus-state pnpm workspace:start
+```
+
+Windows PowerShell:
+
+```text
+$env:ICARUS_HOME = Join-Path $HOME ".icarus-state"
+pnpm workspace:start
 ```
 
 The process prints JSON containing its exact URL, fixed binding, and state root.
@@ -63,15 +77,23 @@ The browser golden path is:
    committed-tree metadata only and deterministically filters all `.env*`,
    dependency/generated paths, binary or invalid UTF-8 files, model-hidden paths,
    and secret-shaped content.
-3. Enter a task plus explicit loopback Ollama model/base URL. Draft creation first
-   persists a real `preparing` run without contacting the provider; planning is a
-   separate action.
-4. Review exact state, product phase, plan, any edit action that actually exists,
+3. Enter a task plus explicit loopback Ollama model/base URL. Draft creation
+   first persists a real `preparing` run without contacting the provider.
+   Stopping and restarting the foreground server before planning must rediscover
+   the same draft.
+4. Select Plan as a separate action. SQLite admits the bounded planning
+   operations before provider work, and the run stops at the real approval gate.
+5. Review exact state, product phase, plan, any edit action that actually exists,
    involved/changed files, verification/check output, warnings, approvals, usage,
-   failures, and timestamps. `unconfigured` and
-   `not_run` are real outcomes, never aliases for completion or passing checks.
-5. Continue any digest approval, edit, sandbox check, review decision, rollback,
-   or restore through the CLI. The browser intentionally has no such route.
+   failures, and timestamps. `unconfigured` and `not_run` are real outcomes,
+   never aliases for completion or passing checks.
+6. Continue any digest approval, edit, sandbox check, review decision, rollback,
+   or restore through the Linux CLI. The browser intentionally has no such route.
+
+With `ICARUS_CHROMIUM_EXECUTABLE` set to an explicit local Chromium binary,
+`pnpm smoke:workspace:browser` drives this path through the compiled application
+in real headless Chromium, reloads before planning, and verifies the source
+fingerprint remains unchanged.
 
 Treat the loopback server as same-user local authority. It has no authentication
 because it is not a remote service: do not reverse-proxy it, bind it to a LAN or
@@ -87,9 +109,11 @@ deployment, or fleet-control integration.
 
 ## Preflight
 
-Milestone 1 requires util-linux `flock` at `/usr/bin/flock` and a local
-filesystem with working `flock(2)` semantics. Lease acquisition fails closed if
-that fixed helper or kernel behavior is unavailable.
+Approval and execution require util-linux `flock` at `/usr/bin/flock` and a
+local filesystem with working `flock(2)` semantics. Lease acquisition fails
+closed if that fixed helper or kernel behavior is unavailable. Portable
+loopback planning uses SQLite operation admission and does not require these
+Linux lease primitives.
 
 Version-2 leases do not support an online transition from metadata-only
 owners. Before upgrading, stop every Icarus process, verify none remain, and
@@ -98,9 +122,10 @@ by v2. Malformed or partial lease metadata is never aged into ownership;
 preserve the state and require explicit operator recovery.
 
 1. Confirm the repository is a non-bare, clean Git worktree with at least one
-   commit. Confirm the prospective state root and repository do not contain one
-   another. The configured base ref must resolve to the source HEAD when a run
-   is prepared and again before plan approval.
+   commit. Confirm the prospective state root is outside every Git checkout and
+   that it and the repository do not contain one another. The configured base
+   ref must resolve to the source HEAD when a run is prepared and again before
+   plan approval.
 2. Register only offline verification commands that can run against a read-only
    tracked-file export with temporary writes confined to `/tmp`.
 3. Choose a provider whose privacy class permits the selected repository.
@@ -164,19 +189,23 @@ preserve the state and require explicit operator recovery.
   and is refused unless verification passed and the live source/worktree,
   changed-path set, diff, and checkpoint still match the reviewed evidence.
 
-Per-run stable lock files reject concurrent mutating CLI processes. The kernel
-owns exclusion through `flock(2)` on an open descriptor and is authoritative
-among current-version participants. Protocol-version and owner-nonce metadata
-are required compatibility and release evidence; PID/start values are
-diagnostic. Acquisition refuses live or indeterminate legacy metadata, migrates
-only a valid, proved-dead legacy owner in place, and fails closed on malformed,
-partial, or unknown-version metadata. There is no concurrent v1/v2 upgrade
-protocol. Acquisition and release revalidate descriptor/path inode identity,
-and production lease code never unlinks or renames a lock pathname. Process
-death releases the kernel lock while leaving a harmless metadata file for the
-next owner. Icarus never automatically deletes artifacts, caches, or worktrees.
-Missing or drifted private state is preserved for investigation; Milestone 1
-has no reconstruction or cleanup command.
+Portable planning first inserts a SQLite `started` operation in a transaction.
+The partial unique index allowing one started operation per run rejects
+concurrent planning before a second process performs provider work.
+
+Linux planning, approval, and execution additionally use per-run stable lock
+files. The kernel owns exclusion through `flock(2)` on an open descriptor and is
+authoritative among current-version participants. Protocol-version and
+owner-nonce metadata are required compatibility and release evidence; PID/start
+values are diagnostic. Acquisition refuses live or indeterminate legacy
+metadata, migrates only a valid, proved-dead legacy owner in place, and fails
+closed on malformed, partial, or unknown-version metadata. There is no
+concurrent v1/v2 upgrade protocol. Acquisition and release revalidate
+descriptor/path inode identity, and production lease code never unlinks or
+renames a lock pathname. Process death releases the kernel lock while leaving a
+harmless metadata file for the next owner. Icarus never automatically deletes
+artifacts, caches, or worktrees. Missing or drifted private state is preserved
+for investigation; Milestone 1 has no reconstruction or cleanup command.
 
 Atomic replacement writes its pre-rename temporary in the Icarus-private run
 directory, not the Git worktree. A failed write or rename is cleaned best-effort;
@@ -208,7 +237,10 @@ If a process stops:
 The workspace reads the same SQLite state and append-only history through an
 allowlisted presenter. It exposes exact state plus a derived product phase,
 warnings, timestamps, and bounded/redacted evidence. Missing provider/execution
-capability stays `unconfigured`; missing checks stay `not_run`.
+capability stays `unconfigured`; missing checks stay `not_run`. An already
+completed CLI run is presented with its populated plan, action, involved and
+changed files, verification, check output, approvals, usage, and timestamps
+while private runtime paths remain omitted.
 
 Events record transition, actor where applicable, bounded/redacted detail, and
 timestamps. Operation events expose reservations, interruption, and final
@@ -244,13 +276,19 @@ gh api "repos/Ayyitskevin/Icarus/commits/$(git rev-parse HEAD)/check-runs"
 ## Re-runnable adversarial evidence
 
 The durable review evidence is the named test source plus fresh command output;
-do not replace it with a prose claim. Run these from a clean candidate tree and
-record the observed exit status and counts in `docs/PLANS.md`:
+do not replace it with a prose claim. `pnpm smoke:workspace:browser` launches
+real headless Chromium; `pnpm smoke:workspace` separately exercises the API and
+production assets across restart. Run these from a clean candidate tree and
+record the observed exit status and counts in
+`docs/PLANS.md`:
 
 ```text
 pnpm exec vitest run tests/integration/security-regressions.test.ts
 pnpm exec vitest run tests/integration/runtime-ceiling-cancellation.test.ts
+pnpm exec vitest run tests/unit/runtime-state-root.test.ts tests/unit/service-draft.test.ts
+pnpm exec vitest run tests/integration/local-workspace-api.test.ts tests/integration/lifecycle-restart.test.ts
 pnpm smoke:workspace
+ICARUS_CHROMIUM_EXECUTABLE=/absolute/path/to/chromium pnpm smoke:workspace:browser
 pnpm exec vitest run tests/integration/docker-containment.test.ts
 pnpm exec vitest run tests/unit/git-file-safety.test.ts tests/unit/lease.test.ts tests/unit/sandbox-wire.test.ts
 pnpm eval

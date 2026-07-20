@@ -35,15 +35,34 @@ class DraftGit {
   listTreeCalls = 0;
   readBlobCalls = 0;
   createWorkspaceCalls = 0;
+  readonly inspectStarted: Promise<void>;
+  readonly #continueInspection: Promise<void>;
+  #markInspectStarted!: () => void;
+  #releaseInspection!: () => void;
 
-  inspectRepository(): Promise<RepositoryInspection> {
+  constructor() {
+    this.inspectStarted = new Promise((resolve) => {
+      this.#markInspectStarted = resolve;
+    });
+    this.#continueInspection = new Promise((resolve) => {
+      this.#releaseInspection = resolve;
+    });
+  }
+
+  async inspectRepository(): Promise<RepositoryInspection> {
     this.inspectCalls += 1;
-    return Promise.resolve({
+    this.#markInspectStarted();
+    await this.#continueInspection;
+    return {
       canonicalPath: "/tmp/unit-repository",
       device: 1,
       inode: 2,
       head: UNIT_BASE_COMMIT,
-    });
+    };
+  }
+
+  releaseInspection(): void {
+    this.#releaseInspection();
   }
 
   resolveCommit(): Promise<string> {
@@ -146,7 +165,11 @@ describe("atomic repository and project registration", () => {
 });
 
 describe("run drafts", () => {
-  it("persists only the preparing draft before planning it through the existing guard", async () => {
+  it.each([
+    ["linux", "kernel lease"],
+    ["darwin", "portable SQLite operation admission"],
+    ["win32", "portable SQLite operation admission"],
+  ] as const)("persists the draft before planning on %s through %s", async (platform) => {
     const fixture = createUnitStore();
     cleanupRoots.push(fixture.root);
     cleanupStores.push(fixture.store);
@@ -190,15 +213,23 @@ describe("run drafts", () => {
         },
       };
     };
-    const service = new IcarusService({
-      stateRoot,
-      store: fixture.store,
-      artifacts: new ArtifactStore(stateRoot),
-      git: git as unknown as GitController,
-      checks,
-      gatewayFactory,
-      id: () => UNIT_RUN_ID,
-    });
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    if (platformDescriptor === undefined) throw new Error("process.platform descriptor is missing");
+    let service: IcarusService;
+    Object.defineProperty(process, "platform", { ...platformDescriptor, value: platform });
+    try {
+      service = new IcarusService({
+        stateRoot,
+        store: fixture.store,
+        artifacts: new ArtifactStore(stateRoot),
+        git: git as unknown as GitController,
+        checks,
+        gatewayFactory,
+        id: () => UNIT_RUN_ID,
+      });
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+    }
     await service.initialize();
 
     const draft = service.createRunDraft({
@@ -232,7 +263,15 @@ describe("run drafts", () => {
     expect(await readdir(path.join(stateRoot, "artifacts"))).toEqual([]);
     expect(await readdir(path.join(stateRoot, "runs"))).toEqual([]);
 
-    const planned = await service.planDraftRun(draft.id);
+    const planning = service.planDraftRun(draft.id);
+    await git.inspectStarted;
+    try {
+      await expect(service.planDraftRun(draft.id)).rejects.toMatchObject({ code: "RUN_BUSY" });
+      expect(service.getRun(draft.id).state).toBe("preparing");
+    } finally {
+      git.releaseInspection();
+    }
+    const planned = await planning;
 
     expect(planned.state).toBe("awaiting_approval");
     expect(planned.baseCommit).toBe(UNIT_BASE_COMMIT);

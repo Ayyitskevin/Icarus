@@ -1,4 +1,4 @@
-import { invariant } from "./errors.js";
+import { IcarusError, invariant } from "./errors.js";
 import type {
   JsonValue,
   ModelCapabilities,
@@ -31,7 +31,12 @@ export interface ModelGateway {
 }
 
 export function parseProviderBaseUrl(value: string): { url: URL; locality: ProviderLocality } {
-  const url = new URL(value);
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new IcarusError("INVALID_PROVIDER_URL", "Provider URL is invalid");
+  }
   invariant(
     url.protocol === "http:" || url.protocol === "https:",
     "INVALID_PROVIDER_URL",

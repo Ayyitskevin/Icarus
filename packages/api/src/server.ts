@@ -273,18 +273,11 @@ function workspaceSnapshot(options: WorkspaceServerOptions): Record<string, unkn
         status: "unconfigured",
         reason: "Enter a loopback Ollama model and endpoint for each draft.",
       },
-      planning:
-        process.platform === "linux"
-          ? {
-              status: "available",
-              reason:
-                "Loopback planning is available and inherits the guarded runtime's Linux lease primitives.",
-            }
-          : {
-              status: "unavailable",
-              reason:
-                "Context preview and draft inspection remain available, but guarded planning currently requires Linux lease primitives.",
-            },
+      planning: {
+        status: "available",
+        reason:
+          "Portable loopback planning is available; SQLite operation admission prevents concurrent provider work.",
+      },
       execution: {
         status: "unconfigured",
         reason:
@@ -370,12 +363,6 @@ async function routeApi(
   }
   if (method === "POST" && pathname === "/api/runs") {
     const input = runDraftRequest(await readJson(request));
-    if (process.platform !== "linux") {
-      throw new IcarusError(
-        "WORKSPACE_PLANNING_UNSUPPORTED",
-        "New guarded run drafts currently require Linux planning support",
-      );
-    }
     const project = findProject(options.runtime.service.listProjects(), input.projectId);
     const providerEndpoint = parseProviderBaseUrl(input.provider.baseUrl);
     if (providerEndpoint.locality !== "loopback") {
@@ -409,12 +396,6 @@ async function routeApi(
         : null;
     if (bodyObject === null || Object.keys(bodyObject).length !== 0) {
       throw new IcarusError("INVALID_REQUEST", "Plan request body must be an empty object");
-    }
-    if (process.platform !== "linux") {
-      throw new IcarusError(
-        "WORKSPACE_PLANNING_UNSUPPORTED",
-        "Guarded planning currently requires Linux lease primitives",
-      );
     }
     await options.runtime.service.planDraftRun(runId);
     json(response, 200, presentRunById(options, runId));

@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
+import { startWorkspaceServer } from "../../packages/api/src/server.js";
+import { createIcarusRuntime } from "../../packages/core/src/index.js";
 import { IcarusStore } from "../../packages/core/src/store.js";
 import type { RunRecord } from "../../packages/core/src/types.js";
 import {
@@ -237,6 +239,112 @@ describe("CLI lifecycle across process restarts", () => {
           checks: [expect.objectContaining({ checkId: "verify", outcome: "passed" })],
         }),
       );
+    }
+
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const apiRuntime = await createIcarusRuntime(fixture.stateRoot);
+    const apiServer = await startWorkspaceServer(
+      { runtime: apiRuntime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    try {
+      const apiResponse = await fetch(`${apiServer.url}/api/runs/${planned.id}`);
+      expect(apiResponse.status).toBe(200);
+      const apiRun = (await apiResponse.json()) as Record<string, unknown>;
+      expect(apiRun).toMatchObject({
+        id: planned.id,
+        phase: "completed",
+        state: "completed",
+        gate: null,
+        action: {
+          status: "completed",
+          kind: "one_exact_replacement",
+          path: "src/greeting.txt",
+          files: ["src/greeting.txt"],
+          allowed: false,
+        },
+        files: {
+          involved: expect.arrayContaining(["src/greeting.txt"]),
+          changed: ["src/greeting.txt"],
+        },
+        checks: [
+          {
+            id: "verify",
+            name: "Verify greeting",
+            argv: ["python", "checks/verify.py"],
+            outcome: "passed",
+            exitCode: 0,
+            signal: null,
+            durationMs: expect.any(Number),
+            stdout: "",
+            stderr: "",
+            truncated: false,
+          },
+        ],
+        verification: {
+          outcome: "passed",
+          diffSha256: restored.verification?.diffSha256,
+          checkpointSha256: restored.verification?.checkpointSha256,
+        },
+        diff: expect.stringContaining("+Hello, Icarus!"),
+        outputs: [
+          {
+            label: "Verify greeting standard output",
+            stream: "stdout",
+            text: "",
+            truncated: false,
+          },
+          {
+            label: "Verify greeting standard error",
+            stream: "stderr",
+            text: "",
+            truncated: false,
+          },
+        ],
+        usage: {
+          toolCalls: expect.any(Number),
+          inputTokens: 24,
+          outputTokens: 16,
+          activeRuntimeMs: expect.any(Number),
+          estimatedCostUsd: 0,
+          reservedCostUsd: 0,
+        },
+        createdAt: expect.any(String),
+        updatedAt: expect.any(String),
+        timestamps: {
+          createdAt: expect.any(String),
+          updatedAt: expect.any(String),
+        },
+      });
+      const apiUsage = apiRun.usage as { readonly toolCalls: number };
+      expect(apiUsage.toolCalls).toBeGreaterThan(0);
+      const apiApprovals = apiRun.approvals as readonly {
+        readonly kind: string;
+        readonly decision: string;
+      }[];
+      expect(apiApprovals.map(({ kind, decision }) => `${kind}:${decision}`)).toEqual([
+        "plan:approve",
+        "review:reject",
+        "restore:approve",
+        "review:approve",
+      ]);
+      const apiTimeline = apiRun.timeline as readonly { readonly type: string }[];
+      expect(apiTimeline.map(({ type }) => type)).toEqual(expect.arrayContaining(eventTypes));
+      const serializedApiRun = JSON.stringify(apiRun);
+      expect(serializedApiRun).not.toContain(fixture.stateRoot);
+      expect(serializedApiRun).not.toContain("contextArtifactPath");
+      expect(serializedApiRun).not.toContain("cachePath");
+      expect(serializedApiRun).not.toContain("worktreePath");
+      expect(serializedApiRun).not.toContain("baselineBase64");
+      expect(serializedApiRun).not.toContain("approvedBase64");
+      expect(serializedApiRun).not.toContain(Buffer.from(preimage).toString("base64"));
+      expect(serializedApiRun).not.toContain(Buffer.from("Hello, Icarus!\n").toString("base64"));
+      expect(serializedApiRun).not.toContain("MALICIOUS-INSTRUCTION-FIXTURE");
+    } finally {
+      await apiServer.close();
+      apiRuntime.close();
     }
     expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
   }, 180_000);

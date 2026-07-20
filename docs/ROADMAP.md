@@ -34,22 +34,43 @@ evals, context budget allocation, and retrieval-quality fixtures.
 
 ## M3 — Workspace UI
 
-Status: first bounded vertical slice implemented; acceptance verification is
-pending on the working branch.
+Status: first bounded vertical slice accepted on the final working tree
+(2026-07-20); full M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
 metadata, persisted task drafts, loopback Ollama planning, exact internal run
 state plus product phases, and allowlisted plan/action/file/check/output/warning/
-timestamp evidence. It is review-only: browser approval, edit execution, checks,
-commit, push, and deployment are not exposed. Missing providers/execution are
+timestamp evidence. Registration, preview, drafts, and loopback planning support
+Linux, macOS, and Windows under atomic SQLite operation admission. It is
+review-only: browser approval, edit execution, checks, commit, push, and
+deployment are not exposed. Guarded approval and execution remain Linux CLI-only
+under the kernel lease and Docker boundary. Missing providers/execution are
 shown as `unconfigured`, and checks that did not run remain `not_run`.
 
-The remaining M3 scope is repository status, live events, richer run timeline,
-file tree and diff navigation, checkpoints, prompt history, a small task board,
-token/cost telemetry, server-held provider profiles, and deliberately designed
-approval/recovery controls. Any browser execution path needs a separate safety
-contract and evidence; provider keys remain server-side.
+Acceptance was recorded from fresh output of these commands; exact results are
+in `docs/PLANS.md`:
+
+```text
+pnpm exec vitest run tests/unit tests/provider --reporter=dot
+pnpm exec vitest run tests/integration --reporter=dot
+pnpm smoke:workspace
+ICARUS_CHROMIUM_EXECUTABLE=/absolute/path/to/chromium pnpm smoke:workspace:browser
+pnpm check
+git diff --check
+```
+
+Native macOS and Windows host acceptance remains to be recorded; the current
+branch exercises its platform-policy paths under the Linux test host. A registry
+dependency audit is also intentionally outside this no-network local slice.
+
+The next M3 feature slice is read-only repository status plus live event and
+evidence navigation. Later M3 scope includes richer run timelines, file and diff
+views, checkpoints, prompt history, a small task board, token/cost telemetry,
+server-held provider profiles, and deliberately designed approval/recovery
+controls. Patch materialization is not the next slice. Any browser execution
+path needs a separate safety contract and evidence; provider keys remain
+server-side.
 
 ## M4 — Runtime and previews
 
@@ -97,7 +118,7 @@ remain human-gated and outside automatic dogfood.
 
 ## Next recommended slice
 
-Run and record the complete local gate and real restart/source-isolation smoke
-for the first M3 slice while preserving the ADR 0010 security hold. Then deepen
-read-only repository status, event, and evidence navigation before adding any
-browser approval or execution authority.
+Preserve the ADR 0010 security hold and implement only the next bounded feature
+slice: read-only repository status plus live event and evidence navigation.
+Keep patch materialization, browser approval, and execution out of that slice;
+each authority expansion needs its own contract and evidence.

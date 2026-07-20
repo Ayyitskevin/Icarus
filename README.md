@@ -60,13 +60,14 @@ and distributed workers.
 - Git 2.40 or newer
 - a clean local repository with at least one commit for workspace import
 
-The loopback HTTP/UI, repository import, context preview, and draft inspection
-use portable Node/browser primitives and require no homelab, cloud service,
-account, telemetry, or global install. Guarded planning and execution currently
-inherit the Milestone 1 Linux lease runtime and require util-linux `flock` at
-`/usr/bin/flock`; execution additionally requires Docker with seccomp support
-and a locally present digest-pinned check image. Windows and macOS planning and
-execution are not yet supported.
+The loopback HTTP/UI, repository import, context preview, draft persistence, and
+loopback planning path support Linux, macOS, and Windows and require no homelab,
+cloud service, account, telemetry, or global install. Planning is read-only with
+respect to the imported checkout and uses an atomic SQLite operation admission
+record to reject concurrent provider work. Approval and execution remain
+Linux-only: they use the Milestone 1 kernel lease through util-linux `flock` at
+`/usr/bin/flock`, and execution additionally requires Docker with seccomp
+support and a locally present digest-pinned check image.
 
 ## Quick start
 
@@ -82,14 +83,22 @@ export ICARUS_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/icarus"
 pnpm workspace:start
 ```
 
+On Windows PowerShell, keep the state beneath the current user profile:
+
+```text
+$env:ICARUS_HOME = Join-Path $HOME ".icarus-state"
+pnpm workspace:start
+```
+
 Open `http://127.0.0.1:8787`. The server binds only to `127.0.0.1`,
 validates browser `Host` and `Origin`, and never enables cross-origin
 access. Importing and previewing a repository reads its committed Git objects;
 it does not copy, edit, check, commit, or push the source. Planning is available
-only when the chosen model is served by loopback Ollama. Until an endpoint and
-model are entered, the workspace clearly reports provider and execution
-capabilities as `unconfigured`. Saving a configured draft contacts no provider;
-the separate plan action does.
+on Linux, macOS, and Windows only when the chosen model is served by loopback
+Ollama. Until an endpoint and model are entered, the workspace clearly reports
+provider and execution capabilities as `unconfigured`. Saving a configured
+draft contacts no provider; the separate plan action does. Approval and
+execution continue through the Linux CLI only.
 
 The existing CLI golden path begins with:
 
@@ -106,10 +115,23 @@ node packages/cli/dist/main.js project add \
   --sandbox-image 'python:3.12-slim@sha256:c3d81d25b3154142b0b42eb1e61300024426268edeb5b5a26dd7ddf64d9daf28'
 ```
 
-The state root must be a dedicated, current-user-owned `0700` directory. An
-existing root must be empty or already contain Icarus's exact ownership marker;
-broad paths such as `/` and `/tmp`, symlink parents, shared/synced directories,
-and any path overlapping a registered repository are rejected.
+On POSIX systems, the state root must be a dedicated, current-user-owned `0700`
+directory. On Windows, it must be strictly beneath the current user profile and
+inherits that profile's ACL; locations outside the profile are rejected. On
+every platform, an existing root must be empty or already contain Icarus's exact
+marker. Filesystem roots, symlink parents, and any path inside a Git checkout are
+rejected before Icarus creates the state root. Project registration separately
+rejects repository/state containment in either direction before persisting the
+repository or project. Network, shared, and synced directories are unsupported
+and must not be used for Icarus state.
+
+Set `ICARUS_CHROMIUM_EXECUTABLE` to an explicit local Chromium binary, then
+`pnpm smoke:workspace:browser` builds the production assets and drives the
+project → context → draft → browser reload → plan → evidence path in real
+headless Chromium.
+Focused integration tests also cover restart before planning, useful errors for
+malformed provider URLs and missing repositories, and populated HTTP evidence
+for an already completed CLI run.
 
 Plan with local Ollama:
 

@@ -160,6 +160,26 @@ try {
   if (draft.state !== "preparing" || draft.phase !== "draft" || provider.requests() !== 0) {
     throw new Error("Draft was not persisted before provider work");
   }
+  await workspace.close();
+  workspace = undefined;
+  runtime.close();
+  runtime = undefined;
+
+  runtime = await createIcarusRuntime(stateRoot);
+  workspace = await startWorkspaceServer(
+    { runtime, stateRoot, workspaceDist: path.resolve("packages/workspace/dist") },
+    0,
+  );
+  const draftResponse = await fetch(`${workspace.url}/api/runs/${draft.id}`);
+  const persistedDraft = await draftResponse.json();
+  if (
+    !draftResponse.ok ||
+    persistedDraft.state !== "preparing" ||
+    persistedDraft.phase !== "draft" ||
+    provider.requests() !== 0
+  ) {
+    throw new Error("Draft was not recovered before planning after restart");
+  }
   const planned = await post(`${workspace.url}/api/runs/${draft.id}/plan`, {});
   if (
     planned.state !== "awaiting_approval" ||

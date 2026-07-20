@@ -2,7 +2,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IcarusError } from "../../packages/core/src/errors.js";
 import {
@@ -71,6 +71,36 @@ describe("state-root ownership boundary", () => {
     await expectUnsafe(() => createIcarusRuntime(linked));
   });
 
+  it("confines Windows state beneath the current user profile", async () => {
+    const parent = await makeTemporaryRoot();
+    const profile = path.join(parent, "profile");
+    const stateRoot = path.join(profile, "windows-state");
+    const outsideState = path.join(parent, "outside-state");
+    await mkdir(profile, { mode: 0o700 });
+    await mkdir(stateRoot, { mode: 0o755 });
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    if (platformDescriptor === undefined) throw new Error("process.platform descriptor is missing");
+    const homedir = vi.spyOn(os, "homedir").mockReturnValue(profile);
+    Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
+
+    try {
+      await expect(createIcarusRuntime(outsideState)).rejects.toMatchObject({
+        code: "UNSAFE_STATE_ROOT",
+      });
+      await expect(lstat(outsideState)).rejects.toMatchObject({ code: "ENOENT" });
+      const first = await createIcarusRuntime(stateRoot);
+      first.close();
+      expect(await readFile(path.join(stateRoot, ".icarus-state-v1"), "utf8")).toBe(
+        '{"application":"icarus","format":1}\n',
+      );
+      const reopened = await createIcarusRuntime(stateRoot);
+      reopened.close();
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+      homedir.mockRestore();
+    }
+  });
+
   it("rejects a state root reached through a symlinked parent", async () => {
     const parent = await makeTemporaryRoot();
     const realParent = path.join(parent, "real-parent");
@@ -87,8 +117,13 @@ describe("state-root ownership boundary", () => {
     const alias = path.join(parent, "repository-alias");
     const nestedState = path.join(alias, ".state");
     await mkdir(repository, { mode: 0o700 });
+    await mkdir(path.join(repository, ".git"), { mode: 0o700 });
     await symlink(repository, alias);
 
+    await expect(createIcarusRuntime(nestedState)).rejects.toMatchObject({
+      code: "STATE_REPOSITORY_OVERLAP",
+    });
+    await expect(lstat(path.join(repository, ".state"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(assertRegistrationStateSeparation(nestedState, repository)).rejects.toMatchObject({
       code: "STATE_REPOSITORY_OVERLAP",
     });

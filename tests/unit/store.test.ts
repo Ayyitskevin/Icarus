@@ -27,6 +27,7 @@ import {
 } from "../support/unit-fixtures.js";
 
 interface TestDatabase {
+  exec(sql: string): void;
   prepare(sql: string): { run(...parameters: unknown[]): unknown };
   close(): void;
 }
@@ -153,6 +154,74 @@ describe("SQLite run persistence", () => {
     expect(run.contextSha256).toBe("");
     expect(reopened.listEvents(UNIT_RUN_ID).map((event) => event.type)).toEqual(["run.created"]);
     reopened.close();
+  });
+
+  it("admits only one active operation across SQLite connections", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+    const second = new IcarusStore(fixture.databasePath, {
+      now: () => "2026-07-19T12:01:00.000Z",
+      id: makeUnitIdGenerator(),
+    });
+
+    try {
+      expectIcarusCode(
+        () => second.beginOperation(UNIT_RUN_ID, "stale-preparation", 0, 0, 500, "preparing"),
+        "RUN_BUSY",
+      );
+      const active = fixture.store.beginOperation(UNIT_RUN_ID, "first", 0, 0, 500);
+      expectIcarusCode(() => second.beginOperation(UNIT_RUN_ID, "second", 0, 0, 500), "RUN_BUSY");
+      fixture.store.finishOperation(active, {
+        outcome: "succeeded",
+        activeRuntimeMs: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCostUsd: 0,
+        detail: { result: "released" },
+      });
+      const next = second.beginOperation(UNIT_RUN_ID, "second", 0, 0, 500);
+      expect(next).toMatchObject({
+        runId: UNIT_RUN_ID,
+        kind: "second",
+      });
+      second.finishOperation(next, {
+        outcome: "succeeded",
+        activeRuntimeMs: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCostUsd: 0,
+        detail: { result: "released" },
+      });
+    } finally {
+      second.close();
+      fixture.store.close();
+    }
+  });
+
+  it("maps SQLite writer contention to RUN_BUSY", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+    const contender = new IcarusStore(fixture.databasePath, {
+      now: () => "2026-07-19T12:01:00.000Z",
+      id: makeUnitIdGenerator(),
+      busyTimeoutMs: 1,
+    });
+    const locker = new Database(fixture.databasePath);
+
+    try {
+      locker.exec("BEGIN IMMEDIATE");
+      expectIcarusCode(
+        () => contender.beginOperation(UNIT_RUN_ID, "contended", 0, 0, 500),
+        "RUN_BUSY",
+      );
+    } finally {
+      locker.exec("ROLLBACK");
+      locker.close();
+      contender.close();
+      fixture.store.close();
+    }
   });
 
   it("charges worst-case reservations for an operation interrupted across reopen", () => {

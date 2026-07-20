@@ -16,6 +16,7 @@
     "workspace:start": "pnpm build && pnpm --filter @icarus/api start",
     "workspace:ui": "pnpm --filter @icarus/workspace dev",
     "smoke:workspace": "pnpm build && node scripts/smoke-workspace.mjs",
+    "smoke:workspace:browser": "pnpm build && node scripts/smoke-workspace-browser.mjs",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint .",
