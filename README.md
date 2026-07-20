@@ -48,10 +48,22 @@ after restart. The browser is deliberately review-only: it cannot approve a
 plan, create a worktree, execute checks, mutate the imported repository, or
 claim that unrun work completed.
 
+The second Milestone 3 slice adds project-scoped, nonpersistent repository
+observation with independent
+availability, worktree, HEAD, branch, and configured-base-relation fields, plus
+fixed-size event metadata pages addressed by sequence cursor. It omits dirty
+filenames and counts, file content, raw Git output, and event payloads. The
+selected run may short-poll only in the visible foreground, with abort, bounded
+backoff, request-revision guards, coherent full-run/approval/timeline SQLite
+snapshots, an event-cursor freshness guard, and fixed Icarus-generated evidence
+anchors. Full browser timelines retain only the 200 most recent metadata rows;
+the CLI history contract remains complete. This slice adds no streaming
+transport, schema, dependency, or browser authority.
+
 Not yet included: browser approval or execution, arbitrary agent tool use,
 model-written shell commands, semantic search, commits or pushes, application
-previews, deployment, backend platform primitives, multi-agent orchestration,
-and distributed workers.
+previews, richer file/status, diff, or history navigation, deployment, backend
+platform primitives, multi-agent orchestration, and distributed workers.
 
 ## Requirements
 

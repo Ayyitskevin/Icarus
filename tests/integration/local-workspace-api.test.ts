@@ -1,11 +1,16 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import http from "node:http";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
 import { startWorkspaceServer } from "../../packages/api/src/server.js";
-import { createIcarusRuntime, type IcarusRuntime } from "../../packages/core/src/index.js";
+import {
+  createIcarusRuntime,
+  IcarusError,
+  type IcarusRuntime,
+} from "../../packages/core/src/index.js";
 import {
   createFixtureRepository,
   git,
@@ -16,6 +21,17 @@ import {
 } from "../support/integration-cli.js";
 
 const cleanups: Array<() => Promise<void>> = [];
+
+interface TestDatabase {
+  prepare(sql: string): { run(...parameters: unknown[]): unknown };
+  close(): void;
+}
+
+const Database = createRequire(new URL("../../packages/core/package.json", import.meta.url))(
+  "better-sqlite3",
+) as new (
+  filename: string,
+) => TestDatabase;
 
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) {
@@ -161,10 +177,54 @@ describe("loopback local workspace API", () => {
     });
     expect(draftResponse.status).toBe(201);
     const draft = await responseJson(draftResponse);
-    expect(draft).toMatchObject({ phase: "draft", state: "preparing" });
+    expect(draft).toMatchObject({
+      phase: "draft",
+      state: "preparing",
+      eventCursor: 1,
+      timelineTotal: 1,
+      timelineTruncated: false,
+    });
     expect(JSON.stringify(draft)).not.toContain(fixture.stateRoot);
     expect(provider.requests).toHaveLength(0);
     const runId = String(draft.id);
+
+    const initialEventsResponse = await fetch(`${server.url}/api/runs/${runId}/events?after=0`);
+    expect(initialEventsResponse.status).toBe(200);
+    const initialEvents = await responseJson(initialEventsResponse);
+    expect(initialEvents).toMatchObject({
+      runId,
+      revision: 1,
+      nextAfter: 1,
+      hasMore: false,
+      events: [
+        {
+          sequence: 1,
+          type: "run.created",
+          evidenceSection: "summary",
+          timestamp: expect.any(String),
+        },
+      ],
+    });
+    expect(JSON.stringify(initialEvents)).not.toContain("payload");
+    expect(JSON.stringify(initialEvents)).not.toContain("createdAt");
+    for (const query of [
+      "",
+      "?after=-1",
+      "?after=0.5",
+      "?after=01",
+      "?after=2",
+      "?after=9007199254740992",
+      "?after=0&after=0",
+      "?after=0&extra=1",
+    ]) {
+      const invalidEvents = await fetch(`${server.url}/api/runs/${runId}/events${query}`);
+      expect(invalidEvents.status).toBe(422);
+    }
+    const forbiddenEventPost = await postJson(`${server.url}/api/runs/${runId}/events?after=0`, {});
+    expect(forbiddenEventPost.status).toBe(404);
+    expect(
+      await responseJson(await fetch(`${server.url}/api/runs/${runId}/events?after=0`)),
+    ).toEqual(initialEvents);
 
     const forbiddenApproval = await postJson(`${server.url}/api/runs/${runId}/approve`, {});
     expect(forbiddenApproval.status).toBe(404);
@@ -339,6 +399,436 @@ describe("loopback local workspace API", () => {
     expect(await index.text()).toContain('id="root"');
   });
 
+  test("serves bounded coherent run snapshots without decoding private event payloads", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const projectResponse = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "bounded-fixture", path: fixture.repository },
+      project: {
+        name: "bounded-project",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    const projectId = String((await responseJson(projectResponse)).id);
+    const draftResponse = await postJson(`${server.url}/api/runs`, {
+      projectId,
+      task: "Keep persisted event payloads private.",
+      target: "src/greeting.txt",
+      provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
+    });
+    const runId = String((await responseJson(draftResponse)).id);
+
+    const privateSentinel = "/private/runtime/api-payload-sentinel";
+    const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    database.prepare("UPDATE runs SET edit_json = ? WHERE id = ?").run(
+      JSON.stringify({
+        path: "src/greeting.txt",
+        expectedPreimageSha256: "a".repeat(64),
+        findText: "Hello",
+        replaceText: "Hello, Icarus",
+        rationale: "Exercise bounded action presentation.",
+      }),
+      runId,
+    );
+    database
+      .prepare("UPDATE run_events SET payload_json = ? WHERE run_id = ? AND sequence = 1")
+      .run("not-json", runId);
+    const insert = database.prepare(
+      `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (let sequence = 2; sequence <= 206; sequence += 1) {
+      const type =
+        sequence === 205
+          ? "restore.completed"
+          : sequence === 206
+            ? "cancellation.completed"
+            : "operation.finished";
+      insert.run(
+        runId,
+        sequence,
+        type,
+        JSON.stringify({ privateSentinel, sequence }),
+        "2026-07-20T12:00:00.000Z",
+      );
+    }
+    database.close();
+
+    const selected = await responseJson(await fetch(`${server.url}/api/runs/${runId}`));
+    expect(selected).toMatchObject({
+      id: runId,
+      action: { status: "reverted" },
+      eventCursor: 206,
+      timelineTotal: 206,
+      timelineTruncated: true,
+    });
+    expect(selected.timeline).toHaveLength(200);
+    expect((selected.timeline as Array<{ sequence: number }>)[0]?.sequence).toBe(7);
+    expect(JSON.stringify(selected)).not.toContain(privateSentinel);
+    expect(JSON.stringify(selected)).not.toContain("not-json");
+
+    const workspace = await responseJson(await fetch(`${server.url}/api/workspace`));
+    const workspaceRun = (workspace.runs as Array<Record<string, unknown>>).find(
+      (run) => run.id === runId,
+    );
+    expect(workspaceRun).toMatchObject({
+      action: { status: "reverted" },
+      eventCursor: 206,
+      timelineTotal: 206,
+    });
+    expect(JSON.stringify(workspaceRun)).not.toContain(privateSentinel);
+    expect(() => runtime.service.history(runId)).toThrowError(
+      expect.objectContaining({ code: "DATABASE_ERROR" }),
+    );
+  });
+
+  test("fails registration closed before invoking a repository clean filter", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    await writeFile(
+      path.join(fixture.repository, ".gitattributes"),
+      "src/greeting.txt filter=registration-sentinel\n",
+    );
+    await git(fixture.repository, ["add", ".gitattributes"]);
+    await git(fixture.repository, ["commit", "-m", "declare registration test filter"]);
+    const marker = path.join(fixture.root, "registration-filter-invoked");
+    const unsafeKey = "filter.registration-sentinel.clean";
+    await git(fixture.repository, ["config", unsafeKey, `sh -c 'printf invoked > "${marker}"'`]);
+    const sourceBefore = await readFile(path.join(fixture.repository, "src/greeting.txt"));
+    const headBefore = (await git(fixture.repository, ["rev-parse", "HEAD"])).trim();
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const response = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "unsafe-registration", path: fixture.repository },
+      project: {
+        name: "unsafe-registration",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    expect(response.status).toBe(422);
+    const body = await responseJson(response);
+    expect(body).toEqual({
+      error: {
+        code: "GIT_UNSAFE_CONFIGURATION",
+        message: "Repository Git configuration is not safe to inspect",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain(unsafeKey);
+    expect(JSON.stringify(body)).not.toContain(marker);
+    expect(JSON.stringify(body)).not.toContain(fixture.repository);
+    await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(path.join(fixture.repository, "src/greeting.txt"))).toEqual(sourceBefore);
+    expect((await git(fixture.repository, ["rev-parse", "HEAD"])).trim()).toBe(headBefore);
+    expect(runtime.service.listRepositories()).toEqual([]);
+    expect(runtime.service.listProjects()).toEqual([]);
+  });
+
+  test("reports sanitized repository status for clean, dirty, divergent, missing, and replaced paths", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    await writeFile(
+      path.join(fixture.repository, ".gitattributes"),
+      "src/greeting.txt filter=icarus-malicious\n",
+    );
+    await git(fixture.repository, ["add", ".gitattributes"]);
+    await git(fixture.repository, ["commit", "-m", "declare inert test filter"]);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const created = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "status-fixture", path: fixture.repository },
+      project: {
+        name: "status-golden",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    expect(created.status).toBe(201);
+    const projectId = String((await responseJson(created)).id);
+    const statusUrl = `${server.url}/api/projects/${projectId}/repository-status`;
+
+    const cleanFingerprint = await repositoryFingerprint(fixture.repository);
+    const clean = await responseJson(await fetch(statusUrl));
+    expect(clean).toMatchObject({
+      projectId,
+      availability: "available",
+      worktree: "clean",
+      branch: "main",
+      baseRef: "main",
+      headMatchesBaseRef: true,
+      issue: null,
+    });
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(cleanFingerprint);
+
+    const expectDirtyStatus = async (...privateSentinels: readonly string[]): Promise<void> => {
+      const before = await repositoryFingerprint(fixture.repository);
+      const dirtyResponse = await fetch(statusUrl);
+      expect(dirtyResponse.status).toBe(200);
+      const dirty = await responseJson(dirtyResponse);
+      expect(dirty).toMatchObject({
+        availability: "available",
+        worktree: "dirty",
+        issue: { code: "DIRTY_REPOSITORY" },
+      });
+      const serializedDirty = JSON.stringify(dirty);
+      for (const sentinel of privateSentinels) {
+        expect(serializedDirty).not.toContain(sentinel);
+      }
+      expect(serializedDirty).not.toContain(fixture.repository);
+      expect(await repositoryFingerprint(fixture.repository)).toEqual(before);
+    };
+
+    const dirtyFilename = "private-dirty-sentinel.txt";
+    await writeFile(path.join(fixture.repository, dirtyFilename), "private dirty contents\n");
+    await expectDirtyStatus(dirtyFilename, "private dirty contents");
+    await unlink(path.join(fixture.repository, dirtyFilename));
+
+    const unstagedFilename = "src/greeting.txt";
+    await writeFile(path.join(fixture.repository, unstagedFilename), "private unstaged contents\n");
+    await expectDirtyStatus(unstagedFilename, "private unstaged contents");
+    await git(fixture.repository, ["restore", unstagedFilename]);
+
+    const stagedFilename = "README.md";
+    await writeFile(path.join(fixture.repository, stagedFilename), "private staged contents\n");
+    await git(fixture.repository, ["add", stagedFilename]);
+    await expectDirtyStatus(stagedFilename, "private staged contents");
+    await git(fixture.repository, ["restore", "--staged", stagedFilename]);
+    await git(fixture.repository, ["restore", stagedFilename]);
+
+    const restoredFingerprint = await repositoryFingerprint(fixture.repository);
+    expect(await responseJson(await fetch(statusUrl))).toMatchObject({
+      availability: "available",
+      worktree: "clean",
+      issue: null,
+    });
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(restoredFingerprint);
+
+    const sourceBytes = await readFile(path.join(fixture.repository, "src/greeting.txt"));
+    const sourceHead = (await git(fixture.repository, ["rev-parse", "HEAD"])).trim();
+    for (const unsafeKey of [
+      "filter.icarus-malicious.clean",
+      "filter.icarus-malicious.process",
+      "core.alternateRefsCommand",
+    ]) {
+      const marker = path.join(fixture.root, `unsafe-config-${unsafeKey.replaceAll(".", "-")}`);
+      const command = `sh -c 'printf invoked > "${marker}"'`;
+      let clearUnsafeConfiguration: () => Promise<void>;
+      if (unsafeKey.endsWith(".process")) {
+        const includedConfig = path.join(fixture.root, "included-process-filter.config");
+        await git(fixture.repository, ["config", "--file", includedConfig, unsafeKey, command]);
+        await git(fixture.repository, ["config", "--local", "include.path", includedConfig]);
+        clearUnsafeConfiguration = async () => {
+          await git(fixture.repository, ["config", "--local", "--unset", "include.path"]);
+        };
+      } else if (unsafeKey === "core.alternateRefsCommand") {
+        await git(fixture.repository, ["config", "extensions.worktreeConfig", "true"]);
+        await git(fixture.repository, ["config", "--worktree", unsafeKey, command]);
+        clearUnsafeConfiguration = async () => {
+          await git(fixture.repository, ["config", "--worktree", "--unset", unsafeKey]);
+        };
+      } else {
+        await git(fixture.repository, ["config", unsafeKey, command]);
+        clearUnsafeConfiguration = async () => {
+          await git(fixture.repository, ["config", "--unset", unsafeKey]);
+        };
+      }
+      const unsafeStatus = await responseJson(await fetch(statusUrl));
+      expect(unsafeStatus).toMatchObject({
+        availability: "unavailable",
+        worktree: "unknown",
+        head: null,
+        branch: null,
+        issue: { code: "REPOSITORY_UNAVAILABLE" },
+      });
+      const serialized = JSON.stringify(unsafeStatus);
+      expect(serialized).not.toContain(unsafeKey);
+      expect(serialized).not.toContain(marker);
+      expect(serialized).not.toContain(fixture.repository);
+      await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readFile(path.join(fixture.repository, "src/greeting.txt"))).toEqual(
+        sourceBytes,
+      );
+      expect((await git(fixture.repository, ["rev-parse", "HEAD"])).trim()).toBe(sourceHead);
+      await clearUnsafeConfiguration();
+    }
+
+    const unresolvedProject = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "status-fixture", path: fixture.repository },
+      project: {
+        name: "status-unresolved",
+        baseRef: "refs/heads/does-not-exist",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    const unresolvedProjectId = String((await responseJson(unresolvedProject)).id);
+    expect(
+      await responseJson(
+        await fetch(`${server.url}/api/projects/${unresolvedProjectId}/repository-status`),
+      ),
+    ).toMatchObject({
+      availability: "available",
+      worktree: "clean",
+      baseCommit: null,
+      headMatchesBaseRef: null,
+      issue: { code: "BASE_REF_UNRESOLVED" },
+    });
+
+    const blobId = (await git(fixture.repository, ["rev-parse", "HEAD:src/greeting.txt"])).trim();
+    await git(fixture.repository, ["update-ref", "refs/tags/blob-base", blobId]);
+    const unpeelableProject = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "status-fixture", path: fixture.repository },
+      project: {
+        name: "status-unpeelable",
+        baseRef: "refs/tags/blob-base",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    const unpeelableProjectId = String((await responseJson(unpeelableProject)).id);
+    expect(
+      await responseJson(
+        await fetch(`${server.url}/api/projects/${unpeelableProjectId}/repository-status`),
+      ),
+    ).toMatchObject({
+      availability: "unavailable",
+      worktree: "unknown",
+      baseCommit: null,
+      issue: { code: "REPOSITORY_UNAVAILABLE" },
+    });
+    await git(fixture.repository, ["update-ref", "-d", "refs/tags/blob-base"]);
+
+    await git(fixture.repository, ["checkout", "--detach", "main"]);
+    expect(await responseJson(await fetch(statusUrl))).toMatchObject({
+      availability: "available",
+      worktree: "clean",
+      branch: null,
+      headMatchesBaseRef: true,
+      issue: null,
+    });
+    await git(fixture.repository, ["checkout", "main"]);
+
+    const headPath = path.join(fixture.repository, ".git", "HEAD");
+    const validHead = await readFile(headPath);
+    await writeFile(headPath, "not a valid head\n");
+    const failedGitStatus = await responseJson(await fetch(statusUrl));
+    expect(failedGitStatus).toMatchObject({
+      availability: "unavailable",
+      worktree: "unknown",
+      head: null,
+      branch: null,
+      issue: { code: "REPOSITORY_UNAVAILABLE" },
+    });
+    expect(JSON.stringify(failedGitStatus)).not.toContain("not a valid head");
+    expect(JSON.stringify(failedGitStatus)).not.toContain(fixture.repository);
+    await writeFile(headPath, validHead);
+
+    await git(fixture.repository, ["checkout", "-b", "ahead"]);
+    await writeFile(path.join(fixture.repository, "src/greeting.txt"), "Hello from ahead!\n");
+    await git(fixture.repository, ["add", "src/greeting.txt"]);
+    await git(fixture.repository, ["commit", "-m", "advance head away from base ref"]);
+    const divergent = await responseJson(await fetch(statusUrl));
+    expect(divergent).toMatchObject({
+      availability: "available",
+      worktree: "clean",
+      branch: "ahead",
+      headMatchesBaseRef: false,
+      issue: { code: "BASE_REF_NOT_HEAD" },
+    });
+
+    const movedRepository = path.join(fixture.root, "registered-repository-moved");
+    await rename(fixture.repository, movedRepository);
+    expect(await responseJson(await fetch(statusUrl))).toMatchObject({
+      availability: "missing",
+      worktree: "unknown",
+      head: null,
+      branch: null,
+      issue: { code: "REPOSITORY_MISSING" },
+    });
+
+    await mkdir(fixture.repository);
+    expect(await responseJson(await fetch(statusUrl))).toMatchObject({
+      availability: "identity_changed",
+      worktree: "unknown",
+      head: null,
+      branch: null,
+      issue: { code: "REPOSITORY_IDENTITY_CHANGED" },
+    });
+  });
+
+  test("propagates a repository-status client disconnect through AbortSignal", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    let resolveSignal: (signal: AbortSignal) => void = () => undefined;
+    const signalReceived = new Promise<AbortSignal>((resolve) => {
+      resolveSignal = resolve;
+    });
+    let resolveAborted: () => void = () => undefined;
+    const operationAborted = new Promise<void>((resolve) => {
+      resolveAborted = resolve;
+    });
+    runtime.service.getProjectRepositoryStatus = async (_projectId, signal) => {
+      if (signal === undefined) throw new Error("Repository status signal was not provided");
+      resolveSignal(signal);
+      await new Promise<void>((resolve) =>
+        signal.addEventListener("abort", resolve, { once: true }),
+      );
+      resolveAborted();
+      throw new IcarusError("CANCELLED", "Synthetic disconnect cancellation");
+    };
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const request = http.get(`${server.url}/api/projects/project-id/repository-status`);
+    request.on("error", () => undefined);
+    const propagatedSignal = await signalReceived;
+    expect(propagatedSignal.aborted).toBe(false);
+    request.destroy();
+    await operationAborted;
+    expect(propagatedSignal.aborted).toBe(true);
+  });
+
   test("rejects non-loopback browser authority, unsafe bodies, remote providers, and bind fallback", async () => {
     const fixture = await createFixtureRepository();
     cleanups.push(fixture.cleanup);
@@ -427,6 +917,14 @@ describe("loopback local workspace API", () => {
     const missingRun = await fetch(`${server.url}/api/runs/missing-run`);
     expect(missingRun.status).toBe(404);
     expect(JSON.stringify(await responseJson(missingRun))).toContain("NOT_FOUND");
+    const missingRunEvents = await fetch(`${server.url}/api/runs/missing-run/events?after=0`);
+    expect(missingRunEvents.status).toBe(404);
+    expect(JSON.stringify(await responseJson(missingRunEvents))).toContain("NOT_FOUND");
+    const missingRepositoryStatus = await fetch(
+      `${server.url}/api/projects/missing-project/repository-status`,
+    );
+    expect(missingRepositoryStatus.status).toBe(404);
+    expect(JSON.stringify(await responseJson(missingRepositoryStatus))).toContain("NOT_FOUND");
 
     const invalidRepository = await postJson(`${server.url}/api/projects`, {
       repository: { name: "missing-repository", path: path.join(fixture.root, "does-not-exist") },

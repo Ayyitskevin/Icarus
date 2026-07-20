@@ -686,4 +686,148 @@ describe("SQLite run persistence", () => {
     expect(reopened.resumeFailed(UNIT_RUN_ID).state).toBe("running");
     reopened.close();
   });
+
+  it("pages metadata-only contiguous events across reopen and rejects invalid cursors", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    const { projectId } = seedUnitProject(fixture.store);
+    fixture.store.createRun({
+      id: UNIT_RUN_ID,
+      projectId,
+      task: "Exercise event cursor pagination",
+      target: UNIT_PLAN.target,
+      provider: UNIT_PROVIDER,
+    });
+    for (let index = 0; index < 70; index += 1) {
+      fixture.store.recordResumeRequested(UNIT_RUN_ID);
+    }
+
+    const first = fixture.store.listEventPage(UNIT_RUN_ID, 0);
+    expect(first).toMatchObject({
+      runId: UNIT_RUN_ID,
+      revision: 71,
+      nextAfter: 64,
+      hasMore: true,
+    });
+    expect(first.events).toHaveLength(64);
+    expect(first.events.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 64 }, (_, index) => index + 1),
+    );
+    expect(JSON.stringify(first)).not.toContain("payload");
+
+    const second = fixture.store.listEventPage(UNIT_RUN_ID, first.nextAfter);
+    expect(second).toMatchObject({ revision: 71, nextAfter: 71, hasMore: false });
+    expect(second.events.map((event) => event.sequence)).toEqual([65, 66, 67, 68, 69, 70, 71]);
+    expect(fixture.store.listEventPage(UNIT_RUN_ID, 71)).toMatchObject({
+      revision: 71,
+      nextAfter: 71,
+      hasMore: false,
+      events: [],
+    });
+    expectIcarusCode(() => fixture.store.listEventPage(UNIT_RUN_ID, 72), "INVALID_EVENT_CURSOR");
+    fixture.store.close();
+
+    const reopened = new IcarusStore(fixture.databasePath, {
+      now: () => "2026-07-19T12:01:00.000Z",
+      id: makeUnitIdGenerator(),
+    });
+    expect(reopened.listEventPage(UNIT_RUN_ID, 64)).toEqual(second);
+
+    const mutator = new Database(fixture.databasePath);
+    mutator.prepare("DELETE FROM run_events WHERE run_id = ? AND sequence = ?").run(UNIT_RUN_ID, 3);
+    mutator.close();
+    expectIcarusCode(() => reopened.listEventPage(UNIT_RUN_ID, 0), "DATABASE_ERROR");
+    reopened.close();
+  });
+
+  it("builds a bounded presentation snapshot without decoding event payloads", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    const { projectId } = seedUnitProject(fixture.store);
+    fixture.store.createRun({
+      id: UNIT_RUN_ID,
+      projectId,
+      task: "Keep private event details outside presentation",
+      target: UNIT_PLAN.target,
+      provider: UNIT_PROVIDER,
+    });
+
+    const privateSentinel = "/private/runtime/payload-sentinel";
+    const mutator = new Database(fixture.databasePath);
+    mutator.prepare("UPDATE runs SET edit_json = ? WHERE id = ?").run(
+      JSON.stringify({
+        path: UNIT_PLAN.target,
+        expectedPreimageSha256: "a".repeat(64),
+        findText: "Hello",
+        replaceText: "Hello, Icarus",
+        rationale: "Exercise bounded action presentation.",
+      }),
+      UNIT_RUN_ID,
+    );
+    mutator
+      .prepare("UPDATE run_events SET payload_json = ? WHERE run_id = ? AND sequence = 1")
+      .run("not-json", UNIT_RUN_ID);
+    const insert = mutator.prepare(
+      `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (let sequence = 2; sequence <= 206; sequence += 1) {
+      const type =
+        sequence === 2
+          ? "edit.materialized"
+          : sequence === 206
+            ? "cancellation.completed"
+            : "operation.finished";
+      insert.run(
+        UNIT_RUN_ID,
+        sequence,
+        type,
+        JSON.stringify({ privateSentinel, sequence }),
+        "2026-07-19T12:00:00.000Z",
+      );
+    }
+    mutator.close();
+
+    const snapshot = fixture.store.getRunPresentationSnapshot(UNIT_RUN_ID);
+    expect(snapshot).toMatchObject({
+      eventCursor: 206,
+      eventCount: 206,
+      actionEvents: [{ sequence: 206, type: "cancellation.completed" }],
+    });
+    expect(snapshot.actionEvents).toHaveLength(1);
+    expect(snapshot.events).toHaveLength(200);
+    expect(snapshot.events[0]?.sequence).toBe(7);
+    expect(snapshot.events.at(-1)?.sequence).toBe(206);
+    expect(JSON.stringify(snapshot)).not.toContain(privateSentinel);
+    expect(JSON.stringify(snapshot)).not.toContain("payload");
+    expectIcarusCode(() => fixture.store.getRunHistory(UNIT_RUN_ID), "DATABASE_ERROR");
+    fixture.store.close();
+  });
+
+  it("pages events without selecting or decoding the full run row", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    const { projectId } = seedUnitProject(fixture.store);
+    fixture.store.createRun({
+      id: UNIT_RUN_ID,
+      projectId,
+      task: "Keep event polling independent from full run decoding",
+      target: UNIT_PLAN.target,
+      provider: UNIT_PROVIDER,
+    });
+
+    const mutator = new Database(fixture.databasePath);
+    mutator.prepare("UPDATE runs SET provider_json = ? WHERE id = ?").run("not-json", UNIT_RUN_ID);
+    mutator.close();
+
+    expect(fixture.store.listEventPage(UNIT_RUN_ID, 0)).toMatchObject({
+      runId: UNIT_RUN_ID,
+      revision: 1,
+      nextAfter: 1,
+      hasMore: false,
+      events: [{ sequence: 1, runId: UNIT_RUN_ID, type: "run.created" }],
+    });
+    expectIcarusCode(() => fixture.store.getRun(UNIT_RUN_ID), "DATABASE_ERROR");
+    fixture.store.close();
+  });
 });

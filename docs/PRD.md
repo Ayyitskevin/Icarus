@@ -114,6 +114,43 @@ The first browser path is intentionally narrower than the guarded CLI lifecycle:
    Guarded approval and execution remain Linux CLI-only under the kernel lease;
    execution also remains inside the Docker sandbox boundary.
 
+## Second M3 read-only observation slice
+
+ADR 0015 implements this bounded observation contract:
+
+1. Observe one persisted project's repository without changing or persisting
+   repository, project, run, or event state. Present independent availability,
+   worktree, HEAD, branch, and configured-base-relation fields.
+2. Missing repositories, identity mismatches, unresolved refs, and observation
+   errors remain explicit in their relevant fields and never masquerade as a
+   clean worktree. Detached HEAD is represented as `branch: null` while worktree
+   cleanliness remains independently truthful. Omit dirty filenames and counts,
+   file content, repository/private runtime paths, and raw Git output.
+3. Expose one read-only event metadata endpoint for the selected run. Return a
+   sequence-ordered page strictly after the supplied cursor under one fixed
+   service-owned maximum. Each item contains only sequence, type, a
+   host-controlled label, timestamp, and a fixed host-generated evidence-section
+   identifier; event payloads never cross the API.
+4. Build each full run response—run, approvals, and the 200 most recent timeline
+   metadata rows—from one coherent SQLite read snapshot and include the
+   append-only event sequence high-water mark in that response as its event
+   cursor and total. Event metadata pages remain separate requests; complete
+   payload-bearing history remains a CLI-only contract. If the retained suffix
+   cannot establish an action's earlier prerequisite, present `unknown` with CLI
+   guidance rather than inventing a status.
+5. Short-poll only the selected run while the document is visible. Keep one
+   current request, pause while hidden, abort on selection change or unmount,
+   apply bounded failure backoff with success reset, and reject late responses
+   through a selection/request revision guard. Accept a full run response only
+   when its event cursor is at least the newest event revision already observed.
+6. Link live updates only to a closed set of fixed, Icarus-generated evidence
+   anchors. Never derive fragment identifiers or navigation targets from
+   repository, provider, event, or check text.
+7. Add no Server-Sent Events, WebSocket, filesystem watcher, schema migration,
+   runtime dependency, background daemon, approval, mutation, execution,
+   arbitrary-command, commit, push, or deployment authority. The guarded CLI
+   lifecycle and ADR 0010 hold remain unchanged.
+
 ## Sun ceiling
 
 Every run records maximum active runtime, provider output tokens, total tokens,
@@ -170,10 +207,11 @@ exist in Milestone 1:
   `rg`-based search, syntax/LSP signals, semantic retrieval, project memory,
   file-and-line provenance, and measured context-budget fixtures.
 - The first local-workspace slice exposes persisted projects, context metadata,
-  task drafts, loopback planning, run state, and allowlisted evidence. Later M3
-  slices may add repository status, sessions, live events, file tree, richer
-  diffs/check evidence, application previews, approvals, checkpoints, prompt
-  history, and token/cost telemetry without placing provider keys in a browser.
+  task drafts, loopback planning, run state, and allowlisted evidence. The
+  accepted second-slice design adds only the bounded observation contract above.
+  Later M3 slices may add sessions, richer file/status, diff, and history
+  navigation, application previews, approvals, checkpoints, prompt history, and
+  token/cost telemetry without placing provider keys in a browser.
 - Application-factory templates may add an application starter, API layer,
   database, authentication, storage, realtime events, jobs, vector search,
   environment references, local preview, and deployment configuration only as
@@ -215,3 +253,12 @@ exist in Milestone 1:
 - The HTTP presenter exposes populated, bounded plan, action, file, verification,
   check-output, approval, usage, and timestamp evidence for a completed CLI run
   without exposing private runtime paths.
+
+The second M3 implementation has fresh local evidence for its independent status
+fields, nonpersistence and source isolation, fixed event bounds and cursors,
+payload omission, transaction-scoped full-run reads, the cross-request
+event-revision guard, foreground polling lifecycle, bounded backoff,
+stale-response guard, fixed evidence anchors, and unchanged browser authority.
+Exact-head hosted CI remains required before published acceptance. No separate
+cross-process WAL contention stress was added; coherence currently relies on the
+explicit better-sqlite3 read transaction plus bounded/corrupt-payload tests.

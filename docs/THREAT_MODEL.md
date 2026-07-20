@@ -7,6 +7,7 @@
 - private repository text sent to a chosen provider;
 - Icarus project/run history, diffs, and command output;
 - loopback workspace requests and allowlisted browser evidence;
+- point-in-time repository observations and cursor-paged event metadata;
 - host filesystem, processes, private network, and production systems;
 - GitHub Actions credentials, OIDC authority, and repository automation;
 - operator trust in approval and verification evidence.
@@ -25,6 +26,9 @@
    application service.
 9. Allowlisted state/evidence crosses from the API presenter into React, where
    repository, provider, and check-derived strings remain untrusted data.
+10. In the second M3 slice, sanitized Git observations and event metadata cross
+    the same presenter boundary without their raw command output or event
+    payloads.
 
 Repository rules, source, docs, issue text, model output, HTTP errors, command
 output, Host/Origin values, URLs, and JSON bodies are untrusted. Fixed host policy
@@ -57,6 +61,23 @@ approval commands are authoritative; the browser is review-only.
 | Misleading success | timeout/cancellation cannot pass on exit zero; exact internal state stays visible; absent provider/execution is `unconfigured`; absent checks are `not_run`; history is append-only | timeout-trap, phase mapping, restart-before-plan, populated completed-run HTTP evidence, real-Chromium smoke, history, drift, and measured-eval tests |
 | Destructive rollback | rollback touches only the approved path in the owned worktree and retains checkpoint | rollback/restore test |
 | SQLite tampering/corruption | local file permissions, foreign keys, WAL, transaction boundaries, backups documented | operations drill |
+
+## Second M3 observation threats
+
+| Threat | Current control | Evidence and limits |
+| --- | --- | --- |
+| Repository observation mutates the source or leaks dirty paths/content | project-scoped fixed read-only Git argv; file-only transport; lazy fetch, prompts, and optional index locks disabled; traditional hooks redirected; configured hook commands and effective clean/smudge/process filters or alternate-ref commands rejected; `post-checkout` disabled at command scope; allowlist only independent availability/worktree/HEAD/branch/base-relation fields; persist nothing | source fingerprints cover content status, refs, config, index, and linked worktree metadata; clean/staged/unstaged/untracked and helper-command marker tests prove omission and no invocation. Config-hook rejection is version-independent and covers a tampered private cache; the execution host is Git 2.43, so a real Git 2.55 configured-hook run is not claimed. Same-user config TOCTOU remains a non-goal. |
+| A missing repository, identity mismatch, unresolved ref, or Git failure appears clean | availability, worktree, HEAD, branch, and base relation are independent; unresolved and error states remain explicit; detached HEAD is `branch: null` without changing cleanliness | focused endpoint tests cover clean, dirty, divergent, detached, unresolved, unpeelable, missing, replaced-identity, invalid-HEAD, and spawn-failure cases. |
+| Event history leaks private paths, diffs, check output, or other raw payload data | fixed-size sequence-cursor pages expose only sequence, type, host-controlled label, timestamp, and fixed `evidenceSection`; the browser presenter selects no `payload_json` | corrupt/private payload fixtures pass through selected-run and workspace endpoints without decode or disclosure; the CLI full-history path still detects the corrupt payload. |
+| A full run response combines different database moments, or an older full response overwrites newer event knowledge | run, approvals, and the 200-row metadata tail share one SQLite read transaction; the sequence high-water mark is the cursor/total; the UI accepts a full response only at or beyond the newest observed revision | bounded/corrupt-payload store and endpoint tests plus monotonic page and client high-water tests pass. A separate concurrent-process WAL stress test is not recorded; transaction structure is the current coherence evidence. |
+| A truncated browser tail rewrites older action truth | an incomplete tail starts with explicit unknown action state; only self-establishing retained transitions make it known; ambiguous cancellation remains unknown with CLI guidance | presenter regression places materialization before the 200-row tail and cancellation at its end, then proves the browser does not guess. CLI history remains complete. |
+| Polling continues while hidden, overlaps, storms after failure, or overwrites a new selection | selected-run-only foreground short polling; one current request; visibility pause; abort on selection change/unmount; bounded failure backoff reset only by success; selection/request guards | pure delay/cursor tests cover the 2/4/8/15-second sequence, cap, rollback rejection, and snapshot threshold; real-browser acceptance covers visibility, injected failure/recovery, a held non-overlapping request, cancellation on unmount, preserved newer selection, and a newly appended event causing an event-page read, subsequent coherent full-run read, and rendered update without reselection. |
+| Untrusted event or repository text becomes an injected navigation target | a closed host-generated evidence-anchor map; untrusted strings render only as text | hostile anchor inputs fall back to `run-activity`; presenter tests verify fixed targets; the static security gate forbids raw-HTML sinks. |
+
+The slice adds no Server-Sent Events, WebSocket, watcher, schema migration,
+runtime dependency, background daemon, or browser action route. Existing
+loopback and guarded CLI boundaries remain authoritative, and the ADR 0010 hold
+remains unresolved.
 
 ## Inherited repository automation hold
 
@@ -103,6 +124,12 @@ is held. ADR 0010 records the options without changing the workflow.
   macOS/Windows acceptance remains to be recorded.
 - Guarded approval and execution remain Linux-only through `/usr/bin/flock` and
   `/proc`; execution also depends on a local Docker daemon.
+- Repository status is an unlocked, point-in-time observation, not proof
+  that state remains unchanged. Every later guarded action must revalidate source
+  identity, HEAD/base relation, and cleanliness at its own authority boundary.
+- Effective Git config is checked before helper-capable commands, but a hostile
+  same-user process can change config between the preflight and command. No OS
+  no-exec boundary or hostile multi-user isolation is claimed.
 
 ## Security non-goals
 
@@ -110,3 +137,4 @@ No claim of hostile multi-user isolation, microVM isolation, production
 deployment safety, remote API authentication/authorization, tenant isolation,
 portable guarded approval/execution, account security, telemetry security, or
 remote worker security is made by Milestone 1 or the first M3 workspace slice.
+The second M3 observation slice does not change those non-goals.

@@ -15,6 +15,7 @@ async function collectSources(directory, include) {
 }
 
 const processSource = await readFile("packages/core/src/process.ts", "utf8");
+const gitSource = await readFile("packages/core/src/git.ts", "utf8");
 const sandboxSource = await readFile("packages/core/src/sandbox.ts", "utf8");
 const workspaceServerSource = await readFile("packages/api/src/server.ts", "utf8");
 const workspaceUiSources = await collectSources(
@@ -29,6 +30,21 @@ const testSources = await collectSources("tests", (name) => name.endsWith(".test
 const assertions = {
   controllerNeverUsesShell:
     processSource.includes("shell: false") && !processSource.includes("shell: true"),
+  gitLazyFetchDisabled: gitSource.includes('GIT_NO_LAZY_FETCH: "1"'),
+  gitTransportRestricted:
+    gitSource.includes('GIT_ALLOW_PROTOCOL: "file"') &&
+    gitSource.includes('GIT_PROTOCOL_FROM_USER: "0"') &&
+    gitSource.includes('"protocol.allow=never"') &&
+    gitSource.includes('"protocol.file.allow=always"'),
+  gitUnsafeConfigurationRejected:
+    gitSource.includes("UNSAFE_REPOSITORY_CONFIG_PATTERN") &&
+    gitSource.includes("clean|smudge|process") &&
+    gitSource.includes("core\\\\.alternaterefscommand") &&
+    gitSource.includes("hook\\\\..*\\\\.command") &&
+    gitSource.includes('"hook.post-checkout.enabled=false"') &&
+    gitSource.includes('"--includes"') &&
+    gitSource.includes('"--name-only"') &&
+    gitSource.includes('"GIT_UNSAFE_CONFIGURATION"'),
   dockerNetworkDisabled: sandboxSource.includes('"--network"') && sandboxSource.includes('"none"'),
   dockerRootReadOnly: sandboxSource.includes('"--read-only"'),
   dockerCapabilitiesDropped:

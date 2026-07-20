@@ -30,6 +30,22 @@ export interface RepositoryView {
   readonly path: string;
 }
 
+export type RepositoryAvailability = "available" | "missing" | "identity_changed" | "unavailable";
+
+export interface RepositoryStatusView {
+  readonly projectId: string;
+  readonly repositoryId: string;
+  readonly checkedAt: string;
+  readonly availability: RepositoryAvailability;
+  readonly worktree: "clean" | "dirty" | "unknown";
+  readonly head: string | null;
+  readonly branch: string | null;
+  readonly baseRef: string;
+  readonly baseCommit: string | null;
+  readonly headMatchesBaseRef: boolean | null;
+  readonly issue: { readonly code: string; readonly message: string } | null;
+}
+
 export interface ProjectView {
   readonly id: string;
   readonly name: string;
@@ -170,12 +186,22 @@ export interface WarningView {
 export interface TimelineEntryView {
   readonly id?: string;
   readonly sequence?: number;
+  readonly type?: string;
   readonly phase?: RunPhase;
   readonly state?: string;
   readonly label?: string;
   readonly detail?: string;
+  readonly evidenceSection?: string;
   readonly timestamp?: string;
   readonly createdAt?: string;
+}
+
+export interface RunEventPageView {
+  readonly runId: string;
+  readonly revision: number;
+  readonly nextAfter: number;
+  readonly hasMore: boolean;
+  readonly events: readonly TimelineEntryView[];
 }
 
 export interface RunFilesView {
@@ -219,6 +245,9 @@ export interface RunTimestamps {
 
 export interface RunView {
   readonly id: string;
+  readonly eventCursor: number;
+  readonly timelineTotal: number;
+  readonly timelineTruncated: boolean;
   readonly phase: RunPhase;
   readonly state: string;
   readonly gate: GateView | null;
@@ -337,8 +366,8 @@ function postJson<T>(path: string, body?: unknown): Promise<T> {
   );
 }
 
-export function getWorkspace(): Promise<WorkspaceView> {
-  return requestJson<WorkspaceView>("/api/workspace");
+export function getWorkspace(signal?: AbortSignal): Promise<WorkspaceView> {
+  return requestJson<WorkspaceView>("/api/workspace", signal === undefined ? {} : { signal });
 }
 
 export function createProject(input: CreateProjectInput): Promise<ProjectView> {
@@ -363,8 +392,32 @@ export function planRun(runId: string): Promise<RunView> {
   return postJson<RunView>(`/api/runs/${encodeURIComponent(runId)}/plan`, {});
 }
 
-export function getRun(runId: string): Promise<RunView> {
-  return requestJson<RunView>(`/api/runs/${encodeURIComponent(runId)}`);
+export function getRepositoryStatus(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<RepositoryStatusView> {
+  return requestJson<RepositoryStatusView>(
+    `/api/projects/${encodeURIComponent(projectId)}/repository-status`,
+    signal === undefined ? {} : { signal },
+  );
+}
+
+export function getRun(runId: string, signal?: AbortSignal): Promise<RunView> {
+  return requestJson<RunView>(
+    `/api/runs/${encodeURIComponent(runId)}`,
+    signal === undefined ? {} : { signal },
+  );
+}
+
+export function getRunEvents(
+  runId: string,
+  after: number,
+  signal?: AbortSignal,
+): Promise<RunEventPageView> {
+  return requestJson<RunEventPageView>(
+    `/api/runs/${encodeURIComponent(runId)}/events?after=${encodeURIComponent(String(after))}`,
+    signal === undefined ? {} : { signal },
+  );
 }
 
 function normalizeContextPreview(preview: RawContextPreview): ContextMetadataView {

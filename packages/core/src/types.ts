@@ -71,6 +71,32 @@ export interface ProjectRecord {
   readonly createdAt: string;
 }
 
+export type RepositoryAvailability = "available" | "missing" | "identity_changed" | "unavailable";
+
+export type RepositoryWorktreeStatus = "clean" | "dirty" | "unknown";
+
+export type RepositoryStatusIssueCode =
+  | "DIRTY_REPOSITORY"
+  | "REPOSITORY_IDENTITY_CHANGED"
+  | "BASE_REF_UNRESOLVED"
+  | "BASE_REF_NOT_HEAD"
+  | "REPOSITORY_MISSING"
+  | "REPOSITORY_UNAVAILABLE";
+
+export interface ProjectRepositoryStatus {
+  readonly projectId: string;
+  readonly repositoryId: string;
+  readonly checkedAt: string;
+  readonly availability: RepositoryAvailability;
+  readonly worktree: RepositoryWorktreeStatus;
+  readonly head: string | null;
+  readonly branch: string | null;
+  readonly baseRef: string;
+  readonly baseCommit: string | null;
+  readonly headMatchesBaseRef: boolean | null;
+  readonly issue: { readonly code: RepositoryStatusIssueCode } | null;
+}
+
 export interface ModelCapabilities {
   readonly contextSize: number | null;
   readonly toolSupport: false;
@@ -213,6 +239,21 @@ export interface EventRecord {
   readonly createdAt: string;
 }
 
+export interface EventSummaryRecord {
+  readonly sequence: number;
+  readonly runId: string;
+  readonly type: string;
+  readonly createdAt: string;
+}
+
+export interface RunEventPage {
+  readonly runId: string;
+  readonly revision: number;
+  readonly nextAfter: number;
+  readonly hasMore: boolean;
+  readonly events: readonly EventSummaryRecord[];
+}
+
 export interface ApprovalRecord {
   readonly runId: string;
   readonly kind: "egress" | "plan" | "review" | "rollback" | "restore";
@@ -220,6 +261,21 @@ export interface ApprovalRecord {
   readonly actor: string;
   readonly decision: "approve" | "reject";
   readonly createdAt: string;
+}
+
+export interface RunHistory {
+  readonly run: RunRecord;
+  readonly approvals: readonly ApprovalRecord[];
+  readonly events: readonly EventRecord[];
+}
+
+export interface RunPresentationSnapshot {
+  readonly run: RunRecord;
+  readonly approvals: readonly ApprovalRecord[];
+  readonly events: readonly EventSummaryRecord[];
+  readonly eventCursor: number;
+  readonly eventCount: number;
+  readonly actionEvents: readonly EventSummaryRecord[];
 }
 
 export interface OperationToken {

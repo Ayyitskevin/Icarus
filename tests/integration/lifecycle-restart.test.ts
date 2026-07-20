@@ -342,6 +342,43 @@ describe("CLI lifecycle across process restarts", () => {
       expect(serializedApiRun).not.toContain(Buffer.from(preimage).toString("base64"));
       expect(serializedApiRun).not.toContain(Buffer.from("Hello, Icarus!\n").toString("base64"));
       expect(serializedApiRun).not.toContain("MALICIOUS-INSTRUCTION-FIXTURE");
+
+      const eventResponse = await fetch(`${apiServer.url}/api/runs/${planned.id}/events?after=0`);
+      expect(eventResponse.status).toBe(200);
+      const eventPage = (await eventResponse.json()) as {
+        readonly revision: number;
+        readonly nextAfter: number;
+        readonly hasMore: boolean;
+        readonly events: readonly {
+          readonly sequence: number;
+          readonly type: string;
+          readonly label: string;
+          readonly evidenceSection: string;
+          readonly timestamp: string;
+        }[];
+      };
+      expect(eventPage).toMatchObject({
+        revision: apiRun.eventCursor,
+        nextAfter: apiRun.eventCursor,
+        hasMore: false,
+      });
+      expect(eventPage.events.map(({ type }) => type)).toEqual(eventTypes);
+      expect(eventPage.events.map(({ sequence }) => sequence)).toEqual(
+        Array.from({ length: eventPage.events.length }, (_, index) => index + 1),
+      );
+      expect(eventPage.events[0]).toEqual({
+        sequence: 1,
+        type: "run.created",
+        label: "run created",
+        evidenceSection: "summary",
+        timestamp: expect.any(String),
+      });
+      const serializedEvents = JSON.stringify(eventPage);
+      expect(serializedEvents).not.toContain("payload");
+      expect(serializedEvents).not.toContain("createdAt");
+      expect(serializedEvents).not.toContain(fixture.stateRoot);
+      expect(serializedEvents).not.toContain("+Hello, Icarus!");
+      expect(serializedEvents).not.toContain("diff --git");
     } finally {
       await apiServer.close();
       apiRuntime.close();

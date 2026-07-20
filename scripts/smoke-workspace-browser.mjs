@@ -13,10 +13,14 @@ import { createIcarusRuntime } from "../packages/core/dist/index.js";
 const SANDBOX_IMAGE = `python:3.12-slim@sha256:${"c".repeat(64)}`;
 const TARGET = "src/app.txt";
 const TARGET_CONTENT = "browser acceptance source remains untouched\n";
+const DIRTY_MARKER_NAME = ".browser-status-private-marker.txt";
+const DIRTY_MARKER_CONTENT = "private dirty marker content must never render\n";
 const TASK = "Inspect one bounded browser workspace request.";
 const PLAN_SUMMARY = "Review one exact local target before any guarded execution.";
 const START_TIMEOUT_MS = 15_000;
 const UI_TIMEOUT_MS = 10_000;
+const EVENT_POLL_INTERVAL_MS = 2_000;
+const EVENT_POLL_FIRST_BACKOFF_MS = 4_000;
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -85,15 +89,23 @@ async function fingerprint(repository) {
 
 async function startProvider() {
   const requests = [];
+  let responseGate = null;
+  const releaseResponseGate = () => {
+    const gate = responseGate;
+    responseGate = null;
+    gate?.release();
+  };
   const server = http.createServer((request, response) => {
     const chunks = [];
     request.on("data", (chunk) => chunks.push(chunk));
-    request.on("end", () => {
+    request.on("end", async () => {
       try {
         requests.push({
           method: request.method,
           body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
         });
+        const gate = responseGate;
+        if (gate !== null) await gate.promise;
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
@@ -130,11 +142,22 @@ async function startProvider() {
   return {
     baseUrl: `http://127.0.0.1:${address.port}/`,
     requests,
-    close: () =>
-      new Promise((resolve, reject) => {
+    holdNextResponse: () => {
+      if (responseGate !== null) throw new Error("A provider response is already held");
+      let release;
+      const promise = new Promise((resolve) => {
+        release = resolve;
+      });
+      responseGate = { promise, release };
+      return releaseResponseGate;
+    },
+    close: () => {
+      releaseResponseGate();
+      return new Promise((resolve, reject) => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));
         server.closeAllConnections();
-      }),
+      });
+    },
   };
 }
 
@@ -453,6 +476,19 @@ class BrowserPage {
     assert.equal(clicked, true, `Could not open persisted run ${task}`);
   }
 
+  async clickProject(name) {
+    const clicked = await this.call((projectName) => {
+      const section = document.querySelector('section[aria-labelledby="projects-heading"]');
+      const button = Array.from(section?.querySelectorAll("button") ?? []).find(
+        (candidate) => candidate.querySelector("strong")?.textContent?.trim() === projectName,
+      );
+      if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+      button.click();
+      return true;
+    }, name);
+    assert.equal(clicked, true, `Could not select project ${name}`);
+  }
+
   bodyText() {
     return this.call(() => document.body.innerText);
   }
@@ -477,6 +513,35 @@ class BrowserPage {
     }, label);
   }
 
+  repositoryFact(label) {
+    return this.call((factLabel) => {
+      const root = document.querySelector(".repository-status");
+      const term = Array.from(root?.querySelectorAll("dt") ?? []).find(
+        (candidate) => candidate.textContent?.trim() === factLabel,
+      );
+      return term?.parentElement?.querySelector("dd")?.textContent?.trim() ?? null;
+    }, label);
+  }
+
+  async clickTimelineEvidence(label) {
+    const href = await this.call((eventLabel) => {
+      const normalize = (value) => value.replaceAll(/\s+/g, " ").trim();
+      const link = Array.from(
+        document.querySelectorAll("#run-activity .timeline__evidence-link"),
+      ).find((candidate) => normalize(candidate.textContent ?? "") === eventLabel);
+      if (!(link instanceof HTMLAnchorElement)) return null;
+      const target = link.getAttribute("href");
+      link.click();
+      return target;
+    }, label);
+    assert.equal(typeof href, "string", `Could not follow timeline evidence link ${label}`);
+    return href;
+  }
+
+  locationHash() {
+    return this.call(() => window.location.hash);
+  }
+
   capability(label) {
     return this.call((capabilityLabel) => {
       const card = Array.from(document.querySelectorAll(".capability-card")).find(
@@ -494,6 +559,18 @@ class BrowserPage {
       return button instanceof HTMLButtonElement ? button.disabled : null;
     }, text);
   }
+
+  async setVisibility(state) {
+    const changed = await this.call((nextState) => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => nextState,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+      return document.visibilityState === nextState;
+    }, state);
+    assert.equal(changed, true, `Could not set synthetic document visibility to ${state}`);
+  }
 }
 
 async function createBrowserPage(chromium, workspaceUrl) {
@@ -509,13 +586,49 @@ async function createBrowserPage(chromium, workspaceUrl) {
 
   const networkRequests = [];
   const networkResponses = [];
+  const networkFinished = [];
+  const networkFailures = [];
+  const networkRequestUrls = new Map();
   const blockedExternalRequests = [];
   const browserErrors = [];
+  let eventFailuresRemaining = 0;
+  let repositoryStatusFailuresRemaining = 0;
+  let eventRequestHold = null;
+  let workspaceRequestHold = null;
   chromium.cdp.on(sessionId, "Network.requestWillBeSent", (event) => {
-    networkRequests.push({ method: event.request?.method, url: event.request?.url });
+    networkRequestUrls.set(event.requestId, event.request?.url);
+    networkRequests.push({
+      requestId: event.requestId,
+      method: event.request?.method,
+      url: event.request?.url,
+      observedAt: Date.now(),
+    });
   });
   chromium.cdp.on(sessionId, "Network.responseReceived", (event) => {
-    networkResponses.push({ status: event.response?.status, url: event.response?.url });
+    networkResponses.push({
+      requestId: event.requestId,
+      status: event.response?.status,
+      url: event.response?.url,
+      observedAt: Date.now(),
+    });
+  });
+  chromium.cdp.on(sessionId, "Network.loadingFinished", (event) => {
+    networkFinished.push({
+      requestId: event.requestId,
+      url: networkRequestUrls.get(event.requestId),
+      observedAt: Date.now(),
+    });
+    networkRequestUrls.delete(event.requestId);
+  });
+  chromium.cdp.on(sessionId, "Network.loadingFailed", (event) => {
+    networkFailures.push({
+      requestId: event.requestId,
+      url: networkRequestUrls.get(event.requestId),
+      canceled: event.canceled === true,
+      errorText: event.errorText,
+      observedAt: Date.now(),
+    });
+    networkRequestUrls.delete(event.requestId);
   });
   chromium.cdp.on(sessionId, "Runtime.exceptionThrown", (event) => {
     browserErrors.push(
@@ -528,15 +641,77 @@ async function createBrowserPage(chromium, workspaceUrl) {
   chromium.cdp.on(sessionId, "Fetch.requestPaused", (event) => {
     const requestUrl = event.request?.url ?? "";
     let external = false;
+    let localEventPoll = false;
+    let localRepositoryStatus = false;
+    let localWorkspaceRead = false;
     try {
       const parsed = new URL(requestUrl);
       external =
         (parsed.protocol === "http:" || parsed.protocol === "https:") &&
         parsed.origin !== workspaceUrl;
+      localEventPoll =
+        parsed.origin === workspaceUrl &&
+        event.request?.method === "GET" &&
+        parsed.pathname.endsWith("/events");
+      localRepositoryStatus =
+        parsed.origin === workspaceUrl &&
+        event.request?.method === "GET" &&
+        parsed.pathname.endsWith("/repository-status");
+      localWorkspaceRead =
+        parsed.origin === workspaceUrl &&
+        event.request?.method === "GET" &&
+        parsed.pathname === "/api/workspace";
     } catch {
       external = false;
     }
     if (external) blockedExternalRequests.push(requestUrl);
+    if (
+      localWorkspaceRead &&
+      workspaceRequestHold !== null &&
+      workspaceRequestHold.event === null
+    ) {
+      workspaceRequestHold.event = event;
+      workspaceRequestHold.observed();
+      return;
+    }
+    if (localEventPoll && eventRequestHold !== null && eventRequestHold.event === null) {
+      const observation = {
+        requestId: event.requestId,
+        networkId: event.networkId ?? null,
+        url: requestUrl,
+        observedAt: Date.now(),
+      };
+      eventRequestHold.event = event;
+      eventRequestHold.observation = observation;
+      eventRequestHold.observed(observation);
+      return;
+    }
+    const failEventPoll = localEventPoll && eventFailuresRemaining > 0;
+    const failRepositoryStatus = localRepositoryStatus && repositoryStatusFailuresRemaining > 0;
+    if (failEventPoll) eventFailuresRemaining -= 1;
+    if (failRepositoryStatus) repositoryStatusFailuresRemaining -= 1;
+    if (failEventPoll || failRepositoryStatus) {
+      void chromium.cdp
+        .send(
+          "Fetch.fulfillRequest",
+          {
+            requestId: event.requestId,
+            responseCode: 503,
+            responseHeaders: [{ name: "content-type", value: "application/json; charset=utf-8" }],
+            body: Buffer.from(
+              JSON.stringify({
+                error: {
+                  code: "BROWSER_SMOKE_CONTROLLED_FAILURE",
+                  message: "Controlled browser smoke read failure.",
+                },
+              }),
+            ).toString("base64"),
+          },
+          sessionId,
+        )
+        .catch((error) => browserErrors.push(error.message));
+      return;
+    }
     void chromium.cdp
       .send(
         external ? "Fetch.failRequest" : "Fetch.continueRequest",
@@ -562,8 +737,108 @@ async function createBrowserPage(chromium, workspaceUrl) {
     sessionId,
     networkRequests,
     networkResponses,
+    networkFinished,
+    networkFailures,
     blockedExternalRequests,
     browserErrors,
+    failNextEventPoll: () => {
+      eventFailuresRemaining += 1;
+    },
+    failNextRepositoryStatus: () => {
+      repositoryStatusFailuresRemaining += 1;
+    },
+    holdNextEventPoll: () => {
+      if (eventRequestHold !== null) throw new Error("An event request is already held");
+      let markObserved;
+      const observed = new Promise((resolve) => {
+        markObserved = resolve;
+      });
+      const hold = {
+        event: null,
+        observation: null,
+        observed: markObserved,
+      };
+      eventRequestHold = hold;
+      let finishPromise = null;
+      const finish = () => {
+        if (finishPromise !== null) return finishPromise;
+        finishPromise = (async () => {
+          if (eventRequestHold === hold) eventRequestHold = null;
+          const held = hold.event;
+          if (held === null) return "not_observed";
+          try {
+            await chromium.cdp.send(
+              "Fetch.continueRequest",
+              { requestId: held.requestId },
+              sessionId,
+            );
+            return "continued";
+          } catch (releaseError) {
+            const sawCancellation = () =>
+              held.networkId !== null &&
+              held.networkId !== undefined &&
+              networkFailures.some(
+                (failure) => failure.requestId === held.networkId && failure.canceled,
+              );
+            if (!sawCancellation()) {
+              await waitForObserved(
+                sawCancellation,
+                "the browser cancellation for an aborted held event poll",
+                500,
+              ).catch(() => undefined);
+            }
+            if (sawCancellation()) return "cancelled";
+            try {
+              await chromium.cdp.send(
+                "Fetch.failRequest",
+                { requestId: held.requestId, errorReason: "Aborted" },
+                sessionId,
+              );
+              return "failed";
+            } catch (cleanupError) {
+              if (sawCancellation()) return "cancelled";
+              throw new Error(
+                `Could not release or fail the held event request: ${
+                  releaseError instanceof Error ? releaseError.message : String(releaseError)
+                }; cleanup failed: ${
+                  cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+                }`,
+              );
+            }
+          }
+        })();
+        return finishPromise;
+      };
+      return {
+        observed,
+        observation: () => hold.observation,
+        finish,
+      };
+    },
+    holdNextWorkspaceRequest: () => {
+      if (workspaceRequestHold !== null) throw new Error("A workspace request is already held");
+      let markObserved;
+      const observed = new Promise((resolve) => {
+        markObserved = resolve;
+      });
+      workspaceRequestHold = { event: null, observed: markObserved };
+      return {
+        observed,
+        release: async () => {
+          await observed;
+          const held = workspaceRequestHold?.event;
+          workspaceRequestHold = null;
+          if (held === null || held === undefined) {
+            throw new Error("The held workspace request was not available to release");
+          }
+          await chromium.cdp.send(
+            "Fetch.continueRequest",
+            { requestId: held.requestId },
+            sessionId,
+          );
+        },
+      };
+    },
   };
 }
 
@@ -588,6 +863,8 @@ let runtime;
 let workspace;
 let provider;
 let chromium;
+let releaseProviderResponse;
+let finishHeldBrowserEventPoll;
 try {
   const repository = path.join(root, "repository");
   const stateRoot = path.join(root, "state");
@@ -620,8 +897,15 @@ try {
   );
   chromium = await startChromium(path.resolve(chromiumExecutable), profile);
   const browserPage = await createBrowserPage(chromium, workspace.url);
-  const { page, networkRequests, networkResponses, blockedExternalRequests, browserErrors } =
-    browserPage;
+  const {
+    page,
+    networkRequests,
+    networkResponses,
+    networkFinished,
+    networkFailures,
+    blockedExternalRequests,
+    browserErrors,
+  } = browserPage;
 
   await page.waitFor(
     () =>
@@ -655,11 +939,120 @@ try {
     "Exact check argv (JSON array, never shell text)",
     JSON.stringify(["node", "--test"]),
   );
+  browserPage.failNextRepositoryStatus();
   await page.clickButton("Register project");
   await page.waitFor(
     () => document.querySelector("#project-detail-heading")?.textContent === "browser-project",
     [],
     "the persisted project detail",
+  );
+
+  await page.waitFor(
+    () =>
+      document.querySelector(".repository-status .status")?.textContent?.trim() ===
+        "not observed" && document.body.innerText.includes("Repository was not observed"),
+    [],
+    "the truthful initial repository-observation failure",
+  );
+  assert.equal(
+    await page.call(
+      () =>
+        document.querySelector(".repository-status .status")?.textContent?.trim() === "checking",
+    ),
+    false,
+  );
+  await page.clickButton("Refresh repository status");
+
+  await page.waitFor(
+    () => {
+      const root = document.querySelector(".repository-status");
+      const facts = new Map(
+        Array.from(root?.querySelectorAll("dt") ?? []).map((term) => [
+          term.textContent?.trim(),
+          term.parentElement?.querySelector("dd")?.textContent?.trim(),
+        ]),
+      );
+      return (
+        facts.get("Availability") === "available" &&
+        facts.get("Observed worktree") === "clean" &&
+        facts.get("HEAD matches base ref") === "Yes"
+      );
+    },
+    [],
+    "the initial clean repository observation",
+  );
+  assert.equal(await page.repositoryFact("HEAD"), before.head.slice(0, 12));
+  assert.equal(await page.repositoryFact("Branch"), "main");
+
+  const dirtyMarker = path.join(repository, DIRTY_MARKER_NAME);
+  await writeFile(dirtyMarker, DIRTY_MARKER_CONTENT);
+  await page.clickButton("Refresh repository status");
+  await page.waitFor(
+    () => {
+      const root = document.querySelector(".repository-status");
+      const term = Array.from(root?.querySelectorAll("dt") ?? []).find(
+        (candidate) => candidate.textContent?.trim() === "Observed worktree",
+      );
+      return term?.parentElement?.querySelector("dd")?.textContent?.trim() === "dirty";
+    },
+    [],
+    "the controlled dirty repository observation",
+  );
+  let body = await page.bodyText();
+  assert.equal(body.includes(DIRTY_MARKER_NAME), false);
+  assert.equal(body.includes(DIRTY_MARKER_CONTENT.trim()), false);
+
+  await rm(dirtyMarker);
+  await page.clickButton("Refresh repository status");
+  await page.waitFor(
+    () => {
+      const root = document.querySelector(".repository-status");
+      const term = Array.from(root?.querySelectorAll("dt") ?? []).find(
+        (candidate) => candidate.textContent?.trim() === "Observed worktree",
+      );
+      return term?.parentElement?.querySelector("dd")?.textContent?.trim() === "clean";
+    },
+    [],
+    "the restored clean repository observation",
+  );
+
+  await page.setField("Repository name", "browser-repository");
+  await page.setField("Absolute repository path", repository);
+  await page.setField("Project name", "browser-project-two");
+  await page.setField("Digest-pinned sandbox image", SANDBOX_IMAGE);
+  await page.setField(
+    "Exact check argv (JSON array, never shell text)",
+    JSON.stringify(["node", "--test"]),
+  );
+  const heldWorkspaceRefresh = browserPage.holdNextWorkspaceRequest();
+  await page.clickButton("Register project");
+  await heldWorkspaceRefresh.observed;
+  await page.waitFor(
+    () => document.querySelector("#project-detail-heading")?.textContent === "browser-project-two",
+    [],
+    "the locally bound newly created project",
+  );
+  await page.clickProject("browser-project");
+  await page.waitFor(
+    () => document.querySelector("#project-detail-heading")?.textContent === "browser-project",
+    [],
+    "a newer project selection while workspace refresh is deferred",
+  );
+  await heldWorkspaceRefresh.release();
+  await page.waitFor(
+    () =>
+      Array.from(document.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Refresh workspace" && !button.disabled,
+      ),
+    [],
+    "the deferred workspace refresh completion",
+  );
+  assert.equal(
+    await page.call(
+      () => document.querySelector("#project-detail-heading")?.textContent === "browser-project",
+    ),
+    true,
+    "a deferred project-created refresh must not overwrite the newer project selection",
   );
 
   await page.setField("Tracked target path", "src/missing.txt");
@@ -682,7 +1075,7 @@ try {
   );
   const firstDigest = await page.contextFact("Digest");
   assert.match(firstDigest, /^[a-f0-9]{64}$/);
-  let body = await page.bodyText();
+  body = await page.bodyText();
   assert.equal(body.includes(TARGET_CONTENT.trim()), false);
   assert.equal(body.includes(".env.example"), false);
   assert.equal(body.includes("generated/client.ts"), false);
@@ -742,6 +1135,9 @@ try {
   assert.equal(provider.requests.length, 0);
   assert.equal(await page.runFact("Product phase"), "draft");
   assert.equal(await page.runFact("Exact persisted state"), "preparing");
+  const browserRunId = await page.runFact("Run ID");
+  assert.equal(typeof browserRunId, "string");
+  assert.match(browserRunId, /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
 
   await reloadPage(chromium, browserPage);
   await page.waitFor(
@@ -765,7 +1161,239 @@ try {
   );
   assert.equal(provider.requests.length, 0);
 
+  await page.waitFor(
+    () =>
+      document.querySelector(".live-refresh .status")?.textContent?.trim() === "auto-refresh on",
+    [],
+    "the initial visible event poll",
+  );
+  await page.setVisibility("hidden");
+  await page.waitFor(
+    () =>
+      document.querySelector(".live-refresh .status")?.textContent?.trim() ===
+      "paused while hidden",
+    [],
+    "the hidden-document polling pause",
+  );
+  const hiddenEventRequestCount = networkRequests.filter(
+    (request) => request.method === "GET" && request.url?.includes("/events?after="),
+  ).length;
+  await delay(EVENT_POLL_INTERVAL_MS + 500);
+  assert.equal(
+    networkRequests.filter(
+      (request) => request.method === "GET" && request.url?.includes("/events?after="),
+    ).length,
+    hiddenEventRequestCount,
+    "event polling must remain paused beyond one steady-state interval",
+  );
+
+  await page.setVisibility("visible");
+  await waitForObserved(
+    () =>
+      networkRequests.filter(
+        (request) => request.method === "GET" && request.url?.includes("/events?after="),
+      ).length > hiddenEventRequestCount,
+    "an immediate event poll after visibility resumes",
+  );
+  await page.waitFor(
+    () =>
+      document.querySelector(".live-refresh .status")?.textContent?.trim() === "auto-refresh on",
+    [],
+    "successful event polling after visibility resumes",
+  );
+
+  const controlledEventFailuresBefore = networkResponses.filter(
+    (response) => response.status === 503 && response.url?.includes("/events?after="),
+  ).length;
+  browserPage.failNextEventPoll();
+  await waitForObserved(
+    () =>
+      networkResponses.filter(
+        (response) => response.status === 503 && response.url?.includes("/events?after="),
+      ).length ===
+      controlledEventFailuresBefore + 1,
+    "the controlled failed event poll",
+  );
+  const failedEventResponse = networkResponses.findLast(
+    (response) => response.status === 503 && response.url?.includes("/events?after="),
+  );
+  assert.notEqual(failedEventResponse, undefined);
+  await page.waitFor(
+    () =>
+      document.querySelector(".live-refresh .status")?.textContent?.trim() ===
+      "evidence may be stale",
+    [],
+    "the stale-evidence state after a failed event poll",
+  );
+  const failedPollRequestCount = networkRequests.filter(
+    (request) => request.method === "GET" && request.url?.includes("/events?after="),
+  ).length;
+  await delay(EVENT_POLL_INTERVAL_MS + 500);
+  assert.equal(
+    networkRequests.filter(
+      (request) => request.method === "GET" && request.url?.includes("/events?after="),
+    ).length,
+    failedPollRequestCount,
+    "the first failed poll must delay recovery beyond the steady-state interval",
+  );
+  await waitForObserved(
+    () =>
+      networkResponses.some(
+        (response) =>
+          response.status === 200 &&
+          response.url?.includes("/events?after=") &&
+          response.observedAt > failedEventResponse.observedAt,
+      ),
+    "a bounded successful event-poll recovery",
+  );
+  const recoveredEventResponse = networkResponses.find(
+    (response) =>
+      response.status === 200 &&
+      response.url?.includes("/events?after=") &&
+      response.observedAt > failedEventResponse.observedAt,
+  );
+  assert.notEqual(recoveredEventResponse, undefined);
+  const recoveryDelayMs = recoveredEventResponse.observedAt - failedEventResponse.observedAt;
+  assert.ok(recoveryDelayMs >= EVENT_POLL_FIRST_BACKOFF_MS - 500);
+  assert.ok(recoveryDelayMs <= EVENT_POLL_FIRST_BACKOFF_MS + UI_TIMEOUT_MS);
+  await page.waitFor(
+    () =>
+      document.querySelector(".live-refresh .status")?.textContent?.trim() === "auto-refresh on",
+    [],
+    "the successful event-poll recovery state",
+  );
+
+  releaseProviderResponse = provider.holdNextResponse();
+  const heldEventPoll = browserPage.holdNextEventPoll();
+  finishHeldBrowserEventPoll = heldEventPoll.finish;
   await page.clickButton("Create guarded plan");
+  await waitForObserved(
+    () => provider.requests.length === 1,
+    "the held provider request after separately committed run events",
+  );
+  await waitForObserved(
+    () => heldEventPoll.observation() !== null,
+    "the deliberately held in-flight event poll",
+  );
+  const heldEventObservation = heldEventPoll.observation();
+  assert.notEqual(heldEventObservation, null);
+  assert.equal(
+    new URL(heldEventObservation.url).pathname,
+    `/api/runs/${encodeURIComponent(browserRunId)}/events`,
+  );
+  const heldEventRequestCount = networkRequests.filter(
+    (request) => request.method === "GET" && request.url?.includes("/events?after="),
+  ).length;
+  await delay(EVENT_POLL_INTERVAL_MS + 500);
+  assert.equal(
+    networkRequests.filter(
+      (request) => request.method === "GET" && request.url?.includes("/events?after="),
+    ).length,
+    heldEventRequestCount,
+    "an in-flight event poll must prevent an overlapping second poll",
+  );
+
+  await page.clickProject("browser-project-two");
+  await page.waitFor(
+    () =>
+      document.querySelector("#project-detail-heading")?.textContent === "browser-project-two" &&
+      document.querySelector("#run-evidence-heading") === null,
+    [],
+    "the project selection that unmounts the polled run",
+  );
+  const unmountedEventRequestCount = networkRequests.filter(
+    (request) => request.method === "GET" && request.url?.includes("/events?after="),
+  ).length;
+  assert.equal(unmountedEventRequestCount, heldEventRequestCount);
+  await delay(EVENT_POLL_INTERVAL_MS + 500);
+  assert.equal(
+    networkRequests.filter(
+      (request) => request.method === "GET" && request.url?.includes("/events?after="),
+    ).length,
+    unmountedEventRequestCount,
+    "event polling must remain stopped after the selected run unmounts",
+  );
+
+  const heldEventReleaseOutcome = await heldEventPoll.finish();
+  finishHeldBrowserEventPoll = undefined;
+  assert.notEqual(heldEventReleaseOutcome, "not_observed");
+  const matchesHeldNetworkRecord = (record) =>
+    heldEventObservation.networkId === null
+      ? record.url === heldEventObservation.url &&
+        record.observedAt >= heldEventObservation.observedAt
+      : record.requestId === heldEventObservation.networkId;
+  await waitForObserved(
+    () =>
+      networkFinished.some(matchesHeldNetworkRecord) ||
+      networkFailures.some(matchesHeldNetworkRecord),
+    "the terminal network outcome for the released held event poll",
+  );
+  const heldEventFinished = networkFinished.find(matchesHeldNetworkRecord);
+  const heldEventFailure = networkFailures.find(matchesHeldNetworkRecord);
+  const heldEventTerminal =
+    heldEventFinished !== undefined
+      ? "completed"
+      : heldEventFailure?.canceled === true
+        ? "cancelled"
+        : "failed";
+  if (heldEventFinished !== undefined) {
+    assert.equal(
+      networkResponses.find(matchesHeldNetworkRecord)?.status,
+      200,
+      "a continued held event poll must finish with the real API response",
+    );
+  }
+  if (heldEventReleaseOutcome === "cancelled") {
+    assert.equal(heldEventFailure?.canceled, true);
+  }
+  assert.equal(
+    await page.call(
+      () =>
+        document.querySelector("#project-detail-heading")?.textContent === "browser-project-two" &&
+        document.querySelector("#run-evidence-heading") === null,
+    ),
+    true,
+    "the late held-poll outcome must not overwrite the newer project selection",
+  );
+
+  await page.clickProject("browser-project");
+  await page.waitFor(
+    () => document.querySelector("#project-detail-heading")?.textContent === "browser-project",
+    [],
+    "the original project after the held-poll isolation check",
+  );
+  await page.clickRecentRun(TASK);
+  await page.waitFor(
+    (runId) =>
+      Array.from(document.querySelectorAll(".run-evidence dt")).some(
+        (term) =>
+          term.textContent?.trim() === "Run ID" &&
+          term.parentElement?.querySelector("dd")?.textContent?.trim() === runId,
+      ),
+    [browserRunId],
+    "the original run after the held-poll isolation check",
+  );
+  await page.waitFor(
+    (eventLabel) =>
+      Array.from(document.querySelectorAll("#run-activity .timeline__evidence-link")).some(
+        (link) => link.textContent?.replaceAll(/\s+/g, " ").trim() === eventLabel,
+      ),
+    ["context assembled"],
+    "the persisted context event after run reselection",
+  );
+  assert.equal(await page.locationHash(), "");
+  assert.equal((await page.bodyText()).includes(PLAN_SUMMARY), false);
+  const contextEvidenceHref = await page.clickTimelineEvidence("context assembled");
+  assert.equal(contextEvidenceHref, "#run-context");
+  await page.waitFor(
+    () =>
+      window.location.hash === "#run-context" && document.querySelector("#run-context") !== null,
+    [],
+    "timeline-to-context evidence anchor navigation",
+  );
+
+  releaseProviderResponse();
+  releaseProviderResponse = undefined;
   await page.waitFor(
     (summary) =>
       Array.from(document.querySelectorAll(".run-evidence dt")).some(
@@ -785,6 +1413,47 @@ try {
   assert.equal(body.includes("No diff was produced."), true);
   assert.equal(body.includes("Context egress approval"), false);
   assert.equal(body.includes("Plan approval"), true);
+
+  const exactSelectedRunUrl = `${workspace.url}/api/runs/${encodeURIComponent(browserRunId)}`;
+  const automaticEventResponseBaseline = networkResponses.length;
+  const automaticRunReadBaseline = networkRequests.length;
+  const automaticRefreshStartedAt = Date.now();
+  await runtime.service.resume(browserRunId);
+  await page.waitFor(
+    (eventLabel) =>
+      Array.from(document.querySelectorAll("#run-activity .timeline__evidence-link")).some(
+        (link) => link.textContent?.replaceAll(/\s+/g, " ").trim() === eventLabel,
+      ),
+    ["resume requested"],
+    "a newly appended event rendered by automatic refresh while the run stays selected",
+  );
+  const automaticFullRunRead = networkRequests
+    .slice(automaticRunReadBaseline)
+    .find(
+      (request) =>
+        request.method === "GET" &&
+        request.url === exactSelectedRunUrl &&
+        request.observedAt >= automaticRefreshStartedAt,
+    );
+  assert.notEqual(
+    automaticFullRunRead,
+    undefined,
+    "a newly observed event must trigger a selected-run snapshot read",
+  );
+  const automaticEventResponse = networkResponses
+    .slice(automaticEventResponseBaseline)
+    .find(
+      (response) =>
+        response.status === 200 &&
+        response.url?.includes(`/api/runs/${encodeURIComponent(browserRunId)}/events?after=`) &&
+        response.observedAt >= automaticRefreshStartedAt &&
+        response.observedAt <= automaticFullRunRead.observedAt,
+    );
+  assert.notEqual(
+    automaticEventResponse,
+    undefined,
+    "the automatic selected-run read must follow a successful event-page response",
+  );
 
   await reloadPage(chromium, browserPage);
   await page.clickRecentRun(TASK);
@@ -808,16 +1477,43 @@ try {
   const planRequests = networkRequests.filter(
     (request) => request.method === "POST" && request.url?.endsWith("/plan"),
   );
+  const repositoryStatusRequests = networkRequests.filter(
+    (request) => request.method === "GET" && request.url?.endsWith("/repository-status"),
+  );
+  const eventRequests = networkRequests.filter(
+    (request) => request.method === "GET" && request.url?.includes("/events?after="),
+  );
+  const liveReadErrors = networkResponses.filter(
+    (response) =>
+      (response.url?.endsWith("/repository-status") || response.url?.includes("/events?after=")) &&
+      response.status !== 200,
+  );
   assert.equal(contextRequests.length, 3);
   assert.equal(draftRequests.length, 1);
   assert.equal(planRequests.length, 1);
+  assert.ok(repositoryStatusRequests.length >= 3);
+  assert.ok(eventRequests.length > 0);
+  for (const request of eventRequests) {
+    const eventUrl = new URL(request.url);
+    assert.equal(
+      eventUrl.pathname,
+      `/api/runs/${encodeURIComponent(browserRunId)}/events`,
+      "every selected-run event poll must remain bound to that run id",
+    );
+    assert.deepEqual([...eventUrl.searchParams.keys()], ["after"]);
+  }
+  assert.deepEqual(
+    liveReadErrors.map(({ status }) => status),
+    [503, 503],
+  );
   assert.deepEqual(blockedExternalRequests, []);
   assert.deepEqual(browserErrors, []);
 
   const projects = runtime.service.listProjects();
   const runs = runtime.service.listRuns();
-  assert.equal(projects.length, 1);
+  assert.equal(projects.length, 2);
   assert.equal(runs.length, 1);
+  assert.equal(runs[0]?.id, browserRunId);
   assert.equal(runs[0]?.state, "awaiting_approval");
   const after = await fingerprint(repository);
   assert.deepEqual(after, before);
@@ -839,6 +1535,22 @@ try {
         action: null,
         providerRequests: provider.requests.length,
         planSurvivedReload: true,
+        repositoryStatus: ["not_observed", "clean", "dirty", "clean"],
+        deferredWorkspaceSelectionGuard: true,
+        automaticEventRefresh: true,
+        visibilityPolling: ["visible", "hidden", "visible"],
+        heldEventPolling: {
+          overlapPrevented: true,
+          stoppedOnUnmount: true,
+          release: heldEventReleaseOutcome,
+          terminal: heldEventTerminal,
+          selectionPreserved: true,
+        },
+        controlledReadFailures: liveReadErrors.length,
+        eventRecoveryDelayMs: recoveryDelayMs,
+        evidenceAnchor: contextEvidenceHref,
+        repositoryStatusRequests: repositoryStatusRequests.length,
+        eventRequests: eventRequests.length,
         browserErrors: browserErrors.length,
         blockedExternalRequests: blockedExternalRequests.length,
         sourceUnchanged: true,
@@ -848,6 +1560,10 @@ try {
     )}\n`,
   );
 } finally {
+  await finishHeldBrowserEventPoll?.().catch(() => undefined);
+  finishHeldBrowserEventPoll = undefined;
+  releaseProviderResponse?.();
+  releaseProviderResponse = undefined;
   await stopChromium(chromium);
   await workspace?.close();
   runtime?.close();

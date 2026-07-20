@@ -1,24 +1,35 @@
 import type { FormEvent } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CapabilityView,
   CheckEvidenceView,
   ContextMetadataView,
   CreateProjectInput,
   ProjectView,
+  RepositoryStatusView,
   RunView,
+  TimelineEntryView,
   WorkspaceView,
 } from "./api.js";
 import {
   createProject,
   createRun,
   errorMessage,
+  getRepositoryStatus,
   getRun,
+  getRunEvents,
   getWorkspace,
   planRun,
   previewProjectContext,
   unwrapContextPreview,
 } from "./api.js";
+import {
+  advanceEventPoll,
+  eventPollDelayMs,
+  evidenceTarget,
+  liveEventAnnouncement,
+  snapshotIncludesObservedRevision,
+} from "./live-poll.js";
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "unknown";
@@ -31,6 +42,76 @@ function formatTimestamp(value: string | undefined): string {
   if (value === undefined || value.length === 0) return "Not recorded";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function shortCommit(value: string | null): string {
+  return value === null ? "Not available" : value.slice(0, 12);
+}
+
+function runEventCursor(run: RunView): number {
+  if (Number.isSafeInteger(run.eventCursor) && run.eventCursor >= 0) return run.eventCursor;
+  return run.timeline.reduce(
+    (cursor, entry) =>
+      entry.sequence === undefined || !Number.isSafeInteger(entry.sequence)
+        ? cursor
+        : Math.max(cursor, entry.sequence),
+    0,
+  );
+}
+
+function newestRun(current: RunView | undefined, candidate: RunView): RunView {
+  return current !== undefined && runEventCursor(current) > runEventCursor(candidate)
+    ? current
+    : candidate;
+}
+
+function workspaceWithRun(current: WorkspaceView | null, run: RunView): WorkspaceView | null {
+  if (current === null) return current;
+  const existing = current.runs.find((candidate) => candidate.id === run.id);
+  const merged = newestRun(existing, run);
+  return {
+    ...current,
+    runs: [merged, ...current.runs.filter((candidate) => candidate.id !== run.id)],
+  };
+}
+
+const EVIDENCE_LINKS = [
+  ["run-summary", "Summary"],
+  ["run-context", "Context"],
+  ["run-plan", "Plan"],
+  ["run-action", "Action & files"],
+  ["run-verification", "Verification"],
+  ["run-outputs", "Outputs"],
+  ["run-approvals", "Warnings & approvals"],
+  ["run-usage", "Usage"],
+  ["run-activity", "Activity"],
+] as const;
+
+const EVENT_POLL_MAX_PAGES = 8;
+
+function pageIsVisible(): boolean {
+  return document.visibilityState !== "hidden";
+}
+
+type LivePollState = "checking" | "current" | "catching_up" | "paused" | "stale";
+
+function livePollLabel(state: LivePollState): string {
+  switch (state) {
+    case "checking":
+      return "checking for events";
+    case "current":
+      return "auto-refresh on";
+    case "catching_up":
+      return "catching up";
+    case "paused":
+      return "paused while hidden";
+    case "stale":
+      return "evidence may be stale";
+  }
+}
+
+function timelineLabel(entry: TimelineEntryView): string {
+  return entry.label ?? entry.phase?.replaceAll("_", " ") ?? entry.state ?? "Run event";
 }
 
 function statusClass(status: string): string {
@@ -65,6 +146,183 @@ function CapabilityCard({ label, capability }: { label: string; capability: Capa
       </div>
       <p>{capability.reason ?? "No limitation was reported by the local API."}</p>
     </article>
+  );
+}
+
+function repositoryStatusLabel(
+  status: RepositoryStatusView | null,
+  checking: boolean,
+  statusError: string | null,
+): string {
+  if (status === null) return checking && statusError === null ? "checking" : "not observed";
+  if (status.availability === "identity_changed") return "identity changed";
+  if (status.availability !== "available") return status.availability;
+  if (status.worktree === "dirty") return "changes present";
+  if (status.headMatchesBaseRef === false) return "head differs";
+  if (status.issue !== null) return "attention needed";
+  if (status.worktree === "clean" && status.headMatchesBaseRef === true) return "clean";
+  return status.worktree;
+}
+
+function repositoryStatusClass(
+  status: RepositoryStatusView | null,
+  statusError: string | null,
+): string {
+  if (status === null) {
+    return statusError === null ? "status status--neutral" : "status status--negative";
+  }
+  if (status.availability !== "available") return "status status--negative";
+  if (status.issue !== null || status.worktree === "dirty" || status.headMatchesBaseRef === false) {
+    return "status status--warning";
+  }
+  return status.worktree === "clean" ? "status status--positive" : "status status--neutral";
+}
+
+function RepositoryStatusPanel({ project }: { readonly project: ProjectView }) {
+  const [statusSnapshot, setStatusSnapshot] = useState<{
+    readonly projectId: string;
+    readonly value: RepositoryStatusView;
+  } | null>(null);
+  const [statusErrorSnapshot, setStatusErrorSnapshot] = useState<{
+    readonly projectId: string;
+    readonly message: string;
+  } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
+
+  const status = statusSnapshot?.projectId === project.id ? statusSnapshot.value : null;
+  const statusError =
+    statusErrorSnapshot?.projectId === project.id ? statusErrorSnapshot.message : null;
+
+  const loadStatus = useCallback(async (): Promise<void> => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setChecking(true);
+    setStatusErrorSnapshot(null);
+    try {
+      const next = await getRepositoryStatus(project.id, controller.signal);
+      if (next.projectId !== project.id || next.repositoryId !== project.repository.id) {
+        throw new Error("The repository status response did not match the selected project.");
+      }
+      if (!controller.signal.aborted) {
+        setStatusSnapshot({ projectId: project.id, value: next });
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setStatusErrorSnapshot({ projectId: project.id, message: errorMessage(error) });
+      }
+    } finally {
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setChecking(false);
+      }
+    }
+  }, [project.id, project.repository.id]);
+
+  useEffect(() => {
+    void loadStatus();
+    return () => {
+      requestRef.current?.abort();
+      requestRef.current = null;
+    };
+  }, [loadStatus]);
+
+  const label = repositoryStatusLabel(status, checking, statusError);
+  return (
+    <section
+      className="repository-status"
+      aria-labelledby="repository-status-heading"
+      aria-busy={checking}
+    >
+      <div className="evidence-block__heading">
+        <div>
+          <p className="eyebrow">Live read-only observation</p>
+          <h3 id="repository-status-heading">Repository status</h3>
+        </div>
+        <span className={repositoryStatusClass(status, statusError)}>{label}</span>
+      </div>
+      {status === null ? (
+        <p className="empty-state">
+          {checking
+            ? "Inspecting the registered source checkout…"
+            : "No repository observation is available."}
+        </p>
+      ) : (
+        <dl className="facts facts--compact">
+          <div>
+            <dt>Availability</dt>
+            <dd>{status.availability.replaceAll("_", " ")}</dd>
+          </div>
+          <div>
+            <dt>Observed worktree</dt>
+            <dd>{status.worktree}</dd>
+          </div>
+          <div>
+            <dt>HEAD</dt>
+            <dd className="digest" title={status.head ?? undefined}>
+              {shortCommit(status.head)}
+            </dd>
+          </div>
+          <div>
+            <dt>Branch</dt>
+            <dd>{status.branch ?? "Detached or unavailable"}</dd>
+          </div>
+          <div>
+            <dt>Base ref</dt>
+            <dd>{status.baseRef}</dd>
+          </div>
+          <div>
+            <dt>Base commit</dt>
+            <dd className="digest" title={status.baseCommit ?? undefined}>
+              {shortCommit(status.baseCommit)}
+            </dd>
+          </div>
+          <div>
+            <dt>HEAD matches base ref</dt>
+            <dd>
+              {status.headMatchesBaseRef === null
+                ? "Unknown"
+                : status.headMatchesBaseRef
+                  ? "Yes"
+                  : "No"}
+            </dd>
+          </div>
+          <div>
+            <dt>Checked</dt>
+            <dd>
+              <time dateTime={status.checkedAt} title={status.checkedAt}>
+                {formatTimestamp(status.checkedAt)}
+              </time>
+            </dd>
+          </div>
+        </dl>
+      )}
+      {status?.issue === null || status?.issue === undefined ? null : (
+        <p className="message message--warning" role="status">
+          {status.issue.code}: {status.issue.message}
+        </p>
+      )}
+      {statusError === null ? null : (
+        <p className="message message--error" role="status">
+          {status === null ? "Repository was not observed" : "Repository observation may be stale"}
+          {` — ${statusError}`}
+        </p>
+      )}
+      <div className="repository-status__actions">
+        <p className="empty-state">
+          Observation only. Icarus does not clean, checkout, stage, or modify this repository.
+        </p>
+        <button
+          type="button"
+          className="button--secondary"
+          disabled={checking}
+          onClick={() => void loadStatus()}
+        >
+          {checking ? "Checking repository…" : "Refresh repository status"}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -225,10 +483,21 @@ function ProjectRegistrationForm({ busy, onCreated }: ProjectRegistrationFormPro
   );
 }
 
-function ContextSummary({ context }: { context: ContextMetadataView }) {
+function ContextSummary({
+  context,
+  sectionId,
+}: {
+  readonly context: ContextMetadataView;
+  readonly sectionId?: string;
+}) {
   const digest = context.sha256 ?? context.digest;
   return (
-    <section className="evidence-block" aria-labelledby="context-summary-heading">
+    <section
+      id={sectionId}
+      className="evidence-block"
+      aria-labelledby="context-summary-heading"
+      tabIndex={sectionId === undefined ? undefined : -1}
+    >
       <div className="evidence-block__heading">
         <h3 id="context-summary-heading">Context summary</h3>
         <span className="status status--neutral">metadata only</span>
@@ -492,6 +761,7 @@ function ProjectDetail({
             </dd>
           </div>
         </dl>
+        <RepositoryStatusPanel project={project} />
         <h3>Registered checks</h3>
         {project.checks.length === 0 ? (
           <p className="empty-state">
@@ -744,6 +1014,129 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
   const [planning, setPlanning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [liveState, setLiveState] = useState<LivePollState>("checking");
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [liveAnnouncement, setLiveAnnouncement] = useState(
+    "Automatic persisted-event refresh is starting.",
+  );
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [retryGeneration, setRetryGeneration] = useState(0);
+  const cursorRef = useRef(runEventCursor(run));
+  const cursorRunIdRef = useRef(run.id);
+
+  useEffect(() => {
+    if (cursorRunIdRef.current !== run.id) {
+      cursorRunIdRef.current = run.id;
+      cursorRef.current = runEventCursor(run);
+      return;
+    }
+    cursorRef.current = Math.max(cursorRef.current, runEventCursor(run));
+  }, [run]);
+
+  useEffect(() => {
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let request: AbortController | null = null;
+    let failureCount = 0;
+    let hasSynced = false;
+
+    if (retryGeneration > 0) {
+      setLiveAnnouncement("Retrying automatic persisted-event refresh.");
+    }
+
+    const schedule = (delayMs: number): void => {
+      if (timer !== undefined) clearTimeout(timer);
+      if (disposed || !pageIsVisible()) return;
+      timer = setTimeout(() => void poll(), delayMs);
+    };
+
+    async function poll(): Promise<void> {
+      if (disposed || !pageIsVisible() || request !== null) return;
+      const controller = new AbortController();
+      request = controller;
+      let cursor = cursorRef.current;
+      let observedEvents = 0;
+      let latestLabel: string | null = null;
+      let observedRevision = cursor;
+      let pageCount = 0;
+      let drainCapped = false;
+      try {
+        let hasMore: boolean;
+        do {
+          const page = await getRunEvents(run.id, cursor, controller.signal);
+          pageCount += 1;
+          const progress = advanceEventPoll(run.id, cursor, observedRevision, page);
+          cursor = progress.cursor;
+          observedRevision = progress.observedRevision;
+          observedEvents += progress.eventCount;
+          if (progress.lastEvent !== null) latestLabel = timelineLabel(progress.lastEvent);
+          hasMore = page.hasMore;
+          if (hasMore && pageCount >= EVENT_POLL_MAX_PAGES) {
+            drainCapped = true;
+            break;
+          }
+          if (hasMore && !disposed) setLiveState("catching_up");
+        } while (hasMore && !disposed);
+
+        if (disposed) return;
+        if (observedEvents > 0 || drainCapped) {
+          const nextRun = await getRun(run.id, controller.signal);
+          if (!snapshotIncludesObservedRevision(runEventCursor(nextRun), observedRevision)) {
+            throw new Error("The run evidence snapshot is older than its event cursor.");
+          }
+          if (disposed) return;
+          await onRunChanged(nextRun);
+          cursorRef.current = Math.max(cursorRef.current, runEventCursor(nextRun));
+          setLiveAnnouncement(
+            liveEventAnnouncement(observedEvents, drainCapped, latestLabel ?? "run activity"),
+          );
+        } else {
+          cursorRef.current = cursor;
+          if (!hasSynced) setLiveAnnouncement("Persisted run evidence is current.");
+        }
+        hasSynced = true;
+        failureCount = 0;
+        setLiveError(null);
+        setLiveState("current");
+        setLastSyncedAt(new Date().toISOString());
+      } catch (error) {
+        if (controller.signal.aborted || disposed) return;
+        failureCount += 1;
+        setLiveError(errorMessage(error));
+        setLiveState("stale");
+        setLiveAnnouncement("Automatic refresh failed; the last known evidence remains visible.");
+      } finally {
+        if (request === controller) request = null;
+        if (!disposed && pageIsVisible()) {
+          schedule(eventPollDelayMs(failureCount));
+        }
+      }
+    }
+
+    const visibilityChanged = (): void => {
+      if (document.visibilityState === "hidden") {
+        if (timer !== undefined) clearTimeout(timer);
+        timer = undefined;
+        request?.abort();
+        setLiveState("paused");
+        setLiveAnnouncement("Automatic event refresh is paused while this tab is hidden.");
+      } else {
+        setLiveState("checking");
+        setLiveAnnouncement("Automatic event refresh resumed.");
+        schedule(0);
+      }
+    };
+
+    setLiveState(pageIsVisible() ? "checking" : "paused");
+    document.addEventListener("visibilitychange", visibilityChanged);
+    schedule(0);
+    return () => {
+      disposed = true;
+      if (timer !== undefined) clearTimeout(timer);
+      request?.abort();
+      document.removeEventListener("visibilitychange", visibilityChanged);
+    };
+  }, [onRunChanged, retryGeneration, run.id]);
 
   const requestPlan = async (): Promise<void> => {
     setActionError(null);
@@ -769,6 +1162,13 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
       setRefreshing(false);
     }
   };
+
+  const liveStatusClass =
+    liveState === "current"
+      ? "status status--positive"
+      : liveState === "stale"
+        ? "status status--negative"
+        : "status status--neutral";
 
   return (
     <section className="panel run-evidence" aria-labelledby="run-evidence-heading">
@@ -798,6 +1198,42 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
           </button>
         ) : null}
       </div>
+      <nav className="evidence-nav" aria-label="Run evidence">
+        <span>Evidence</span>
+        <ul>
+          {EVIDENCE_LINKS.map(([id, label]) => (
+            <li key={id}>
+              <a href={`#${id}`}>{label}</a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <div
+        className="live-refresh"
+        aria-busy={liveState === "checking" || liveState === "catching_up"}
+      >
+        <span className={liveStatusClass}>{livePollLabel(liveState)}</span>
+        <span className="live-refresh__time" aria-hidden="true">
+          {lastSyncedAt === null
+            ? "No successful event check yet"
+            : `Checked ${formatTimestamp(lastSyncedAt)}`}
+        </span>
+        <span className="visually-hidden" aria-live="polite" aria-atomic="true">
+          {liveAnnouncement}
+        </span>
+      </div>
+      {liveError === null ? null : (
+        <div className="message message--warning live-refresh__error" role="status">
+          <span>Last-known evidence is preserved — {liveError}</span>
+          <button
+            type="button"
+            className="button--secondary"
+            onClick={() => setRetryGeneration((current) => current + 1)}
+          >
+            Retry event refresh
+          </button>
+        </div>
+      )}
       {run.phase === "draft" && planningCapability.status !== "available" ? (
         <p className="message message--warning" role="status">
           {planningCapability.reason ?? "Guarded planning is unavailable on this platform."}
@@ -813,65 +1249,78 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
           Persisted failure — {run.lastError.code}: {run.lastError.message}
         </p>
       )}
-      <dl className="facts">
-        <div>
-          <dt>Run ID</dt>
-          <dd className="digest">{run.id}</dd>
-        </div>
-        <div>
-          <dt>Product phase</dt>
-          <dd>{run.phase.replaceAll("_", " ")}</dd>
-        </div>
-        <div>
-          <dt>Exact persisted state</dt>
-          <dd>{run.state}</dd>
-        </div>
-        <div>
-          <dt>Target</dt>
-          <dd>{run.target}</dd>
-        </div>
-        <div>
-          <dt>Provider model</dt>
-          <dd>{run.provider.model}</dd>
-        </div>
-        <div>
-          <dt>Provider endpoint</dt>
-          <dd>{run.provider.baseUrl}</dd>
-        </div>
-      </dl>
-
-      {run.gate === null ? (
-        <p className="message message--info">No human gate is currently reported.</p>
-      ) : (
-        <section className="gate" aria-labelledby="gate-heading">
+      <section
+        id="run-summary"
+        className="evidence-block"
+        aria-labelledby="run-summary-heading"
+        tabIndex={-1}
+      >
+        <h3 id="run-summary-heading">Run summary</h3>
+        <dl className="facts">
           <div>
-            <p className="eyebrow">Human gate</p>
-            <h3 id="gate-heading">{run.gate.label ?? run.gate.kind}</h3>
+            <dt>Run ID</dt>
+            <dd className="digest">{run.id}</dd>
           </div>
-          <p>{run.gate.reason ?? "Review the exact persisted evidence before continuing."}</p>
-          <dl className="facts facts--compact">
+          <div>
+            <dt>Product phase</dt>
+            <dd>{run.phase.replaceAll("_", " ")}</dd>
+          </div>
+          <div>
+            <dt>Exact persisted state</dt>
+            <dd>{run.state}</dd>
+          </div>
+          <div>
+            <dt>Target</dt>
+            <dd>{run.target}</dd>
+          </div>
+          <div>
+            <dt>Provider model</dt>
+            <dd>{run.provider.model}</dd>
+          </div>
+          <div>
+            <dt>Provider endpoint</dt>
+            <dd>{run.provider.baseUrl}</dd>
+          </div>
+        </dl>
+
+        {run.gate === null ? (
+          <p className="message message--info">No human gate is currently reported.</p>
+        ) : (
+          <section className="gate" aria-labelledby="gate-heading">
             <div>
-              <dt>Status</dt>
-              <dd>{run.gate.status ?? "awaiting approval"}</dd>
+              <p className="eyebrow">Human gate</p>
+              <h3 id="gate-heading">{run.gate.label ?? run.gate.kind}</h3>
             </div>
-            <div>
-              <dt>Bound digest</dt>
-              <dd className="digest">{run.gate.digest ?? "Not supplied"}</dd>
-            </div>
-          </dl>
-        </section>
-      )}
+            <p>{run.gate.reason ?? "Review the exact persisted evidence before continuing."}</p>
+            <dl className="facts facts--compact">
+              <div>
+                <dt>Status</dt>
+                <dd>{run.gate.status ?? "awaiting approval"}</dd>
+              </div>
+              <div>
+                <dt>Bound digest</dt>
+                <dd className="digest">{run.gate.digest ?? "Not supplied"}</dd>
+              </div>
+            </dl>
+          </section>
+        )}
+      </section>
 
       {run.context === null ? (
-        <section className="evidence-block">
+        <section id="run-context" className="evidence-block" tabIndex={-1}>
           <h3>Context summary</h3>
           <p className="empty-state">Context has not been assembled for this draft.</p>
         </section>
       ) : (
-        <ContextSummary context={run.context} />
+        <ContextSummary context={run.context} sectionId="run-context" />
       )}
 
-      <section className="evidence-block" aria-labelledby="plan-heading">
+      <section
+        id="run-plan"
+        className="evidence-block"
+        aria-labelledby="plan-heading"
+        tabIndex={-1}
+      >
         <h3 id="plan-heading">Plan</h3>
         {run.plan === null ? (
           <p className="empty-state">No plan exists. This is not a completed agent run.</p>
@@ -902,7 +1351,12 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
         )}
       </section>
 
-      <section className="evidence-block" aria-labelledby="action-heading">
+      <section
+        id="run-action"
+        className="evidence-block"
+        aria-labelledby="action-heading"
+        tabIndex={-1}
+      >
         <h3 id="action-heading">Allowed or proposed action</h3>
         {run.action === null ? (
           <p className="empty-state">No action was proposed or allowed.</p>
@@ -956,7 +1410,12 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
         )}
       </section>
 
-      <section className="evidence-block" aria-labelledby="verification-heading">
+      <section
+        id="run-verification"
+        className="evidence-block"
+        aria-labelledby="verification-heading"
+        tabIndex={-1}
+      >
         <div className="evidence-block__heading">
           <h3 id="verification-heading">Verification</h3>
           <span className={statusClass(run.verification.outcome)}>
@@ -996,7 +1455,12 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
         <pre>{run.diff === null || run.diff.length === 0 ? "No diff was produced." : run.diff}</pre>
       </section>
 
-      <section className="evidence-block" aria-labelledby="outputs-heading">
+      <section
+        id="run-outputs"
+        className="evidence-block"
+        aria-labelledby="outputs-heading"
+        tabIndex={-1}
+      >
         <div className="evidence-block__heading">
           <h3 id="outputs-heading">Outputs</h3>
           <span className="count">{run.outputs.length}</span>
@@ -1019,7 +1483,12 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
         )}
       </section>
 
-      <section className="evidence-block" aria-labelledby="warnings-heading">
+      <section
+        id="run-approvals"
+        className="evidence-block"
+        aria-labelledby="warnings-heading"
+        tabIndex={-1}
+      >
         <div className="evidence-block__heading">
           <h3 id="warnings-heading">Warnings</h3>
           <span className="count">{run.warnings.length}</span>
@@ -1068,7 +1537,12 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
         )}
       </section>
 
-      <section className="evidence-block" aria-labelledby="usage-heading">
+      <section
+        id="run-usage"
+        className="evidence-block"
+        aria-labelledby="usage-heading"
+        tabIndex={-1}
+      >
         <h3 id="usage-heading">Measured usage</h3>
         <dl className="facts">
           <div>
@@ -1098,11 +1572,32 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
         </dl>
       </section>
 
-      <section className="evidence-block" aria-labelledby="timeline-heading">
+      <section
+        id="run-activity"
+        className="evidence-block"
+        aria-labelledby="timeline-heading"
+        tabIndex={-1}
+      >
         <div className="evidence-block__heading">
           <h3 id="timeline-heading">Timeline</h3>
-          <span className="count">{run.timeline.length}</span>
+          <span
+            className="count"
+            title={
+              run.timelineTruncated
+                ? `${run.timeline.length} most recent of ${run.timelineTotal} persisted events`
+                : `${run.timelineTotal} persisted events`
+            }
+          >
+            {run.timelineTruncated
+              ? `${run.timeline.length} of ${run.timelineTotal}`
+              : run.timelineTotal}
+          </span>
         </div>
+        {run.timelineTruncated ? (
+          <p className="message message--info">
+            Showing the {run.timeline.length} most recent of {run.timelineTotal} persisted events.
+          </p>
+        ) : null}
         {run.timeline.length === 0 ? (
           <p className="empty-state">No timeline events were returned.</p>
         ) : (
@@ -1115,9 +1610,12 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
                 }
               >
                 <div>
-                  <strong>
-                    {entry.label ?? entry.phase?.replaceAll("_", " ") ?? entry.state ?? "Run event"}
-                  </strong>
+                  <a
+                    className="timeline__evidence-link"
+                    href={`#${evidenceTarget(entry.evidenceSection)}`}
+                  >
+                    {timelineLabel(entry)}
+                  </a>
                   <time dateTime={entry.timestamp ?? entry.createdAt}>
                     {formatTimestamp(entry.timestamp ?? entry.createdAt)}
                   </time>
@@ -1151,78 +1649,178 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const workspaceRequestRef = useRef<AbortController | null>(null);
+  const workspaceGenerationRef = useRef(0);
+  const selectionRequestRef = useRef<AbortController | null>(null);
+  const selectionGenerationRef = useRef(0);
+
+  const cancelPendingRunSelection = useCallback((): void => {
+    selectionGenerationRef.current += 1;
+    selectionRequestRef.current?.abort();
+    selectionRequestRef.current = null;
+  }, []);
 
   const loadWorkspace = useCallback(async (initial = false): Promise<WorkspaceView | null> => {
+    workspaceRequestRef.current?.abort();
+    const controller = new AbortController();
+    const generation = workspaceGenerationRef.current + 1;
+    const selectionGeneration = selectionGenerationRef.current;
+    workspaceGenerationRef.current = generation;
+    workspaceRequestRef.current = controller;
     if (initial) setLoading(true);
     else setRefreshing(true);
     setWorkspaceError(null);
     try {
-      const next = await getWorkspace();
-      setWorkspace(next);
-      setSelectedProjectId((current) => {
-        if (current !== null && next.projects.some((project) => project.id === current)) {
-          return current;
-        }
-        return next.projects.at(0)?.id ?? null;
+      const next = await getWorkspace(controller.signal);
+      if (controller.signal.aborted || workspaceGenerationRef.current !== generation) return null;
+      setWorkspace((current) => {
+        if (current === null) return next;
+        const incomingIds = new Set(next.runs.map((run) => run.id));
+        return {
+          ...next,
+          runs: [
+            ...next.runs.map((run) =>
+              newestRun(
+                current.runs.find((candidate) => candidate.id === run.id),
+                run,
+              ),
+            ),
+            ...current.runs.filter((run) => !incomingIds.has(run.id)),
+          ],
+        };
       });
-      setSelectedRun((current) => {
-        if (current === null) return null;
-        return next.runs.find((run) => run.id === current.id) ?? current;
-      });
+      if (selectionGenerationRef.current === selectionGeneration) {
+        setSelectedProjectId((current) => {
+          if (current !== null && next.projects.some((project) => project.id === current)) {
+            return current;
+          }
+          return next.projects.at(0)?.id ?? null;
+        });
+        setSelectedRun((current) => {
+          if (current === null) return null;
+          const candidate = next.runs.find((run) => run.id === current.id);
+          return candidate === undefined ? current : newestRun(current, candidate);
+        });
+      }
       return next;
     } catch (error) {
-      setWorkspaceError(errorMessage(error));
+      if (
+        !controller.signal.aborted &&
+        workspaceGenerationRef.current === generation &&
+        selectionGenerationRef.current === selectionGeneration
+      ) {
+        setWorkspaceError(errorMessage(error));
+      }
       return null;
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (workspaceRequestRef.current === controller) workspaceRequestRef.current = null;
+      if (workspaceGenerationRef.current === generation) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void loadWorkspace(true);
+    return () => {
+      workspaceGenerationRef.current += 1;
+      workspaceRequestRef.current?.abort();
+      workspaceRequestRef.current = null;
+    };
   }, [loadWorkspace]);
+
+  useEffect(
+    () => () => {
+      cancelPendingRunSelection();
+    },
+    [cancelPendingRunSelection],
+  );
 
   const selectedProject =
     workspace?.projects.find((project) => project.id === selectedProjectId) ?? null;
   const projectRuns = workspace?.runs.filter((run) => run.projectId === selectedProjectId) ?? [];
 
-  const selectProject = (projectId: string): void => {
-    setSelectedProjectId(projectId);
-    setSelectedRun(null);
-  };
+  const mergeRun = useCallback(async (run: RunView): Promise<void> => {
+    setSelectedRun((current) => (current?.id === run.id ? newestRun(current, run) : current));
+    setWorkspace((current) => workspaceWithRun(current, run));
+  }, []);
 
-  const selectRun = async (runId: string): Promise<void> => {
-    try {
-      const run = await getRun(runId);
-      setSelectedRun(run);
-      setSelectedProjectId(run.projectId);
-    } catch (error) {
-      setWorkspaceError(errorMessage(error));
-    }
-  };
-
-  const mergeRun = async (run: RunView): Promise<void> => {
-    setSelectedRun(run);
+  const openRun = useCallback(async (run: RunView): Promise<void> => {
+    setSelectedRun((current) => (current?.id === run.id ? newestRun(current, run) : run));
     setSelectedProjectId(run.projectId);
+    setWorkspace((current) => workspaceWithRun(current, run));
+  }, []);
+
+  const openCreatedRun = useCallback(
+    async (run: RunView): Promise<void> => {
+      cancelPendingRunSelection();
+      await openRun(run);
+    },
+    [cancelPendingRunSelection, openRun],
+  );
+
+  const refreshRun = useCallback(
+    async (runId: string): Promise<void> => {
+      await mergeRun(await getRun(runId));
+    },
+    [mergeRun],
+  );
+
+  const selectRun = useCallback(
+    async (runId: string): Promise<void> => {
+      selectionRequestRef.current?.abort();
+      const controller = new AbortController();
+      const generation = selectionGenerationRef.current + 1;
+      selectionGenerationRef.current = generation;
+      selectionRequestRef.current = controller;
+      setWorkspaceError(null);
+      try {
+        const run = await getRun(runId, controller.signal);
+        if (controller.signal.aborted || selectionGenerationRef.current !== generation) return;
+        selectionRequestRef.current = null;
+        await openRun(run);
+      } catch (error) {
+        if (!controller.signal.aborted && selectionGenerationRef.current === generation) {
+          setWorkspaceError(errorMessage(error));
+        }
+      } finally {
+        if (selectionRequestRef.current === controller) selectionRequestRef.current = null;
+      }
+    },
+    [openRun],
+  );
+
+  const selectProject = useCallback(
+    (projectId: string): void => {
+      cancelPendingRunSelection();
+      setSelectedProjectId(projectId);
+      setSelectedRun(null);
+    },
+    [cancelPendingRunSelection],
+  );
+
+  const closeRun = useCallback((): void => {
+    cancelPendingRunSelection();
+    setSelectedRun(null);
+  }, [cancelPendingRunSelection]);
+
+  const projectCreated = async (project: ProjectView): Promise<void> => {
+    cancelPendingRunSelection();
     setWorkspace((current) =>
       current === null
         ? current
         : {
             ...current,
-            runs: [run, ...current.runs.filter((candidate) => candidate.id !== run.id)],
+            projects: [
+              ...current.projects.filter((candidate) => candidate.id !== project.id),
+              project,
+            ],
           },
     );
-  };
-
-  const projectCreated = async (project: ProjectView): Promise<void> => {
-    const next = await loadWorkspace();
-    setSelectedProjectId(
-      next?.projects.some((candidate) => candidate.id === project.id)
-        ? project.id
-        : (next?.projects.at(-1)?.id ?? null),
-    );
+    setSelectedProjectId(project.id);
     setSelectedRun(null);
+    await loadWorkspace();
   };
 
   return (
@@ -1346,21 +1944,22 @@ export function App() {
                     planningCapability={workspace.capabilities.planning}
                     runs={projectRuns}
                     onSelectRun={selectRun}
-                    onRunCreated={mergeRun}
+                    onRunCreated={openCreatedRun}
                   />
                   <ProjectRegistrationForm busy={refreshing} onCreated={projectCreated} />
                 </>
               )
             ) : (
               <div className="stack">
-                <button type="button" className="back-button" onClick={() => setSelectedRun(null)}>
+                <button type="button" className="back-button" onClick={closeRun}>
                   ← Back to project
                 </button>
                 <RunEvidence
+                  key={selectedRun.id}
                   run={selectedRun}
                   planningCapability={workspace.capabilities.planning}
                   onRunChanged={mergeRun}
-                  onRefresh={selectRun}
+                  onRefresh={refreshRun}
                 />
               </div>
             )}

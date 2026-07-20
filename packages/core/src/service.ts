@@ -43,8 +43,12 @@ import type {
   JsonValue,
   OperationToken,
   ProjectRecord,
+  ProjectRepositoryStatus,
   ProviderConfig,
   RepositoryRecord,
+  RunEventPage,
+  RunHistory,
+  RunPresentationSnapshot,
   RunRecord,
   RunState,
   SandboxProfile,
@@ -301,6 +305,7 @@ export interface IcarusServiceOptions {
   readonly checks: CheckRunner;
   readonly gatewayFactory?: GatewayFactory;
   readonly id?: () => string;
+  readonly now?: () => string;
 }
 
 export interface PlanRunInput {
@@ -318,6 +323,7 @@ export class IcarusService {
   readonly #checks: CheckRunner;
   readonly #gatewayFactory: GatewayFactory;
   readonly #id: () => string;
+  readonly #now: () => string;
   readonly #leases: RunLeaseManager;
   readonly #platform: NodeJS.Platform;
 
@@ -330,6 +336,7 @@ export class IcarusService {
     this.#gatewayFactory =
       options.gatewayFactory ?? ((config) => createGateway(config, process.env));
     this.#id = options.id ?? randomUUID;
+    this.#now = options.now ?? (() => new Date().toISOString());
     this.#leases = new RunLeaseManager(this.#stateRoot);
     this.#platform = process.platform;
   }
@@ -435,6 +442,88 @@ export class IcarusService {
     return this.#store.listProjects();
   }
 
+  getProject(projectId: string): ProjectRecord {
+    return this.#store.getProject(projectId);
+  }
+
+  async getProjectRepositoryStatus(
+    projectId: string,
+    signal?: AbortSignal,
+  ): Promise<ProjectRepositoryStatus> {
+    const project = this.#store.getProject(projectId);
+    const repository = this.#store.getRepository(project.repositoryId);
+    const unavailable = (
+      availability: ProjectRepositoryStatus["availability"],
+      code: NonNullable<ProjectRepositoryStatus["issue"]>["code"],
+    ): ProjectRepositoryStatus => ({
+      projectId: project.id,
+      repositoryId: repository.id,
+      checkedAt: this.#now(),
+      availability,
+      worktree: "unknown",
+      head: null,
+      branch: null,
+      baseRef: project.baseRef,
+      baseCommit: null,
+      headMatchesBaseRef: null,
+      issue: { code },
+    });
+
+    try {
+      const inspection = await this.#git.inspectRepositoryStatus(
+        repository.path,
+        project.baseRef,
+        {
+          canonicalPath: repository.path,
+          device: repository.device,
+          inode: repository.inode,
+        },
+        signal,
+      );
+      const headMatchesBaseRef =
+        inspection.baseCommit === null ? null : inspection.head === inspection.baseCommit;
+      const issue = !inspection.clean
+        ? ({ code: "DIRTY_REPOSITORY" } as const)
+        : inspection.baseCommit === null
+          ? ({ code: "BASE_REF_UNRESOLVED" } as const)
+          : headMatchesBaseRef
+            ? null
+            : ({ code: "BASE_REF_NOT_HEAD" } as const);
+      return {
+        projectId: project.id,
+        repositoryId: repository.id,
+        checkedAt: this.#now(),
+        availability: "available",
+        worktree: inspection.clean ? "clean" : "dirty",
+        head: inspection.head,
+        branch: inspection.branch,
+        baseRef: project.baseRef,
+        baseCommit: inspection.baseCommit,
+        headMatchesBaseRef,
+        issue,
+      };
+    } catch (error) {
+      if (error instanceof IcarusError) {
+        if (error.code === "REPOSITORY_IDENTITY_CHANGED") {
+          return unavailable("identity_changed", "REPOSITORY_IDENTITY_CHANGED");
+        }
+        if (error.code === "INVALID_REPOSITORY" && error.details.reason === "missing") {
+          return unavailable("missing", "REPOSITORY_MISSING");
+        }
+        if (
+          error.code === "INVALID_REPOSITORY" ||
+          error.code === "GIT_FAILED" ||
+          error.code === "GIT_OUTPUT_INVALID" ||
+          error.code === "GIT_UNSAFE_CONFIGURATION" ||
+          error.code === "INVALID_REF"
+        ) {
+          return unavailable("unavailable", "REPOSITORY_UNAVAILABLE");
+        }
+      }
+      throw error;
+    }
+  }
+
   async previewProjectContext(
     projectId: string,
     target: string,
@@ -469,16 +558,16 @@ export class IcarusService {
     return this.#store.listRuns(projectId);
   }
 
-  history(runId: string): {
-    readonly run: RunRecord;
-    readonly approvals: ReturnType<IcarusStore["listApprovals"]>;
-    readonly events: ReturnType<IcarusStore["listEvents"]>;
-  } {
-    return {
-      run: this.#store.getRun(runId),
-      approvals: this.#store.listApprovals(runId),
-      events: this.#store.listEvents(runId),
-    };
+  history(runId: string): RunHistory {
+    return this.#store.getRunHistory(runId);
+  }
+
+  presentationSnapshot(runId: string): RunPresentationSnapshot {
+    return this.#store.getRunPresentationSnapshot(runId);
+  }
+
+  listRunEvents(runId: string, after: number): RunEventPage {
+    return this.#store.listEventPage(runId, after);
   }
 
   createRunDraft(input: PlanRunInput): RunRecord {

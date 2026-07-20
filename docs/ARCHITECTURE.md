@@ -239,6 +239,73 @@ durability and completed-run evidence. A production-asset smoke drives the
 project → context → draft → browser reload → plan → evidence flow in real
 headless Chromium and rechecks the imported source fingerprint.
 
+## Second M3 observation path
+
+ADR 0015 is implemented through the existing HTTP/API, application-service, Git
+controller, SQLite, and React boundaries. It adds no package, schema, migration,
+or runtime dependency.
+
+1. A project-scoped repository-observation handler resolves the persisted
+   repository identity and runs only fixed read-only Git controller operations.
+   Network transports, lazy fetch, hooks, prompts, and optional index locking stay
+   disabled. Before any Git operation that can invoke a repository-configured
+   helper, an effective-config name-only preflight follows includes and worktree
+   config and rejects clean/smudge/process filters,
+   `core.alternateRefsCommand`, and configured `hook.*.command` programs. The
+   controller also disables the `post-checkout` hook event at command scope;
+   private caches are checked again before `worktree add`. The presenter returns
+   independent availability, worktree, HEAD, branch, and configured-base-relation
+   fields. Missing or mismatched
+   identity, unresolved refs, and observation errors stay explicit instead of
+   collapsing into `clean`. Detached HEAD is `branch: null`, while the
+   independent worktree field continues to report truthful cleanliness.
+2. Repository observation returns no dirty filenames or counts, file contents,
+   repository/private runtime paths, or raw Git output. It is a point-in-time
+   projection only: no project/run record changes, event append, cache, worktree,
+   or source-checkout mutation occurs.
+3. A read-only selected-run event handler returns sequence-ordered pages strictly
+   after an exclusive sequence cursor and enforces one fixed service-owned page
+   maximum. Each event exposes only sequence, type, a fixed host-controlled label,
+   timestamp, and a fixed host-generated `evidenceSection`; `payload_json` is
+   neither returned nor used as browser copy.
+4. The full run presenter reads its run row, approvals, and the 200 most recent
+   timeline metadata rows inside one SQLite read transaction/snapshot. It uses
+   the append-only sequence high-water mark as both `eventCursor` and timeline
+   total without decoding or scanning every event payload. Action presentation
+   is derived only from that bounded tail. Event metadata pages are separate
+   requests; their exclusive sequence cursor makes successive pages monotonic
+   and overlap-free. The CLI history path continues to read the complete event
+   history and payloads. If the bounded suffix omits the prerequisite for an
+   action transition, the browser reports the action status as `unknown` with
+   CLI guidance instead of guessing `proposed`, `cancelled`, or `reverted`.
+5. React short-polls only the selected run while `document.visibilityState` is
+   visible. One request is current at a time; selection changes and unmount abort
+   it, failures use bounded backoff, success restores the short interval, and a
+   selection/request revision rejects late or out-of-order responses. A full run
+   response is accepted only when its `eventCursor` is at least the newest event
+   revision the client has already observed.
+6. Live items target only a closed map of Icarus-generated evidence anchors.
+   Untrusted repository, provider, event, and check strings remain text and never
+   become element identifiers or fragment targets.
+
+This path is observation-only. It adds no Server-Sent Events, WebSocket,
+filesystem watcher, background process, approval, edit, check execution,
+arbitrary command, commit, push, deployment, or other browser authority. Richer
+file/status, diff, and history navigation remains deferred, and guarded actions
+must still revalidate authoritative repository state immediately before use.
+
+Only the event-history portion of a full run response is fixed-size. Approval
+lists and workspace-wide run enumeration retain their existing unpaginated local
+behavior and are not claimed to have constant work or response size.
+
+The helper-config preflight and the following Git subprocess are separate host
+operations. A same-user process can change repository or included config between
+them; Icarus does not claim hostile multi-user isolation. Repositories that use
+effective clean/smudge/process helpers, `core.alternateRefsCommand`, or configured
+hook commands therefore fail closed, and partial/promisor repositories must
+already contain every object needed by the requested operation because lazy fetch
+is disabled.
+
 ## Provider contract
 
 The provider-neutral port accepts model identity, capability metadata, a typed

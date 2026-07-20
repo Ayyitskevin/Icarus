@@ -1,9 +1,12 @@
 import type {
   ApprovalRecord,
   EventRecord,
-  IcarusService,
+  EventSummaryRecord,
   ProjectRecord,
+  ProjectRepositoryStatus,
   RepositoryRecord,
+  RunEventPage,
+  RunPresentationSnapshot,
   RunRecord,
   RunState,
 } from "@icarus/core";
@@ -50,6 +53,17 @@ interface WorkspaceGate {
   readonly digest?: string;
   readonly reason: string;
 }
+
+export type WorkspaceEvidenceSection =
+  | "summary"
+  | "context"
+  | "plan"
+  | "action"
+  | "verification"
+  | "outputs"
+  | "approvals"
+  | "usage"
+  | "activity";
 
 function approvalGate(run: RunRecord): WorkspaceGate | null {
   const kind =
@@ -101,14 +115,99 @@ export function presentProject(
   };
 }
 
-function timeline(events: readonly EventRecord[]): readonly Record<string, unknown>[] {
-  return events.map((event) => ({
+function evidenceSection(type: string): WorkspaceEvidenceSection {
+  if (type === "run.created" || type === "base.pinned") return "summary";
+  if (type === "context.assembled" || type === "egress.requested") return "context";
+  if (type === "plan.created") return "plan";
+  if (
+    type === "egress.approved" ||
+    type === "plan.approved" ||
+    type.startsWith("review.") ||
+    type === "rollback.approved" ||
+    type === "restore.approved"
+  ) {
+    return "approvals";
+  }
+  if (
+    type === "workspace.created" ||
+    type.startsWith("edit.") ||
+    type.startsWith("rollback.") ||
+    type.startsWith("restore.") ||
+    type.startsWith("cancellation.")
+  ) {
+    return "action";
+  }
+  if (type === "checkpoint.saved" || type === "verification.completed") {
+    return "verification";
+  }
+  if (type.startsWith("operation.")) return "usage";
+  return "activity";
+}
+
+export function presentTimelineEvent(
+  event: Pick<EventRecord | EventSummaryRecord, "sequence" | "type" | "createdAt">,
+): Record<string, unknown> {
+  return {
     sequence: event.sequence,
     type: event.type,
     label: event.type.replaceAll(".", " "),
+    evidenceSection: evidenceSection(event.type),
     timestamp: event.createdAt,
     createdAt: event.createdAt,
-  }));
+  };
+}
+
+function timeline(events: readonly EventSummaryRecord[]): readonly Record<string, unknown>[] {
+  return events.map(presentTimelineEvent);
+}
+
+const REPOSITORY_ISSUE_MESSAGES: Readonly<
+  Record<NonNullable<ProjectRepositoryStatus["issue"]>["code"], string>
+> = {
+  DIRTY_REPOSITORY: "The repository has staged, unstaged, or untracked changes.",
+  REPOSITORY_IDENTITY_CHANGED: "The registered repository identity changed.",
+  BASE_REF_UNRESOLVED: "The configured base ref could not be resolved.",
+  BASE_REF_NOT_HEAD: "Repository HEAD does not match the configured base ref.",
+  REPOSITORY_MISSING: "The registered repository path is missing.",
+  REPOSITORY_UNAVAILABLE: "Repository status could not be read safely.",
+};
+
+export function presentRepositoryStatus(status: ProjectRepositoryStatus): Record<string, unknown> {
+  return {
+    projectId: status.projectId,
+    repositoryId: status.repositoryId,
+    checkedAt: status.checkedAt,
+    availability: status.availability,
+    worktree: status.worktree,
+    head: status.head,
+    branch: status.branch,
+    baseRef: status.baseRef,
+    baseCommit: status.baseCommit,
+    headMatchesBaseRef: status.headMatchesBaseRef,
+    issue:
+      status.issue === null
+        ? null
+        : {
+            code: status.issue.code,
+            message: REPOSITORY_ISSUE_MESSAGES[status.issue.code],
+          },
+  };
+}
+
+export function presentRunEventPage(page: RunEventPage): Record<string, unknown> {
+  return {
+    runId: page.runId,
+    revision: page.revision,
+    nextAfter: page.nextAfter,
+    hasMore: page.hasMore,
+    events: page.events.map((event) => ({
+      sequence: event.sequence,
+      type: event.type,
+      label: event.type.replaceAll(".", " "),
+      evidenceSection: evidenceSection(event.type),
+      timestamp: event.createdAt,
+    })),
+  };
 }
 
 function approvals(records: readonly ApprovalRecord[]): readonly Record<string, unknown>[] {
@@ -122,10 +221,10 @@ function approvals(records: readonly ApprovalRecord[]): readonly Record<string, 
 }
 
 export function presentRun(
-  run: RunRecord,
   project: ProjectRecord,
-  history: ReturnType<IcarusService["history"]>,
+  snapshot: RunPresentationSnapshot,
 ): Record<string, unknown> {
+  const run: RunRecord = snapshot.run;
   const checks = project.checks.map((check) => {
     const evidence = run.verification?.checks.find((entry) => entry.checkId === check.id);
     return evidence === undefined
@@ -194,7 +293,17 @@ export function presentRun(
     "This workspace slice is review-only: approving plans or executing project commands remains unavailable in the browser.",
   );
 
-  const actionState = history.events.reduce(
+  type ActionPresentationState = {
+    readonly status:
+      | "proposed"
+      | "materialized"
+      | "reverted"
+      | "completed"
+      | "cancelled"
+      | "unknown";
+    readonly materialized: boolean | null;
+  };
+  const actionState = snapshot.actionEvents.reduce<ActionPresentationState>(
     (state, event) => {
       if (event.type === "edit.materialized" || event.type === "restore.completed") {
         return { status: "materialized", materialized: true };
@@ -203,6 +312,9 @@ export function presentRun(
         return { status: "reverted", materialized: false };
       }
       if (event.type === "cancellation.completed") {
+        if (state.materialized === null) {
+          return { status: "unknown", materialized: null };
+        }
         return {
           status: state.materialized ? "reverted" : "cancelled",
           materialized: false,
@@ -213,8 +325,15 @@ export function presentRun(
       }
       return state;
     },
-    { status: "proposed", materialized: false },
+    snapshot.eventCount === snapshot.events.length
+      ? { status: "proposed", materialized: false }
+      : { status: "unknown", materialized: null },
   );
+  if (run.edit !== null && actionState.status === "unknown") {
+    warnings.push(
+      "Action status predates the bounded browser timeline; use the CLI for complete history.",
+    );
+  }
   const action =
     run.edit === null
       ? null
@@ -291,8 +410,11 @@ export function presentRun(
     usage: run.usage,
     lastError: run.lastError,
     warnings,
-    approvals: approvals(history.approvals),
-    timeline: timeline(history.events),
+    approvals: approvals(snapshot.approvals),
+    eventCursor: snapshot.eventCursor,
+    timelineTotal: snapshot.eventCount,
+    timelineTruncated: snapshot.eventCount > snapshot.events.length,
+    timeline: timeline(snapshot.events),
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
     timestamps: {

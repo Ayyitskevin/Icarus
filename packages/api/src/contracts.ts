@@ -2,6 +2,7 @@ import { IcarusError } from "@icarus/core";
 
 const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
 const DIGEST_IMAGE_PATTERN = /^[a-z0-9][a-z0-9._/-]*(?::[a-zA-Z0-9._-]+)?@sha256:[a-f0-9]{64}$/;
+const EVENT_CURSOR_PATTERN = /^(0|[1-9][0-9]*)$/;
 
 function invalid(message: string): never {
   throw new IcarusError("INVALID_REQUEST", message);
@@ -134,4 +135,21 @@ export function runDraftRequest(value: unknown): RunDraftRequest {
       baseUrl: stringValue(provider.baseUrl, "provider.baseUrl", { maxBytes: 2_048 }),
     },
   };
+}
+
+export function runEventsQuery(searchParams: URLSearchParams): { readonly after: number } {
+  const keys = Array.from(searchParams.keys());
+  const values = searchParams.getAll("after");
+  if (keys.length !== 1 || keys[0] !== "after" || values.length !== 1) {
+    invalid("Event requests require exactly one after query parameter");
+  }
+  const raw = values[0] ?? "";
+  if (!EVENT_CURSOR_PATTERN.test(raw)) {
+    invalid("after must be a canonical nonnegative safe integer");
+  }
+  const after = Number(raw);
+  if (!Number.isSafeInteger(after)) {
+    invalid("after must be a canonical nonnegative safe integer");
+  }
+  return { after };
 }

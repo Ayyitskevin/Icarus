@@ -12,11 +12,20 @@ import {
   parseProviderBaseUrl,
   type ProjectRecord,
   type RepositoryRecord,
-  type RunRecord,
 } from "@icarus/core";
 
-import { contextPreviewRequest, projectRequest, runDraftRequest } from "./contracts.js";
-import { presentProject, presentRun } from "./present.js";
+import {
+  contextPreviewRequest,
+  projectRequest,
+  runDraftRequest,
+  runEventsQuery,
+} from "./contracts.js";
+import {
+  presentProject,
+  presentRepositoryStatus,
+  presentRun,
+  presentRunEventPage,
+} from "./present.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const API_PREFIX = "/api/";
@@ -235,6 +244,26 @@ function decodedRouteId(value: string, name: string): string {
   return decoded;
 }
 
+function disconnectSignal(
+  request: IncomingMessage,
+  response: ServerResponse,
+): { readonly signal: AbortSignal; dispose(): void } {
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  request.once("aborted", abort);
+  response.once("close", abort);
+  if (request.aborted || response.destroyed) {
+    abort();
+  }
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      request.off("aborted", abort);
+      response.off("close", abort);
+    },
+  };
+}
+
 function findProject(projects: readonly ProjectRecord[], projectId: string): ProjectRecord {
   const project = projects.find((candidate) => candidate.id === projectId);
   if (project === undefined) throw new IcarusError("NOT_FOUND", "Project was not found");
@@ -250,16 +279,10 @@ function findRepository(
   return repository;
 }
 
-function findRun(runs: readonly RunRecord[], runId: string): RunRecord {
-  const run = runs.find((candidate) => candidate.id === runId);
-  if (run === undefined) throw new IcarusError("NOT_FOUND", "Run was not found");
-  return run;
-}
-
 function presentRunById(options: WorkspaceServerOptions, runId: string): Record<string, unknown> {
-  const run = findRun(options.runtime.service.listRuns(), runId);
-  const project = findProject(options.runtime.service.listProjects(), run.projectId);
-  return presentRun(run, project, options.runtime.service.history(run.id));
+  const snapshot = options.runtime.service.presentationSnapshot(runId);
+  const project = options.runtime.service.getProject(snapshot.run.projectId);
+  return presentRun(project, snapshot);
 }
 
 function workspaceSnapshot(options: WorkspaceServerOptions): Record<string, unknown> {
@@ -288,13 +311,10 @@ function workspaceSnapshot(options: WorkspaceServerOptions): Record<string, unkn
     projects: projects.map((project) =>
       presentProject(project, findRepository(repositories, project.repositoryId)),
     ),
-    runs: runs.map((run) =>
-      presentRun(
-        run,
-        findProject(projects, run.projectId),
-        options.runtime.service.history(run.id),
-      ),
-    ),
+    runs: runs.map((run) => {
+      const snapshot = options.runtime.service.presentationSnapshot(run.id);
+      return presentRun(findProject(projects, snapshot.run.projectId), snapshot);
+    }),
   };
 }
 
@@ -303,6 +323,7 @@ async function routeApi(
   request: IncomingMessage,
   response: ServerResponse,
   pathname: string,
+  searchParams: URLSearchParams,
 ): Promise<boolean> {
   const method = request.method ?? "GET";
   if (method === "GET" && pathname === "/api/health") {
@@ -355,10 +376,26 @@ async function routeApi(
   const projectContext = /^\/api\/projects\/([^/]+)\/context-preview$/.exec(pathname);
   if (method === "POST" && projectContext !== null) {
     const projectId = decodedRouteId(projectContext[1] ?? "", "project id");
-    findProject(options.runtime.service.listProjects(), projectId);
     const input = contextPreviewRequest(await readJson(request));
     const preview = await options.runtime.service.previewProjectContext(projectId, input.target);
     json(response, 200, preview);
+    return true;
+  }
+  const projectRepositoryStatus = /^\/api\/projects\/([^/]+)\/repository-status$/.exec(pathname);
+  if (method === "GET" && projectRepositoryStatus !== null) {
+    const projectId = decodedRouteId(projectRepositoryStatus[1] ?? "", "project id");
+    const disconnect = disconnectSignal(request, response);
+    try {
+      const status = await options.runtime.service.getProjectRepositoryStatus(
+        projectId,
+        disconnect.signal,
+      );
+      if (!disconnect.signal.aborted && !response.destroyed) {
+        json(response, 200, presentRepositoryStatus(status));
+      }
+    } finally {
+      disconnect.dispose();
+    }
     return true;
   }
   if (method === "POST" && pathname === "/api/runs") {
@@ -388,7 +425,6 @@ async function routeApi(
   const runPlan = /^\/api\/runs\/([^/]+)\/plan$/.exec(pathname);
   if (method === "POST" && runPlan !== null) {
     const runId = decodedRouteId(runPlan[1] ?? "", "run id");
-    findRun(options.runtime.service.listRuns(), runId);
     const body = await readJson(request);
     const bodyObject =
       typeof body === "object" && body !== null && !Array.isArray(body)
@@ -402,6 +438,13 @@ async function routeApi(
     return true;
   }
   const runDetail = /^\/api\/runs\/([^/]+)$/.exec(pathname);
+  const runEvents = /^\/api\/runs\/([^/]+)\/events$/.exec(pathname);
+  if (method === "GET" && runEvents !== null) {
+    const runId = decodedRouteId(runEvents[1] ?? "", "run id");
+    const { after } = runEventsQuery(searchParams);
+    json(response, 200, presentRunEventPage(options.runtime.service.listRunEvents(runId, after)));
+    return true;
+  }
   if (method === "GET" && runDetail !== null) {
     json(response, 200, presentRunById(options, decodedRouteId(runDetail[1] ?? "", "run id")));
     return true;
@@ -461,7 +504,7 @@ export function createWorkspaceServer(options: WorkspaceServerOptions): Server {
       assertLocalBrowserRequest(request);
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       if (url.pathname.startsWith(API_PREFIX)) {
-        const handled = await routeApi(options, request, response, url.pathname);
+        const handled = await routeApi(options, request, response, url.pathname, url.searchParams);
         if (!handled) {
           json(response, 404, { error: { code: "NOT_FOUND", message: "API route was not found" } });
         }
@@ -469,8 +512,10 @@ export function createWorkspaceServer(options: WorkspaceServerOptions): Server {
       }
       await serveWorkspace(options, request, response, url.pathname);
     } catch (error) {
-      if (response.headersSent) {
-        response.end();
+      if (response.destroyed || response.headersSent) {
+        if (!response.destroyed) {
+          response.end();
+        }
         return;
       }
       const safe = safeError(error);

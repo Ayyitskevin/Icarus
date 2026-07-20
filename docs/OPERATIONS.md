@@ -107,6 +107,61 @@ The browser accepts loopback Ollama planning only. It has no cloud-provider key
 entry, provider fallback, arbitrary shell, account, telemetry, commit, push,
 deployment, or fleet-control integration.
 
+## Second M3 observation behavior
+
+Selecting a project requests one point-in-time repository observation. Read
+availability, worktree, HEAD, branch, and configured-base relation as independent
+fields. A missing repository,
+identity mismatch, unresolved ref, or observation error must stay explicit and
+must never be interpreted as `clean`. Detached HEAD appears as `branch: null`;
+the independent worktree field still reports truthful cleanliness.
+
+The repository response intentionally contains no dirty filenames or counts,
+file content, repository/private runtime paths, or raw Git output. It is not
+stored in SQLite and appends no event. Treat it as advisory display state only;
+approval or execution must continue through the guarded CLI, which performs its
+own authoritative revalidation immediately before acting.
+
+Repository inspection ignores system/global Git config, permits only local-file
+transport, disables lazy fetch, and fails closed when effective repository,
+included, or worktree config defines a clean/smudge/process filter,
+`core.alternateRefsCommand`, or a configured `hook.*.command`. The controller also
+disables the `post-checkout` event at command scope, and existing private caches
+receive the same preflight before a worktree is added. A repository that depends
+on one of those helpers, or a promisor repository whose required objects are
+absent, is reported unavailable instead of running the helper or fetching. The
+preflight and Git command are separate processes, so hostile concurrent same-user
+config mutation remains out of scope rather than being presented as isolated.
+
+Selecting a run may start short polling only while the page is visible. The UI
+keeps one current request, pauses on document visibility loss, aborts on run
+selection change or component unmount, uses bounded backoff after errors, and
+returns to its short interval after success. A request revision prevents a late
+response from replacing a newer selection. Poll failures remain visible errors;
+they are not rendered as an empty history or successful state. The UI accepts a
+full run response only when its event cursor is at least the newest event
+revision it has already observed.
+
+Event pages advance strictly after an exclusive sequence cursor and use one
+fixed service-owned maximum. Operators see only sequence, type, a
+host-controlled label, timestamp, and a fixed host-generated `evidenceSection`;
+event payloads are unavailable through this route. Separately, each full run
+response reads its run row, approvals, and the 200 most recent timeline metadata
+rows from one coherent SQLite snapshot. The append-only sequence high-water mark
+is the event cursor and total; CLI history remains complete. When an action's
+prerequisite falls before the bounded tail and the retained suffix cannot
+re-establish it, the browser reports `unknown` and points the operator to CLI
+history instead of guessing. Live links target only fixed Icarus-generated
+evidence anchors, not repository, provider, event, or check text. Only event
+history has the fixed bound; existing approval lists and workspace-wide run
+enumeration remain unpaginated local reads.
+
+No migration, dependency install, daemon, watcher, Server-Sent Events, or
+WebSocket setup accompanies this slice. It adds no browser approval, mutation,
+execution, command, commit, push, or deployment authority. Richer file/status,
+diff, and history navigation remains deferred, and the ADR 0010 release hold
+remains in force.
+
 ## Preflight
 
 Approval and execution require util-linux `flock` at `/usr/bin/flock` and a

@@ -1,6 +1,119 @@
 # Implementation plans
 
-## Current plan: first M3 local workspace vertical slice
+## Current plan: second M3 read-only observation slice
+
+Status values are evidence claims. The ADR 0015 implementation and fresh local
+acceptance passed on the final working tree on 2026-07-20. Exact published-head
+hosted CI remains pending, so this is a locally verified candidate rather than
+published acceptance of the slice.
+
+### Repository observation
+
+- [x] Add a project-scoped, read-only repository observation endpoint whose
+      availability, worktree, HEAD, branch, and configured-base-relation fields
+      are independent
+- [x] Keep missing repositories, identity mismatches, unresolved refs, and
+      observation failures explicit so none can masquerade as a clean worktree;
+      represent detached HEAD as `branch: null` without changing truthful
+      worktree cleanliness
+- [x] Return no dirty filenames or counts, file content, repository/private
+      runtime paths, or raw Git output
+- [x] Use only fixed read-only Git controller operations with network, hooks,
+      external programs, prompts, and optional index locks disabled
+- [x] Keep every observation point-in-time and nonpersistent: no project/run
+      update, event append, cache, worktree, or source-checkout mutation
+
+### Event metadata and live review
+
+- [x] Add a read-only selected-run event endpoint ordered by sequence, with an
+      exclusive sequence cursor and one fixed service-owned maximum page size
+- [x] Return only event sequence, type, host-controlled label, timestamp, and a
+      fixed host-generated `evidenceSection`; never return `payload_json` or
+      derive browser text from it
+- [x] Build each full run response—run, approvals, and timeline—from one coherent
+      SQLite read snapshot, with the latest included event sequence as its event
+      cursor; keep event metadata pages as separate requests
+- [x] Short-poll only the selected run while the document is visible, with one
+      current request, visibility pause, selection/unmount abort, bounded failure
+      backoff, success reset, and a revision guard against late responses; accept
+      a full run response only when its event cursor is at least the newest
+      observed event revision
+- [x] Link live items only to a closed set of Icarus-generated evidence anchors;
+      never form identifiers or navigation targets from untrusted text
+
+### Scope and safety
+
+- [x] Add no Server-Sent Events, WebSocket, filesystem watcher, schema migration,
+      runtime dependency, background daemon, or browser action authority
+- [x] Preserve the existing loopback Host/Origin, same-origin, bounded-response,
+      text-rendering, source-isolation, guarded CLI, and Docker boundaries
+- [x] Keep browser approval, mutation, checks, arbitrary commands, commit, push,
+      deployment, and patch materialization out of the slice
+- [x] Keep richer file/status, diff, and history navigation, including dirty
+      filenames/counts and event payload presentation, explicitly deferred
+- [x] Preserve the inherited ADR 0010 operator security hold without changing or
+      blessing `.github/workflows/opencode.yml`
+
+### Acceptance coverage and commands
+
+- [x] Focused unit/integration coverage proves sanitized independent status
+      fields, nonpersistence, fixed event bounds/cursors, payload omission, and
+      coherent full-run reads plus the cross-request event-revision guard
+- [x] UI coverage proves selected-run-only polling, visibility pause,
+      selection/unmount abort, bounded backoff, stale-response rejection, fixed
+      anchors, truthful failures, and no added browser authority
+- [x] Source fingerprint and Git-metadata evidence proves observation leaves the
+      imported checkout unchanged
+- [x] `pnpm format:check`
+- [x] `pnpm lint`
+- [x] `pnpm typecheck`
+- [x] `pnpm test`
+- [x] `pnpm test:integration`
+- [x] `pnpm security`
+- [x] `pnpm build`
+- [x] `pnpm check`
+- [x] `pnpm smoke:workspace`
+- [x] `ICARUS_CHROMIUM_EXECUTABLE=/absolute/path/to/chromium pnpm smoke:workspace:browser`
+- [x] `pnpm audit --audit-level high`
+- [x] `pnpm audit --prod --audit-level high`
+- [x] `git diff --check`
+- [ ] Hosted `ci` succeeds at the exact published implementation head
+
+Fresh local candidate evidence on 2026-07-20:
+
+- The six focused changed-file suites passed 58/58 tests. The full gate passed
+  116/116 unit/provider tests across 14 files and 37/37 integration tests across
+  8 files. Final-audit regressions cover configured-hook rejection from a
+  tampered private cache and an ambiguous action transition whose prerequisite
+  falls before the 200-row tail.
+- `pnpm check` exited 0: 77 files passed formatting; lint reported no errors and
+  26 inherited informational `useTemplate` diagnostics; typecheck passed;
+  evaluation reported 5 passed, 0 failed, and 5 explicitly unsupported; 109
+  security tests and 20 static assertions passed; and Vite built 18 modules.
+- `pnpm smoke:workspace` reached `awaiting_approval` with one provider request,
+  `not_run` verification, two assets, and an unchanged source fingerprint.
+- The real Brave/Chromium smoke observed repository status
+  `not_observed -> clean -> dirty -> clean`, without disclosing the dirty marker;
+  proved deferred project-selection safety, visible/hidden polling pause and
+  resume, one held request with no overlap, cancellation on unmount, late-response
+  rejection, selected-run URL binding, injected event failure with about 4.0 s
+  recovery, and fixed `#run-context` evidence navigation. A metadata-only event
+  appended while the run remained selected caused a successful event-page read,
+  a subsequent exact-run snapshot GET, and rendered `resume requested` evidence
+  without refresh or reselection. The smoke reported zero browser errors, zero
+  blocked external requests, and an unchanged source.
+- The coherent full-run claim is backed by one explicit SQLite read transaction
+  plus bounded/corrupt-payload store and endpoint tests. No separate
+  cross-process WAL-contention stress run is claimed.
+- `git diff --check` reported no errors. Exact implementation-head hosted CI is
+  deliberately left unchecked until publication.
+- Full and production dependency audits reported no known vulnerabilities.
+- Config-hook rejection and command-scope `post-checkout` disabling are exercised
+  structurally on the Git 2.43 host. The fail-closed regression does not depend on
+  Git executing the command, but a real Git 2.55 configured-hook execution run is
+  not claimed.
+
+## Prior accepted plan: first M3 local workspace vertical slice
 
 Status values are evidence claims. The bounded implementation and acceptance
 coverage passed on the final working tree on 2026-07-20. This accepts the first
@@ -231,7 +344,8 @@ Final adversarial candidate local evidence on 2026-07-20:
 ## Deferred plan
 
 The inherited ADR 0010 security hold remains separate from this local feature
-branch. After the first workspace slice passes its gate, the next bounded M3
-feature is read-only repository status plus live event and evidence navigation.
-Patch materialization, file/diff editing, browser approval, and execution remain
-later, explicitly reviewed authority expansions. See `docs/ROADMAP.md`.
+branch. ADR 0015 is locally verified; exact implementation-head hosted CI remains
+the final publication check. The next bounded read-only navigation slice requires
+its own ADR and safety contract. Richer file/status, diff, and history navigation,
+patch materialization, browser approval, and execution remain later, explicitly
+reviewed authority expansions. See `docs/ROADMAP.md`.

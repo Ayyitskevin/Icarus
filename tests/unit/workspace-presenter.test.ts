@@ -1,7 +1,17 @@
 import { describe, expect, test } from "vitest";
 
-import { workspaceRunPhase, presentRun } from "../../packages/api/src/present.js";
-import type { ProjectRecord, RunRecord, RunState } from "../../packages/core/src/types.js";
+import {
+  presentRun,
+  presentRunEventPage,
+  workspaceRunPhase,
+} from "../../packages/api/src/present.js";
+import type {
+  ProjectRecord,
+  RunHistory,
+  RunPresentationSnapshot,
+  RunRecord,
+  RunState,
+} from "../../packages/core/src/types.js";
 import { UNIT_CEILING, UNIT_PROVIDER, UNIT_SANDBOX } from "../support/unit-fixtures.js";
 
 const states: readonly [RunState, ReturnType<typeof workspaceRunPhase>][] = [
@@ -20,6 +30,32 @@ const states: readonly [RunState, ReturnType<typeof workspaceRunPhase>][] = [
   ["cancelled", "cancelled"],
   ["rolled_back", "cancelled"],
 ];
+
+const actionEventTypes = new Set([
+  "edit.materialized",
+  "restore.completed",
+  "rollback.completed",
+  "cancellation.completed",
+  "review.accepted",
+]);
+
+function presentationSnapshot(history: RunHistory): RunPresentationSnapshot {
+  const events = history.events.map((event) => ({
+    sequence: event.sequence,
+    runId: event.runId,
+    type: event.type,
+    createdAt: event.createdAt,
+  }));
+  const presentationEvents = events.slice(-200);
+  return {
+    run: history.run,
+    approvals: history.approvals,
+    events: presentationEvents,
+    eventCursor: events.at(-1)?.sequence ?? 0,
+    eventCount: events.length,
+    actionEvents: presentationEvents.filter((event) => actionEventTypes.has(event.type)).slice(-2),
+  };
+}
 
 describe("workspace run presentation", () => {
   test.each(states)("maps %s to the truthful workspace phase %s", (state, phase) => {
@@ -78,7 +114,7 @@ describe("workspace run presentation", () => {
       updatedAt: "2026-07-20T12:00:00.000Z",
     };
 
-    const view = presentRun(run, project, { run, approvals: [], events: [] });
+    const view = presentRun(project, presentationSnapshot({ run, approvals: [], events: [] }));
     const serialized = JSON.stringify(view);
 
     expect(view).toMatchObject({
@@ -112,88 +148,165 @@ describe("workspace run presentation", () => {
         rationale: "Apply one exact replacement.",
       },
     };
-    const proposed = presentRun(withEdit, project, {
-      run: withEdit,
-      approvals: [],
-      events: [
-        {
-          sequence: 1,
-          runId: run.id,
-          type: "edit.intent_recorded",
-          payload: {},
-          createdAt: run.createdAt,
-        },
-      ],
-    });
+    const proposed = presentRun(
+      project,
+      presentationSnapshot({
+        run: withEdit,
+        approvals: [],
+        events: [
+          {
+            sequence: 1,
+            runId: run.id,
+            type: "edit.intent_recorded",
+            payload: {},
+            createdAt: run.createdAt,
+          },
+        ],
+      }),
+    );
     expect(proposed).toMatchObject({
       action: { status: "proposed", path: run.target, allowed: false },
     });
-    const materialized = presentRun(withEdit, project, {
-      run: withEdit,
-      approvals: [],
-      events: [
-        {
-          sequence: 1,
-          runId: run.id,
-          type: "edit.intent_recorded",
-          payload: {},
-          createdAt: run.createdAt,
-        },
-        {
-          sequence: 2,
-          runId: run.id,
-          type: "edit.materialized",
-          payload: {},
-          createdAt: run.updatedAt,
-        },
-      ],
-    });
+    const materialized = presentRun(
+      project,
+      presentationSnapshot({
+        run: withEdit,
+        approvals: [],
+        events: [
+          {
+            sequence: 1,
+            runId: run.id,
+            type: "edit.intent_recorded",
+            payload: {},
+            createdAt: run.createdAt,
+          },
+          {
+            sequence: 2,
+            runId: run.id,
+            type: "edit.materialized",
+            payload: {},
+            createdAt: run.updatedAt,
+          },
+        ],
+      }),
+    );
     expect(materialized).toMatchObject({ action: { status: "materialized" } });
-    const cancelledBeforeMaterialization = presentRun(withEdit, project, {
-      run: withEdit,
-      approvals: [],
-      events: [
-        {
-          sequence: 1,
-          runId: run.id,
-          type: "edit.intent_recorded",
-          payload: {},
-          createdAt: run.createdAt,
-        },
-        {
-          sequence: 2,
-          runId: run.id,
-          type: "cancellation.completed",
-          payload: {},
-          createdAt: run.updatedAt,
-        },
-      ],
-    });
+    const cancelledBeforeMaterialization = presentRun(
+      project,
+      presentationSnapshot({
+        run: withEdit,
+        approvals: [],
+        events: [
+          {
+            sequence: 1,
+            runId: run.id,
+            type: "edit.intent_recorded",
+            payload: {},
+            createdAt: run.createdAt,
+          },
+          {
+            sequence: 2,
+            runId: run.id,
+            type: "cancellation.completed",
+            payload: {},
+            createdAt: run.updatedAt,
+          },
+        ],
+      }),
+    );
     expect(cancelledBeforeMaterialization).toMatchObject({
       action: { status: "cancelled" },
     });
-    const revertedAfterMaterialization = presentRun(withEdit, project, {
-      run: withEdit,
-      approvals: [],
-      events: [
-        {
-          sequence: 1,
-          runId: run.id,
-          type: "edit.materialized",
-          payload: {},
-          createdAt: run.createdAt,
-        },
-        {
-          sequence: 2,
-          runId: run.id,
-          type: "cancellation.completed",
-          payload: {},
-          createdAt: run.updatedAt,
-        },
-      ],
-    });
+    const revertedAfterMaterialization = presentRun(
+      project,
+      presentationSnapshot({
+        run: withEdit,
+        approvals: [],
+        events: [
+          {
+            sequence: 1,
+            runId: run.id,
+            type: "edit.materialized",
+            payload: {},
+            createdAt: run.createdAt,
+          },
+          {
+            sequence: 2,
+            runId: run.id,
+            type: "cancellation.completed",
+            payload: {},
+            createdAt: run.updatedAt,
+          },
+        ],
+      }),
+    );
     expect(revertedAfterMaterialization).toMatchObject({
       action: { status: "reverted" },
     });
+
+    const truncatedActionEvents = Array.from({ length: 206 }, (_, index) => ({
+      sequence: index + 1,
+      runId: run.id,
+      type:
+        index === 1
+          ? "edit.materialized"
+          : index === 205
+            ? "cancellation.completed"
+            : "operation.finished",
+      payload: {},
+      createdAt: run.updatedAt,
+    }));
+    const unknownAfterTruncatedMaterialization = presentRun(
+      project,
+      presentationSnapshot({ run: withEdit, approvals: [], events: truncatedActionEvents }),
+    );
+    expect(unknownAfterTruncatedMaterialization).toMatchObject({
+      action: { status: "unknown" },
+    });
+    expect(unknownAfterTruncatedMaterialization.warnings).toContain(
+      "Action status predates the bounded browser timeline; use the CLI for complete history.",
+    );
+
+    const events = Array.from({ length: 205 }, (_, index) => ({
+      sequence: index + 1,
+      runId: run.id,
+      type: index === 0 ? "context.assembled" : "operation.started",
+      payload: { privatePath: "/private/state/sentinel", diff: "+private diff" },
+      createdAt: run.createdAt,
+    }));
+    const capped = presentRun(project, presentationSnapshot({ run, approvals: [], events }));
+    expect(capped).toMatchObject({
+      eventCursor: 205,
+      timelineTotal: 205,
+      timelineTruncated: true,
+    });
+    expect(capped.timeline).toHaveLength(200);
+    expect((capped.timeline as Array<{ sequence: number }>)[0]?.sequence).toBe(6);
+
+    const eventPage = presentRunEventPage({
+      runId: run.id,
+      revision: 205,
+      nextAfter: 2,
+      hasMore: true,
+      events: events.slice(0, 2),
+    });
+    expect(eventPage).toMatchObject({
+      runId: run.id,
+      revision: 205,
+      nextAfter: 2,
+      hasMore: true,
+    });
+    expect((eventPage.events as Array<Record<string, unknown>>)[0]).toEqual({
+      sequence: 1,
+      type: "context.assembled",
+      label: "context assembled",
+      evidenceSection: "context",
+      timestamp: run.createdAt,
+    });
+    const serializedEventPage = JSON.stringify(eventPage);
+    expect(serializedEventPage).not.toContain("payload");
+    expect(serializedEventPage).not.toContain("createdAt");
+    expect(serializedEventPage).not.toContain("/private/state/sentinel");
+    expect(serializedEventPage).not.toContain("+private diff");
   });
 });

@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, type Stats } from "node:fs";
 import { lstat, mkdir, open, readdir, realpath, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { TextDecoder } from "node:util";
 
 import { IcarusError, invariant } from "./errors.js";
 import { assertRepositoryRelativePath } from "./policy.js";
-import { runControllerProcess } from "./process.js";
+import { runControllerProcess, type ControllerProcessResult } from "./process.js";
 
 const GIT_OUTPUT_LIMIT = 8 * 1024 * 1024;
+const GIT_CONFIG_NAME_OUTPUT_LIMIT = 64 * 1024;
 
 function nullDevice(): string {
   return process.platform === "win32" ? "NUL" : "/dev/null";
@@ -28,6 +29,18 @@ export interface RepositoryInspection {
   readonly head: string;
 }
 
+export interface RepositoryIdentity {
+  readonly canonicalPath: string;
+  readonly device: number;
+  readonly inode: number;
+}
+
+export interface RepositoryStatusInspection extends RepositoryInspection {
+  readonly branch: string | null;
+  readonly clean: boolean;
+  readonly baseCommit: string | null;
+}
+
 export interface PrivateWorkspace {
   readonly cachePath: string;
   readonly worktreePath: string;
@@ -41,7 +54,10 @@ function gitEnvironment(home: string): Record<string, string> {
     LC_ALL: "C.UTF-8",
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_GLOBAL: nullDevice(),
+    GIT_ALLOW_PROTOCOL: "file",
     GIT_TERMINAL_PROMPT: "0",
+    GIT_NO_LAZY_FETCH: "1",
+    GIT_PROTOCOL_FROM_USER: "0",
     GIT_ASKPASS: process.platform === "win32" ? process.execPath : "/bin/false",
     GIT_SSH_COMMAND:
       process.platform === "win32" ? `"${process.execPath.replaceAll('"', '\\"')}"` : "false",
@@ -50,42 +66,102 @@ function gitEnvironment(home: string): Record<string, string> {
   };
 }
 
+const UNSAFE_REPOSITORY_CONFIG_PATTERN =
+  "^(filter\\..*\\.(clean|smudge|process)|core\\.alternaterefscommand|hook\\..*\\.command)$";
+
 export class GitController {
   readonly #controlHome: string;
   readonly #managedRunsRoot: string;
+  readonly #gitExecutable: string;
 
-  constructor(controlHome: string, managedRunsRoot = path.join(path.dirname(controlHome), "runs")) {
+  constructor(
+    controlHome: string,
+    managedRunsRoot = path.join(path.dirname(controlHome), "runs"),
+    gitExecutable = "git",
+  ) {
     this.#controlHome = path.resolve(controlHome);
     this.#managedRunsRoot = path.resolve(managedRunsRoot);
+    this.#gitExecutable = gitExecutable;
   }
 
-  async #run(cwd: string, args: readonly string[], signal?: AbortSignal): Promise<string> {
+  async #execute(
+    cwd: string,
+    args: readonly string[],
+    signal: AbortSignal | undefined,
+    maxOutputBytes = GIT_OUTPUT_LIMIT,
+  ): Promise<ControllerProcessResult> {
     const guardedArgs = [
       "-c",
       "core.fsmonitor=false",
       "-c",
       `core.hooksPath=${nullDevice()}`,
       "-c",
+      "hook.post-checkout.enabled=false",
+      "-c",
       "credential.helper=",
+      "-c",
+      "protocol.allow=never",
+      "-c",
+      "protocol.file.allow=always",
       "-c",
       "protocol.ext.allow=never",
       ...args,
     ];
-    const result = await runControllerProcess("git", guardedArgs, {
-      cwd,
-      env: gitEnvironment(this.#controlHome),
-      timeoutMs: 60_000,
-      maxOutputBytes: GIT_OUTPUT_LIMIT,
-      maxRawOutputBytes: GIT_OUTPUT_LIMIT,
-      signal,
-    });
-    if (result.exitCode !== 0 || result.rawLimitExceeded || result.truncated) {
-      throw new IcarusError("GIT_FAILED", `Git command failed: ${result.stderr || result.stdout}`, {
+    try {
+      return await runControllerProcess(this.#gitExecutable, guardedArgs, {
+        cwd,
+        env: gitEnvironment(this.#controlHome),
+        timeoutMs: 60_000,
+        maxOutputBytes,
+        maxRawOutputBytes: maxOutputBytes,
+        signal,
+      });
+    } catch (error) {
+      if (error instanceof IcarusError && error.code === "CANCELLED") {
+        throw error;
+      }
+      throw new IcarusError("GIT_FAILED", "Git operation failed", {
+        operation: args[0] ?? "unknown",
+        reason: "spawn",
+      });
+    }
+  }
+
+  #assertAccepted(
+    result: ControllerProcessResult,
+    args: readonly string[],
+    acceptedExitCodes: readonly number[],
+  ): void {
+    if (
+      result.exitCode === null ||
+      !acceptedExitCodes.includes(result.exitCode) ||
+      result.cancelled ||
+      result.timedOut ||
+      result.rawLimitExceeded ||
+      result.truncated
+    ) {
+      const reason = result.cancelled
+        ? "cancelled"
+        : result.timedOut
+          ? "timeout"
+          : result.rawLimitExceeded || result.truncated
+            ? "output_limit"
+            : "exit";
+      throw new IcarusError("GIT_FAILED", "Git operation failed", {
         exitCode: result.exitCode,
         signal: result.signal,
         operation: args[0] ?? "unknown",
+        reason,
       });
     }
+  }
+
+  #output(
+    result: ControllerProcessResult,
+    args: readonly string[],
+    acceptedExitCodes: readonly number[],
+  ): string {
+    this.#assertAccepted(result, args, acceptedExitCodes);
     try {
       return new TextDecoder("utf-8", { fatal: true }).decode(result.stdoutBytes);
     } catch {
@@ -93,62 +169,209 @@ export class GitController {
     }
   }
 
+  async #run(cwd: string, args: readonly string[], signal?: AbortSignal): Promise<string> {
+    return this.#output(await this.#execute(cwd, args, signal), args, [0]);
+  }
+
+  async #runAllowingNoMatch(
+    cwd: string,
+    args: readonly string[],
+    signal?: AbortSignal,
+    maxOutputBytes = GIT_OUTPUT_LIMIT,
+  ): Promise<0 | 1> {
+    const result = await this.#execute(cwd, args, signal, maxOutputBytes);
+    this.#assertAccepted(result, args, [0, 1]);
+    invariant(result.exitCode === 0 || result.exitCode === 1, "GIT_FAILED", "Git operation failed");
+    return result.exitCode;
+  }
+
+  async #assertNoUnsafeRepositoryConfiguration(
+    repositoryPath: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const exitCode = await this.#runAllowingNoMatch(
+      repositoryPath,
+      ["config", "--includes", "--name-only", "--get-regexp", UNSAFE_REPOSITORY_CONFIG_PATTERN],
+      signal,
+      GIT_CONFIG_NAME_OUTPUT_LIMIT,
+    );
+    if (exitCode === 0) {
+      throw new IcarusError(
+        "GIT_UNSAFE_CONFIGURATION",
+        "Repository Git configuration is not safe to inspect",
+      );
+    }
+  }
+
   async inspectRepository(
     repositoryPath: string,
     signal?: AbortSignal,
   ): Promise<RepositoryInspection> {
-    const { canonicalPath, repositoryStat } = await (async () => {
-      try {
-        const resolved = await realpath(repositoryPath);
-        return { canonicalPath: resolved, repositoryStat: await stat(resolved) };
-      } catch {
-        throw new IcarusError(
-          "INVALID_REPOSITORY",
-          "Repository path could not be inspected as a local directory",
-        );
-      }
-    })();
+    const inspection = await this.#inspectRepositoryState(repositoryPath, null, null, signal);
+    invariant(inspection.clean, "DIRTY_REPOSITORY", "Milestone 1 requires a clean repository");
+    return {
+      canonicalPath: inspection.canonicalPath,
+      device: inspection.device,
+      inode: inspection.inode,
+      head: inspection.head,
+    };
+  }
+
+  async inspectRepositoryStatus(
+    repositoryPath: string,
+    baseRef: string,
+    expectedIdentity: RepositoryIdentity,
+    signal?: AbortSignal,
+  ): Promise<RepositoryStatusInspection> {
+    return this.#inspectRepositoryState(repositoryPath, baseRef, expectedIdentity, signal);
+  }
+
+  async #repositoryIdentity(repositoryPath: string): Promise<RepositoryIdentity> {
+    let canonicalPath: string;
+    let repositoryStat: Stats;
+    try {
+      canonicalPath = await realpath(repositoryPath);
+      repositoryStat = await stat(canonicalPath);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      throw new IcarusError(
+        "INVALID_REPOSITORY",
+        "Repository path could not be inspected as a local directory",
+        { reason: code === "ENOENT" || code === "ENOTDIR" ? "missing" : "unavailable" },
+      );
+    }
     invariant(
       repositoryStat.isDirectory(),
       "INVALID_REPOSITORY",
       "Repository path is not a directory",
     );
 
-    const topLevel = (
-      await this.#run(canonicalPath, ["rev-parse", "--show-toplevel"], signal)
-    ).trim();
-    invariant(
-      (await realpath(topLevel)) === canonicalPath,
-      "INVALID_REPOSITORY",
-      "Register the repository root, not a nested directory",
-    );
-    const bare = (
-      await this.#run(canonicalPath, ["rev-parse", "--is-bare-repository"], signal)
-    ).trim();
-    invariant(bare === "false", "INVALID_REPOSITORY", "Bare repositories cannot be registered");
-    const statusOutput = await this.#run(
-      canonicalPath,
-      ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=all"],
-      signal,
-    );
-    invariant(
-      statusOutput.length === 0,
-      "DIRTY_REPOSITORY",
-      "Milestone 1 requires a clean repository",
-    );
-    const head = (await this.#run(canonicalPath, ["rev-parse", "HEAD^{commit}"], signal)).trim();
-    invariant(
-      /^[a-f0-9]{40,64}$/.test(head),
-      "INVALID_REPOSITORY",
-      "Repository has no valid HEAD commit",
-    );
-
     return {
       canonicalPath,
       device: repositoryStat.dev,
       inode: repositoryStat.ino,
-      head,
     };
+  }
+
+  #assertRepositoryIdentity(actual: RepositoryIdentity, expected: RepositoryIdentity): void {
+    invariant(
+      actual.canonicalPath === expected.canonicalPath &&
+        actual.device === expected.device &&
+        actual.inode === expected.inode,
+      "REPOSITORY_IDENTITY_CHANGED",
+      "Registered repository identity changed",
+    );
+  }
+
+  async #inspectRepositoryState(
+    repositoryPath: string,
+    baseRef: string | null,
+    expectedIdentity: RepositoryIdentity | null,
+    signal?: AbortSignal,
+  ): Promise<RepositoryStatusInspection> {
+    const before = await this.#repositoryIdentity(repositoryPath);
+    if (expectedIdentity !== null) {
+      this.#assertRepositoryIdentity(before, expectedIdentity);
+    }
+
+    const outcome = await (async (): Promise<RepositoryStatusInspection> => {
+      const topLevel = (
+        await this.#run(before.canonicalPath, ["rev-parse", "--show-toplevel"], signal)
+      ).trim();
+      invariant(
+        (await realpath(topLevel)) === before.canonicalPath,
+        "INVALID_REPOSITORY",
+        "Register the repository root, not a nested directory",
+      );
+      const bare = (
+        await this.#run(before.canonicalPath, ["rev-parse", "--is-bare-repository"], signal)
+      ).trim();
+      invariant(bare === "false", "INVALID_REPOSITORY", "Bare repositories cannot be registered");
+      await this.#assertNoUnsafeRepositoryConfiguration(before.canonicalPath, signal);
+      const statusOutput = await this.#run(
+        before.canonicalPath,
+        [
+          "status",
+          "--porcelain=v1",
+          "-z",
+          "--untracked-files=all",
+          "--ignore-submodules=all",
+          "--no-renames",
+        ],
+        signal,
+      );
+      const head = (
+        await this.#run(before.canonicalPath, ["rev-parse", "HEAD^{commit}"], signal)
+      ).trim();
+      invariant(
+        /^[a-f0-9]{40,64}$/.test(head),
+        "INVALID_REPOSITORY",
+        "Repository has no valid HEAD commit",
+      );
+      const branchText = (
+        await this.#run(before.canonicalPath, ["rev-parse", "--abbrev-ref", "HEAD"], signal)
+      ).trim();
+      invariant(
+        branchText.length > 0 && Buffer.byteLength(branchText, "utf8") <= 1_024,
+        "GIT_OUTPUT_INVALID",
+        "Git returned an invalid branch name",
+      );
+
+      let baseCommit: string | null = null;
+      if (baseRef !== null) {
+        invariant(
+          baseRef.length > 0 && !baseRef.startsWith("-"),
+          "INVALID_REF",
+          "Base ref is invalid",
+        );
+        const existenceExitCode = await this.#runAllowingNoMatch(
+          before.canonicalPath,
+          ["rev-parse", "--verify", "--quiet", baseRef],
+          signal,
+        );
+        if (existenceExitCode === 0) {
+          const resolved = (
+            await this.#run(
+              before.canonicalPath,
+              ["rev-parse", "--verify", "--quiet", `${baseRef}^{commit}`],
+              signal,
+            )
+          ).trim();
+          invariant(
+            /^[a-f0-9]{40,64}$/.test(resolved),
+            "GIT_OUTPUT_INVALID",
+            "Git returned an invalid base commit",
+          );
+          baseCommit = resolved;
+        }
+      }
+
+      return {
+        canonicalPath: before.canonicalPath,
+        device: before.device,
+        inode: before.inode,
+        head,
+        branch: branchText === "HEAD" ? null : branchText,
+        clean: statusOutput.length === 0,
+        baseCommit,
+      };
+    })().then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    let after: RepositoryIdentity;
+    try {
+      after = await this.#repositoryIdentity(repositoryPath);
+    } catch {
+      throw new IcarusError(
+        "REPOSITORY_IDENTITY_CHANGED",
+        "Registered repository identity changed during inspection",
+      );
+    }
+    this.#assertRepositoryIdentity(after, expectedIdentity ?? before);
+    if (!outcome.ok) throw outcome.error;
+    return outcome.value;
   }
 
   async resolveCommit(repositoryPath: string, ref: string, signal?: AbortSignal): Promise<string> {
@@ -241,17 +464,9 @@ export class GitController {
       "Git object size is invalid",
     );
     invariant(size <= maxBytes, "FILE_BUDGET_EXCEEDED", "Git object exceeds the read ceiling");
-    const result = await runControllerProcess("git", ["cat-file", "blob", objectId], {
-      cwd: repositoryPath,
-      env: gitEnvironment(this.#controlHome),
-      timeoutMs: 60_000,
-      maxOutputBytes: maxBytes,
-      maxRawOutputBytes: maxBytes,
-      signal,
-    });
-    if (result.exitCode !== 0 || result.truncated || result.rawLimitExceeded) {
-      throw new IcarusError("GIT_FAILED", "Unable to read bounded Git object");
-    }
+    const args = ["cat-file", "blob", objectId] as const;
+    const result = await this.#execute(repositoryPath, args, signal, maxBytes);
+    this.#assertAccepted(result, args, [0]);
     return Buffer.from(result.stdoutBytes);
   }
 
@@ -342,9 +557,10 @@ export class GitController {
         const actualHead = (
           await this.#run(worktreePath, ["rev-parse", "HEAD^{commit}"], signal)
         ).trim();
+        await this.#assertNoUnsafeRepositoryConfiguration(worktreePath, signal);
         const statusOutput = await this.#run(
           worktreePath,
-          ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+          ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"],
           signal,
         );
         invariant(
@@ -359,6 +575,7 @@ export class GitController {
     const existingEntries = runRootCreated ? [] : await readdir(resolvedRunRoot);
     if (!existingEntries.includes("git-cache.git")) {
       const stagingCache = path.join(resolvedRunRoot, `.git-cache-${randomUUID()}.tmp`);
+      await this.#assertNoUnsafeRepositoryConfiguration(sourceRepository, signal);
       await this.#run(
         this.#controlHome,
         [
@@ -406,6 +623,7 @@ export class GitController {
     );
     const currentEntries = await readdir(resolvedRunRoot);
     if (!currentEntries.includes("worktree")) {
+      await this.#assertNoUnsafeRepositoryConfiguration(cachePath, signal);
       await this.#run(
         this.#controlHome,
         ["--git-dir", cachePath, "worktree", "add", "--detach", worktreePath, commit],
@@ -429,7 +647,12 @@ export class GitController {
       await this.#run(worktreePath, ["rev-parse", "HEAD^{commit}"], signal)
     ).trim();
     invariant(actualHead === commit, "WORKTREE_MISMATCH", "Private worktree has the wrong commit");
-    const statusOutput = await this.#run(worktreePath, ["status", "--porcelain=v1", "-z"], signal);
+    await this.#assertNoUnsafeRepositoryConfiguration(worktreePath, signal);
+    const statusOutput = await this.#run(
+      worktreePath,
+      ["status", "--porcelain=v1", "-z", "--no-renames"],
+      signal,
+    );
     invariant(statusOutput.length === 0, "WORKTREE_MISMATCH", "Private worktree is not clean");
     return { cachePath, worktreePath };
   }
@@ -585,9 +808,10 @@ export class GitController {
   }
 
   async changedPaths(worktreePath: string, signal?: AbortSignal): Promise<string[]> {
+    await this.#assertNoUnsafeRepositoryConfiguration(worktreePath, signal);
     const output = await this.#run(
       worktreePath,
-      ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+      ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"],
       signal,
     );
     const entries = output.split("\0").filter((entry) => entry.length > 0);
@@ -600,9 +824,10 @@ export class GitController {
     maxBytes: number,
     signal?: AbortSignal,
   ): Promise<string> {
+    await this.#assertNoUnsafeRepositoryConfiguration(worktreePath, signal);
     const output = await this.#run(
       worktreePath,
-      ["diff", "--binary", "--no-ext-diff", "--no-textconv", "--", target],
+      ["diff", "--binary", "--no-ext-diff", "--no-textconv", "--no-renames", "--", target],
       signal,
     );
     invariant(

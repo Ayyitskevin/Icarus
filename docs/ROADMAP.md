@@ -34,8 +34,9 @@ evals, context budget allocation, and retrieval-quality fixtures.
 
 ## M3 — Workspace UI
 
-Status: first bounded vertical slice accepted on the final working tree
-(2026-07-20); full M3 remains open.
+Status: first bounded vertical slice accepted on the final working tree; the
+second bounded observation slice is implemented and its local gate passed
+(2026-07-20), with exact-head hosted CI still pending; full M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
@@ -64,13 +65,28 @@ Native macOS and Windows host acceptance remains to be recorded; the current
 branch exercises its platform-policy paths under the Linux test host. A registry
 dependency audit is also intentionally outside this no-network local slice.
 
-The next M3 feature slice is read-only repository status plus live event and
-evidence navigation. Later M3 scope includes richer run timelines, file and diff
-views, checkpoints, prompt history, a small task board, token/cost telemetry,
-server-held provider profiles, and deliberately designed approval/recovery
-controls. Patch materialization is not the next slice. Any browser execution
-path needs a separate safety contract and evidence; provider keys remain
-server-side.
+ADR 0015 implements project-scoped, sanitized, nonpersistent repository
+observation and selected-run live event metadata.
+Repository availability, worktree, HEAD, branch, and configured-base relation
+remain independent; missing or unresolved state never appears clean. Dirty
+filenames/counts, file content, raw Git output, and event payloads are omitted.
+Event pages have a fixed service-owned bound and exclusive sequence cursor, and
+each separate full run response reads its run row, approvals, and timeline from
+one coherent SQLite snapshot. Foreground selected-run short polling pauses with
+document visibility, aborts on selection or unmount, backs off within fixed
+bounds, and rejects stale responses. It accepts a full response only when its
+event cursor is at least the newest observed event revision. Evidence links use
+only fixed host-generated anchors. A truncated action history that cannot
+re-establish its prerequisite is shown as `unknown`, never guessed from an
+incomplete suffix.
+
+The slice adds no SSE, WebSocket, watcher, schema migration, runtime dependency,
+or browser authority. Later M3 scope includes richer run timelines and
+file/status, diff, and history navigation, checkpoints, prompt history, a small
+task board, token/cost telemetry, server-held provider profiles, and deliberately
+designed approval/recovery controls. Patch materialization is not the next slice.
+Any browser execution path needs a separate safety contract and evidence;
+provider keys remain server-side.
 
 ## M4 — Runtime and previews
 
@@ -118,7 +134,9 @@ remain human-gated and outside automatic dogfood.
 
 ## Next recommended slice
 
-Preserve the ADR 0010 security hold and implement only the next bounded feature
-slice: read-only repository status plus live event and evidence navigation.
-Keep patch materialization, browser approval, and execution out of that slice;
-each authority expansion needs its own contract and evidence.
+Preserve the ADR 0010 security hold. After exact-head acceptance of ADR 0015,
+write a separate decision and safety contract for the next bounded read-only M3
+navigation slice before implementing it. Richer file/status, diff, and history
+views are candidates; patch materialization, browser approval, and execution are
+separate authority expansions and remain out of scope until explicitly designed
+and evidenced.

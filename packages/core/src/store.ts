@@ -14,13 +14,13 @@ import {
   planApprovalDigest,
 } from "./policy.js";
 import { assertTransition } from "./state-machine.js";
-import { CONTEXT_AUDIT_POLICY_VERSION } from "./types.js";
 import type {
   ApprovalRecord,
   CheckProfile,
   ContextManifest,
   EditProposal,
   EventRecord,
+  EventSummaryRecord,
   JsonValue,
   OperationFinish,
   OperationToken,
@@ -28,18 +28,32 @@ import type {
   ProjectRecord,
   ProviderConfig,
   RepositoryRecord,
+  RunEventPage,
+  RunHistory,
+  RunPresentationSnapshot,
   RunRecord,
   RunState,
   SandboxProfile,
   SunCeiling,
   VerificationEvidence,
 } from "./types.js";
+import { CONTEXT_AUDIT_POLICY_VERSION } from "./types.js";
 
 type Row = Record<string, unknown>;
 
 export const CANCELLATION_RECOVERY_OPERATION_KIND = "cancellation.recovery";
 export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
+export const RUN_EVENT_PAGE_LIMIT = 64;
+export const RUN_PRESENTATION_EVENT_LIMIT = 200;
+const RUN_PRESENTATION_ACTION_EVENT_LIMIT = 2;
+const RUN_PRESENTATION_ACTION_EVENT_TYPES = [
+  "edit.materialized",
+  "restore.completed",
+  "rollback.completed",
+  "cancellation.completed",
+  "review.accepted",
+] as const;
 
 function isSqliteBusy(error: unknown): boolean {
   return (
@@ -381,10 +395,9 @@ export class IcarusStore {
   }
 
   getProject(id: string): ProjectRecord {
-    const value = row(
-      this.#database.prepare("SELECT * FROM projects WHERE id = ?").get(id),
-      "project",
-    );
+    const result = this.#database.prepare("SELECT * FROM projects WHERE id = ?").get(id);
+    invariant(result !== undefined, "NOT_FOUND", "Project was not found");
+    const value = row(result, "project");
     const checks = parseJson<CheckProfile[]>(value.checks_json, "project.checks_json");
     const sandbox = parseJson<SandboxProfile>(value.sandbox_json, "project.sandbox_json");
     const ceiling = parseJson<SunCeiling>(value.ceiling_json, "project.ceiling_json");
@@ -550,7 +563,9 @@ export class IcarusStore {
   }
 
   getRun(id: string): RunRecord {
-    const value = row(this.#database.prepare("SELECT * FROM runs WHERE id = ?").get(id), "run");
+    const result = this.#database.prepare("SELECT * FROM runs WHERE id = ?").get(id);
+    invariant(result !== undefined, "NOT_FOUND", "Run was not found");
+    const value = row(result, "run");
     const errorCode = nullableText(value.error_code, "run.error_code");
     const errorMessage = nullableText(value.error_message, "run.error_message");
     return {
@@ -1472,6 +1487,152 @@ export class IcarusStore {
         createdAt: text(value.created_at, "event.created_at"),
       };
     });
+  }
+
+  getRunHistory(runId: string): RunHistory {
+    const transaction = this.#database.transaction(() => ({
+      run: this.getRun(runId),
+      approvals: this.listApprovals(runId),
+      events: this.listEvents(runId),
+    }));
+    return transaction();
+  }
+
+  getRunPresentationSnapshot(runId: string): RunPresentationSnapshot {
+    const summary = (entry: unknown, name: string): EventSummaryRecord => {
+      const value = row(entry, name);
+      const event = {
+        sequence: numberValue(value.sequence, "event.sequence"),
+        runId: text(value.run_id, "event.run_id"),
+        type: text(value.type, "event.type"),
+        createdAt: text(value.created_at, "event.created_at"),
+      };
+      invariant(
+        Number.isSafeInteger(event.sequence) && event.sequence > 0 && event.runId === runId,
+        "DATABASE_ERROR",
+        "Event summary is invalid",
+      );
+      return event;
+    };
+    const transaction = this.#database.transaction((): RunPresentationSnapshot => {
+      const run = this.getRun(runId);
+      const approvals = this.listApprovals(runId);
+      const aggregate = row(
+        this.#database
+          .prepare(
+            `SELECT COALESCE(MAX(sequence), 0) AS event_cursor
+             FROM run_events WHERE run_id = ?`,
+          )
+          .get(runId),
+        "event aggregate",
+      );
+      const eventCursor = numberValue(aggregate.event_cursor, "event.event_cursor");
+      invariant(
+        Number.isSafeInteger(eventCursor) && eventCursor >= 0,
+        "DATABASE_ERROR",
+        "Event aggregate is invalid",
+      );
+      // Per-run sequences are allocated append-only as MAX(sequence) + 1 and begin at 1,
+      // so the high-water mark is also the total. Avoid a history-sized COUNT on every poll.
+      const eventCount = eventCursor;
+      const events = (
+        this.#database
+          .prepare(
+            `SELECT sequence, run_id, type, created_at
+             FROM run_events WHERE run_id = ?
+             ORDER BY sequence DESC LIMIT ?`,
+          )
+          .all(runId, RUN_PRESENTATION_EVENT_LIMIT) as unknown[]
+      )
+        .map((entry) => summary(entry, "presentation event"))
+        .reverse();
+      const firstExpectedSequence = eventCursor - events.length + 1;
+      invariant(
+        events.every((event, index) => event.sequence === firstExpectedSequence + index),
+        "DATABASE_ERROR",
+        "Presentation event sequence is not contiguous",
+      );
+      // Derive action state from the already bounded presentation tail. A separate
+      // type-filtered query can walk an arbitrarily old per-run history when action
+      // events are absent or sparse because the sequence index cannot satisfy both
+      // the type predicate and LIMIT.
+      const actionEvents = events
+        .filter((event) =>
+          RUN_PRESENTATION_ACTION_EVENT_TYPES.includes(
+            event.type as (typeof RUN_PRESENTATION_ACTION_EVENT_TYPES)[number],
+          ),
+        )
+        .slice(-RUN_PRESENTATION_ACTION_EVENT_LIMIT);
+      return { run, approvals, events, eventCursor, eventCount, actionEvents };
+    });
+    return transaction();
+  }
+
+  listEventPage(runId: string, after: number): RunEventPage {
+    invariant(
+      Number.isSafeInteger(after) && after >= 0,
+      "INVALID_EVENT_CURSOR",
+      "Event cursor must be a nonnegative safe integer",
+    );
+    const transaction = this.#database.transaction(() => {
+      const exists = this.#database.prepare("SELECT 1 FROM runs WHERE id = ?").get(runId);
+      invariant(exists !== undefined, "NOT_FOUND", "Run was not found");
+      const revision = numberValue(
+        row(
+          this.#database
+            .prepare(
+              "SELECT COALESCE(MAX(sequence), 0) AS revision FROM run_events WHERE run_id = ?",
+            )
+            .get(runId),
+          "event revision",
+        ).revision,
+        "event.revision",
+      );
+      invariant(
+        Number.isSafeInteger(revision) && revision >= 0,
+        "DATABASE_ERROR",
+        "Event revision is invalid",
+      );
+      invariant(
+        after <= revision,
+        "INVALID_EVENT_CURSOR",
+        "Event cursor is ahead of the persisted revision",
+      );
+      const rows = this.#database
+        .prepare(
+          `SELECT sequence, run_id, type, created_at
+           FROM run_events
+           WHERE run_id = ? AND sequence > ?
+           ORDER BY sequence
+           LIMIT ?`,
+        )
+        .all(runId, after, RUN_EVENT_PAGE_LIMIT + 1) as unknown[];
+      const summaries = rows.map((entry, index): EventSummaryRecord => {
+        const value = row(entry, "event summary");
+        const sequence = numberValue(value.sequence, "event.sequence");
+        invariant(
+          Number.isSafeInteger(sequence) && sequence === after + index + 1,
+          "DATABASE_ERROR",
+          "Event sequence is not contiguous",
+        );
+        return {
+          sequence,
+          runId: text(value.run_id, "event.run_id"),
+          type: text(value.type, "event.type"),
+          createdAt: text(value.created_at, "event.created_at"),
+        };
+      });
+      const hasMore = summaries.length > RUN_EVENT_PAGE_LIMIT;
+      const events = summaries.slice(0, RUN_EVENT_PAGE_LIMIT);
+      return {
+        runId,
+        revision,
+        nextAfter: events.at(-1)?.sequence ?? after,
+        hasMore,
+        events,
+      };
+    });
+    return transaction();
   }
 
   #appendEvent(runId: string, type: string, payload: unknown): void {
