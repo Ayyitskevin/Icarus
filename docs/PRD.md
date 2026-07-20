@@ -237,10 +237,11 @@ exist in Milestone 1:
   file-and-line provenance, and measured context-budget fixtures.
 - The first local-workspace slice exposes persisted projects, context metadata,
   task drafts, loopback planning, run state, and allowlisted evidence. The
-  accepted second-slice design adds only the bounded observation contract above.
-  Later M3 slices may add sessions, richer file/status, diff, and history
-  navigation, application previews, approvals, checkpoints, prompt history, and
-  token/cost telemetry without placing provider keys in a browser.
+  accepted second- and third-slice designs add only the bounded observation and
+  metadata-only older-activity contracts above. Later M3 slices may add sessions,
+  richer file/status, diff, and payload-bearing history navigation, application
+  previews, approvals, checkpoints, prompt history, and token/cost telemetry
+  without placing provider keys in a browser.
 - Application-factory templates may add an application starter, API layer,
   database, authentication, storage, realtime events, jobs, vector search,
   environment references, local preview, and deployment configuration only as
@@ -288,6 +289,16 @@ fields, nonpersistence and source isolation, fixed event bounds and cursors,
 payload omission, transaction-scoped full-run reads, the cross-request
 event-revision guard, foreground polling lifecycle, bounded backoff,
 stale-response guard, fixed evidence anchors, and unchanged browser authority.
-Exact-head hosted CI remains required before published acceptance. No separate
+Exact-head hosted CI passed before published acceptance. No separate
 cross-process WAL contention stress was added; coherence currently relies on the
 explicit better-sqlite3 read transaction plus bounded/corrupt-payload tests.
+
+The third M3 implementation has fresh local and real-browser evidence for its
+metadata-only reverse query, fixed 64-row pages, pinned revision, independent
+live/history cursors, four-page replacement window, explicit navigation,
+single-flight and lifecycle cancellation, late-success rejection, private
+payload omission, current-evidence anchors, focus behavior, source isolation,
+and zero logical SQLite writes during browsing. Exact implementation-head hosted
+CI passed at `e99067c4d21aa5991b9cc49b17a925c0b9b4529a`. The query-plan
+regression copies the production SQL literal exactly and therefore retains a
+low-severity maintenance drift risk.

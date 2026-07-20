@@ -291,8 +291,9 @@ or runtime dependency.
 This path is observation-only. It adds no Server-Sent Events, WebSocket,
 filesystem watcher, background process, approval, edit, check execution,
 arbitrary command, commit, push, deployment, or other browser authority. Richer
-file/status, diff, and history navigation remains deferred, and guarded actions
-must still revalidate authoritative repository state immediately before use.
+file/status, diff, and payload-bearing history navigation remains deferred, and
+guarded actions must still revalidate authoritative repository state immediately
+before use.
 
 Only the event-history portion of a full run response is fixed-size. Approval
 lists and workspace-wide run enumeration retain their existing unpaginated local
@@ -308,8 +309,8 @@ is disabled.
 
 ## Third M3 older-activity path
 
-ADR 0016 defines the next implementation step without adding another source of
-truth. A selected run may request one metadata page strictly before an exclusive
+ADR 0016 implements this accepted path without adding another source of truth. A
+selected run may request one metadata page strictly before an exclusive
 sequence and at or below a pinned event revision. SQLite validates the run,
 revision, and cursor in one read transaction, uses the unique
 `(run_id, sequence)` index in descending order with `LIMIT 65`, retains 64 rows,

@@ -1,76 +1,110 @@
 # Implementation plans
 
-## Current plan: third M3 bounded older-activity navigation
+## Most recently accepted plan: third M3 bounded older-activity navigation
 
-Status values are evidence claims. ADR 0016 is accepted on 2026-07-20; no
-implementation or acceptance is claimed until every item below has fresh
-evidence.
+Status values are evidence claims. The ADR 0016 implementation, fresh local
+acceptance, independent audit, and exact published implementation-head hosted CI
+passed on 2026-07-20. This accepts the third bounded M3 slice; it does not claim
+that full M3 is complete.
 
 ### Historical metadata contract
 
-- [ ] Add one selected-run reverse metadata endpoint with exactly one canonical
+- [x] Add one selected-run reverse metadata endpoint with exactly one canonical
       positive `before` cursor, one canonical positive pinned `snapshot`, and a
       fixed service-owned 64-event page
-- [ ] Use an index-backed descending `LIMIT 65` query over sequence, run ID,
+- [x] Use an index-backed descending `LIMIT 65` query over sequence, run ID,
       type, and timestamp only; never select or decode `payload_json`
-- [ ] Validate run existence, current high-water, pinned snapshot, exclusive
+- [x] Validate run existence, current high-water, pinned snapshot, exclusive
       cursor, contiguous sequences, bounded event type/timestamp, `nextBefore`,
       and `hasMore` in one coherent SQLite read transaction
-- [ ] Return only the existing host-label/fixed-anchor metadata projection and
+- [x] Return only the existing host-label/fixed-anchor metadata projection and
       keep historical and live cursors completely independent
 
 ### Explicit browser navigation
 
-- [ ] Open older activity only from an operator action when the coherent recent
+- [x] Open older activity only from an operator action when the coherent recent
       timeline is truncated; pin the first page to that run response's revision
-- [ ] Pause and abort live polling while the panel is open, then resume it
+- [x] Pause and abort live polling while the panel is open, then resume it
       immediately on close without advancing its cursor from historical pages
-- [ ] Permit one historical request, abort on hidden/close/selection/unmount,
+- [x] Permit one historical request, abort on hidden/close/selection/unmount,
       and reject late responses with exact run/cursor/snapshot generations
-- [ ] Replace rather than accumulate pages, allow at most four historical pages
+- [x] Replace rather than accumulate pages, allow at most four historical pages
       per panel session while retaining one 64-row page plus at most three
       newer-page cursors, and provide older/newer controls with CLI guidance
       beyond that window
-- [ ] Preserve the last successful page on failure, expose honest retry/busy/
+- [x] Preserve the last successful page on failure, expose honest retry/busy/
       partial states, and describe any evidence link as current—not historical
 
 ### Scope and safety
 
-- [ ] Add no schema/migration, dependency, write, event append, Git/source read,
+- [x] Add no schema/migration, dependency, write, event append, Git/source read,
       dirty-path/file-content disclosure, diff/check/event payload presentation,
       stream, watcher, daemon, or browser action authority
-- [ ] Preserve loopback Host/Origin, same-origin/CSP, fixed presenter, React-text,
+- [x] Preserve loopback Host/Origin, same-origin/CSP, fixed presenter, React-text,
       guarded CLI, source-isolation, portability, and ADR 0010 boundaries
-- [ ] Leave workspace-wide run and approval pagination, file/status views, richer
+- [x] Leave workspace-wide run and approval pagination, file/status views, richer
       diff/history payloads, patch materialization, browser approval, and
       execution explicitly deferred
 
 ### Acceptance coverage and commands
 
-- [ ] Store/API tests cover more than 200 events, reverse page boundaries,
+- [x] Store/API tests cover more than 200 events, reverse page boundaries,
       reopen stability, invalid cursors/snapshots, gaps, index use, corrupt and
       private payload non-disclosure, zero writes, and negative action routes
-- [ ] Pure client tests cover page replacement, four-page depth, older/newer,
+- [x] Pure client tests cover page replacement, four-page depth, older/newer,
       mismatched run/cursor/snapshot, noncontiguous data, and stale responses
-- [ ] Real-browser acceptance covers explicit load-older navigation, fixed
+- [x] Real-browser acceptance covers explicit load-older navigation, fixed
       current-evidence anchors, failure/retry, no overlap, live pause/resume,
       hidden/selection/unmount cancellation, and preserved newer selection
-- [ ] Source and SQLite evidence proves browsing changes no checkout or durable
+- [x] Source and SQLite evidence proves browsing changes no checkout or durable
       state
-- [ ] `pnpm format:check`
-- [ ] `pnpm lint`
-- [ ] `pnpm typecheck`
-- [ ] `pnpm test`
-- [ ] `pnpm test:integration`
-- [ ] `pnpm security`
-- [ ] `pnpm build`
-- [ ] `pnpm check`
-- [ ] `pnpm smoke:workspace`
-- [ ] `ICARUS_CHROMIUM_EXECUTABLE=/absolute/path/to/chromium pnpm smoke:workspace:browser`
-- [ ] `pnpm audit --audit-level high`
-- [ ] `pnpm audit --prod --audit-level high`
-- [ ] `git diff --check`
-- [ ] Hosted `ci` succeeds at the exact published implementation head
+- [x] `pnpm format:check`
+- [x] `pnpm lint`
+- [x] `pnpm typecheck`
+- [x] `pnpm test`
+- [x] `pnpm test:integration`
+- [x] `pnpm security`
+- [x] `pnpm build`
+- [x] `pnpm check`
+- [x] `pnpm smoke:workspace`
+- [x] `ICARUS_CHROMIUM_EXECUTABLE=/absolute/path/to/chromium pnpm smoke:workspace:browser`
+- [x] `pnpm audit --audit-level high`
+- [x] `pnpm audit --prod --audit-level high`
+- [x] `git diff --check`
+- [x] Hosted `ci` succeeds at the exact published implementation head
+
+Fresh local candidate evidence on 2026-07-20:
+
+- `pnpm check` exited 0: 122/122 unit/provider tests across 15 files and
+  37/37 integration tests across 8 files passed; evaluation reported 5 passed,
+  0 failed, and 5 explicitly unsupported; 109 security tests and 21 static
+  assertions passed; typecheck, formatting, lint, and the 19-module Vite build
+  completed successfully. Lint retained 26 inherited informational
+  `useTemplate` diagnostics and no errors.
+- Store/API regressions exercise more than 200 events, exact reverse boundaries,
+  reopen stability, malformed metadata and sequence gaps, index use, corrupt
+  private payloads, and zero logical writes. Pure client tests exercise
+  replacement, the four-page cursor window, older/newer navigation, exact
+  response identity, and stale-response rejection.
+- The real Brave smoke pinned revision 507, displayed first-page sequences
+  244–307, navigated and replaced four pages, retained the last page across an
+  injected failure, and followed the historical `#run-context` current-evidence
+  anchor. It proved active-live, hidden, close, and selection request
+  cancellation; contended single-flight controls; rejection of a delayed
+  cancellation-ignoring success; focus restoration; private-payload omission;
+  unchanged logical SQLite state; zero browser errors; zero blocked external
+  requests; and an unchanged source fingerprint.
+- `pnpm smoke:workspace`, both high-severity dependency audits, and
+  `git diff --check` exited 0. The dependency audits reported no known
+  vulnerabilities.
+- Independent backend, UI, safety, and final correctness audits approved the
+  implementation. The query-plan regression currently copies the production SQL
+  literal exactly; that low-severity maintenance drift risk remains documented
+  rather than introducing a one-use query abstraction.
+- Hosted `ci` run 29779180238 passed the deterministic release gate,
+  production dependency audit, and whitespace check in 1 minute 2 seconds at
+  exact published implementation commit
+  `e99067c4d21aa5991b9cc49b17a925c0b9b4529a`.
 
 ## Prior accepted plan: second M3 read-only observation slice
 
@@ -421,7 +455,7 @@ Final adversarial candidate local evidence on 2026-07-20:
 ## Deferred plan
 
 The inherited ADR 0010 security hold remains separate from local feature work.
-ADR 0016 selects only bounded older event metadata for the third M3 slice.
+ADR 0016 implements only bounded older event metadata for the third M3 slice.
 Workspace-wide run and approval pagination, file/status views, richer diff or
 payload-bearing history, patch materialization, browser approval, and execution
 remain later, explicitly reviewed expansions. See `docs/ROADMAP.md`.

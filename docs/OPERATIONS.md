@@ -156,13 +156,13 @@ evidence anchors, not repository, provider, event, or check text. Only event
 history has the fixed bound; existing approval lists and workspace-wide run
 enumeration remain unpaginated local reads.
 
-ADR 0016 is the next implementation contract. It adds an explicit selected-run
+The accepted ADR 0016 implementation adds an explicit selected-run
 older-activity panel pinned to the coherent run revision, backed by a direct
 reverse 64-row metadata page rather than a forward drain from sequence zero.
 While that panel is open, live polling pauses; the client replaces pages within a
 four-page cursor window and complete payload-bearing history remains available
-only through `run history`. Until ADR 0016 implementation evidence passes, use
-the CLI for events before the browser's recent tail.
+only through `run history`. Use the CLI for events outside that bounded browser
+window.
 
 No migration, dependency install, daemon, watcher, Server-Sent Events, or
 WebSocket setup accompanies these read-only slices. They add no browser approval,

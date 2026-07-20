@@ -83,7 +83,7 @@ remains unresolved.
 
 ## Third M3 older-activity threats
 
-| Threat | Required control | Required evidence and limits |
+| Threat | Current control | Evidence and limits |
 | --- | --- | --- |
 | Browsing older events drains history or creates unbounded server/client work | direct reverse exclusive cursor pinned to a revision; index-backed descending `LIMIT 65`; one retained 64-row page and four-page cursor window; no count or forward drain from sequence zero | query-plan and more-than-200-event tests prove fixed page boundaries, page replacement, bounded depth, and CLI guidance beyond the window |
 | Historical browsing leaks private payload paths, diffs, or check output | select only sequence/run ID/type/timestamp and reuse the fixed host-label/evidence-section presenter; never select or decode `payload_json` | corrupt and private payload fixtures succeed without payload bytes in store, API, or browser output; complete payload history remains CLI-only |

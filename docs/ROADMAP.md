@@ -34,10 +34,9 @@ evals, context budget allocation, and retrieval-quality fixtures.
 
 ## M3 — Workspace UI
 
-Status: the first bounded vertical slice and second bounded observation slice
-are accepted with fresh local evidence and exact implementation-head hosted CI.
-ADR 0016 selects bounded older event-metadata navigation for the third slice;
-implementation evidence is pending (2026-07-20). Full M3 remains open.
+Status: the first bounded vertical slice, second bounded observation slice, and
+third bounded older-activity slice are accepted with fresh local evidence and
+exact implementation-head hosted CI (2026-07-20). Full M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
@@ -83,13 +82,14 @@ incomplete suffix.
 
 The slice adds no SSE, WebSocket, watcher, schema migration, runtime dependency,
 or browser authority. Later M3 scope includes richer run timelines and
-file/status, diff, and history navigation, checkpoints, prompt history, a small
-task board, token/cost telemetry, server-held provider profiles, and deliberately
-designed approval/recovery controls. Patch materialization is not the next slice.
+file/status, diff, and payload-bearing history navigation, checkpoints, prompt
+history, a small task board, token/cost telemetry, server-held provider profiles,
+and deliberately designed approval/recovery controls. Patch materialization is
+not the next slice.
 Any browser execution path needs a separate safety contract and evidence;
 provider keys remain server-side.
 
-ADR 0016 chooses the smallest substantive history extension: an explicit,
+ADR 0016 implements the smallest substantive history extension: an explicit,
 selected-run page immediately before the recent 200-event tail. It pins a
 revision, uses a fixed reverse sequence cursor, selects metadata rather than
 payloads, pauses live polling while the bounded historical panel is open, and
@@ -143,8 +143,8 @@ remain human-gated and outside automatic dogfood.
 
 ## Next recommended slice
 
-Preserve the ADR 0010 security hold. Implement and evidence ADR 0016's bounded,
-metadata-only older-activity navigation before selecting another M3 candidate.
-File/status views, richer diff or payload-bearing history, patch materialization,
-browser approval, and execution are separate authority expansions and remain out
-of scope until explicitly designed and evidenced.
+Preserve the ADR 0010 security hold. Select the smallest remaining read-only M3
+observation candidate through a dedicated design and evidence contract before
+implementation. File/status views, richer diff or payload-bearing history, patch
+materialization, browser approval, and execution are separate authority
+expansions and remain out of scope until explicitly designed and evidenced.
