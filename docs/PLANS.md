@@ -5,11 +5,11 @@
 Status values are evidence claims. A checked item must be backed by a command or
 test named below.
 
-Status: repaired candidate passes the local gate; release hold on 2026-07-19.
+Status: repaired candidate passes local and hosted CI gates; security release
+hold on 2026-07-19.
 
-M0/M1 must not be called complete until a candidate commit passes the full local
-gate, GitHub reports a successful `ci` run for that exact commit, and Kevin makes
-the security decision recorded in ADR 0010 for the inherited OpenCode workflow.
+M0/M1 must not be called complete until Kevin makes the security decision
+recorded in ADR 0010 for the inherited OpenCode workflow.
 
 ### Phase A — foundation
 
@@ -53,7 +53,7 @@ the security decision recorded in ADR 0010 for the inherited OpenCode workflow.
 - [x] Adversarial review identified release blockers and produced re-runnable
       test targets
 - [x] Full repaired candidate gate and adversarial targets pass
-- [ ] Hosted `ci` succeeds at the exact repaired candidate commit
+- [x] Hosted `ci` succeeds at the exact repaired candidate commit
 - [ ] Kevin decides whether to disable or harden the inherited OpenCode workflow
 
 ### Repair continuation
@@ -118,10 +118,12 @@ Repaired candidate local evidence on 2026-07-19:
   --check` produced no errors.
 
 The generated measured eval artifact is `.local/eval-report.json` and remains
-untracked. After publication, the remaining exact-head command is:
+untracked. Hosted evidence for implementation commit
+`39efbf41d3b6a387a3a55e00d26b68b7420ca17d`:
 
 ```text
-gh run list -R Ayyitskevin/Icarus --workflow ci.yml --commit <candidate-sha>
+gh run view 29712657768 -R Ayyitskevin/Icarus
+observed: completed successfully; quality job passed in 42 seconds
 ```
 
 ## Deferred plan

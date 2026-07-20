@@ -2,17 +2,17 @@
 
 ## M0 — Foundation
 
-Status: implementation present; release hold (2026-07-19).
+Status: local and hosted gates passed; security release hold (2026-07-19).
 
 Deliver documentation contracts, workspace tooling, CI, security checks, and
 the versioned evaluation fixture catalog.
 
-Release requires a successful hosted `ci` run at the exact candidate commit and
-Kevin's explicit decision on the inherited OpenCode workflow in ADR 0010.
+Release requires Kevin's explicit decision on the inherited OpenCode workflow
+in ADR 0010.
 
 ## M1 — Golden path
 
-Status: repaired candidate passes the local gate; release hold (2026-07-19).
+Status: local and hosted gates passed; security release hold (2026-07-19).
 
 Deliver one planned, approved, isolated, verified, reviewable, resumable, and
 reversible one-file change with Ollama and OpenAI adapters.
