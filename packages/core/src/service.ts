@@ -17,10 +17,10 @@ import {
   assertSunCeiling,
   checkpointDigest,
   EDIT_SCHEMA,
+  PLAN_SCHEMA,
   parseEditProposal,
   parsePlanProposal,
   parseProviderJson,
-  PLAN_SCHEMA,
   planApprovalDigest,
 } from "./policy.js";
 import {
@@ -33,6 +33,7 @@ import { createGateway } from "./providers.js";
 import { sanitizeText } from "./redaction.js";
 import type { CheckRunner } from "./sandbox.js";
 import type { IcarusStore } from "./store.js";
+import { CONTEXT_AUDIT_POLICY_VERSION } from "./types.js";
 import type {
   CheckEvidence,
   CheckProfile,
@@ -164,6 +165,12 @@ function decodeCheckpointText(value: string, name: string): string {
 
 function contextBundleFromArtifact(value: unknown, run: RunRecord): ContextBundle {
   const object = asObject(value, "context");
+  const auditPolicyVersion = asString(object.auditPolicyVersion, "context.auditPolicyVersion");
+  invariant(
+    auditPolicyVersion === CONTEXT_AUDIT_POLICY_VERSION,
+    "CONTEXT_POLICY_OUTDATED",
+    "Context was assembled under an outdated credential-audit policy",
+  );
   const baseCommit = asString(object.baseCommit, "context.baseCommit");
   const target = asString(object.target, "context.target");
   invariant(
@@ -221,6 +228,7 @@ function contextBundleFromArtifact(value: unknown, run: RunRecord): ContextBundl
     "Context must contain exactly one approved target",
   );
   const manifest: ContextManifest = {
+    auditPolicyVersion,
     baseCommit,
     target,
     repositoryMap,
@@ -238,7 +246,14 @@ function contextBundleFromArtifact(value: unknown, run: RunRecord): ContextBundl
     "CONTEXT_TAMPERED",
     "Context manifest no longer matches its approved digest",
   );
-  return { baseCommit, target, repositoryMap, entries, totalBytes };
+  return {
+    auditPolicyVersion,
+    baseCommit,
+    target,
+    repositoryMap,
+    entries,
+    totalBytes,
+  };
 }
 
 function asIcarusError(error: unknown, fallbackCode: string): IcarusError {
@@ -407,7 +422,7 @@ export class IcarusService {
     });
     try {
       return await this.#leases.withLease(run.id, () =>
-        this.#guarded(run.id, "preparing", () => this.#prepareRun(run.id, signal)),
+        this.#guarded(run.id, "preparing", () => this.#prepareRun(run.id, signal), signal),
       );
     } catch (error) {
       const failure = asIcarusError(error, "RUN_PREPARATION_FAILED");
@@ -428,9 +443,23 @@ export class IcarusService {
         "INVALID_STATE",
         "Run is not awaiting egress approval",
       );
-      await this.#loadContext(run);
+      const project = this.#store.getProject(run.projectId);
+      try {
+        await this.#runHostStage(
+          runId,
+          "egress.validate",
+          project.ceiling.commandTimeoutMs,
+          signal,
+          () => this.#loadContext(run),
+        );
+      } catch (error) {
+        if (signal?.aborted) {
+          return this.#landSignalCancellation(runId);
+        }
+        throw error;
+      }
       this.#store.approveEgress(runId, contextSha256, actor);
-      return this.#guarded(runId, "planned", () => this.#createPlan(runId, signal));
+      return this.#guarded(runId, "planned", () => this.#createPlan(runId, signal), signal);
     });
   }
 
@@ -447,10 +476,26 @@ export class IcarusService {
         "INVALID_STATE",
         "Run is not awaiting plan approval",
       );
-      await this.#loadContext(run);
-      await this.#assertRunSourceCurrent(run, signal);
+      const project = this.#store.getProject(run.projectId);
+      try {
+        await this.#runHostStage(
+          runId,
+          "approval.validate",
+          project.ceiling.commandTimeoutMs,
+          signal,
+          async (aggregateSignal) => {
+            await this.#loadContext(run);
+            await this.#assertRunSourceCurrent(run, aggregateSignal);
+          },
+        );
+      } catch (error) {
+        if (signal?.aborted) {
+          return this.#landSignalCancellation(runId);
+        }
+        throw error;
+      }
       this.#store.approvePlan(runId, planSha256, actor);
-      return this.#guarded(runId, "running", () => this.#execute(runId, signal));
+      return this.#guarded(runId, "running", () => this.#execute(runId, signal), signal);
     });
   }
 
@@ -465,11 +510,23 @@ export class IcarusService {
       const run = this.#store.getRun(runId);
       invariant(run.state === "awaiting_review", "INVALID_STATE", "Run is not awaiting review");
       if (decision === "approve") {
-        await this.#assertReviewWorktreeCurrent(run, signal);
-        return this.#store.decideReview(runId, diffSha256, actor, "approve");
+        try {
+          await this.#assertReviewWorktreeCurrent(run, signal);
+          return this.#store.decideReview(runId, diffSha256, actor, "approve");
+        } catch (error) {
+          if (signal?.aborted) {
+            return this.#landSignalCancellation(runId);
+          }
+          throw error;
+        }
       }
       this.#store.decideReview(runId, diffSha256, actor, "reject");
-      return this.#guarded(runId, "rolling_back", () => this.#performRollback(runId, signal));
+      return this.#guarded(
+        runId,
+        "rolling_back",
+        () => this.#performRollback(runId, signal),
+        signal,
+      );
     });
   }
 
@@ -481,7 +538,12 @@ export class IcarusService {
   ): Promise<RunRecord> {
     return this.#leases.withLease(runId, async () => {
       this.#store.approveRollback(runId, diffSha256, actor);
-      return this.#guarded(runId, "rolling_back", () => this.#performRollback(runId, signal));
+      return this.#guarded(
+        runId,
+        "rolling_back",
+        () => this.#performRollback(runId, signal),
+        signal,
+      );
     });
   }
 
@@ -493,7 +555,7 @@ export class IcarusService {
   ): Promise<RunRecord> {
     return this.#leases.withLease(runId, async () => {
       this.#store.approveRestore(runId, checkpointSha256, actor);
-      return this.#guarded(runId, "restoring", () => this.#performRestore(runId, signal));
+      return this.#guarded(runId, "restoring", () => this.#performRestore(runId, signal), signal);
     });
   }
 
@@ -507,19 +569,34 @@ export class IcarusService {
       }
       switch (run.state) {
         case "preparing":
-          return this.#guarded(runId, "preparing", () => this.#prepareRun(runId, signal));
+          return this.#guarded(runId, "preparing", () => this.#prepareRun(runId, signal), signal);
         case "planned":
-          return this.#guarded(runId, "planned", () => this.#createPlan(runId, signal));
+          return this.#guarded(runId, "planned", () => this.#createPlan(runId, signal), signal);
         case "running":
-          return this.#guarded(runId, "running", () => this.#execute(runId, signal));
+          return this.#guarded(runId, "running", () => this.#execute(runId, signal), signal);
         case "verifying":
-          return this.#guarded(runId, "verifying", () => this.#verify(runId, signal));
+          return this.#guarded(runId, "verifying", () => this.#verify(runId, signal), signal);
         case "rolling_back":
-          return this.#guarded(runId, "rolling_back", () => this.#performRollback(runId, signal));
+          return this.#guarded(
+            runId,
+            "rolling_back",
+            () => this.#performRollback(runId, signal),
+            signal,
+          );
         case "restoring":
-          return this.#guarded(runId, "restoring", () => this.#performRestore(runId, signal));
+          return this.#guarded(
+            runId,
+            "restoring",
+            () => this.#performRestore(runId, signal),
+            signal,
+          );
         case "cancelling":
-          return this.#guarded(runId, "cancelling", () => this.#performCancellation(runId, signal));
+          return this.#guarded(
+            runId,
+            "cancelling",
+            () => this.#performCancellation(runId, signal),
+            signal,
+          );
         default:
           return run;
       }
@@ -548,7 +625,16 @@ export class IcarusService {
     });
   }
 
+  #assertCurrentContextPolicy(run: RunRecord): void {
+    invariant(
+      run.context.auditPolicyVersion === CONTEXT_AUDIT_POLICY_VERSION,
+      "CONTEXT_POLICY_OUTDATED",
+      "Run context predates the current credential-audit policy",
+    );
+  }
+
   async #loadContext(run: RunRecord): Promise<ContextBundle> {
+    this.#assertCurrentContextPolicy(run);
     const project = this.#store.getProject(run.projectId);
     const value = await this.#artifacts.readJson(
       run.contextArtifactPath,
@@ -578,9 +664,10 @@ export class IcarusService {
       0,
       preparationRuntime,
     );
+    const preparationWorkRuntime = preparationRuntime - 1_000;
     const startedAt = performance.now();
+    const preparationSignal = boundedSignal(signal, preparationWorkRuntime);
     try {
-      const preparationSignal = boundedSignal(signal, preparationRuntime - 1_000);
       if (run.baseCommit.length === 0) {
         const inspection = await this.#assertRepositoryCurrent(
           repository,
@@ -615,11 +702,33 @@ export class IcarusService {
         project.ceiling,
         preparationSignal,
       );
+      const assemblyRuntimeMs = this.#observedOperationRuntime(startedAt);
+      if (
+        signal?.aborted ||
+        preparationSignal.aborted ||
+        assemblyRuntimeMs > preparationWorkRuntime
+      ) {
+        throw new IcarusError(
+          signal?.aborted ? "CANCELLED" : "RUNTIME_BUDGET_EXCEEDED",
+          "Context preparation exhausted its bounded audit runtime",
+        );
+      }
       const contextArtifactPath = await this.#artifacts.writeJson(
         runId,
         "context.json",
         asJsonValue(assembled.bundle),
       );
+      const timing = this.#operationTiming(operation, startedAt);
+      if (
+        signal?.aborted ||
+        preparationSignal.aborted ||
+        timing.observedRuntimeMs > operation.reservedRuntimeMs
+      ) {
+        throw new IcarusError(
+          signal?.aborted ? "CANCELLED" : "RUNTIME_BUDGET_EXCEEDED",
+          "Context preparation exhausted its aggregate active-runtime reservation",
+        );
+      }
       run = this.#store.completePreparation(
         runId,
         assembled.manifest,
@@ -628,15 +737,28 @@ export class IcarusService {
       );
       this.#store.finishOperation(operation, {
         outcome: "succeeded",
-        activeRuntimeMs: Math.round(performance.now() - startedAt),
+        activeRuntimeMs: timing.chargedRuntimeMs,
         inputTokens: 0,
         outputTokens: 0,
         estimatedCostUsd: 0,
-        detail: { baseCommit: run.baseCommit, contextSha256: run.contextSha256 },
+        detail: {
+          baseCommit: run.baseCommit,
+          contextSha256: run.contextSha256,
+          observedRuntimeMs: timing.observedRuntimeMs,
+          chargedRuntimeMs: timing.chargedRuntimeMs,
+        },
       });
     } catch (error) {
-      this.#finishFailedOperation(operation, error, startedAt);
-      throw error;
+      const failure = signal?.aborted
+        ? new IcarusError("CANCELLED", "Operator cancelled context preparation")
+        : preparationSignal.aborted
+          ? new IcarusError(
+              "RUNTIME_BUDGET_EXCEEDED",
+              "Context preparation exhausted its aggregate active-runtime reservation",
+            )
+          : error;
+      this.#finishFailedOperation(operation, failure, startedAt);
+      throw failure;
     }
 
     return run.state === "awaiting_egress_approval" ? run : this.#createPlan(run.id, signal);
@@ -672,7 +794,13 @@ export class IcarusService {
     const run = this.#store.getRun(runId);
     invariant(run.state === "planned", "INVALID_STATE", "Run is not ready for planning");
     const project = this.#store.getProject(run.projectId);
-    const context = await this.#loadContext(run);
+    const context = await this.#runHostStage(
+      runId,
+      "context.load.plan",
+      project.ceiling.commandTimeoutMs,
+      signal,
+      () => this.#loadContext(run),
+    );
     const request: StructuredGenerationRequest = {
       schemaName: "icarus_plan",
       schema: PLAN_SCHEMA,
@@ -722,66 +850,56 @@ export class IcarusService {
       "MISSING_PLAN",
       "Run has no approved plan",
     );
-    await this.#assertRunSourceCurrent(run, signal);
     const project = this.#store.getProject(run.projectId);
     const repository = this.#store.getRepository(project.repositoryId);
-    const context = await this.#loadContext(run);
-    const targetEntry = context.entries.find(
-      (entry) => entry.reason === "target" && entry.path === run.target,
+    const { context, targetEntry } = await this.#runHostStage(
+      runId,
+      "execution.prepare",
+      project.ceiling.commandTimeoutMs,
+      signal,
+      async (aggregateSignal) => {
+        await this.#assertRunSourceCurrent(run, aggregateSignal);
+        const loadedContext = await this.#loadContext(run);
+        const loadedTarget = loadedContext.entries.find(
+          (entry) => entry.reason === "target" && entry.path === run.target,
+        );
+        invariant(loadedTarget !== undefined, "CONTEXT_MISMATCH", "Target is missing from context");
+        return { context: loadedContext, targetEntry: loadedTarget };
+      },
     );
-    invariant(targetEntry !== undefined, "CONTEXT_MISMATCH", "Target is missing from context");
 
     if (run.worktreePath === null) {
-      const beforeWorkspace = this.#store.getRun(runId);
-      const workspaceRuntime = Math.min(
-        project.ceiling.maxActiveRuntimeMs - beforeWorkspace.usage.activeRuntimeMs,
-        project.ceiling.commandTimeoutMs + 2_000,
-      );
-      const operation = this.#store.beginOperation(
+      const created = await this.#runHostStage(
         runId,
         "workspace.create",
-        0,
-        0,
-        workspaceRuntime,
+        project.ceiling.commandTimeoutMs,
+        signal,
+        async (aggregateSignal) => {
+          const workspace = await this.#git.createPrivateWorkspace(
+            repository.path,
+            run.baseCommit,
+            path.join(this.#stateRoot, "runs", run.id),
+            aggregateSignal,
+          );
+          const workspaceBaseline = await this.#git.readRegularUtf8File(
+            workspace.worktreePath,
+            run.target,
+            project.ceiling.maxFileBytes,
+          );
+          invariant(
+            sha256(workspaceBaseline) === targetEntry.sha256,
+            "STALE_PREIMAGE",
+            "Private target bytes differ from the planned committed context",
+          );
+          return { workspace, baseline: workspaceBaseline };
+        },
       );
-      const startedAt = performance.now();
-      try {
-        const workspaceSignal = boundedSignal(signal, Math.max(1, workspaceRuntime - 1_000));
-        const workspace = await this.#git.createPrivateWorkspace(
-          repository.path,
-          run.baseCommit,
-          path.join(this.#stateRoot, "runs", run.id),
-          workspaceSignal,
-        );
-        const baseline = await this.#git.readRegularUtf8File(
-          workspace.worktreePath,
-          run.target,
-          project.ceiling.maxFileBytes,
-        );
-        invariant(
-          sha256(baseline) === targetEntry.sha256,
-          "STALE_PREIMAGE",
-          "Private target bytes differ from the planned committed context",
-        );
-        this.#store.recordWorkspace(
-          runId,
-          workspace.cachePath,
-          workspace.worktreePath,
-          Buffer.from(baseline, "utf8").toString("base64"),
-        );
-        this.#store.finishOperation(operation, {
-          outcome: "succeeded",
-          activeRuntimeMs: Math.round(performance.now() - startedAt),
-          inputTokens: 0,
-          outputTokens: 0,
-          estimatedCostUsd: 0,
-          detail: { baseCommit: run.baseCommit },
-        });
-      } catch (error) {
-        this.#finishFailedOperation(operation, error, startedAt);
-        throw error;
-      }
-      run = this.#store.getRun(runId);
+      run = this.#store.recordWorkspace(
+        runId,
+        created.workspace.cachePath,
+        created.workspace.worktreePath,
+        Buffer.from(created.baseline, "utf8").toString("base64"),
+      );
     }
 
     invariant(
@@ -794,10 +912,17 @@ export class IcarusService {
     const baseline = decodeCheckpointText(run.baselineBase64, "baseline");
     let approved: string;
     if (run.edit === null || run.approvedBase64 === null) {
-      const current = await this.#git.readRegularUtf8File(
-        run.worktreePath,
-        run.target,
-        project.ceiling.maxFileBytes,
+      const current = await this.#runHostStage(
+        runId,
+        "edit.prepare",
+        project.ceiling.commandTimeoutMs,
+        signal,
+        () =>
+          this.#git.readRegularUtf8File(
+            run.worktreePath as string,
+            run.target,
+            project.ceiling.maxFileBytes,
+          ),
       );
       invariant(
         current === baseline,
@@ -841,19 +966,30 @@ export class IcarusService {
 
     invariant(run.worktreePath !== null, "MISSING_WORKSPACE", "Run lost its private worktree");
     const worktreePath = run.worktreePath;
-    const current = await this.#git.readRegularUtf8File(
-      worktreePath,
-      run.target,
-      project.ceiling.maxFileBytes,
+    await this.#runHostStage(
+      runId,
+      "edit.materialize",
+      project.ceiling.commandTimeoutMs,
+      signal,
+      async (aggregateSignal) => {
+        const current = await this.#git.readRegularUtf8File(
+          worktreePath,
+          run.target,
+          project.ceiling.maxFileBytes,
+        );
+        invariant(
+          current === baseline || current === approved,
+          "WORKTREE_DRIFT",
+          "Private target contains bytes outside the recorded edit intent",
+        );
+        if (current === baseline) {
+          if (aggregateSignal.aborted) {
+            throw new IcarusError("CANCELLED", "Edit materialization was cancelled");
+          }
+          await this.#git.atomicWriteUtf8(worktreePath, run.target, approved);
+        }
+      },
     );
-    invariant(
-      current === baseline || current === approved,
-      "WORKTREE_DRIFT",
-      "Private target contains bytes outside the recorded edit intent",
-    );
-    if (current === baseline) {
-      await this.#git.atomicWriteUtf8(worktreePath, run.target, approved);
-    }
     this.#store.transition(runId, "verifying", "edit.materialized", {
       target: run.target,
       approvedSha256: sha256(approved),
@@ -864,6 +1000,7 @@ export class IcarusService {
   async #verify(runId: string, signal?: AbortSignal): Promise<RunRecord> {
     const run = this.#store.getRun(runId);
     invariant(run.state === "verifying", "INVALID_STATE", "Run is not verifying");
+    this.#assertCurrentContextPolicy(run);
     invariant(
       run.plan !== null &&
         run.worktreePath !== null &&
@@ -872,96 +1009,110 @@ export class IcarusService {
       "MISSING_EDIT_STATE",
       "Verification has no complete edit intent",
     );
-    await this.#assertRunSourceCurrent(run, signal);
     const project = this.#store.getProject(run.projectId);
     const approved = decodeCheckpointText(run.approvedBase64, "approved");
-    const current = await this.#git.readRegularUtf8File(
-      run.worktreePath,
-      run.target,
-      project.ceiling.maxFileBytes,
-    );
-    invariant(
-      current === approved,
-      "WORKTREE_DRIFT",
-      "Private target no longer matches the edit intent",
-    );
-    const changedPaths = await this.#git.changedPaths(run.worktreePath, signal);
-    invariant(
-      changedPaths.length === 1 && changedPaths[0] === run.target,
-      "CHANGED_PATH_MISMATCH",
-      "Private worktree changed paths outside the approved target",
-    );
-    const diff = await this.#git.diff(
-      run.worktreePath,
-      run.target,
-      project.ceiling.maxDiffBytes,
-      signal,
-    );
-    const checkpointSha256 = checkpointDigest({
+    const { changedPaths, diff, checkpointSha256 } = await this.#runHostStage(
       runId,
-      baseCommit: run.baseCommit,
-      target: run.target,
-      baselineBase64: run.baselineBase64,
-      approvedBase64: run.approvedBase64,
-    });
-    this.#store.saveCheckpoint(runId, run.baselineBase64, run.approvedBase64, checkpointSha256);
+      "verification.preflight",
+      project.ceiling.commandTimeoutMs,
+      signal,
+      async (aggregateSignal) => {
+        await this.#assertRunSourceCurrent(run, aggregateSignal);
+        const current = await this.#git.readRegularUtf8File(
+          run.worktreePath as string,
+          run.target,
+          project.ceiling.maxFileBytes,
+        );
+        invariant(
+          current === approved,
+          "WORKTREE_DRIFT",
+          "Private target no longer matches the edit intent",
+        );
+        const preflightChangedPaths = await this.#git.changedPaths(
+          run.worktreePath as string,
+          aggregateSignal,
+        );
+        invariant(
+          preflightChangedPaths.length === 1 && preflightChangedPaths[0] === run.target,
+          "CHANGED_PATH_MISMATCH",
+          "Private worktree changed paths outside the approved target",
+        );
+        const preflightDiff = await this.#git.diff(
+          run.worktreePath as string,
+          run.target,
+          project.ceiling.maxDiffBytes,
+          aggregateSignal,
+        );
+        const digest = checkpointDigest({
+          runId,
+          baseCommit: run.baseCommit,
+          target: run.target,
+          baselineBase64: run.baselineBase64 as string,
+          approvedBase64: run.approvedBase64 as string,
+        });
+        this.#store.saveCheckpoint(
+          runId,
+          run.baselineBase64 as string,
+          run.approvedBase64 as string,
+          digest,
+        );
+        return {
+          changedPaths: preflightChangedPaths,
+          diff: preflightDiff,
+          checkpointSha256: digest,
+        };
+      },
+    );
     const selectedChecks = run.plan.checkIds.map((checkId) => {
       const check = project.checks.find((candidate) => candidate.id === checkId);
       invariant(check !== undefined, "CHECK_MISMATCH", "Approved plan references an unknown check");
       return check;
     });
-    const beforeChecks = this.#store.getRun(runId);
-    const checkRuntime = Math.min(
-      project.ceiling.maxActiveRuntimeMs - beforeChecks.usage.activeRuntimeMs,
-      selectedChecks.length * project.ceiling.commandTimeoutMs + 120_000,
-    );
-    const operation = this.#store.beginOperation(runId, "sandbox.verify", 0, 0, checkRuntime);
-    const startedAt = performance.now();
     let checks: readonly CheckEvidence[];
     try {
-      const latest = this.#store.getRun(runId);
-      const remainingRuntime = project.ceiling.maxActiveRuntimeMs - latest.usage.activeRuntimeMs;
-      invariant(
-        remainingRuntime > 0,
-        "RUNTIME_BUDGET_EXCEEDED",
-        "No active runtime remains for checks",
-      );
-      const boundedCeiling: SunCeiling = {
-        ...project.ceiling,
-        commandTimeoutMs: Math.max(
-          1,
-          Math.min(
-            project.ceiling.commandTimeoutMs,
-            Math.floor(remainingRuntime / selectedChecks.length),
-          ),
-        ),
-      };
-      const checkSignal = boundedSignal(signal, Math.max(1, checkRuntime - 30_000));
-      checks = await this.#checks.runChecks({
+      checks = await this.#runHostStage(
         runId,
-        worktreePath: run.worktreePath,
-        baseCommit: run.baseCommit,
-        target: run.target,
-        checks: selectedChecks,
-        sandbox: project.sandbox,
-        ceiling: boundedCeiling,
-        signal: checkSignal,
-      });
-      this.#store.finishOperation(operation, {
-        outcome: signal?.aborted ? "cancelled" : "succeeded",
-        activeRuntimeMs: Math.round(performance.now() - startedAt),
-        inputTokens: 0,
-        outputTokens: 0,
-        estimatedCostUsd: 0,
-        detail: {
-          outcomes: checks.map((check) => ({
-            checkId: check.checkId,
-            outcome: check.outcome,
-          })),
+        "sandbox.verify",
+        selectedChecks.length * project.ceiling.commandTimeoutMs + 120_000,
+        signal,
+        async (aggregateSignal) => {
+          const latest = this.#store.getRun(runId);
+          const remainingRuntime =
+            project.ceiling.maxActiveRuntimeMs - latest.usage.activeRuntimeMs;
+          invariant(
+            remainingRuntime > 0,
+            "RUNTIME_BUDGET_EXCEEDED",
+            "No active runtime remains for checks",
+          );
+          const boundedCeiling: SunCeiling = {
+            ...project.ceiling,
+            commandTimeoutMs: Math.max(
+              1,
+              Math.min(
+                project.ceiling.commandTimeoutMs,
+                Math.floor(remainingRuntime / selectedChecks.length),
+              ),
+            ),
+          };
+          return this.#checks.runChecks({
+            runId,
+            worktreePath: run.worktreePath as string,
+            baseCommit: run.baseCommit,
+            target: run.target,
+            checks: selectedChecks,
+            sandbox: project.sandbox,
+            ceiling: boundedCeiling,
+            signal: aggregateSignal,
+          });
         },
-      });
+      );
     } catch (error) {
-      this.#finishFailedOperation(operation, error, startedAt);
+      if (
+        error instanceof IcarusError &&
+        (error.code === "CANCELLED" || error.code === "RUNTIME_BUDGET_EXCEEDED")
+      ) {
+        throw error;
+      }
       checks = selectedChecks.map((check) => ({
         checkId: check.id,
         argv: check.argv,
@@ -986,25 +1137,36 @@ export class IcarusService {
       diffSha256: sha256(diff),
       checkpointSha256,
     };
-    const finalCurrent = await this.#git.readRegularUtf8File(
-      run.worktreePath,
-      run.target,
-      project.ceiling.maxFileBytes,
-    );
-    const finalChangedPaths = await this.#git.changedPaths(run.worktreePath, signal);
-    const finalDiff = await this.#git.diff(
-      run.worktreePath,
-      run.target,
-      project.ceiling.maxDiffBytes,
+    await this.#runHostStage(
+      runId,
+      "verification.postflight",
+      project.ceiling.commandTimeoutMs,
       signal,
-    );
-    invariant(
-      finalCurrent === approved &&
-        finalChangedPaths.length === 1 &&
-        finalChangedPaths[0] === run.target &&
-        finalDiff === diff,
-      "WORKTREE_DRIFT",
-      "Private worktree changed while verification was running",
+      async (aggregateSignal) => {
+        const finalCurrent = await this.#git.readRegularUtf8File(
+          run.worktreePath as string,
+          run.target,
+          project.ceiling.maxFileBytes,
+        );
+        const finalChangedPaths = await this.#git.changedPaths(
+          run.worktreePath as string,
+          aggregateSignal,
+        );
+        const finalDiff = await this.#git.diff(
+          run.worktreePath as string,
+          run.target,
+          project.ceiling.maxDiffBytes,
+          aggregateSignal,
+        );
+        invariant(
+          finalCurrent === approved &&
+            finalChangedPaths.length === 1 &&
+            finalChangedPaths[0] === run.target &&
+            finalDiff === diff,
+          "WORKTREE_DRIFT",
+          "Private worktree changed while verification was running",
+        );
+      },
     );
     return this.#store.recordVerificationAndAwaitReview(runId, diff, verification);
   }
@@ -1019,74 +1181,157 @@ export class IcarusService {
       "MISSING_VERIFICATION",
       "Review has no complete persisted verification state",
     );
-    await this.#checks.reconcile(run.id, signal);
-    await this.#assertRunSourceCurrent(run, signal);
+    this.#assertCurrentContextPolicy(run);
     const project = this.#store.getProject(run.projectId);
     const approved = decodeCheckpointText(run.approvedBase64, "approved");
-    const current = await this.#git.readRegularUtf8File(
-      run.worktreePath,
-      run.target,
-      project.ceiling.maxFileBytes,
-    );
-    const changedPaths = await this.#git.changedPaths(run.worktreePath, signal);
-    const diff = await this.#git.diff(
-      run.worktreePath,
-      run.target,
-      project.ceiling.maxDiffBytes,
+    await this.#runHostStage(
+      run.id,
+      "review.validate",
+      project.ceiling.commandTimeoutMs + 120_000,
       signal,
-    );
-    const checkpoint = this.#store.getCheckpoint(run.id);
-    invariant(
-      current === approved &&
-        changedPaths.length === 1 &&
-        changedPaths[0] === run.target &&
-        diff === run.diff &&
-        sha256(diff) === run.verification.diffSha256 &&
-        checkpoint.checkpointSha256 === run.verification.checkpointSha256,
-      "WORKTREE_DRIFT",
-      "Private worktree no longer matches the reviewed verification evidence",
+      async (aggregateSignal) => {
+        await this.#checks.reconcile(run.id, aggregateSignal);
+        await this.#assertRunSourceCurrent(run, aggregateSignal);
+        const current = await this.#git.readRegularUtf8File(
+          run.worktreePath as string,
+          run.target,
+          project.ceiling.maxFileBytes,
+        );
+        const changedPaths = await this.#git.changedPaths(
+          run.worktreePath as string,
+          aggregateSignal,
+        );
+        const diff = await this.#git.diff(
+          run.worktreePath as string,
+          run.target,
+          project.ceiling.maxDiffBytes,
+          aggregateSignal,
+        );
+        const checkpoint = this.#store.getCheckpoint(run.id);
+        invariant(
+          current === approved &&
+            changedPaths.length === 1 &&
+            changedPaths[0] === run.target &&
+            diff === run.diff &&
+            sha256(diff) === run.verification?.diffSha256 &&
+            checkpoint.checkpointSha256 === run.verification?.checkpointSha256,
+          "WORKTREE_DRIFT",
+          "Private worktree no longer matches the reviewed verification evidence",
+        );
+      },
     );
   }
 
   async #performCancellation(runId: string, signal?: AbortSignal): Promise<RunRecord> {
     const run = this.#store.getRun(runId);
     invariant(run.state === "cancelling", "INVALID_STATE", "Run is not cancelling");
-    if (run.worktreePath === null) {
-      return this.#store.finishCancellation(runId);
+    const operation = this.#store.beginCancellationRecoveryOperation(runId);
+    const startedAt = performance.now();
+    const recoverySignal = boundedSignal(signal, operation.reservedRuntimeMs);
+    const assertRecoveryActive = (): void => {
+      const observedRuntimeMs = this.#observedOperationRuntime(startedAt);
+      if (
+        !signal?.aborted &&
+        !recoverySignal.aborted &&
+        observedRuntimeMs <= operation.reservedRuntimeMs
+      ) {
+        return;
+      }
+      throw new IcarusError(
+        signal?.aborted ? "CANCELLED" : "RECOVERY_TIMEOUT",
+        signal?.aborted
+          ? "Operator cancelled cancellation recovery"
+          : "Cancellation recovery exceeded its aggregate bound",
+      );
+    };
+
+    try {
+      if (run.worktreePath !== null) {
+        assertRecoveryActive();
+        await this.#checks.reconcile(runId, recoverySignal);
+        assertRecoveryActive();
+        invariant(
+          run.worktreePath === path.join(this.#stateRoot, "runs", run.id, "worktree") &&
+            run.baselineBase64 !== null,
+          "MISSING_CHECKPOINT",
+          "Cancellation has no valid private baseline",
+        );
+        const baseline = decodeCheckpointText(run.baselineBase64, "baseline");
+        const approved =
+          run.approvedBase64 === null ? null : decodeCheckpointText(run.approvedBase64, "approved");
+        const recoveryMaxFileBytes = Math.max(
+          Buffer.byteLength(baseline, "utf8"),
+          approved === null ? 0 : Buffer.byteLength(approved, "utf8"),
+        );
+        const current = await this.#git.readRegularUtf8File(
+          run.worktreePath,
+          run.target,
+          recoveryMaxFileBytes,
+        );
+        assertRecoveryActive();
+        invariant(
+          current === baseline || (approved !== null && current === approved),
+          "WORKTREE_DRIFT",
+          "Cancellation preserved unexpected worktree bytes for human inspection",
+        );
+        if (approved !== null && current === approved) {
+          await this.#git.atomicWriteUtf8(run.worktreePath, run.target, baseline);
+          assertRecoveryActive();
+        }
+        const restored = await this.#git.readRegularUtf8File(
+          run.worktreePath,
+          run.target,
+          recoveryMaxFileBytes,
+        );
+        assertRecoveryActive();
+        invariant(
+          restored === baseline,
+          "WORKTREE_DRIFT",
+          "Cancellation could not confirm the restored baseline",
+        );
+      }
+    } catch (error) {
+      const observedRuntimeMs = this.#observedOperationRuntime(startedAt);
+      const failure = signal?.aborted
+        ? new IcarusError("CANCELLED", "Operator cancelled cancellation recovery")
+        : recoverySignal.aborted || observedRuntimeMs > operation.reservedRuntimeMs
+          ? new IcarusError(
+              "RECOVERY_TIMEOUT",
+              "Cancellation recovery exceeded its aggregate bound",
+            )
+          : error;
+      this.#finishFailedCancellationRecovery(operation, failure, startedAt);
+      throw failure;
     }
-    invariant(
-      run.worktreePath === path.join(this.#stateRoot, "runs", run.id, "worktree") &&
-        run.baselineBase64 !== null,
-      "MISSING_CHECKPOINT",
-      "Cancellation has no valid private baseline",
-    );
-    await this.#checks.reconcile(runId, signal);
-    const project = this.#store.getProject(run.projectId);
-    const baseline = decodeCheckpointText(run.baselineBase64, "baseline");
-    const approved =
-      run.approvedBase64 === null ? null : decodeCheckpointText(run.approvedBase64, "approved");
-    const current = await this.#git.readRegularUtf8File(
-      run.worktreePath,
-      run.target,
-      project.ceiling.maxFileBytes,
-    );
-    invariant(
-      current === baseline || (approved !== null && current === approved),
-      "WORKTREE_DRIFT",
-      "Cancellation preserved unexpected worktree bytes for human inspection",
-    );
-    if (approved !== null && current === approved) {
-      await this.#git.atomicWriteUtf8(run.worktreePath, run.target, baseline);
+
+    const timing = this.#operationTiming(operation, startedAt);
+    if (
+      signal?.aborted ||
+      recoverySignal.aborted ||
+      timing.observedRuntimeMs > operation.reservedRuntimeMs
+    ) {
+      const failure = new IcarusError(
+        signal?.aborted ? "CANCELLED" : "RECOVERY_TIMEOUT",
+        signal?.aborted
+          ? "Operator cancelled cancellation recovery"
+          : "Cancellation recovery exceeded its aggregate bound",
+      );
+      this.#finishFailedCancellationRecovery(operation, failure, startedAt);
+      throw failure;
     }
-    invariant(
-      (await this.#git.readRegularUtf8File(
-        run.worktreePath,
-        run.target,
-        project.ceiling.maxFileBytes,
-      )) === baseline,
-      "WORKTREE_DRIFT",
-      "Cancellation could not confirm the restored baseline",
-    );
+    this.#store.finishCancellationRecoveryOperation(operation, {
+      outcome: "succeeded",
+      activeRuntimeMs: timing.chargedRuntimeMs,
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostUsd: 0,
+      detail: {
+        stage: operation.kind,
+        target: run.target,
+        observedRuntimeMs: timing.observedRuntimeMs,
+        chargedRuntimeMs: timing.chargedRuntimeMs,
+      },
+    });
     return this.#store.finishCancellation(runId);
   }
 
@@ -1116,9 +1361,11 @@ export class IcarusService {
       recoveryRuntime,
     );
     const startedAt = performance.now();
+    const recoverySignal = boundedSignal(signal, recoveryRuntime - 1_000);
     try {
-      const recoverySignal = boundedSignal(signal, recoveryRuntime - 1_000);
+      this.#assertAggregateSignal(signal, recoverySignal, "Rollback");
       await this.#checks.reconcile(runId, recoverySignal);
+      this.#assertAggregateSignal(signal, recoverySignal, "Rollback");
       const baseline = decodeCheckpointText(run.baselineBase64, "baseline");
       const approved = decodeCheckpointText(run.approvedBase64, "approved");
       const current = await this.#git.readRegularUtf8File(
@@ -1126,6 +1373,7 @@ export class IcarusService {
         run.target,
         project.ceiling.maxFileBytes,
       );
+      this.#assertAggregateSignal(signal, recoverySignal, "Rollback");
       invariant(
         current === baseline || current === approved,
         "WORKTREE_DRIFT",
@@ -1133,23 +1381,38 @@ export class IcarusService {
       );
       if (current === approved) {
         await this.#git.atomicWriteUtf8(run.worktreePath, run.target, baseline);
+        this.#assertAggregateSignal(signal, recoverySignal, "Rollback");
       }
+      const changedPaths = await this.#git.changedPaths(run.worktreePath, recoverySignal);
+      this.#assertAggregateSignal(signal, recoverySignal, "Rollback");
       invariant(
-        (await this.#git.changedPaths(run.worktreePath, recoverySignal)).length === 0,
+        changedPaths.length === 0,
         "ROLLBACK_FAILED",
         "Private worktree is not clean after rollback",
       );
+      const timing = this.#operationTiming(operation, startedAt);
+      if (timing.observedRuntimeMs > operation.reservedRuntimeMs) {
+        throw new IcarusError(
+          "RUNTIME_BUDGET_EXCEEDED",
+          "Rollback exhausted its aggregate active-runtime reservation",
+        );
+      }
       this.#store.finishOperation(operation, {
         outcome: "succeeded",
-        activeRuntimeMs: Math.round(performance.now() - startedAt),
+        activeRuntimeMs: timing.chargedRuntimeMs,
         inputTokens: 0,
         outputTokens: 0,
         estimatedCostUsd: 0,
-        detail: { target: run.target },
+        detail: {
+          target: run.target,
+          observedRuntimeMs: timing.observedRuntimeMs,
+          chargedRuntimeMs: timing.chargedRuntimeMs,
+        },
       });
     } catch (error) {
-      this.#finishFailedOperation(operation, error, startedAt);
-      throw error;
+      const failure = this.#aggregateSignalError(signal, recoverySignal, "Rollback", error);
+      this.#finishFailedOperation(operation, failure, startedAt);
+      throw failure;
     }
     return this.#store.finishRollback(runId);
   }
@@ -1157,6 +1420,7 @@ export class IcarusService {
   async #performRestore(runId: string, signal?: AbortSignal): Promise<RunRecord> {
     const run = this.#store.getRun(runId);
     invariant(run.state === "restoring", "INVALID_STATE", "Run is not restoring");
+    this.#assertCurrentContextPolicy(run);
     invariant(
       run.worktreePath !== null && run.baselineBase64 !== null && run.approvedBase64 !== null,
       "MISSING_CHECKPOINT",
@@ -1180,9 +1444,11 @@ export class IcarusService {
       recoveryRuntime,
     );
     const startedAt = performance.now();
+    const recoverySignal = boundedSignal(signal, recoveryRuntime - 1_000);
     try {
-      const recoverySignal = boundedSignal(signal, recoveryRuntime - 1_000);
+      this.#assertAggregateSignal(signal, recoverySignal, "Restore");
       await this.#checks.reconcile(runId, recoverySignal);
+      this.#assertAggregateSignal(signal, recoverySignal, "Restore");
       const baseline = decodeCheckpointText(run.baselineBase64, "baseline");
       const approved = decodeCheckpointText(run.approvedBase64, "approved");
       const current = await this.#git.readRegularUtf8File(
@@ -1190,6 +1456,7 @@ export class IcarusService {
         run.target,
         project.ceiling.maxFileBytes,
       );
+      this.#assertAggregateSignal(signal, recoverySignal, "Restore");
       invariant(
         current === baseline || current === approved,
         "WORKTREE_DRIFT",
@@ -1197,21 +1464,131 @@ export class IcarusService {
       );
       if (current === baseline) {
         await this.#git.atomicWriteUtf8(run.worktreePath, run.target, approved);
+        this.#assertAggregateSignal(signal, recoverySignal, "Restore");
+      }
+      const timing = this.#operationTiming(operation, startedAt);
+      if (timing.observedRuntimeMs > operation.reservedRuntimeMs) {
+        throw new IcarusError(
+          "RUNTIME_BUDGET_EXCEEDED",
+          "Restore exhausted its aggregate active-runtime reservation",
+        );
       }
       this.#store.finishOperation(operation, {
         outcome: "succeeded",
-        activeRuntimeMs: Math.round(performance.now() - startedAt),
+        activeRuntimeMs: timing.chargedRuntimeMs,
         inputTokens: 0,
         outputTokens: 0,
         estimatedCostUsd: 0,
-        detail: { target: run.target },
+        detail: {
+          target: run.target,
+          observedRuntimeMs: timing.observedRuntimeMs,
+          chargedRuntimeMs: timing.chargedRuntimeMs,
+        },
       });
     } catch (error) {
-      this.#finishFailedOperation(operation, error, startedAt);
-      throw error;
+      const failure = this.#aggregateSignalError(signal, recoverySignal, "Restore", error);
+      this.#finishFailedOperation(operation, failure, startedAt);
+      throw failure;
     }
     this.#store.finishRestore(runId);
     return this.#verify(runId, signal);
+  }
+
+  #aggregateSignalError(
+    signal: AbortSignal | undefined,
+    aggregateSignal: AbortSignal,
+    label: string,
+    error: unknown,
+  ): unknown {
+    if (signal?.aborted) {
+      return new IcarusError("CANCELLED", `Operator cancelled ${label}`);
+    }
+    if (aggregateSignal.aborted) {
+      return new IcarusError(
+        "RUNTIME_BUDGET_EXCEEDED",
+        `${label} exhausted its aggregate active-runtime reservation`,
+      );
+    }
+    return error;
+  }
+
+  #assertAggregateSignal(
+    signal: AbortSignal | undefined,
+    aggregateSignal: AbortSignal,
+    label: string,
+  ): void {
+    const failure = this.#aggregateSignalError(signal, aggregateSignal, label, null);
+    if (failure !== null) {
+      throw failure;
+    }
+  }
+
+  async #runHostStage<T>(
+    runId: string,
+    kind: string,
+    maximumRuntimeMs: number,
+    signal: AbortSignal | undefined,
+    action: (aggregateSignal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    invariant(
+      Number.isSafeInteger(maximumRuntimeMs) && maximumRuntimeMs > 0,
+      "INVALID_RESERVATION",
+      "Host-stage runtime must be a positive integer",
+    );
+    const run = this.#store.getRun(runId);
+    const project = this.#store.getProject(run.projectId);
+    const remainingRuntime = project.ceiling.maxActiveRuntimeMs - run.usage.activeRuntimeMs;
+    invariant(
+      remainingRuntime > 0,
+      "RUNTIME_BUDGET_EXCEEDED",
+      `No active runtime remains for ${kind}`,
+    );
+    const reservedRuntime = Math.min(remainingRuntime, maximumRuntimeMs);
+    const operation = this.#store.beginOperation(runId, kind, 0, 0, reservedRuntime);
+    const aggregateSignal = boundedSignal(signal, reservedRuntime);
+    const startedAt = performance.now();
+    let finished = false;
+    try {
+      const value = await action(aggregateSignal);
+      const timing = this.#operationTiming(operation, startedAt);
+      if (signal?.aborted) {
+        throw new IcarusError("CANCELLED", `Operator cancelled ${kind}`);
+      }
+      if (aggregateSignal.aborted || timing.observedRuntimeMs > operation.reservedRuntimeMs) {
+        throw new IcarusError(
+          "RUNTIME_BUDGET_EXCEEDED",
+          `${kind} exhausted its aggregate active-runtime reservation`,
+        );
+      }
+      this.#store.finishOperation(operation, {
+        outcome: "succeeded",
+        activeRuntimeMs: timing.chargedRuntimeMs,
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCostUsd: 0,
+        detail: {
+          stage: kind,
+          observedRuntimeMs: timing.observedRuntimeMs,
+          chargedRuntimeMs: timing.chargedRuntimeMs,
+        },
+      });
+      finished = true;
+      return value;
+    } catch (error) {
+      const observedRuntimeMs = this.#observedOperationRuntime(startedAt);
+      const failure = signal?.aborted
+        ? new IcarusError("CANCELLED", `Operator cancelled ${kind}`)
+        : aggregateSignal.aborted || observedRuntimeMs > operation.reservedRuntimeMs
+          ? new IcarusError(
+              "RUNTIME_BUDGET_EXCEEDED",
+              `${kind} exhausted its aggregate active-runtime reservation`,
+            )
+          : error;
+      if (!finished) {
+        this.#finishFailedOperation(operation, failure, startedAt);
+      }
+      throw failure;
+    }
   }
 
   async #providerCall(
@@ -1267,45 +1644,64 @@ export class IcarusService {
       reservedTokens,
       providerRuntime,
     );
+    const effectiveTimeoutMs = Math.max(1, Math.min(request.timeoutMs, providerRuntime - 1_000));
+    const providerSignal = boundedSignal(signal, effectiveTimeoutMs);
     const startedAt = performance.now();
     try {
-      const latest = this.#store.getRun(runId);
-      const remainingRuntime = project.ceiling.maxActiveRuntimeMs - latest.usage.activeRuntimeMs;
-      invariant(remainingRuntime > 0, "RUNTIME_BUDGET_EXCEEDED", "No active runtime remains");
       const gateway = this.#gatewayFactory(canonicalProvider(run.provider));
       const result = await gateway.generateStructured(
         {
           ...request,
-          timeoutMs: Math.max(
-            1,
-            Math.min(request.timeoutMs, remainingRuntime, providerRuntime - 1_000),
-          ),
+          timeoutMs: effectiveTimeoutMs,
         },
-        signal,
+        providerSignal,
       );
+      const responseTiming = this.#operationTiming(operation, startedAt);
+      if (
+        signal?.aborted ||
+        providerSignal.aborted ||
+        responseTiming.observedRuntimeMs > effectiveTimeoutMs
+      ) {
+        throw new IcarusError(
+          signal?.aborted ? "CANCELLED" : "RUNTIME_BUDGET_EXCEEDED",
+          "Provider request exceeded its effective timeout",
+        );
+      }
+      const responseText = result.text;
+      const usage = result.usage;
       invariant(
-        !containsSecretShapedContent(Buffer.from(result.text, "utf8")),
+        !containsSecretShapedContent(Buffer.from(responseText, "utf8")),
         "PROVIDER_SECRET_DETECTED",
         "Provider output contained secret-shaped material and was discarded",
       );
       const reportedTokens =
-        result.usage.inputTokens === null || result.usage.outputTokens === null
+        usage.inputTokens === null || usage.outputTokens === null
           ? null
-          : result.usage.inputTokens + result.usage.outputTokens;
+          : usage.inputTokens + usage.outputTokens;
+      const responseBytes = Buffer.byteLength(responseText, "utf8");
+      const finishTiming = this.#operationTiming(operation, startedAt);
+      invariant(
+        finishTiming.observedRuntimeMs <= operation.reservedRuntimeMs,
+        "RUNTIME_BUDGET_EXCEEDED",
+        "Provider post-processing exhausted its aggregate runtime reservation",
+      );
       if (
-        (result.usage.outputTokens !== null &&
-          result.usage.outputTokens > request.maxOutputTokens) ||
+        (usage.outputTokens !== null && usage.outputTokens > request.maxOutputTokens) ||
         (reportedTokens !== null && reportedTokens > reservedTokens) ||
-        (result.usage.estimatedCostUsd !== null &&
-          result.usage.estimatedCostUsd > reservedCostUsd + Number.EPSILON)
+        (usage.estimatedCostUsd !== null &&
+          usage.estimatedCostUsd > reservedCostUsd + Number.EPSILON)
       ) {
         this.#store.finishOperation(operation, {
           outcome: "failed",
-          activeRuntimeMs: result.usage.latencyMs,
+          activeRuntimeMs: finishTiming.chargedRuntimeMs,
           inputTokens: null,
           outputTokens: null,
           estimatedCostUsd: null,
-          detail: { code: "PROVIDER_USAGE_EXCEEDED_RESERVATION" },
+          detail: {
+            code: "PROVIDER_USAGE_EXCEEDED_RESERVATION",
+            observedRuntimeMs: finishTiming.observedRuntimeMs,
+            chargedRuntimeMs: finishTiming.chargedRuntimeMs,
+          },
         });
         throw new IcarusError(
           "PROVIDER_USAGE_EXCEEDED_RESERVATION",
@@ -1314,26 +1710,40 @@ export class IcarusService {
       }
       this.#store.finishOperation(operation, {
         outcome: "succeeded",
-        activeRuntimeMs: result.usage.latencyMs,
-        inputTokens: result.usage.inputTokens,
-        outputTokens: result.usage.outputTokens,
-        estimatedCostUsd: result.usage.estimatedCostUsd,
-        detail: { responseBytes: Buffer.byteLength(result.text, "utf8") },
+        activeRuntimeMs: finishTiming.chargedRuntimeMs,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        estimatedCostUsd: usage.estimatedCostUsd,
+        detail: {
+          responseBytes,
+          observedRuntimeMs: finishTiming.observedRuntimeMs,
+          chargedRuntimeMs: finishTiming.chargedRuntimeMs,
+        },
       });
-      return result.text;
+      return responseText;
     } catch (error) {
-      const elapsed = Math.round(performance.now() - startedAt);
+      const timing = this.#operationTiming(operation, startedAt);
+      const failure = signal?.aborted
+        ? new IcarusError("CANCELLED", `Operator cancelled ${kind}`)
+        : providerSignal.aborted || timing.observedRuntimeMs > effectiveTimeoutMs
+          ? new IcarusError(
+              "RUNTIME_BUDGET_EXCEEDED",
+              "Provider request exceeded its effective timeout",
+            )
+          : error;
       try {
         this.#store.finishOperation(operation, {
           outcome:
-            error instanceof IcarusError && error.code === "CANCELLED" ? "cancelled" : "failed",
-          activeRuntimeMs: elapsed,
+            failure instanceof IcarusError && failure.code === "CANCELLED" ? "cancelled" : "failed",
+          activeRuntimeMs: timing.chargedRuntimeMs,
           inputTokens: null,
           outputTokens: null,
           estimatedCostUsd: null,
           detail: {
-            code: error instanceof IcarusError ? error.code : "PROVIDER_FAILED",
-            message: sanitizeText(errorMessage(error)),
+            code: failure instanceof IcarusError ? failure.code : "PROVIDER_FAILED",
+            message: sanitizeText(errorMessage(failure)),
+            observedRuntimeMs: timing.observedRuntimeMs,
+            chargedRuntimeMs: timing.chargedRuntimeMs,
           },
         });
       } catch (finishError) {
@@ -1344,8 +1754,26 @@ export class IcarusService {
           throw finishError;
         }
       }
-      throw error;
+      throw failure;
     }
+  }
+
+  #observedOperationRuntime(startedAt: number): number {
+    return Math.max(1, Math.ceil(performance.now() - startedAt));
+  }
+
+  #operationTiming(
+    operation: ReturnType<IcarusStore["beginOperation"]>,
+    startedAt: number,
+  ): {
+    readonly observedRuntimeMs: number;
+    readonly chargedRuntimeMs: number;
+  } {
+    const observedRuntimeMs = this.#observedOperationRuntime(startedAt);
+    return {
+      observedRuntimeMs,
+      chargedRuntimeMs: Math.min(operation.reservedRuntimeMs, observedRuntimeMs),
+    };
   }
 
   #finishFailedOperation(
@@ -1353,29 +1781,94 @@ export class IcarusService {
     error: unknown,
     startedAt: number,
   ): void {
+    const timing = this.#operationTiming(operation, startedAt);
     this.#store.finishOperation(operation, {
       outcome: error instanceof IcarusError && error.code === "CANCELLED" ? "cancelled" : "failed",
-      activeRuntimeMs: Math.round(performance.now() - startedAt),
+      activeRuntimeMs: timing.chargedRuntimeMs,
       inputTokens: null,
       outputTokens: null,
       estimatedCostUsd: null,
       detail: {
         code: error instanceof IcarusError ? error.code : "OPERATION_FAILED",
         message: sanitizeText(errorMessage(error)),
+        observedRuntimeMs: timing.observedRuntimeMs,
+        chargedRuntimeMs: timing.chargedRuntimeMs,
       },
     });
+  }
+
+  #finishFailedCancellationRecovery(
+    operation: ReturnType<IcarusStore["beginOperation"]>,
+    error: unknown,
+    startedAt: number,
+  ): void {
+    const timing = this.#operationTiming(operation, startedAt);
+    this.#store.finishCancellationRecoveryOperation(operation, {
+      outcome: error instanceof IcarusError && error.code === "CANCELLED" ? "cancelled" : "failed",
+      activeRuntimeMs: timing.chargedRuntimeMs,
+      inputTokens: null,
+      outputTokens: null,
+      estimatedCostUsd: null,
+      detail: {
+        code: error instanceof IcarusError ? error.code : "CANCELLATION_RECOVERY_FAILED",
+        message: sanitizeText(errorMessage(error)),
+        observedRuntimeMs: timing.observedRuntimeMs,
+        chargedRuntimeMs: timing.chargedRuntimeMs,
+      },
+    });
+  }
+
+  async #landSignalCancellation(runId: string): Promise<RunRecord> {
+    this.#store.markStartedOperationsInterrupted(runId);
+    let current = this.#store.getRun(runId);
+    if (
+      current.state === "completed" ||
+      current.state === "cancelled" ||
+      current.state === "rolled_back"
+    ) {
+      return current;
+    }
+    invariant(
+      current.state !== "rolling_back" &&
+        current.state !== "restoring" &&
+        current.state !== "cancelling",
+      "RECOVERY_IN_PROGRESS",
+      "An interrupted recovery step must be resumed fail-closed",
+    );
+    this.#store.transition(runId, "cancelling", "cancellation.requested", {
+      actor: "operator-signal",
+    });
+    try {
+      return await this.#performCancellation(runId);
+    } catch (error) {
+      const failure = asIcarusError(error, "CANCELLATION_RECOVERY_FAILED");
+      current = this.#store.getRun(runId);
+      if (current.state === "cancelling") {
+        this.#store.failRun(runId, "cancelling", failure);
+      }
+      throw failure;
+    }
   }
 
   async #guarded(
     runId: string,
     resumeState: RunState,
     action: () => Promise<RunRecord>,
+    signal?: AbortSignal,
   ): Promise<RunRecord> {
     try {
       return await action();
     } catch (error) {
       const failure = asIcarusError(error, "RUN_STEP_FAILED");
       const current = this.#store.getRun(runId);
+      if (
+        signal?.aborted &&
+        current.state !== "rolling_back" &&
+        current.state !== "restoring" &&
+        current.state !== "cancelling"
+      ) {
+        return this.#landSignalCancellation(runId);
+      }
       if (
         current.state !== "completed" &&
         current.state !== "cancelled" &&

@@ -173,10 +173,16 @@ describe("OpenAIResponsesGateway HTTP contract", () => {
     expect(server.requests).toHaveLength(1);
   });
 
-  it("redacts the API key from provider HTTP errors", async () => {
+  it("does not expose provider HTTP error bodies", async () => {
+    const reflectedCredential = apiKey.replace("test-only-openai-key-value", "npm-value");
     server = await startProviderHttpServer((_request, response) => {
       response.writeHead(401, { "content-type": "application/json" });
-      response.end(JSON.stringify({ error: `invalid bearer ${apiKey}` }));
+      response.end(
+        JSON.stringify({
+          error: `invalid bearer ${apiKey}`,
+          detail: ["NPM_TOKEN", reflectedCredential].join("="),
+        }),
+      );
     });
     const gateway = new OpenAIResponsesGateway(
       createProviderConfig({ kind: "openai", model: "test-model", baseUrl: server.baseUrl }),
@@ -190,7 +196,9 @@ describe("OpenAIResponsesGateway HTTP contract", () => {
     expect(error).toEqual(expect.objectContaining({ code: "PROVIDER_HTTP_ERROR" }));
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).not.toContain(apiKey);
-    expect((error as Error).message).toContain("<redacted:known-secret:");
+    expect((error as Error).message).not.toContain(reflectedCredential);
+    expect((error as Error).message).not.toContain("invalid bearer");
+    expect((error as Error).message).toBe("Provider returned HTTP 401");
   });
 
   it("redacts the API key from thrown transport errors", async () => {
@@ -212,7 +220,7 @@ describe("OpenAIResponsesGateway HTTP contract", () => {
     expect(error).toEqual(expect.objectContaining({ code: "PROVIDER_TRANSPORT_ERROR" }));
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).not.toContain(apiKey);
-    expect((error as Error).message).toContain("<redacted:known-secret:");
+    expect((error as Error).message).toContain("<redacted:known-secret>");
   });
 
   it("rewraps and redacts an IcarusError thrown by the transport", async () => {
@@ -236,7 +244,7 @@ describe("OpenAIResponsesGateway HTTP contract", () => {
     expect(error).toEqual(expect.objectContaining({ code: "PROVIDER_TRANSPORT_ERROR" }));
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).not.toContain(apiKey);
-    expect((error as Error).message).toContain("<redacted:known-secret:");
+    expect((error as Error).message).toContain("<redacted:known-secret>");
   });
 
   it("reports a structured refusal without persisting its text", async () => {
@@ -291,6 +299,30 @@ describe("OpenAIResponsesGateway HTTP contract", () => {
     expect(error).toEqual(expect.objectContaining({ code: "PROVIDER_SECRET_DETECTED" }));
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).not.toContain(apiKey);
+  });
+
+  it.each([
+    { name: "too short", value: "q7!" },
+    { name: "contains whitespace", value: "not a valid key" },
+    { name: "too long", value: "x".repeat(513) },
+  ])("rejects an API key that is $name before transport", ({ value }) => {
+    const config = createProviderConfig({
+      kind: "openai",
+      model: "test-model",
+      baseUrl: "https://api.openai.com/v1/",
+      inputUsdPerMillionTokens: 1,
+      outputUsdPerMillionTokens: 1,
+    });
+    let fetchCalled = false;
+    const fetchImplementation = (() => {
+      fetchCalled = true;
+      return Promise.reject(new Error("transport must not run"));
+    }) as typeof fetch;
+
+    expect(() => new OpenAIResponsesGateway(config, value, fetchImplementation)).toThrow(
+      expect.objectContaining({ code: "OPENAI_API_KEY_INVALID" }),
+    );
+    expect(fetchCalled).toBe(false);
   });
 
   it("denies sending OpenAI credentials to a non-OpenAI remote origin", () => {

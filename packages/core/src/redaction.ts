@@ -1,35 +1,105 @@
-import { sha256 } from "./digest.js";
+import { findSecretSpans, type SecretSpan } from "./context.js";
 
-// biome-ignore lint/complexity/useRegexLiterals: constructors keep control bytes out of regex literals
-const ANSI_PATTERN = new RegExp(
-  String.raw`\x1b(?:\][^\x07]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~])`,
-  "g",
-);
 // biome-ignore lint/complexity/useRegexLiterals: constructors keep control bytes out of regex literals
 const CONTROL_PATTERN = new RegExp(String.raw`[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`, "g");
-const PRIVATE_KEY_PATTERN =
-  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
-const TOKEN_PATTERNS: readonly [RegExp, string][] = [
-  [/\bsk-[A-Za-z0-9_-]{16,}\b/g, "api-key"],
-  [/\bgh[opusr]_[A-Za-z0-9]{20,}\b/g, "github-token"],
-  [/\bAKIA[0-9A-Z]{16}\b/g, "aws-access-key"],
-  [/(?:https?:\/\/)[^\s/@:]+:[^\s/@]+@/g, "credentialed-url"],
-];
+const MAX_REDACTION_SPANS = 4_096;
 
-function marker(kind: string, value: string): string {
-  return `<redacted:${kind}:${sha256(value).slice(0, 12)}>`;
+interface RedactionSpan {
+  readonly start: number;
+  readonly end: number;
+  readonly kind: SecretSpan["kind"] | "known-secret";
+}
+
+function mergedSpans(spans: readonly RedactionSpan[]): RedactionSpan[] {
+  const ordered = [...spans].sort(
+    (left, right) => left.start - right.start || right.end - left.end,
+  );
+  const merged: RedactionSpan[] = [];
+  for (const span of ordered) {
+    const previous = merged.at(-1);
+    if (previous === undefined || span.start > previous.end) {
+      merged.push(span);
+    } else if (span.end > previous.end) {
+      merged[merged.length - 1] = { ...previous, end: span.end };
+    }
+  }
+  return merged;
+}
+
+function knownSecretSpans(input: string, knownSecrets: readonly string[]): RedactionSpan[] {
+  const spans: RedactionSpan[] = [];
+  for (const secret of new Set(knownSecrets.filter((value) => value.length > 0))) {
+    let start = 0;
+    while (start < input.length) {
+      const match = input.indexOf(secret, start);
+      if (match === -1) break;
+      if (spans.length >= MAX_REDACTION_SPANS) {
+        spans.push({ start: match, end: input.length, kind: "known-secret" });
+        return mergedSpans(spans);
+      }
+      spans.push({ start: match, end: match + secret.length, kind: "known-secret" });
+      start = match + secret.length;
+    }
+  }
+  return mergedSpans(spans);
+}
+
+function redactSpans(input: string, spans: readonly RedactionSpan[]): string {
+  let cursor = 0;
+  let output = "";
+  for (const span of mergedSpans(spans)) {
+    output += input.slice(cursor, span.start);
+    output += `<redacted:${span.kind}>`;
+    cursor = span.end;
+  }
+  return output + input.slice(cursor);
+}
+
+function escapeAnsiControls(input: string): string {
+  const parts: string[] = [];
+  let segmentStart = 0;
+  let cursor = 0;
+  while (cursor < input.length) {
+    if (input.charCodeAt(cursor) !== 0x1b) {
+      cursor += 1;
+      continue;
+    }
+    parts.push(input.slice(segmentStart, cursor), "<escaped-control>");
+    let end = cursor + 1;
+    const introducer = input[end];
+    if (introducer === "]") {
+      end += 1;
+      while (end < input.length) {
+        if (input.charCodeAt(end) === 0x07) {
+          end += 1;
+          break;
+        }
+        if (input.charCodeAt(end) === 0x1b && input[end + 1] === "\\") {
+          end += 2;
+          break;
+        }
+        end += 1;
+      }
+    } else if (introducer === "[") {
+      end += 1;
+      while (end < input.length && /[0-?]/.test(input[end] ?? "")) end += 1;
+      while (end < input.length && /[ -/]/.test(input[end] ?? "")) end += 1;
+      if (end < input.length && /[@-~]/.test(input[end] ?? "")) end += 1;
+    }
+    cursor = end;
+    segmentStart = end;
+  }
+  if (parts.length === 0) return input;
+  parts.push(input.slice(segmentStart));
+  return parts.join("");
 }
 
 export function sanitizeText(input: string, knownSecrets: readonly string[] = []): string {
-  let result = input.replace(ANSI_PATTERN, "<escaped-control>");
-  for (const secret of knownSecrets) {
-    if (secret.length >= 4) {
-      result = result.split(secret).join(marker("known-secret", secret));
-    }
-  }
-  result = result.replace(PRIVATE_KEY_PATTERN, (value) => marker("private-key", value));
-  for (const [pattern, kind] of TOKEN_PATTERNS) {
-    result = result.replace(pattern, (value) => marker(kind, value));
-  }
+  let result = redactSpans(input, [
+    ...knownSecretSpans(input, knownSecrets),
+    ...findSecretSpans(input),
+  ]);
+  result = escapeAnsiControls(result);
+  result = redactSpans(result, findSecretSpans(result));
   return result.replace(CONTROL_PATTERN, "<escaped-control>");
 }

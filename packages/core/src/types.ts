@@ -1,5 +1,6 @@
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export const CONTEXT_AUDIT_POLICY_VERSION = "tracked-tree-secret-audit-v1";
 
 export type RunState =
   | "preparing"
@@ -101,6 +102,7 @@ export interface ContextEntry {
 }
 
 export interface ContextBundle {
+  readonly auditPolicyVersion: typeof CONTEXT_AUDIT_POLICY_VERSION;
   readonly baseCommit: string;
   readonly target: string;
   readonly repositoryMap: readonly string[];
@@ -116,6 +118,7 @@ export interface ContextManifestEntry {
 }
 
 export interface ContextManifest {
+  readonly auditPolicyVersion: typeof CONTEXT_AUDIT_POLICY_VERSION;
   readonly baseCommit: string;
   readonly target: string;
   readonly repositoryMap: readonly string[];

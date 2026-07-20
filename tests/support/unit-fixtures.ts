@@ -6,6 +6,7 @@ import { digestJson } from "../../packages/core/src/digest.js";
 import { DEFAULT_CEILING } from "../../packages/core/src/policy.js";
 import { createProviderConfig } from "../../packages/core/src/provider.js";
 import { IcarusStore } from "../../packages/core/src/store.js";
+import { CONTEXT_AUDIT_POLICY_VERSION } from "../../packages/core/src/types.js";
 import type {
   ContextManifest,
   JsonValue,
@@ -99,6 +100,7 @@ export function seedUnitProject(store: IcarusStore): {
 
 export function unitContextManifest(): ContextManifest {
   return {
+    auditPolicyVersion: CONTEXT_AUDIT_POLICY_VERSION,
     baseCommit: UNIT_BASE_COMMIT,
     target: "src/greeting.txt",
     repositoryMap: ["src/greeting.txt"],

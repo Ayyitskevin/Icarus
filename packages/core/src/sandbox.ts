@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { containsSecretShapedContent, isSecretShapedPath } from "./context.js";
+import {
+  containsSecretShapedContent,
+  isIntrinsicallySecretPath,
+  MAX_TRACKED_TREE_BYTES,
+  MAX_TRACKED_TREE_FILE_BYTES,
+} from "./context.js";
 import { sha256 } from "./digest.js";
 import { errorMessage, IcarusError, invariant } from "./errors.js";
 import type { GitController } from "./git.js";
@@ -11,9 +16,6 @@ import { sanitizeText } from "./redaction.js";
 import type { CheckEvidence, CheckProfile, SandboxProfile, SunCeiling } from "./types.js";
 
 const RUN_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
-const MAX_SNAPSHOT_FILE_BYTES = 16 * 1024 * 1024;
-
 function controllerEnvironment(): Record<string, string> {
   return {
     PATH: "/usr/local/bin:/usr/bin:/bin",
@@ -90,7 +92,7 @@ async function createReadOnlySnapshot(
         `Sandbox snapshot cannot materialize Git mode ${entry.mode}: ${entry.path}`,
       );
       invariant(
-        !isSecretShapedPath(entry.path),
+        !isIntrinsicallySecretPath(entry.path),
         "SNAPSHOT_SECRET_PATH",
         `Secret-shaped tracked path is denied in the check snapshot: ${entry.path}`,
       );
@@ -101,14 +103,14 @@ async function createReadOnlySnapshot(
               await git.readRegularUtf8File(
                 input.worktreePath,
                 input.target,
-                input.ceiling.maxFileBytes,
+                Math.min(input.ceiling.maxFileBytes, MAX_TRACKED_TREE_FILE_BYTES),
               ),
               "utf8",
             )
           : await git.readBlob(
               input.worktreePath,
               entry.objectId,
-              MAX_SNAPSHOT_FILE_BYTES,
+              MAX_TRACKED_TREE_FILE_BYTES,
               input.signal,
             );
       foundTarget ||= entry.path === input.target;
@@ -119,7 +121,7 @@ async function createReadOnlySnapshot(
       );
       totalBytes += bytes.length;
       invariant(
-        totalBytes <= MAX_SNAPSHOT_BYTES,
+        totalBytes <= MAX_TRACKED_TREE_BYTES,
         "SNAPSHOT_BUDGET_EXCEEDED",
         "Tracked repository snapshot exceeds the Milestone 1 byte ceiling",
       );

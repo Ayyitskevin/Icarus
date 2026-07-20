@@ -35,7 +35,9 @@ roll it back, or restore the recorded checkpoint.
    network, shell, and approval policy is fixed host policy, not project data.
 3. Start a run with a task, existing tracked target, provider, model, and bounded
    ceiling; pin a clean committed base tree.
-4. Map the pinned Git tree; ignored and uncommitted files never enter context.
+4. Map the pinned Git tree and, before a context artifact, provider egress,
+   private cache, or worktree exists, audit the complete tracked tree within
+   fixed file/aggregate bounds. Ignored and uncommitted files never enter context.
 5. Load only root/target-ancestor rules with byte limits and provenance.
 6. For non-loopback providers, stop before context egress and bind approval to
    the exact context manifest digest.
@@ -81,6 +83,11 @@ estimated cost, context bytes, changed-file count, file bytes, diff bytes, tool
 calls, provider/check timeouts, and persisted/raw process-output bytes. Network
 class, container-only execution, and required plan/review approvals are fixed
 Milestone 1 host policy. Unknown remote pricing is a hard stop.
+The ordinary active-runtime ceiling remains binding for productive work. One
+fixed `cancellation.recovery` operation kind may charge at most two 120-second
+attempts above ordinary runtime admission solely to land a run safely; the
+additional tool calls and runtime remain visible.
+
 
 ## Non-functional requirements
 
@@ -92,10 +99,14 @@ Milestone 1 host policy. Unknown remote pricing is a hard stop.
   An interrupted external operation is charged its full conservative
   reservation before a fresh retry; resume may therefore stop at a ceiling.
 - Deterministic tests do not call paid or installed models.
-- Secrets are environment-only, redacted from errors/evidence, and recognizable
-  credential material in successful provider output is discarded before
-  proposal persistence. Known credentials reflected by thrown transport errors
-  are sanitized before the error crosses the provider adapter boundary.
+- Secrets are environment-only, and recognizable credential material in
+  successful provider output is discarded before proposal persistence.
+- Before any context artifact, egress, cache, or worktree, a bounded complete
+  tracked-tree audit rejects intrinsically secret paths, content findings, files
+  over 16 MiB, or aggregate content over 64 MiB.
+- Known credentials and detected spans are redacted with constant markers.
+  Non-success provider HTTP response bodies are not surfaced or persisted, and
+  transport errors are sanitized before crossing the provider adapter boundary.
 - Linux is the supported Milestone 1 platform.
 
 ## Explicit non-goals
@@ -104,6 +115,29 @@ Public signup, billing, teams, browser-held provider keys, Kubernetes, semantic
 retrieval, arbitrary commands, creates/deletes, binary patches, commits, pushes,
 deployments, previews, database migrations, customer data, production access,
 backend-as-a-service primitives, and distributed execution.
+
+## Preserved future contracts
+
+Later milestones retain these product requirements without implying that they
+exist in Milestone 1:
+
+- Context intelligence will add project skills, language/framework detection,
+  `rg`-based search, syntax/LSP signals, semantic retrieval, project memory,
+  file-and-line provenance, and measured context-budget fixtures.
+- The local workspace will expose repository status, sessions, live events,
+  task state, file tree, diffs, checks, terminal evidence, previews, approvals,
+  checkpoints, prompt history, and token/cost telemetry without placing provider
+  keys in a browser.
+- Application-factory templates may add an application starter, API layer,
+  database, authentication, storage, realtime events, jobs, vector search,
+  environment references, local preview, and deployment configuration only as
+  demanded by real projects.
+- Distributed execution treats Mickey, Flow, Highwind, and Zenbook as separate
+  networked nodes with explicit job envelopes, heartbeats, retries,
+  cancellation, idempotency, and resource limits. No shared-machine assumption
+  is permitted.
+- Future local services default to understandable Docker Compose-style
+  orchestration. Kubernetes remains out of scope until evidence justifies it.
 
 ## Success measures
 

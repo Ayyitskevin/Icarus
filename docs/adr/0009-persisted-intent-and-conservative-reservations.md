@@ -26,6 +26,10 @@ Normal completion replaces the reservation with actual bounded usage. If no
 result exists after restart, Icarus marks the operation interrupted and charges
 the full reservation before any fresh retry.
 
+ADR 0012 narrowly supersedes the ordinary-ceiling requirement for the dedicated
+`cancellation.recovery` operation after a run is already in `cancelling`.
+Recovery remains fixed, attempt-bounded, metered, and conservatively charged.
+
 ## Alternatives rejected
 
 - Optimistically refund unknown calls: can silently exceed paid or runtime

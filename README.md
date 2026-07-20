@@ -2,6 +2,9 @@
 
 > Fly high. Know the ceiling. Land safely.
 
+The name comes from the Greek story of Icarus: the product is designed for
+ambitious capability with an explicit ceiling and a safe landing path.
+
 Icarus is a local-first, self-hosted, model-agnostic AI software factory. The
 current foundation deliberately implements one narrow workflow well: plan one
 controlled replacement in an operator-selected tracked text file, obtain human
@@ -33,7 +36,9 @@ roadmap contracts plus repeatable quality gates. The Milestone 1 slice supplies:
 Remote preparation reaches its egress gate atomically, successful provider
 output containing recognizable credential material is discarded before
 persistence, and completion revalidates the live worktree against the reviewed
-diff.
+diff. Before any context artifact, provider request, private Git cache, or
+worktree exists, preparation also audits the complete tracked tree within fixed
+file and aggregate byte limits and fails closed on credential material.
 
 Not yet included: a web UI, arbitrary agent tool use, model-written shell
 commands, semantic search, commits or pushes, previews, deployment, backend
@@ -44,6 +49,7 @@ platform primitives, multi-agent orchestration, and distributed workers.
 - Node.js 22.23 or newer in the Node 22 line
 - pnpm 9.15 or newer in the pnpm 9 line
 - Git 2.40 or newer
+- util-linux `flock` available at `/usr/bin/flock`
 - Docker with seccomp support and a locally present digest-pinned check image
 - a repository with at least one commit for an agent run
 
@@ -127,7 +133,9 @@ Review rejection performs the bounded rollback directly. A later explicit
 restore rewrites only the recorded approved bytes and reruns verification.
 
 Provider secrets are read from the process environment and are never stored in
-the Icarus database. See `docs/OPERATIONS.md` before using a non-fixture
+the Icarus database. Credential-prone configuration paths are protected from
+model context and edits; safe configuration content may still be included in a
+tracked sandbox snapshot. See `docs/OPERATIONS.md` before using a non-fixture
 repository.
 
 ## Documentation

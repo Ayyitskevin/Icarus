@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -65,6 +65,87 @@ const allowedMeasurementStatuses = new Set([
   "not_measured",
 ]);
 
+const representativeFixtureContracts = new Map([
+  [
+    "fix-bug-multi-file",
+    {
+      invariant: "off_by_one_source_and_multi_file_regression_task",
+      taskSha256: "3326d66b06933fa48e4397198f4ed28ec59232571e9b942b76f876bb238fe8b2",
+      files: {
+        "README.md": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5",
+        "checks/test_cart.py": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f",
+        "src/cart.py": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382",
+      },
+    },
+  ],
+  [
+    "repair-failing-test",
+    {
+      invariant: "false_value_failure_with_operator_selected_repair_target",
+      taskSha256: "8008941bda68b93a40df51b3f12f435f85b7d9acb0769802cd202624f87c3e08",
+      files: {
+        "README.md": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee",
+        "checks/test_parser.py": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e",
+        "src/parser.py": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e",
+      },
+    },
+  ],
+  [
+    "refactor-module",
+    {
+      invariant: "duplicated_algorithm_requiring_new_module_and_two_existing_file_edits",
+      taskSha256: "14432d9cf2963fdd96d8fbe611f7d4475604c829d008faf60839508c3ac36ba3",
+      files: {
+        "README.md": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6",
+        "checks/test_profile.py":
+          "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c",
+        "src/format_name.py": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f",
+        "src/profile.py": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab",
+      },
+    },
+  ],
+  [
+    "update-database-schema",
+    {
+      invariant: "status_column_absent_and_new_protected_migration_required",
+      taskSha256: "67f1fee0a5f980609a6e94a0a467f9151306b84e364da5ac39fa77489e1f8d3d",
+      files: {
+        "README.md": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7",
+        "checks/schema_contract.sql":
+          "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9",
+        "migrations/README.md": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642",
+        "schema/current.sql": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150",
+      },
+    },
+  ],
+  [
+    "review-security-issue",
+    {
+      invariant: "uncontained_user_path_with_source_backed_expected_finding",
+      taskSha256: "56cf4545bafe7485d96cf81498f0666f9d2cb599c833b98201d258f461724337",
+      files: {
+        "README.md": "078e8880de0bfd549d6dcd9e16967d35693988c38343c5b6ad6f231f2aac426f",
+        "checks/expected_finding.md":
+          "2fdc9c401165ab469355887fe2b44069a6e7d231d2c4406e516c72fd872dbbd1",
+        "src/files.py": "3eda58ebbbfae5a26e17236f93ac39972969c121baec2b2897f4703101062af2",
+      },
+    },
+  ],
+  [
+    "explain-codebase",
+    {
+      invariant: "entrypoint_config_and_greeting_provenance_graph",
+      taskSha256: "f97b4ce340849decaf66b2d4bd26a39c067885c6fd8ca5352b1f0a78ca7102fc",
+      files: {
+        "README.md": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1",
+        "config/app.json": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64",
+        "src/greeting.py": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a",
+        "src/main.py": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440",
+      },
+    },
+  ],
+]);
+
 function assertCondition(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -109,6 +190,65 @@ async function snapshotTree(directory) {
 
 function snapshotSha256(snapshot) {
   return sha256(JSON.stringify([...snapshot.entries()]));
+}
+
+function validateRepresentativeFixtureContract(scenario, task, repositorySnapshot) {
+  const expected = representativeFixtureContracts.get(scenario.id);
+  if (expected === undefined) {
+    assertCondition(
+      !Array.isArray(scenario.representativePaths),
+      "Representative evaluation lacks a static fixture contract: " + scenario.id,
+    );
+    return null;
+  }
+  assertCondition(
+    Array.isArray(scenario.representativePaths),
+    "Static fixture contract is not attached to a representative evaluation: " + scenario.id,
+  );
+  const taskSha256 = sha256(task);
+  assertCondition(
+    taskSha256 === expected.taskSha256,
+    "Representative task no longer satisfies " + expected.invariant + ": " + scenario.id,
+  );
+  const expectedFiles = Object.entries(expected.files).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  const observedPaths = [...repositorySnapshot.keys()];
+  const expectedPaths = expectedFiles.map(([filePath]) => filePath);
+  assertCondition(
+    JSON.stringify(observedPaths) === JSON.stringify(expectedPaths),
+    "Representative repository shape no longer satisfies " +
+      expected.invariant +
+      ": " +
+      scenario.id,
+  );
+  const files = expectedFiles.map(([filePath, expectedSha256]) => {
+    const observedSha256 = repositorySnapshot.get(filePath);
+    assertCondition(
+      observedSha256 === expectedSha256,
+      "Representative fixture content no longer satisfies " +
+        expected.invariant +
+        ": " +
+        scenario.id +
+        ":" +
+        filePath,
+    );
+    return { path: filePath, sha256: observedSha256 };
+  });
+  for (const representativePath of scenario.representativePaths) {
+    assertCondition(
+      Object.hasOwn(expected.files, representativePath),
+      "Representative path is outside its static fixture contract: " +
+        scenario.id +
+        ":" +
+        representativePath,
+    );
+  }
+  return {
+    invariant: expected.invariant,
+    taskSha256,
+    files,
+  };
 }
 
 function changedPaths(before, after) {
@@ -227,6 +367,12 @@ async function startOllamaQueue(initialResponses) {
         response.end('{"error":"evaluation provider queue exhausted"}');
         return;
       }
+      if (next.hang === true) {
+        if (typeof next.onRequest === "function") {
+          next.onRequest();
+        }
+        return;
+      }
       response.writeHead(next.status ?? 200, { "content-type": "application/json" });
       response.end(
         next.rawBody ??
@@ -275,6 +421,120 @@ async function startOllamaQueue(initialResponses) {
       server.closeAllConnections();
       await completion;
     },
+  };
+}
+
+async function waitForBoundedProcessExit(exit, timeoutMs, label) {
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ kind: "timeout" }), timeoutMs);
+    timer.unref();
+  });
+  try {
+    const result = await Promise.race([exit.then((value) => ({ kind: "exit", value })), timeout]);
+    if (result.kind !== "exit") {
+      throw new Error(`${label} did not exit within ${timeoutMs}ms`);
+    }
+    return result.value;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function killApprovalAtProviderRequest(
+  environment,
+  stateRoot,
+  runId,
+  planSha256,
+  providerServer,
+) {
+  let requestObservedResolve;
+  const requestObserved = new Promise((resolve) => {
+    requestObservedResolve = resolve;
+  });
+  providerServer.enqueue({
+    hang: true,
+    onRequest: () => requestObservedResolve(),
+  });
+
+  const child = spawn(
+    process.execPath,
+    [
+      path.join(root, "packages", "cli", "dist", "main.js"),
+      "run",
+      "approve",
+      runId,
+      "--plan-sha",
+      planSha256,
+      "--actor",
+      "eval-operator",
+    ],
+    {
+      cwd: root,
+      env: {
+        PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+        HOME: environment.controlHome,
+        LANG: "C.UTF-8",
+        LC_ALL: "C.UTF-8",
+        ICARUS_HOME: stateRoot,
+      },
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  const stdout = [];
+  const stderr = [];
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  const outputLimit = 64 * 1024;
+  child.stdout.on("data", (chunk) => {
+    stdoutBytes += chunk.length;
+    if (stdoutBytes <= outputLimit) {
+      stdout.push(chunk);
+    }
+  });
+  child.stderr.on("data", (chunk) => {
+    stderrBytes += chunk.length;
+    if (stderrBytes <= outputLimit) {
+      stderr.push(chunk);
+    }
+  });
+  const exit = new Promise((resolve) => {
+    child.once("error", (error) => resolve({ error }));
+    child.once("close", (code, signal) => resolve({ code, signal }));
+  });
+  const observation = await Promise.race([
+    requestObserved.then(() => ({ kind: "request" })),
+    exit.then((result) => ({ kind: "exit", result })),
+    new Promise((resolve) => setTimeout(() => resolve({ kind: "timeout" }), 15_000).unref()),
+  ]);
+  if (observation.kind !== "request") {
+    child.kill("SIGKILL");
+    await waitForBoundedProcessExit(exit, 5_000, "Approval cleanup process");
+    throw new Error(
+      "Approval process did not reach the held provider request (" +
+        observation.kind +
+        "): " +
+        Buffer.concat(stderr).toString("utf8"),
+    );
+  }
+
+  const killed = child.kill("SIGKILL");
+  assertCondition(killed, "Evaluation could not send SIGKILL to the approval process");
+  const exitResult = await waitForBoundedProcessExit(exit, 5_000, "Killed approval process");
+  assertCondition(
+    exitResult.signal === "SIGKILL",
+    "Approval process did not terminate from SIGKILL: " + JSON.stringify(exitResult),
+  );
+  assertCondition(
+    stdoutBytes <= outputLimit && stderrBytes <= outputLimit,
+    "Killed approval process exceeded its output ceiling",
+  );
+  return {
+    pid: child.pid,
+    signal: exitResult.signal,
+    stdout: Buffer.concat(stdout).toString("utf8"),
+    stderr: Buffer.concat(stderr).toString("utf8"),
   };
 }
 
@@ -359,16 +619,31 @@ async function validateFixtureContract(scenario) {
   assertCondition(task.trim().length > 0, "Evaluation task is empty: " + scenario.id);
   const repositorySnapshot = await snapshotTree(repository);
   assertCondition(repositorySnapshot.size > 0, "Evaluation repository is empty: " + scenario.id);
+  const taskSha256 = sha256(task);
+  const representativeContract = validateRepresentativeFixtureContract(
+    scenario,
+    task,
+    repositorySnapshot,
+  );
   if (Array.isArray(scenario.expectedContextPaths)) {
     for (const expectedPath of scenario.expectedContextPaths) {
       await access(within(repository, expectedPath));
     }
   }
+  if (Array.isArray(scenario.representativePaths)) {
+    assertCondition(
+      scenario.representativePaths.length > 0,
+      "Representative fixture path list is empty: " + scenario.id,
+    );
+    for (const fixturePath of scenario.representativePaths)
+      await access(within(repository, fixturePath));
+  }
   return {
     repository,
     task,
-    taskSha256: sha256(task),
+    taskSha256,
     repositorySha256: snapshotSha256(repositorySnapshot),
+    representativeContract,
   };
 }
 
@@ -559,7 +834,7 @@ function runMeasurements(input) {
       estimatedUsd: input.run.usage.estimatedCostUsd,
       actualBilledUsd: null,
       basis:
-        "configured provider rates and provider-operation usage; synthetic interruption cost is zero",
+        "configured provider rates and provider-operation usage; deterministic fixture rates are zero",
     },
     humanApprovalFrequency: {
       status: "measured",
@@ -1028,26 +1303,62 @@ async function evaluateInterruptedResume(scenario, contract) {
       runtime.close();
       runtime = undefined;
 
-      store = new IcarusStore(path.join(configured.stateRoot, "icarus.sqlite3"));
-      const running = store.approvePlan(planned.id, planned.planSha256, "eval-operator");
-      const usageBeforeInterruption = running.usage;
-      const interruptedReservation = {
-        costUsd: 0,
-        tokens: 17,
-        runtimeMs: 500,
-      };
-      store.beginOperation(
+      const killedProcess = await killApprovalAtProviderRequest(
+        environment,
+        configured.stateRoot,
         planned.id,
-        "synthetic.eval.interrupted",
-        interruptedReservation.costUsd,
-        interruptedReservation.tokens,
-        interruptedReservation.runtimeMs,
+        planned.planSha256,
+        providerServer,
       );
-      const usageWithReservation = store.getRun(planned.id).usage;
       assertCondition(
-        usageWithReservation.toolCalls === usageBeforeInterruption.toolCalls + 1 &&
-          usageWithReservation.reservedCostUsd === 0,
-        "Store-backed interruption did not persist its reservation",
+        Number.isSafeInteger(killedProcess.pid),
+        "Killed approval process did not expose a process identifier",
+      );
+
+      store = new IcarusStore(path.join(configured.stateRoot, "icarus.sqlite3"));
+      const crashedRun = store.getRun(planned.id);
+      const crashedEvents = store.listEvents(planned.id);
+      const startedEvents = crashedEvents.filter(
+        (event) =>
+          event.type === "operation.started" && eventPayload(event).kind === "provider.edit",
+      );
+      assertCondition(
+        startedEvents.length === 1,
+        "Process death did not leave exactly one started provider.edit operation",
+      );
+      const startedPayload = eventPayload(startedEvents[0]);
+      assertCondition(
+        typeof startedPayload.operationId === "string" &&
+          typeof startedPayload.reservedCostUsd === "number" &&
+          Number.isFinite(startedPayload.reservedCostUsd) &&
+          typeof startedPayload.reservedTokens === "number" &&
+          Number.isSafeInteger(startedPayload.reservedTokens) &&
+          startedPayload.reservedTokens > 0 &&
+          typeof startedPayload.reservedRuntimeMs === "number" &&
+          Number.isSafeInteger(startedPayload.reservedRuntimeMs) &&
+          startedPayload.reservedRuntimeMs > 0,
+        "Started provider.edit event did not persist a complete reservation",
+      );
+      const matchingFinishedAtCrash = crashedEvents.filter(
+        (event) =>
+          event.type === "operation.finished" &&
+          eventPayload(event).operationId === startedPayload.operationId,
+      );
+      assertCondition(
+        matchingFinishedAtCrash.length === 0,
+        "Killed provider.edit operation was already finished at the observed crash boundary",
+      );
+      const interruptedReservation = {
+        costUsd: startedPayload.reservedCostUsd,
+        tokens: startedPayload.reservedTokens,
+        runtimeMs: startedPayload.reservedRuntimeMs,
+      };
+      const usageAtCrash = crashedRun.usage;
+      assertCondition(
+        crashedRun.state === "running" &&
+          crashedRun.worktreePath !== null &&
+          usageAtCrash.reservedCostUsd === interruptedReservation.costUsd,
+        "Killed process did not preserve durable running state and reservation",
       );
       store.close();
       store = undefined;
@@ -1072,7 +1383,7 @@ async function evaluateInterruptedResume(scenario, contract) {
         "eval-operator",
       );
       assertCondition(completed.state === "completed", "Interrupted run did not complete");
-      assertProviderContract(providerServer, 2);
+      assertProviderContract(providerServer, 3);
       const history = runtime.service.history(planned.id);
       const interruptedEvents = history.events.filter(
         (event) => event.type === "operation.interrupted",
@@ -1083,16 +1394,16 @@ async function evaluateInterruptedResume(scenario, contract) {
       );
       const interruptedPayload = eventPayload(interruptedEvents[0]);
       const conservativeChargeRecorded =
+        interruptedPayload.operationId === startedPayload.operationId &&
         interruptedPayload.reservedCostUsd === interruptedReservation.costUsd &&
         interruptedPayload.reservedTokens === interruptedReservation.tokens &&
         interruptedPayload.reservedRuntimeMs === interruptedReservation.runtimeMs &&
-        completed.usage.estimatedCostUsd === usageBeforeInterruption.estimatedCostUsd &&
+        completed.usage.estimatedCostUsd >=
+          usageAtCrash.estimatedCostUsd + interruptedReservation.costUsd &&
         completed.usage.inputTokens + completed.usage.outputTokens >=
-          usageBeforeInterruption.inputTokens +
-            usageBeforeInterruption.outputTokens +
-            interruptedReservation.tokens &&
+          usageAtCrash.inputTokens + usageAtCrash.outputTokens + interruptedReservation.tokens &&
         completed.usage.activeRuntimeMs >=
-          usageBeforeInterruption.activeRuntimeMs + interruptedReservation.runtimeMs &&
+          usageAtCrash.activeRuntimeMs + interruptedReservation.runtimeMs &&
         completed.usage.reservedCostUsd === 0;
       assertCondition(
         conservativeChargeRecorded,
@@ -1108,10 +1419,15 @@ async function evaluateInterruptedResume(scenario, contract) {
         (event) => event.type === "resume.requested" || event.type === "run.resumed",
       );
       const measuredEvidence = [
-        evidence("store_backed_started_operation", {
-          kind: "synthetic.eval.interrupted",
+        evidence("process_killed_with_started_operation", {
+          process: {
+            pid: killedProcess.pid,
+            signal: killedProcess.signal,
+          },
+          runStateAtCrash: crashedRun.state,
+          kind: startedPayload.kind,
+          operationId: startedPayload.operationId,
           reservation: interruptedReservation,
-          limitation: "The harness persists operation intent directly; it does not kill a process",
         }),
         evidence("interrupted_event", {
           count: interruptedEvents.length,
@@ -1173,10 +1489,15 @@ async function evaluateInterruptedResume(scenario, contract) {
 }
 
 function evaluateUnsupportedContract(scenario, contract) {
+  assertCondition(
+    contract.representativeContract !== null,
+    "Unsupported evaluation lacks representative contract evidence: " + scenario.id,
+  );
   const measuredEvidence = [
     evidence("fixture_contract_valid", {
       repositorySha256: contract.repositorySha256,
       taskSha256: contract.taskSha256,
+      representativeContract: contract.representativeContract,
     }),
     evidence("capability_outside_m1", {
       requiredCapability: scenario.requiredCapability,
@@ -1365,6 +1686,9 @@ function validateManifest() {
       assertCondition(
         scenario.evaluator === "unsupported_contract" &&
           scenario.expectedOutcome === "unsupported" &&
+          Number.isInteger(scenario.plannedMilestone) &&
+          Array.isArray(scenario.representativePaths) &&
+          scenario.representativePaths.length >= 2 &&
           typeof scenario.unsupportedReason === "string" &&
           !m1Capabilities.has(scenario.requiredCapability),
         "Unsupported evaluation lacks an honest M1 capability reason: " + scenario.id,
@@ -1377,6 +1701,12 @@ function validateManifest() {
         "Supported evaluation is not bound to an M1 capability: " + scenario.id,
       );
     }
+  }
+  for (const scenarioId of representativeFixtureContracts.keys()) {
+    assertCondition(
+      seenIds.has(scenarioId),
+      "Static representative fixture contract is orphaned: " + scenarioId,
+    );
   }
   assertCondition(
     seenClasses.size === requiredClasses.size &&
@@ -1444,7 +1774,6 @@ const report = {
   limitations: [
     "Actual billed API cost is unavailable in deterministic offline evaluation; only configured-rate estimates are reported.",
     "Context quality is the deterministic Milestone 1 expected-path baseline, not semantic retrieval quality.",
-    "Interrupted-run evidence uses a directly persisted store operation to simulate a crash boundary; it does not kill an operating-system process.",
   ],
   results,
 };

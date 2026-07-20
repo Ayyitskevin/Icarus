@@ -5,8 +5,9 @@
 Status values are evidence claims. A checked item must be backed by a command or
 test named below.
 
-Status: repaired candidate passes local and hosted CI gates; security release
-hold on 2026-07-19.
+Status: final-adversarial-audit repairs are implemented and the fresh local
+gate passed; exact-head hosted CI is pending. The separate security release
+hold remains in force on 2026-07-19.
 
 M0/M1 must not be called complete until Kevin makes the security decision
 recorded in ADR 0010 for the inherited OpenCode workflow.
@@ -73,6 +74,24 @@ The named tests and full local gate now pass on one candidate tree:
 - [x] Emit and validate the schema-v2 measured evaluation report with five M1
       executable outcomes and five honest unsupported M2+ capabilities
 
+### Final adversarial continuation
+
+A final source-level audit reopened the following evidence gaps. Checkmarks are
+added only after the fresh full gate and exact-head CI complete:
+
+- [x] Reject common credential paths/content before context or check snapshots,
+      including short known secrets supplied to redaction
+- [x] Replace stale-path lease cleanup with stable kernel-backed exclusion and
+      adversarial race coverage
+- [x] Meter bounded Git/filesystem control work against aggregate active runtime
+- [x] Prove tool, token, runtime, and cost ceilings with negative tests
+- [x] Land operator signal aborts in durable `cancelled` state
+- [x] Kill a real approval process during a started provider operation and prove
+      conservative resume
+- [x] Validate representative scenario-specific fixtures for every deferred eval
+- [x] Re-run the complete local gate, security/audit checks, and adversarial review
+- [ ] Publish the candidate and verify hosted CI at the exact head.
+
 ## Acceptance evidence
 
 The milestone release gate is `pnpm check`, followed by `pnpm audit --audit-level
@@ -125,6 +144,20 @@ untracked. Hosted evidence for implementation commit
 gh run view 29712657768 -R Ayyitskevin/Icarus
 observed: completed successfully; quality job passed in 42 seconds
 ```
+
+Final adversarial candidate local evidence on 2026-07-20:
+
+- `pnpm check`: exit 0; formatting, lint, typecheck, 74 unit/provider tests, 29
+  integration tests, evaluation, 109 security tests, 12 static security
+  assertions, and the final build passed.
+- `pnpm eval`: 5 passed, 0 failed, 5 honestly unsupported; manifest SHA-256
+  `c641797acac61a7cf01e5900d472bb7d346a1922629df46b86473ef19b4d0d1a`.
+- Focused adversarial suites passed 161/161 tests; independent cross-cut review
+  found no remaining code release blocker.
+- Both full and production dependency audits reported no known vulnerabilities.
+  Checksum-verified `actionlint` v1.7.12 accepted both workflow files, and
+  `git diff --check` reported no errors.
+- Exact-head hosted CI remains pending until this candidate is published.
 
 ## Deferred plan
 

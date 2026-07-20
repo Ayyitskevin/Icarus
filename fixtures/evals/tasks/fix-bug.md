@@ -1,1 +1,2 @@
-Repair a defect that requires coordinated changes to source and tests.
+Repair the one-cent cart subtotal defect in `src/cart.py` and add a regression
+case to `checks/test_cart.py` without changing the public function contract.

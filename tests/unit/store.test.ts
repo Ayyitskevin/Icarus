@@ -1,4 +1,5 @@
 import { rmSync } from "node:fs";
+import { createRequire } from "node:module";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -6,7 +7,11 @@ import { sha256 } from "../../packages/core/src/digest.js";
 import { IcarusError } from "../../packages/core/src/errors.js";
 import { checkpointDigest, planApprovalDigest } from "../../packages/core/src/policy.js";
 import { createProviderConfig } from "../../packages/core/src/provider.js";
-import { IcarusStore } from "../../packages/core/src/store.js";
+import {
+  CANCELLATION_RECOVERY_OPERATION_KIND,
+  CANCELLATION_RECOVERY_RUNTIME_MS,
+  IcarusStore,
+} from "../../packages/core/src/store.js";
 import {
   createUnitStore,
   makeUnitIdGenerator,
@@ -20,6 +25,17 @@ import {
   unitContextDigest,
   unitContextManifest,
 } from "../support/unit-fixtures.js";
+
+interface TestDatabase {
+  prepare(sql: string): { run(...parameters: unknown[]): unknown };
+  close(): void;
+}
+
+const Database = createRequire(new URL("../../packages/core/package.json", import.meta.url))(
+  "better-sqlite3",
+) as new (
+  filename: string,
+) => TestDatabase;
 
 const cleanupRoots: string[] = [];
 
@@ -46,6 +62,16 @@ function prepareRun(store: IcarusStore): void {
     "/tmp/unit-context.json",
     unitContextDigest(context),
   );
+}
+
+function expectIcarusCode(action: () => unknown, code: string): void {
+  try {
+    action();
+    throw new Error(`Expected ${code}`);
+  } catch (error) {
+    expect(error).toBeInstanceOf(IcarusError);
+    expect((error as IcarusError).code).toBe(code);
+  }
 }
 
 function approvePreparedRun(store: IcarusStore): void {
@@ -171,6 +197,90 @@ describe("SQLite run persistence", () => {
     expect(reopened.markStartedOperationsInterrupted(UNIT_RUN_ID).usage).toEqual(interrupted.usage);
     reopened.close();
   });
+  it("conservatively charges and caps interrupted emergency cancellation recovery", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+    expectIcarusCode(
+      () =>
+        fixture.store.beginOperation(UNIT_RUN_ID, CANCELLATION_RECOVERY_OPERATION_KIND, 0, 0, 1),
+      "INVALID_EMERGENCY_OPERATION",
+    );
+
+    fixture.store.transition(UNIT_RUN_ID, "cancelling", "cancellation.requested", {
+      actor: "unit-operator",
+    });
+
+    const first = fixture.store.beginCancellationRecoveryOperation(UNIT_RUN_ID);
+    expect(first).toMatchObject({
+      kind: CANCELLATION_RECOVERY_OPERATION_KIND,
+      reservedRuntimeMs: CANCELLATION_RECOVERY_RUNTIME_MS,
+    });
+    expect(fixture.store.getRun(UNIT_RUN_ID).usage).toMatchObject({
+      toolCalls: 1,
+      activeRuntimeMs: 0,
+    });
+    fixture.store.close();
+
+    const reopened = new IcarusStore(fixture.databasePath, {
+      now: () => "2026-07-19T12:01:00.000Z",
+      id: makeUnitIdGenerator(),
+    });
+    reopened.recordResumeRequested(UNIT_RUN_ID);
+    const interruptedFirst = reopened.markStartedOperationsInterrupted(UNIT_RUN_ID);
+    expect(interruptedFirst.usage).toMatchObject({
+      toolCalls: 1,
+      activeRuntimeMs: CANCELLATION_RECOVERY_RUNTIME_MS,
+    });
+
+    const second = reopened.beginCancellationRecoveryOperation(UNIT_RUN_ID);
+    expect(second.reservedRuntimeMs).toBe(CANCELLATION_RECOVERY_RUNTIME_MS);
+    const interruptedSecond = reopened.markStartedOperationsInterrupted(UNIT_RUN_ID);
+    expect(interruptedSecond.usage).toMatchObject({
+      toolCalls: 2,
+      activeRuntimeMs: CANCELLATION_RECOVERY_RUNTIME_MS * 2,
+    });
+    expectIcarusCode(
+      () => reopened.beginCancellationRecoveryOperation(UNIT_RUN_ID),
+      "RECOVERY_ATTEMPTS_EXHAUSTED",
+    );
+
+    const recoveryEvents = reopened
+      .listEvents(UNIT_RUN_ID)
+      .filter(
+        (event) => event.type === "operation.started" || event.type === "operation.interrupted",
+      );
+    expect(recoveryEvents).toHaveLength(4);
+    expect(recoveryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "operation.started",
+          payload: expect.objectContaining({
+            kind: CANCELLATION_RECOVERY_OPERATION_KIND,
+            budgetClass: "emergency",
+            attempt: 1,
+          }),
+        }),
+        expect.objectContaining({
+          type: "operation.started",
+          payload: expect.objectContaining({
+            kind: CANCELLATION_RECOVERY_OPERATION_KIND,
+            budgetClass: "emergency",
+            attempt: 2,
+          }),
+        }),
+        expect.objectContaining({
+          type: "operation.interrupted",
+          payload: expect.objectContaining({
+            kind: CANCELLATION_RECOVERY_OPERATION_KIND,
+            budgetClass: "emergency",
+            reservedRuntimeMs: CANCELLATION_RECOVERY_RUNTIME_MS,
+          }),
+        }),
+      ]),
+    );
+    reopened.close();
+  });
 
   it("keeps stale plan approval out of state and persists an immutable checkpoint", () => {
     const fixture = createUnitStore();
@@ -241,6 +351,62 @@ describe("SQLite run persistence", () => {
     fixture.store.close();
   });
 
+  it("rejects a secret-shaped approval actor without persisting an approval", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+    const project = fixture.store.getProject(fixture.store.getRun(UNIT_RUN_ID).projectId);
+    const run = fixture.store.getRun(UNIT_RUN_ID);
+    const digest = planApprovalDigest({
+      task: run.task,
+      baseCommit: run.baseCommit,
+      contextSha256: run.contextSha256,
+      target: run.target,
+      provider: run.provider,
+      checks: project.checks,
+      sandbox: project.sandbox,
+      ceiling: project.ceiling,
+      plan: UNIT_PLAN,
+    });
+    fixture.store.recordPlanAndAwaitApproval(UNIT_RUN_ID, UNIT_PLAN, digest);
+    const secretActor = ["sk-", "a".repeat(24)].join("");
+
+    expectIcarusCode(
+      () => fixture.store.approvePlan(UNIT_RUN_ID, digest, secretActor),
+      "SECRET_INPUT_DETECTED",
+    );
+    expect(fixture.store.getRun(UNIT_RUN_ID).state).toBe("awaiting_approval");
+    expect(fixture.store.listApprovals(UNIT_RUN_ID)).toEqual([]);
+    expect(JSON.stringify(fixture.store.listEvents(UNIT_RUN_ID))).not.toContain(secretActor);
+    fixture.store.close();
+  });
+
+  it("fails closed when loading a persisted pre-upgrade timer-unsafe ceiling", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    const { projectId } = seedUnitProject(fixture.store);
+    fixture.store.close();
+
+    const database = new Database(fixture.databasePath);
+    try {
+      database
+        .prepare("UPDATE projects SET ceiling_json = ? WHERE id = ?")
+        .run(JSON.stringify({ ...UNIT_CEILING, providerTimeoutMs: 2_147_483_648 }), projectId);
+    } finally {
+      database.close();
+    }
+
+    const reopened = new IcarusStore(fixture.databasePath, {
+      now: () => "2026-07-19T12:01:00.000Z",
+      id: makeUnitIdGenerator(),
+    });
+    try {
+      expectIcarusCode(() => reopened.getProject(projectId), "INVALID_CEILING");
+    } finally {
+      reopened.close();
+    }
+  });
+
   it("enforces runtime reservations before starting an operation", () => {
     const fixture = createUnitStore();
     cleanupRoots.push(fixture.root);
@@ -259,6 +425,100 @@ describe("SQLite run persistence", () => {
       expect(error).toBeInstanceOf(IcarusError);
       expect((error as IcarusError).code).toBe("RUNTIME_BUDGET_EXCEEDED");
     }
+    expect(fixture.store.getRun(UNIT_RUN_ID).usage.toolCalls).toBe(0);
+    fixture.store.close();
+  });
+  it("rejects a direct operation after aggregate runtime reaches the exact ceiling", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+
+    const exact = fixture.store.beginOperation(
+      UNIT_RUN_ID,
+      "consume-runtime",
+      0,
+      0,
+      UNIT_CEILING.maxActiveRuntimeMs,
+    );
+    fixture.store.finishOperation(exact, {
+      outcome: "succeeded",
+      activeRuntimeMs: UNIT_CEILING.maxActiveRuntimeMs,
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostUsd: 0,
+      detail: {},
+    });
+    expectIcarusCode(
+      () => fixture.store.beginOperation(UNIT_RUN_ID, "after-runtime-ceiling", 0, 0, 1),
+      "RUNTIME_BUDGET_EXCEEDED",
+    );
+    expect(fixture.store.getRun(UNIT_RUN_ID).usage.activeRuntimeMs).toBe(
+      UNIT_CEILING.maxActiveRuntimeMs,
+    );
+    fixture.store.close();
+  });
+
+  it("enforces the tool-call ceiling before starting another operation", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+
+    for (let index = 0; index < UNIT_CEILING.maxToolCalls; index += 1) {
+      const operation = fixture.store.beginOperation(UNIT_RUN_ID, `bounded-tool-${index}`, 0, 0, 1);
+      fixture.store.finishOperation(operation, {
+        outcome: "succeeded",
+        activeRuntimeMs: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCostUsd: 0,
+        detail: {},
+      });
+    }
+
+    expectIcarusCode(
+      () => fixture.store.beginOperation(UNIT_RUN_ID, "one-tool-too-many", 0, 0, 1),
+      "TOOL_BUDGET_EXCEEDED",
+    );
+    expect(fixture.store.getRun(UNIT_RUN_ID).usage.toolCalls).toBe(UNIT_CEILING.maxToolCalls);
+    fixture.store.close();
+  });
+
+  it("enforces the token ceiling before reserving provider work", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+
+    expectIcarusCode(
+      () =>
+        fixture.store.beginOperation(
+          UNIT_RUN_ID,
+          "too-many-tokens",
+          0,
+          UNIT_CEILING.maxTotalTokens + 1,
+          1,
+        ),
+      "TOKEN_BUDGET_EXCEEDED",
+    );
+    expect(fixture.store.getRun(UNIT_RUN_ID).usage.toolCalls).toBe(0);
+    fixture.store.close();
+  });
+
+  it("enforces the cost ceiling before reserving provider work", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+
+    expectIcarusCode(
+      () =>
+        fixture.store.beginOperation(
+          UNIT_RUN_ID,
+          "too-expensive",
+          UNIT_CEILING.maxCostUsd + 0.01,
+          0,
+          1,
+        ),
+      "COST_BUDGET_EXCEEDED",
+    );
     expect(fixture.store.getRun(UNIT_RUN_ID).usage.toolCalls).toBe(0);
     fixture.store.close();
   });

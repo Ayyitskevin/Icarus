@@ -2,7 +2,8 @@
 
 ## M0 — Foundation
 
-Status: local and hosted gates passed; security release hold (2026-07-19).
+Status: fresh local gate passed; exact-head hosted gate pending; security
+release hold (2026-07-19).
 
 Deliver documentation contracts, workspace tooling, CI, security checks, and
 the versioned evaluation fixture catalog.
@@ -12,30 +13,33 @@ in ADR 0010.
 
 ## M1 — Golden path
 
-Status: local and hosted gates passed; security release hold (2026-07-19).
+Status: fresh local gate passed; exact-head hosted gate pending; security
+release hold (2026-07-19).
 
 Deliver one planned, approved, isolated, verified, reviewable, resumable, and
 reversible one-file change with Ollama and OpenAI adapters.
 
-Exit gate: every item in `docs/PLANS.md` Phase A-D and Repair continuation is
-checked with evidence, hosted `ci` is green at the exact candidate commit, and
-the ADR 0010 security hold is resolved.
+Exit gate: every item in `docs/PLANS.md` Phase A-D, Repair continuation, and
+Final adversarial continuation is checked with evidence, hosted `ci` is green
+at the exact candidate commit, and the ADR 0010 security hold is resolved.
 
 ## M2 — Context intelligence
 
 Status: planned.
 
 Add syntax-aware maps, deterministic task/file matching, LSP diagnostics,
-semantic retrieval only after baseline evals, context budget allocation, and
-retrieval-quality fixtures.
+language/framework detection, project rules and skills, `rg`-based search,
+file-and-line provenance, project memory, semantic retrieval only after baseline
+evals, context budget allocation, and retrieval-quality fixtures.
 
 ## M3 — Workspace UI
 
 Status: planned.
 
 Add a local API and React workspace for projects, run timeline, approvals, diff,
-tests, terminal evidence, prompt history, and a small task board. Provider keys
-remain server-side.
+tests, terminal evidence, prompt history, and a small task board. Include
+repository status, live events, file tree, checkpoints, and token/cost telemetry.
+Provider keys remain server-side.
 
 ## M4 — Runtime and previews
 
@@ -57,6 +61,10 @@ Status: planned.
 
 Add only primitives demanded by an Icarus-managed application: PostgreSQL,
 authentication, storage, realtime events, vector search, and background jobs.
+When a real application needs them, add a starter/template contract, API layer,
+environment references, and deployment configuration rather than claiming a
+generic backend platform in advance. Prefer understandable Docker Compose-style
+local orchestration; Kubernetes remains out of scope.
 
 ## M6 — Multi-agent and fleet workers
 
@@ -64,13 +72,16 @@ Status: planned.
 
 Add isolated parallel sessions, role specialization, job envelopes, Mickey/Flow
 worker scheduling, Highwind capability routing, heartbeats, retries,
-cancellation, idempotency, and resource/cost policies.
+cancellation, idempotency, and resource/cost policies. Treat every host as a
+separate node and retain Zenbook as an operator client rather than a worker.
 
 ## M7 — Dogfood and hardening
 
 Status: planned.
 
-Use safe clones/worktrees of fixture apps and selected private projects. Live
+Use safe clones/worktrees of the fixture app and, only with explicit scope,
+Mise, Kleephotography, Athena, and Chronos. Add the deferred repair, refactor,
+diagnostic, and review capability gates before widening autonomy. Live
 production, customer data, deployment targets, schema changes, and secrets
 remain human-gated and outside automatic dogfood.
 

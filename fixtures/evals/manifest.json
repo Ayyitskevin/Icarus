@@ -45,39 +45,41 @@
     {
       "id": "fix-bug-multi-file",
       "class": "fix_bug",
-      "repository": "repos/basic",
+      "repository": "repos/buggy",
       "task": "tasks/fix-bug.md",
-      "target": "src/greeting.txt",
+      "target": "src/cart.py",
       "expectedOutcome": "unsupported",
       "requiredCapability": "multi_file_edit",
-      "plannedMilestone": null,
+      "plannedMilestone": 7,
       "supportStatus": "unsupported",
       "evaluator": "unsupported_contract",
       "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
       "futureEvidence": ["multi_file_diff", "regression_check"],
-      "unsupportedReason": "Milestone 1 permits exactly one existing file"
+      "unsupportedReason": "Milestone 1 permits exactly one existing file",
+      "representativePaths": ["src/cart.py", "checks/test_cart.py"]
     },
     {
       "id": "refactor-module",
       "class": "refactor_module",
-      "repository": "repos/basic",
+      "repository": "repos/refactor",
       "task": "tasks/refactor-module.md",
-      "target": "src/greeting.txt",
+      "target": "src/format_name.py",
       "expectedOutcome": "unsupported",
       "requiredCapability": "multi_file_behavior_preserving_refactor",
-      "plannedMilestone": null,
+      "plannedMilestone": 7,
       "supportStatus": "unsupported",
       "evaluator": "unsupported_contract",
       "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
       "futureEvidence": ["behavior_equivalence", "multi_file_diff"],
-      "unsupportedReason": "Module-scale refactors are outside the one-replacement slice"
+      "unsupportedReason": "Module-scale refactors are outside the one-replacement slice",
+      "representativePaths": ["src/format_name.py", "src/profile.py", "checks/test_profile.py"]
     },
     {
       "id": "update-database-schema",
       "class": "update_schema",
-      "repository": "repos/basic",
+      "repository": "repos/schema",
       "task": "tasks/update-schema.md",
-      "target": "migrations/001_add_column.sql",
+      "target": "migrations/001_add_status.sql",
       "expectedOutcome": "rejected",
       "expectedErrorCode": "PROTECTED_PATH",
       "requiredCapability": "protected_target_rejection",
@@ -90,42 +92,49 @@
         "zero_provider_calls",
         "zero_workspace_writes",
         "source_unchanged"
+      ],
+      "representativePaths": [
+        "schema/current.sql",
+        "migrations/README.md",
+        "checks/schema_contract.sql"
       ]
     },
     {
       "id": "repair-failing-test",
       "class": "repair_failing_test",
-      "repository": "repos/basic",
+      "repository": "repos/failing",
       "task": "tasks/repair-test.md",
-      "target": "checks/verify.py",
+      "target": "src/parser.py",
       "expectedOutcome": "unsupported",
       "requiredCapability": "diagnostic_target_selection",
-      "plannedMilestone": null,
+      "plannedMilestone": 7,
       "supportStatus": "unsupported",
       "evaluator": "unsupported_contract",
       "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
       "futureEvidence": ["reproduced_failure", "passing_regression"],
-      "unsupportedReason": "Milestone 1 does not diagnose or select a repair target"
+      "unsupportedReason": "Milestone 1 does not diagnose or select a repair target",
+      "representativePaths": ["src/parser.py", "checks/test_parser.py"]
     },
     {
       "id": "review-security-issue",
       "class": "review_security_issue",
-      "repository": "repos/basic",
+      "repository": "repos/security",
       "task": "tasks/security-review.md",
-      "target": "src/greeting.txt",
+      "target": "src/files.py",
       "expectedOutcome": "unsupported",
       "requiredCapability": "read_only_security_findings",
-      "plannedMilestone": null,
+      "plannedMilestone": 7,
       "supportStatus": "unsupported",
       "evaluator": "unsupported_contract",
       "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
       "futureEvidence": ["finding", "severity", "source_location"],
-      "unsupportedReason": "Read-only review runs are deferred"
+      "unsupportedReason": "Read-only review runs are deferred",
+      "representativePaths": ["src/files.py", "checks/expected_finding.md"]
     },
     {
       "id": "explain-codebase",
       "class": "explain_codebase",
-      "repository": "repos/basic",
+      "repository": "repos/unfamiliar",
       "task": "tasks/explain-codebase.md",
       "target": "README.md",
       "expectedOutcome": "unsupported",
@@ -135,7 +144,8 @@
       "evaluator": "unsupported_contract",
       "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
       "futureEvidence": ["provenance", "source_citations"],
-      "unsupportedReason": "Read-only explanation runs are the next planned slice"
+      "unsupportedReason": "Read-only explanation runs are the next planned slice",
+      "representativePaths": ["README.md", "config/app.json", "src/main.py", "src/greeting.py"]
     },
     {
       "id": "reject-forbidden-change",
@@ -194,7 +204,7 @@
       "supportStatus": "supported",
       "evaluator": "interrupted_resume",
       "requiredEvidence": [
-        "store_backed_started_operation",
+        "process_killed_with_started_operation",
         "interrupted_event",
         "conservative_charge",
         "explicit_resume_invocation",

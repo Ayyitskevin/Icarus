@@ -34,10 +34,11 @@ checks/sandbox/ceilings and digest-bound approval commands are authoritative.
 | Symlink escape | reject symlinks in every existing component and target | symlink test |
 | State initialization writes inside a repository | canonical prospective-path overlap check runs before state-root creation | nested-state rejection plus source fingerprint |
 | Source checkout/Git corruption | private no-hardlink cache owns all worktrees | source refs/config/status digest |
+| Concurrent cooperative mutators or stale-owner deletion | stable single-link lease inode plus kernel `flock`; malformed metadata fails closed; v1-to-v2 upgrade is stop-the-world | live-owner, legacy-owner, malformed, crash-recovery, and forced-replacement tests |
 | Arbitrary host execution | project code runs only in fail-closed no-network sandbox | real-container probes deny public, host-loopback, and Tailscale-address-space connections |
-| Secret leakage to history | credentials are environment-only; reflected credentials and recognizable provider-output secrets are discarded before proposal persistence; transport/error/check output is redacted with known secrets | provider reflection and throwing-transport tests plus persisted-tree scan |
-| Secret leakage to provider or checks | context and tracked check snapshots reject secret-shaped paths/content; remote egress is separately approved | protected-file and snapshot tests |
-| Unbounded spend/runtime | explicit context, output-token, cost, active-time, file, tool, and output ceilings | budget tests |
+| Secret leakage to history | credentials are environment-only; one bounded span scanner supplies detection and constant-marker redaction; reflected provider credentials are discarded; HTTP error bodies are not retained | provider reflection/error tests plus persisted-tree scan |
+| Secret leakage to provider or derived copies | the complete tracked tree is audited before artifacts, egress, caches, or worktrees; edit, model-visibility, and intrinsic-secret path rules are distinct | unrelated-secret no-side-effect test plus safe `.npmrc` sandbox test |
+| Unbounded spend/runtime | explicit context, output-token, cost, active-time, file, tool, and output ceilings; only a fixed, two-attempt, metered `cancellation.recovery` may exceed ordinary runtime admission to land safely | budget and emergency-recovery tests |
 | Provider/context credential exfiltration | exact pre-egress approval, secret/path filtering, reject URL user info and redirects | endpoint/egress tests |
 | Interrupted atomic write strands an unreviewed path | temporary file is private and outside the worktree; rename is the only worktree mutation | failed-rename cleanup and changed-path tests |
 | TOCTOU path swap | isolated single-operator worktree; `O_NOFOLLOW` descriptor read with identity checks; component checks, atomic write, and final changed-set verification | adversarial test |
@@ -75,6 +76,9 @@ is held. ADR 0010 records the options without changing the workflow.
   future schema version still needs an explicit migration and recovery drill.
 - Redaction is defense in depth, not proof that arbitrary repository content has
   no secrets. Provider choice must match the project's privacy class.
+- Run leases defend cooperating Icarus processes and accidental stale state,
+  not an attacker with arbitrary same-UID write access to `ICARUS_HOME` during
+  a run. The state-root ownership/mode boundary must prevent that access.
 
 ## Security non-goals
 

@@ -1,1 +1,2 @@
-Review the repository for a security issue and report source-backed findings.
+Review `src/files.py` for a path-containment vulnerability and report severity,
+an exploit sketch, and exact source-backed remediation without modifying files.

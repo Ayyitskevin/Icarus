@@ -32,6 +32,16 @@ must therefore leave both the repository and prospective state path untouched.
 
 ## Preflight
 
+Milestone 1 requires util-linux `flock` at `/usr/bin/flock` and a local
+filesystem with working `flock(2)` semantics. Lease acquisition fails closed if
+that fixed helper or kernel behavior is unavailable.
+
+Version-2 leases do not support an online transition from metadata-only
+owners. Before upgrading, stop every Icarus process, verify none remain, and
+back up state. A v1 process already past its stale-path check cannot be fenced
+by v2. Malformed or partial lease metadata is never aged into ownership;
+preserve the state and require explicit operator recovery.
+
 1. Confirm the repository is a non-bare, clean Git worktree with at least one
    commit. Confirm the prospective state root and repository do not contain one
    another. The configured base ref must resolve to the source HEAD when a run
@@ -41,11 +51,14 @@ must therefore leave both the repository and prospective state path untouched.
 3. Choose a provider whose privacy class permits the selected repository.
 4. Set credentials only in the process environment or a user-owned secret
    manager; never pass them as CLI arguments.
-5. For any non-loopback provider, configure HTTPS and both current token rates.
-6. Pull and inspect the exact sandbox image outside a run and configure its
+5. Remove tracked credentials before planning. Icarus audits no more than 16
+   MiB per file and 64 MiB total before creating derived state; exceeding either
+   limit or finding an intrinsically secret path/content fails closed.
+6. For any non-loopback provider, configure HTTPS and both current token rates.
+7. Pull and inspect the exact sandbox image outside a run and configure its
    manifest digest. Icarus uses `--pull=never` and rejects image-declared
    volumes or a daemon without confirmed seccomp.
-7. Back up `icarus.sqlite3` and its WAL/SHM companions before upgrading.
+8. Back up `icarus.sqlite3` and its WAL/SHM companions before upgrading.
 
 ## Provider configuration
 
@@ -57,7 +70,8 @@ must therefore leave both the repository and prospective state path untouched.
   Remote OpenAI credentials are restricted to `api.openai.com:443`.
 - Provider transport exceptions are converted to bounded Icarus errors and
   sanitized with the adapter's known credential before they can reach state or
-  CLI output.
+  CLI output. Non-success HTTP response bodies are not copied into surfaced or
+  durable errors.
 - Model identifiers are explicit. Icarus never silently substitutes a model.
 
 ## Runbook
@@ -80,7 +94,9 @@ must therefore leave both the repository and prospective state path untouched.
 - `run cancel <run-id> --actor <actor>` first persists a recoverable
   `cancelling` state, reconciles any managed container, restores known baseline
   bytes, and only then records `cancelled`. Resume completes an interrupted
-  cancellation.
+  cancellation. This exact recovery operation has a fixed 120-second
+  reservation and at most two persisted attempts; it remains visible and
+  charged even when landing makes usage exceed the ordinary run ceiling.
 - `run rollback <run-id> --diff-sha <sha> --actor <actor>` restores baseline
   bytes in the owned worktree and preserves the checkpoint.
 - `run restore <run-id> --checkpoint-sha <sha> --actor <actor>` restores exact
@@ -90,10 +106,19 @@ must therefore leave both the repository and prospective state path untouched.
   and is refused unless verification passed and the live source/worktree,
   changed-path set, diff, and checkpoint still match the reviewed evidence.
 
-Per-run lock files reject concurrent mutating CLI processes. Icarus never
-automatically deletes artifacts, caches, or worktrees. Missing or drifted private
-state is preserved for investigation; Milestone 1 has no reconstruction or
-cleanup command.
+Per-run stable lock files reject concurrent mutating CLI processes. The kernel
+owns exclusion through `flock(2)` on an open descriptor and is authoritative
+among current-version participants. Protocol-version and owner-nonce metadata
+are required compatibility and release evidence; PID/start values are
+diagnostic. Acquisition refuses live or indeterminate legacy metadata, migrates
+only a valid, proved-dead legacy owner in place, and fails closed on malformed,
+partial, or unknown-version metadata. There is no concurrent v1/v2 upgrade
+protocol. Acquisition and release revalidate descriptor/path inode identity,
+and production lease code never unlinks or renames a lock pathname. Process
+death releases the kernel lock while leaving a harmless metadata file for the
+next owner. Icarus never automatically deletes artifacts, caches, or worktrees.
+Missing or drifted private state is preserved for investigation; Milestone 1
+has no reconstruction or cleanup command.
 
 Atomic replacement writes its pre-rename temporary in the Icarus-private run
 directory, not the Git worktree. A failed write or rename is cleaned best-effort;
@@ -103,10 +128,14 @@ deterministic resume or rollback.
 ## Backup and recovery
 
 Stop active Icarus CLI processes. Copy `icarus.sqlite3` together with any
-`-wal`/`-shm` companions, plus `artifacts/` and `runs/`, to a private backup.
+`-wal`/`-shm` companions, plus `artifacts/`, `runs/`, and `locks/`, to a
+private backup.
 Icarus does not yet provide an integrity-check or restore command. If the
 external `sqlite3` utility is available, run `PRAGMA integrity_check` against a
 copy; do not imply that an empty journal or successful copy proves integrity.
+
+The fleet NAS is currently a single-disk archive target, not a redundant backup.
+Do not count a NAS copy as the only recoverable copy of Icarus state.
 
 If a process stops:
 
@@ -157,8 +186,9 @@ record the observed exit status and counts in `docs/PLANS.md`:
 
 ```text
 pnpm exec vitest run tests/integration/security-regressions.test.ts
+pnpm exec vitest run tests/integration/runtime-ceiling-cancellation.test.ts
 pnpm exec vitest run tests/integration/docker-containment.test.ts
-pnpm exec vitest run tests/unit/git-file-safety.test.ts tests/unit/sandbox-wire.test.ts
+pnpm exec vitest run tests/unit/git-file-safety.test.ts tests/unit/lease.test.ts tests/unit/sandbox-wire.test.ts
 pnpm eval
 pnpm check
 pnpm audit --audit-level high

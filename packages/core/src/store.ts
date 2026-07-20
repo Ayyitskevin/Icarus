@@ -3,11 +3,18 @@ import { chmodSync, lstatSync } from "node:fs";
 import path from "node:path";
 
 import Database from "better-sqlite3";
-
-import { assertTransition } from "./state-machine.js";
-import { IcarusError, invariant } from "./errors.js";
+import { containsSecretShapedContent } from "./context.js";
 import { digestJson, sha256 } from "./digest.js";
-import { checkpointDigest, planApprovalDigest } from "./policy.js";
+import { IcarusError, invariant } from "./errors.js";
+import {
+  assertCheckProfiles,
+  assertSandboxProfile,
+  assertSunCeiling,
+  checkpointDigest,
+  planApprovalDigest,
+} from "./policy.js";
+import { assertTransition } from "./state-machine.js";
+import { CONTEXT_AUDIT_POLICY_VERSION } from "./types.js";
 import type {
   ApprovalRecord,
   CheckProfile,
@@ -29,6 +36,17 @@ import type {
 } from "./types.js";
 
 type Row = Record<string, unknown>;
+
+export const CANCELLATION_RECOVERY_OPERATION_KIND = "cancellation.recovery";
+export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
+export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
+
+function emergencyOperationDetail(detail: JsonValue): JsonValue {
+  if (typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
+    return { ...detail, budgetClass: "emergency" };
+  }
+  return { budgetClass: "emergency", detail };
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS repositories (
@@ -281,6 +299,9 @@ export class IcarusStore {
     sandbox: SandboxProfile;
     ceiling: SunCeiling;
   }): ProjectRecord {
+    assertCheckProfiles(input.checks);
+    assertSandboxProfile(input.sandbox);
+    assertSunCeiling(input.ceiling);
     this.getRepository(input.repositoryId);
     const record: ProjectRecord = {
       id: this.#id(),
@@ -316,14 +337,20 @@ export class IcarusStore {
       this.#database.prepare("SELECT * FROM projects WHERE id = ?").get(id),
       "project",
     );
+    const checks = parseJson<CheckProfile[]>(value.checks_json, "project.checks_json");
+    const sandbox = parseJson<SandboxProfile>(value.sandbox_json, "project.sandbox_json");
+    const ceiling = parseJson<SunCeiling>(value.ceiling_json, "project.ceiling_json");
+    assertCheckProfiles(checks);
+    assertSandboxProfile(sandbox);
+    assertSunCeiling(ceiling);
     return {
       id: text(value.id, "project.id"),
       name: text(value.name, "project.name"),
       repositoryId: text(value.repository_id, "project.repository_id"),
       baseRef: text(value.base_ref, "project.base_ref"),
-      checks: parseJson<CheckProfile[]>(value.checks_json, "project.checks_json"),
-      sandbox: parseJson<SandboxProfile>(value.sandbox_json, "project.sandbox_json"),
-      ceiling: parseJson<SunCeiling>(value.ceiling_json, "project.ceiling_json"),
+      checks,
+      sandbox,
+      ceiling,
       createdAt: text(value.created_at, "project.created_at"),
     };
   }
@@ -352,6 +379,7 @@ export class IcarusStore {
     );
     const now = this.#now();
     const emptyContext: ContextManifest = {
+      auditPolicyVersion: CONTEXT_AUDIT_POLICY_VERSION,
       baseCommit: "",
       target: input.target,
       repositoryMap: [],
@@ -1026,6 +1054,35 @@ export class IcarusStore {
     reservedTokens: number,
     reservedRuntimeMs: number,
   ): OperationToken {
+    return this.#beginOperation(
+      runId,
+      kind,
+      reservedCostUsd,
+      reservedTokens,
+      reservedRuntimeMs,
+      "ordinary",
+    );
+  }
+
+  beginCancellationRecoveryOperation(runId: string): OperationToken {
+    return this.#beginOperation(
+      runId,
+      CANCELLATION_RECOVERY_OPERATION_KIND,
+      0,
+      0,
+      CANCELLATION_RECOVERY_RUNTIME_MS,
+      "emergency",
+    );
+  }
+
+  #beginOperation(
+    runId: string,
+    kind: string,
+    reservedCostUsd: number,
+    reservedTokens: number,
+    reservedRuntimeMs: number,
+    budgetClass: "ordinary" | "emergency",
+  ): OperationToken {
     invariant(
       Number.isFinite(reservedCostUsd) && reservedCostUsd >= 0,
       "INVALID_RESERVATION",
@@ -1044,7 +1101,6 @@ export class IcarusStore {
     let token: OperationToken | undefined;
     const transaction = this.#database.transaction(() => {
       const run = this.getRun(runId);
-      const project = this.getProject(run.projectId);
       invariant(
         this.#database
           .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
@@ -1052,28 +1108,62 @@ export class IcarusStore {
         "RUN_BUSY",
         "Another process is already executing this run",
       );
-      invariant(
-        run.usage.toolCalls + 1 <= project.ceiling.maxToolCalls,
-        "TOOL_BUDGET_EXCEEDED",
-        "Tool-call ceiling exhausted",
-      );
-      invariant(
-        run.usage.activeRuntimeMs + reservedRuntimeMs <= project.ceiling.maxActiveRuntimeMs,
-        "RUNTIME_BUDGET_EXCEEDED",
-        "Active-runtime reservation would exceed the ceiling",
-      );
-      invariant(
-        run.usage.inputTokens + run.usage.outputTokens + reservedTokens <=
-          project.ceiling.maxTotalTokens,
-        "TOKEN_BUDGET_EXCEEDED",
-        "Token ceiling would be exceeded",
-      );
-      invariant(
-        run.usage.estimatedCostUsd + run.usage.reservedCostUsd + reservedCostUsd <=
-          project.ceiling.maxCostUsd,
-        "COST_BUDGET_EXCEEDED",
-        "Cost ceiling would be exceeded",
-      );
+      let recoveryAttempt: number | undefined;
+      if (budgetClass === "emergency") {
+        invariant(
+          run.state === "cancelling" &&
+            kind === CANCELLATION_RECOVERY_OPERATION_KIND &&
+            reservedCostUsd === 0 &&
+            reservedTokens === 0 &&
+            reservedRuntimeMs === CANCELLATION_RECOVERY_RUNTIME_MS,
+          "INVALID_EMERGENCY_OPERATION",
+          "Emergency budget is restricted to fixed cancellation recovery",
+        );
+        const attempts = numberValue(
+          row(
+            this.#database
+              .prepare("SELECT COUNT(*) AS count FROM operations WHERE run_id = ? AND kind = ?")
+              .get(runId, CANCELLATION_RECOVERY_OPERATION_KIND),
+            "cancellation recovery attempts",
+          ).count,
+          "cancellation recovery attempts.count",
+        );
+        invariant(
+          attempts < MAX_CANCELLATION_RECOVERY_ATTEMPTS,
+          "RECOVERY_ATTEMPTS_EXHAUSTED",
+          "Cancellation recovery attempt limit exhausted",
+        );
+        recoveryAttempt = attempts + 1;
+      } else {
+        const project = this.getProject(run.projectId);
+        invariant(
+          kind !== CANCELLATION_RECOVERY_OPERATION_KIND,
+          "INVALID_EMERGENCY_OPERATION",
+          "Cancellation recovery kind is reserved for its emergency operation",
+        );
+        invariant(
+          run.usage.toolCalls + 1 <= project.ceiling.maxToolCalls,
+          "TOOL_BUDGET_EXCEEDED",
+          "Tool-call ceiling exhausted",
+        );
+        invariant(
+          run.usage.activeRuntimeMs + reservedRuntimeMs <= project.ceiling.maxActiveRuntimeMs,
+          "RUNTIME_BUDGET_EXCEEDED",
+          "Active-runtime reservation would exceed the ceiling",
+        );
+        invariant(
+          run.usage.inputTokens + run.usage.outputTokens + reservedTokens <=
+            project.ceiling.maxTotalTokens,
+          "TOKEN_BUDGET_EXCEEDED",
+          "Token ceiling would be exceeded",
+        );
+        invariant(
+          run.usage.estimatedCostUsd + run.usage.reservedCostUsd + reservedCostUsd <=
+            project.ceiling.maxCostUsd,
+          "COST_BUDGET_EXCEEDED",
+          "Cost ceiling would be exceeded",
+        );
+      }
       const id = this.#id();
       const now = this.#now();
       this.#database
@@ -1096,6 +1186,9 @@ export class IcarusStore {
         reservedCostUsd,
         reservedTokens,
         reservedRuntimeMs,
+        ...(budgetClass === "emergency"
+          ? { budgetClass: "emergency", attempt: recoveryAttempt ?? 0 }
+          : {}),
       });
       token = {
         id,
@@ -1112,6 +1205,26 @@ export class IcarusStore {
   }
 
   finishOperation(token: OperationToken, finish: OperationFinish): RunRecord {
+    return this.#finishOperation(token, finish, false);
+  }
+
+  finishCancellationRecoveryOperation(token: OperationToken, finish: OperationFinish): RunRecord {
+    invariant(
+      token.kind === CANCELLATION_RECOVERY_OPERATION_KIND,
+      "INVALID_EMERGENCY_OPERATION",
+      "Emergency finish is restricted to cancellation recovery",
+    );
+    return this.#finishOperation(
+      token,
+      {
+        ...finish,
+        detail: emergencyOperationDetail(finish.detail),
+      },
+      true,
+    );
+  }
+
+  #finishOperation(token: OperationToken, finish: OperationFinish, emergency: boolean): RunRecord {
     invariant(
       Number.isFinite(finish.activeRuntimeMs) && finish.activeRuntimeMs >= 0,
       "INVALID_OPERATION_USAGE",
@@ -1140,6 +1253,23 @@ export class IcarusStore {
           .get(token.id, token.runId),
         "operation",
       );
+      const persistedKind = text(operation.kind, "operation.kind");
+      invariant(
+        persistedKind === token.kind &&
+          numberValue(operation.reserved_cost_usd, "operation.reserved_cost_usd") ===
+            token.reservedCostUsd &&
+          numberValue(operation.reserved_tokens, "operation.reserved_tokens") ===
+            token.reservedTokens &&
+          numberValue(operation.reserved_runtime_ms, "operation.reserved_runtime_ms") ===
+            token.reservedRuntimeMs,
+        "OPERATION_TOKEN_MISMATCH",
+        "Operation token does not match its persisted reservation",
+      );
+      invariant(
+        emergency === (persistedKind === CANCELLATION_RECOVERY_OPERATION_KIND),
+        "INVALID_EMERGENCY_OPERATION",
+        "Cancellation recovery must use its dedicated finish path",
+      );
       invariant(
         text(operation.status, "operation.status") === "started",
         "OPERATION_ALREADY_FINISHED",
@@ -1166,12 +1296,20 @@ export class IcarusStore {
         "Operation exceeded its runtime reservation",
       );
       const run = this.getRun(token.runId);
-      const project = this.getProject(run.projectId);
-      invariant(
-        run.usage.activeRuntimeMs + finish.activeRuntimeMs <= project.ceiling.maxActiveRuntimeMs,
-        "RUNTIME_BUDGET_EXCEEDED",
-        "Operation exceeded the active-runtime ceiling",
-      );
+      if (emergency) {
+        invariant(
+          run.state === "cancelling",
+          "INVALID_STATE",
+          "Cancellation recovery can only finish while the run is cancelling",
+        );
+      } else {
+        const project = this.getProject(run.projectId);
+        invariant(
+          run.usage.activeRuntimeMs + finish.activeRuntimeMs <= project.ceiling.maxActiveRuntimeMs,
+          "RUNTIME_BUDGET_EXCEEDED",
+          "Operation exceeded the active-runtime ceiling",
+        );
+      }
       const now = this.#now();
       this.#database
         .prepare("UPDATE operations SET status = ?, result_json = ?, finished_at = ? WHERE id = ?")
@@ -1213,6 +1351,7 @@ export class IcarusStore {
       for (const entry of operations) {
         const operation = row(entry, "operation");
         const operationId = text(operation.id, "operation.id");
+        const operationKind = text(operation.kind, "operation.kind");
         const reservedCost = numberValue(
           operation.reserved_cost_usd,
           "operation.reserved_cost_usd",
@@ -1240,9 +1379,13 @@ export class IcarusStore {
           .run(reservedTokens, reservedRuntimeMs, now, runId);
         this.#appendEvent(runId, "operation.interrupted", {
           operationId,
+          kind: operationKind,
           reservedCostUsd: reservedCost,
           reservedTokens,
           reservedRuntimeMs,
+          ...(operationKind === CANCELLATION_RECOVERY_OPERATION_KIND
+            ? { budgetClass: "emergency" }
+            : {}),
         });
       }
     });
@@ -1329,6 +1472,11 @@ export class IcarusStore {
         !/[\r\n\0]/.test(approval.actor),
       "INVALID_APPROVAL",
       "Approval actor is invalid",
+    );
+    invariant(
+      !containsSecretShapedContent(Buffer.from(approval.actor, "utf8")),
+      "SECRET_INPUT_DETECTED",
+      "Approval actor contains recognizable credential material",
     );
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);

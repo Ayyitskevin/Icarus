@@ -1,7 +1,8 @@
 import path from "node:path";
 
-import { IcarusError, invariant } from "./errors.js";
+import { containsSecretShapedContent, isProtectedEditPath } from "./context.js";
 import { digestJson, sha256 } from "./digest.js";
+import { IcarusError, invariant } from "./errors.js";
 import type {
   CheckProfile,
   EditProposal,
@@ -15,6 +16,7 @@ import type {
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const DIGEST_IMAGE_PATTERN = /^[a-z0-9][a-z0-9._/-]*(?::[a-zA-Z0-9._-]+)?@sha256:[a-f0-9]{64}$/;
 const ENCODED_PATH_PATTERN = /%(?:2e|2f|5c)/i;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export const POLICY_VERSION = "m1-v1";
 
@@ -170,28 +172,15 @@ export function assertAllowedTarget(value: string): string {
   const lower = target.toLowerCase();
   const components = lower.split("/");
   const basename = components.at(-1) ?? "";
-  const containsSecretComponent = components.some(
-    (component) =>
-      component.startsWith(".env") ||
-      component.includes("secret") ||
-      component.includes("credential") ||
-      component.includes("private-key") ||
-      component.includes("private_key") ||
-      component.endsWith(".pem") ||
-      component.endsWith(".key") ||
-      component.endsWith(".p12") ||
-      component.endsWith(".pfx"),
-  );
 
   const denied =
     components.includes(".git") ||
     components.includes(".icarus") ||
     components.includes("migrations") ||
-    containsSecretComponent ||
+    isProtectedEditPath(target) ||
     lower.startsWith(".github/workflows/") ||
     basename === "agents.md" ||
     basename === "dockerfile" ||
-    basename.startsWith(".env") ||
     basename.endsWith(".pem") ||
     basename.endsWith(".key") ||
     basename === "package.json" ||
@@ -252,6 +241,18 @@ export function assertSunCeiling(ceiling: SunCeiling): void {
       `Sun ceiling ${key} must be a positive integer`,
     );
   }
+  const timerFields = [
+    "maxActiveRuntimeMs",
+    "providerTimeoutMs",
+    "commandTimeoutMs",
+  ] as const satisfies readonly (keyof SunCeiling)[];
+  for (const key of timerFields) {
+    invariant(
+      ceiling[key] <= MAX_TIMER_DELAY_MS,
+      "INVALID_CEILING",
+      `Sun ceiling ${key} exceeds the timer-safe integer range`,
+    );
+  }
   invariant(
     ceiling.maxFilesChanged === 1,
     "INVALID_CEILING",
@@ -278,6 +279,13 @@ export function assertCheckProfiles(checks: readonly CheckProfile[]): void {
   invariant(checks.length > 0, "CHECKS_REQUIRED", "At least one sandbox check is required");
   const ids = new Set<string>();
   for (const check of checks) {
+    invariant(
+      !containsSecretShapedContent(
+        Buffer.from([check.id, check.name, ...check.argv].join("\n"), "utf8"),
+      ),
+      "CHECK_SECRET_DETECTED",
+      "Check profile contains recognizable credential material",
+    );
     invariant(
       check.id.length > 0 && !ids.has(check.id),
       "INVALID_CHECK",

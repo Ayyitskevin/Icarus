@@ -1,8 +1,8 @@
 import { errorMessage, IcarusError, invariant } from "./errors.js";
 import {
   calculateReportedCost,
-  parseProviderBaseUrl,
   type ModelGateway,
+  parseProviderBaseUrl,
   type StructuredGenerationRequest,
   type StructuredGenerationResult,
 } from "./provider.js";
@@ -109,11 +109,9 @@ async function fetchJson(
     }
     const body = await readBoundedBody(response);
     if (!response.ok) {
-      throw new IcarusError(
-        "PROVIDER_HTTP_ERROR",
-        `Provider returned HTTP ${response.status}: ${sanitizeText(body, knownSecrets)}`,
-        { status: response.status },
-      );
+      throw new IcarusError("PROVIDER_HTTP_ERROR", `Provider returned HTTP ${response.status}`, {
+        status: response.status,
+      });
     }
     const contentType = response.headers.get("content-type") ?? "";
     invariant(
@@ -223,6 +221,11 @@ export class OpenAIResponsesGateway implements ModelGateway {
       "OpenAI gateway received the wrong provider config",
     );
     invariant(apiKey.length > 0, "OPENAI_API_KEY_REQUIRED", "OPENAI_API_KEY is required");
+    invariant(
+      apiKey.length >= 8 && apiKey.length <= 512 && !/[\s\0]/.test(apiKey),
+      "OPENAI_API_KEY_INVALID",
+      "OPENAI_API_KEY must contain 8 to 512 non-whitespace characters",
+    );
     const { url, locality } = parseProviderBaseUrl(config.baseUrl);
     invariant(
       locality === "loopback" ||

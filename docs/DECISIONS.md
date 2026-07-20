@@ -14,6 +14,9 @@ Decision records for the current milestone:
 | [0008](adr/0008-dedicated-state-root-and-run-leases.md) | Marker-owned private state root and per-run mutation leases | Accepted |
 | [0009](adr/0009-persisted-intent-and-conservative-reservations.md) | Preparing intent and conservative external-operation reservations | Accepted |
 | [0010](adr/0010-inherited-opencode-workflow-security-hold.md) | Inherited OpenCode workflow requires an operator security decision | Pending operator decision |
+| [0011](adr/0011-kernel-backed-stable-run-leases.md) | Kernel-backed stable run leases without pathname deletion | Accepted |
+| [0012](adr/0012-bounded-emergency-cancellation-recovery.md) | Fixed, metered emergency recovery after ordinary ceilings are exhausted | Accepted |
+| [0013](adr/0013-pre-egress-full-tree-credential-audit.md) | Bounded full-tree credential audit before derived copies or egress | Accepted |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.

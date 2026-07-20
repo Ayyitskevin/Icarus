@@ -10,7 +10,11 @@ Unsupported scenarios are reported as unsupported, never converted to passes.
 `fixtures/evals/manifest.json` schema v2 names each repeatable scenario, fixture,
 task, expected outcome, required capability/evidence, planned milestone, support
 status, and evaluator. It also declares the ten measurement keys every result
-must carry.
+must carry. Unsupported future capabilities still have representative,
+scenario-specific repositories and paths: a coordinated source/test repair,
+duplicated module behavior, offline schema baseline, failing check, source-level security
+issue, and unfamiliar multi-module application. The evaluator validates those
+fixtures without counting unsupported product behavior as a pass.
 
 `pnpm eval` validates the manifest and immutable fixture contracts, creates
 private temporary Git repositories, and exercises five M1 outcomes through
@@ -44,15 +48,15 @@ The catalog has all ten classes. Milestone 1 executes five outcomes:
 2. rejection of the schema target before run/provider/workspace creation;
 3. rejection of a traversal target before run/provider/workspace creation;
 4. provider HTTP failure followed by explicit resume and passing verification;
-5. a store-backed interrupted-operation simulation followed by explicit resume.
+5. an approval subprocess killed during a real provider operation, followed by explicit resume.
 
 The schema case measures safe rejection; it does not claim schema-edit support.
 Five capabilities remain honestly unsupported: multi-file bug repair,
 behavior-preserving module refactor, failing-test diagnosis/target selection,
 read-only security findings, and read-only codebase explanation. The explanation
-capability is planned for M2; the others require later explicit roadmap
-decisions. Unsupported contracts validate their fixtures and capability
-classification but are never converted into passes.
+capability is planned for M2; the broader repair/refactor/review contracts are
+planned as M7 dogfood gates. Unsupported contracts validate their fixtures and
+capability classification but are never converted into passes.
 
 ## Measures
 
@@ -74,8 +78,9 @@ Each measurement is labeled `measured`, `estimated`, `not_applicable`,
 `actualBilledUsd` remains null and configured-rate results are labeled estimated.
 Context quality is expected-path recall/precision plus digest-provenance validity
 for the deterministic M1 selector, not semantic-retrieval quality. The
-interrupted-run case persists a started operation directly to simulate a crash
-boundary; it does not claim to kill an operating-system process.
+interrupted-run case launches the production CLI, holds a real `provider.edit`
+request after its durable operation start, kills that operating-system process,
+and invokes explicit resume against the persisted state.
 
 ## Determinism
 

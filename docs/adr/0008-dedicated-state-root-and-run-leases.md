@@ -3,6 +3,10 @@
 - Status: Accepted
 - Date: 2026-07-19
 
+> The lease ownership and stale-reconciliation mechanism below is superseded by
+> [ADR 0011](0011-kernel-backed-stable-run-leases.md). The dedicated state-root
+> decision remains in force.
+
 ## Context
 
 Icarus changes permissions inside its state directory and multiple CLI

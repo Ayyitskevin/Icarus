@@ -3,15 +3,14 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
-
-import type { RunRecord } from "../../packages/core/src/types.js";
 import { IcarusStore } from "../../packages/core/src/store.js";
+import type { RunRecord } from "../../packages/core/src/types.js";
 import {
   createFixtureRepository,
   editResponse,
   jsonOutput,
-  planResponse,
   PYTHON_IMAGE,
+  planResponse,
   repositoryFingerprint,
   runCli,
   startOllamaQueue,
@@ -294,7 +293,9 @@ describe("CLI lifecycle across process restarts", () => {
       awaitingReview.usage.estimatedCostUsd + 0.1,
     );
     expect(cancelled.usage.inputTokens).toBe(awaitingReview.usage.inputTokens + 25);
-    expect(cancelled.usage.activeRuntimeMs).toBe(awaitingReview.usage.activeRuntimeMs + 100);
+    expect(cancelled.usage.activeRuntimeMs).toBeGreaterThan(
+      awaitingReview.usage.activeRuntimeMs + 100,
+    );
     expect(
       await readFile(
         path.join(fixture.stateRoot, "runs", planned.id, "worktree", "src/greeting.txt"),

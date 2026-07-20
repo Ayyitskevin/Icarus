@@ -55,6 +55,11 @@ repository is then read-only from Icarus's perspective and
 never owns an Icarus worktree. A copied Git cache and mutable worktree live only
 below `ICARUS_HOME/runs/<run-id>/`, whose ownership is proved by generated IDs,
 path containment, and the persisted run record.
+Before any artifact, provider request, cache, or worktree is created,
+preparation audits the complete tracked tree directly through bounded Git object
+reads. A file larger than 16 MiB, more than 64 MiB of tracked content, an
+intrinsically secret path, or recognizable credential content fails closed.
+
 
 ## Explicit run state machine
 
@@ -87,8 +92,12 @@ failed --explicit resume--> persisted preparing/planned/running/verifying/recove
 ```
 
 Every transition is validated and written with an event in the same database
-transaction. Waiting for a human is not active runtime. Per-run leases prevent
-concurrent mutators. Resume re-enters only a persisted safe stage. Exact writes
+transaction. Waiting for a human is not active runtime. Stable per-run files use
+kernel `flock(2)` on a retained descriptor, with descriptor/path inode checks;
+process death releases exclusion without pathname cleanup. These leases prevent
+concurrent cooperative current-version mutators inside the private state-root
+boundary; online mixed-version upgrades and arbitrary same-UID state tampering
+are outside that guarantee. Resume re-enters only a persisted safe stage. Exact writes
 are replay-safe: a retry may accept baseline or identical approved bytes, but
 unexpected bytes are preserved and fail closed.
 
@@ -101,10 +110,11 @@ unexpected bytes are preserved and fail closed.
 2. `run plan` first persists a `preparing` intent. It then verifies repository
    identity, resolves the base ref to the clean source HEAD, and immediately
    persists that immutable commit before further work.
-3. Context assembly is a reserved operation. It reads the committed tree
-   through Git object commands, includes bounded root/target-ancestor
-   `AGENTS.md`/seed files, records SHA-256 provenance, and labels repository
-   text as untrusted.
+3. Context assembly is a reserved operation. It first audits the complete
+   committed tree within fixed credential-scan bounds, before landing any
+   derived copy. It then reads through Git object commands, includes bounded
+   root/target-ancestor `AGENTS.md`/seed files, records SHA-256 provenance, and
+   labels repository text as untrusted.
 4. Context persistence atomically lands a non-loopback run at
    `awaiting_egress_approval`; every remote provider call independently checks
    approval of that exact digest before any bytes leave the host.
@@ -133,13 +143,20 @@ unexpected bytes are preserved and fail closed.
    only checkpoint-approved bytes, and returns through verification.
 
 Before a bounded external operation, SQLite reserves its worst-case runtime,
-tokens, and cost and records a started operation. Completion charges actual
-reported use within the reservation. On restart, an unfinished operation is
+tokens, and cost and records a started operation. Completion charges observed
+wall-clock runtime within the reservation; token and cost fields use validated
+provider-reported usage when available. On restart, an unfinished operation is
 marked interrupted and charged its entire reservation before a new request can
 be attempted. This intentionally favors bounded spend over optimistic replay.
-Cancellation first persists `cancelling`, then reconciles sandbox state and
-restores baseline bytes. A crash resumes that recovery state rather than
-leaving reviewable evidence attached to rewritten bytes.
+Cancellation first persists `cancelling`. Runs with a worktree reconcile sandbox
+state before restoring baseline bytes; pre-workspace runs skip reconciliation.
+A crash resumes that recovery state rather than leaving reviewable evidence
+attached to rewritten bytes.
+One dedicated `cancellation.recovery` operation kind can land a run even after its
+ordinary ceiling is exhausted. It is allowed only in `cancelling`, reserves a
+fixed 120 seconds, has at most two persisted attempts, and remains charged and
+visible in usage. No other productive operation receives that exception.
+
 
 ## Provider contract
 
@@ -162,7 +179,8 @@ adapters against deterministic HTTP contracts; an OpenAI lifecycle test uses
 the production adapter from exact egress approval through review without making
 a paid request. Known credentials are supplied to transport-error sanitization,
 so a thrown HTTP transport error cannot copy a bearer value into durable state
-or CLI output. Tests do not substitute a fake production adapter.
+or CLI output. Non-success HTTP bodies are not retained in surfaced errors.
+Tests do not substitute a fake production adapter.
 
 ## Context boundary
 
@@ -171,6 +189,12 @@ path, reason, size, and digest. Root and nested rules can inform the plan, but
 cannot expand permissions, commands, network access, budgets, or writable paths.
 Semantic retrieval is deferred until deterministic selection has evaluation
 evidence.
+Path classification answers three separate questions: whether a file can be
+edited, whether its bytes can be shown to a model, and whether its pathname is
+intrinsically secret. For example, a safe `.npmrc` is protected and omitted
+from model context but may be exported to the no-network sandbox; detected
+credential bytes never reach any of those derived surfaces.
+
 
 ## Safety boundary
 
@@ -180,8 +204,10 @@ evidence.
   persistence; known credentials, including credentials reflected by thrown
   transport errors, and command/error output are redacted.
 - A proposal is one exact replacement in an existing tracked UTF-8 text file.
-- Protected names include `.git`, `.env*`, credential/key material, Icarus
-  metadata, and repository rule files.
+- Protected edit names include `.git`, non-template `.env*`, credential/key
+  configuration; safe `.env.{example,sample,template}` files remain eligible,
+  Icarus metadata, and repository rule files. Model visibility and intrinsic
+  secret-path policy are evaluated separately.
 - Reads open the final file with `O_NOFOLLOW`, verify descriptor identity and
   bounds, and reject symlinked components, special files, and hardlinks.
 - Model-suggested commands are ignored. Only exact registered `argv` executes in
@@ -207,5 +233,6 @@ evidence.
   recovery, so cleanup is never automatic in Milestone 1.
 - **Timing:** run/operation intent is persisted before bounded external actions;
   approval pauses are excluded from active budgets; interrupted reservations
-  are charged conservatively; cancellation intent precedes rollback writes; and
-  only replay-safe stages may resume.
+  are charged conservatively; cancellation intent precedes rollback writes; a
+  fixed, two-attempt emergency recovery is the only ordinary-ceiling carve-out;
+  and only replay-safe stages may resume.
