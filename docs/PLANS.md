@@ -5,8 +5,8 @@
 Status values are evidence claims. A checked item must be backed by a command or
 test named below.
 
-Status: final-adversarial-audit repairs are implemented and the fresh local
-gate passed; exact-head hosted CI is pending. The separate security release
+Status: final-adversarial-audit repairs are implemented; the fresh local gate
+and exact implementation-head hosted CI passed. The separate security release
 hold remains in force on 2026-07-19.
 
 M0/M1 must not be called complete until Kevin makes the security decision
@@ -90,7 +90,7 @@ added only after the fresh full gate and exact-head CI complete:
       conservative resume
 - [x] Validate representative scenario-specific fixtures for every deferred eval
 - [x] Re-run the complete local gate, security/audit checks, and adversarial review
-- [ ] Publish the candidate and verify hosted CI at the exact head.
+- [x] Publish the candidate and verify hosted CI at the exact implementation head.
 
 ## Acceptance evidence
 
@@ -157,7 +157,8 @@ Final adversarial candidate local evidence on 2026-07-20:
 - Both full and production dependency audits reported no known vulnerabilities.
   Checksum-verified `actionlint` v1.7.12 accepted both workflow files, and
   `git diff --check` reported no errors.
-- Exact-head hosted CI remains pending until this candidate is published.
+- Hosted `ci` run 29719143172 passed all jobs in 50 seconds at exact
+  implementation commit `c56bd9e4026a9c09649110fe1133aea3799f90b6`.
 
 ## Deferred plan
 

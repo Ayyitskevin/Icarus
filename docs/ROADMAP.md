@@ -2,8 +2,8 @@
 
 ## M0 — Foundation
 
-Status: fresh local gate passed; exact-head hosted gate pending; security
-release hold (2026-07-19).
+Status: fresh local and exact implementation-head hosted gates passed; security
+release hold remains (2026-07-19).
 
 Deliver documentation contracts, workspace tooling, CI, security checks, and
 the versioned evaluation fixture catalog.
@@ -13,8 +13,8 @@ in ADR 0010.
 
 ## M1 — Golden path
 
-Status: fresh local gate passed; exact-head hosted gate pending; security
-release hold (2026-07-19).
+Status: fresh local and exact implementation-head hosted gates passed; security
+release hold remains (2026-07-19).
 
 Deliver one planned, approved, isolated, verified, reviewable, resumable, and
 reversible one-file change with Ollama and OpenAI adapters.
