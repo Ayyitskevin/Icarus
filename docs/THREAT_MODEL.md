@@ -6,6 +6,7 @@
 - provider credentials in the process environment;
 - private repository text sent to a chosen provider;
 - Icarus project/run history, diffs, and command output;
+- loopback workspace requests and allowlisted browser evidence;
 - host filesystem, processes, private network, and production systems;
 - GitHub Actions credentials, OIDC authority, and repository automation;
 - operator trust in approval and verification evidence.
@@ -20,15 +21,26 @@
 6. Approved bytes cross into an Icarus-owned worktree.
 7. Public GitHub comments can enter inherited repository automation before the
    Icarus runtime starts.
+8. Browser requests cross the loopback HTTP boundary into validation and the
+   application service.
+9. Allowlisted state/evidence crosses from the API presenter into React, where
+   repository, provider, and check-derived strings remain untrusted data.
 
-Repository rules, source, docs, issue text, model output, HTTP errors, and command
-output are untrusted. Fixed host policy plus the operator's exact project
-checks/sandbox/ceilings and digest-bound approval commands are authoritative.
+Repository rules, source, docs, issue text, model output, HTTP errors, command
+output, Host/Origin values, URLs, and JSON bodies are untrusted. Fixed host policy
+plus the operator's exact project checks/sandbox/ceilings and digest-bound CLI
+approval commands are authoritative; the browser is review-only.
 
 ## Primary threats and controls
 
-| Threat | Milestone 1 control | Required evidence |
+| Threat | Control | Required evidence |
 | --- | --- | --- |
+| Remote access or DNS rebinding reaches local authority | production bind is fixed to `127.0.0.1`; UI/API are same-origin; Host and Origin must be loopback; no CORS permission is emitted | hostile Host/Origin and absent-CORS integration tests |
+| Oversized, malformed, or ambiguous mutation | exact route/method/content-type schemas, unknown-field rejection, and bounded JSON bodies fail before service calls | content-type, body-limit, and invalid-contract tests with unchanged state |
+| Raw state leaks context/source blobs, private runtime paths, or credentials | API presenters allowlist fields and omit raw blobs plus private cache/worktree/artifact paths; explicit diff/check output stays bounded and redacted | serialization tests scan responses for private paths, raw source bytes, and credential material |
+| Repository/provider text executes in the browser | React renders values as text under a restrictive content-security policy; no raw HTML injection contract exists | presenter allowlist test carrying adversarial strings plus package-wide static no-raw-HTML-sink scan |
+| Browser widens execution authority | no approval, edit, check, arbitrary-command, commit, push, or deploy route exists | route inventory/static assertions and negative HTTP tests |
+| Filtered context or provider repository map exposes secret/generated data | preview reads committed Git objects, returns metadata only, and shares its path classifier with the real model repository map; every `.env*`, dependency/generated, symlink, binary/invalid-UTF-8, model-hidden/intrinsic-secret, and secret-content entry is omitted or planning fails closed | deterministic filter tests, captured provider request, hidden-blob test, and source fingerprint |
 | Prompt injection expands authority | Host policy is outside prompts; model can only return one typed proposal | malicious `AGENTS.md` instruction reaches the real prompt but an expanded target is rejected |
 | Path traversal or absolute write | lexical containment plus protected-path policy | traversal tests |
 | Symlink escape | reject symlinks in every existing component and target | symlink test |
@@ -42,7 +54,7 @@ checks/sandbox/ceilings and digest-bound approval commands are authoritative.
 | Provider/context credential exfiltration | exact pre-egress approval, secret/path filtering, reject URL user info and redirects | endpoint/egress tests |
 | Interrupted atomic write strands an unreviewed path | temporary file is private and outside the worktree; rename is the only worktree mutation | failed-rename cleanup and changed-path tests |
 | TOCTOU path swap | isolated single-operator worktree; `O_NOFOLLOW` descriptor read with identity checks; component checks, atomic write, and final changed-set verification | adversarial test |
-| Misleading success | timeout/cancellation cannot pass on exit zero; state needs check evidence and review; every verification attempt is append-only; unsupported evals are not successes | timeout-trap, history, drift, and measured-eval tests |
+| Misleading success | timeout/cancellation cannot pass on exit zero; exact internal state stays visible; absent provider/execution is `unconfigured`; absent checks are `not_run`; history is append-only | timeout-trap, phase mapping, empty/error state, restart, history, drift, and measured-eval tests |
 | Destructive rollback | rollback touches only the approved path in the owned worktree and retains checkpoint | rollback/restore test |
 | SQLite tampering/corruption | local file permissions, foreign keys, WAL, transaction boundaries, backups documented | operations drill |
 
@@ -67,8 +79,11 @@ is held. ADR 0010 records the options without changing the workflow.
   arguments or access its socket inside the container.
 - Full-file model output can contain vulnerable code even when path-safe. Human
   review and project tests remain required.
-- Loopback services are trusted only as configured; another local process may
-  impersonate them.
+- The workspace API has no authentication because loopback plus the current OS
+  user is its boundary. Another process or browser running as that user can call
+  it; it must never be proxied or exposed remotely.
+- A configured loopback model service is trusted only as configured; another
+  local process may impersonate it.
 - GitHub-hosted automation and third-party installers remain outside the local
   runtime boundary. The inherited OpenCode workflow is not approved merely
   because its current upstream implementation contains a late permission check.
@@ -79,9 +94,14 @@ is held. ADR 0010 records the options without changing the workflow.
 - Run leases defend cooperating Icarus processes and accidental stale state,
   not an attacker with arbitrary same-UID write access to `ICARUS_HOME` during
   a run. The state-root ownership/mode boundary must prevent that access.
+- The HTTP/UI, import, preview, and draft-inspection paths use platform-neutral
+  primitives, but Windows and macOS have not been verified. Guarded planning and
+  execution depend on Linux `/usr/bin/flock` and `/proc`; execution also
+  depends on a local Docker daemon.
 
 ## Security non-goals
 
-No claim of hostile multi-user isolation, microVM isolation,
-production deployment safety, authentication, authorization, tenant isolation,
-or remote worker security is made in Milestone 1.
+No claim of hostile multi-user isolation, microVM isolation, production
+deployment safety, remote API authentication/authorization, tenant isolation,
+portable guarded execution, account security, telemetry security, or remote
+worker security is made by Milestone 1 or the first M3 workspace slice.

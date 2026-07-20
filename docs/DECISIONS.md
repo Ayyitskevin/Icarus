@@ -9,7 +9,7 @@ Decision records for the current milestone:
 | [0003](adr/0003-detached-worktree-single-file.md) | Detached worktree and one-file mutation boundary | Accepted |
 | [0004](adr/0004-provider-http-adapters.md) | Provider-neutral port with real Ollama and OpenAI HTTP adapters | Accepted |
 | [0005](adr/0005-deterministic-untrusted-context.md) | Deterministic, provenance-preserving, untrusted context first | Accepted |
-| [0006](adr/0006-headless-first-slice.md) | CLI-first slice; no premature web/API service | Accepted |
+| [0006](adr/0006-headless-first-slice.md) | CLI-first slice; partially superseded for the bounded local workspace by ADR 0014 | Partially superseded |
 | [0007](adr/0007-fail-closed-docker-check-sandbox.md) | No-network Docker sandbox for pre-review checks | Accepted |
 | [0008](adr/0008-dedicated-state-root-and-run-leases.md) | Marker-owned private state root and per-run mutation leases | Accepted |
 | [0009](adr/0009-persisted-intent-and-conservative-reservations.md) | Preparing intent and conservative external-operation reservations | Accepted |
@@ -17,6 +17,7 @@ Decision records for the current milestone:
 | [0011](adr/0011-kernel-backed-stable-run-leases.md) | Kernel-backed stable run leases without pathname deletion | Accepted |
 | [0012](adr/0012-bounded-emergency-cancellation-recovery.md) | Fixed, metered emergency recovery after ordinary ceilings are exhausted | Accepted |
 | [0013](adr/0013-pre-egress-full-tree-credential-audit.md) | Bounded full-tree credential audit before derived copies or egress | Accepted |
+| [0014](adr/0014-loopback-api-react-workspace.md) | Loopback API and review-only React workspace | Accepted |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.

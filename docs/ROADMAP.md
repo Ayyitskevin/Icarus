@@ -34,12 +34,22 @@ evals, context budget allocation, and retrieval-quality fixtures.
 
 ## M3 — Workspace UI
 
-Status: planned.
+Status: first bounded vertical slice implemented; acceptance verification is
+pending on the working branch.
 
-Add a local API and React workspace for projects, run timeline, approvals, diff,
-tests, terminal evidence, prompt history, and a small task board. Include
-repository status, live events, file tree, checkpoints, and token/cost telemetry.
-Provider keys remain server-side.
+The first slice adds a fixed-loopback Node API and same-origin React workspace
+for persisted project registration, deterministic committed-tree context
+metadata, persisted task drafts, loopback Ollama planning, exact internal run
+state plus product phases, and allowlisted plan/action/file/check/output/warning/
+timestamp evidence. It is review-only: browser approval, edit execution, checks,
+commit, push, and deployment are not exposed. Missing providers/execution are
+shown as `unconfigured`, and checks that did not run remain `not_run`.
+
+The remaining M3 scope is repository status, live events, richer run timeline,
+file tree and diff navigation, checkpoints, prompt history, a small task board,
+token/cost telemetry, server-held provider profiles, and deliberately designed
+approval/recovery controls. Any browser execution path needs a separate safety
+contract and evidence; provider keys remain server-side.
 
 ## M4 — Runtime and previews
 
@@ -87,6 +97,7 @@ remain human-gated and outside automatic dogfood.
 
 ## Next recommended slice
 
-Close the M0/M1 repair, exact-head hosted-CI, and inherited-workflow security
-holds first. Then add a read-only explanation run and its evaluation. It
-exercises richer context without widening filesystem or command authority.
+Run and record the complete local gate and real restart/source-isolation smoke
+for the first M3 slice while preserving the ADR 0010 security hold. Then deepen
+read-only repository status, event, and evidence navigation before adding any
+browser approval or execution authority.

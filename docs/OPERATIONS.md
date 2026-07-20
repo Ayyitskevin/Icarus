@@ -2,9 +2,17 @@
 
 ## Supported operating mode
 
-Milestone 1 runs on one Linux host as one OS user. It operates only on local
-repositories explicitly registered by absolute path. It does not install a
-daemon, expose a port, or touch production systems.
+Milestone 1 guarded execution runs on one Linux host as one OS user and only
+against local repositories explicitly registered by absolute path. The optional
+workspace is a foreground process fixed to `127.0.0.1`; it does not install a
+daemon, accept remote traffic, depend on fleet/homelab/cloud services, or touch
+production systems.
+
+The HTTP/UI shell, repository import, context preview, and draft inspection use
+platform-neutral Node/browser primitives. Guarded planning and execution remain
+Linux-only because leases require `/usr/bin/flock` and `/proc`; execution
+checks also require a local Docker daemon. Windows and macOS planning/execution
+are not verified or supported.
 
 Default state layout:
 
@@ -29,6 +37,53 @@ shared, or synced filesystems for SQLite and private worktrees.
 For `repo add`, repository/state lexical and canonical overlap is checked
 before Icarus creates or opens the requested state root. A rejected nested path
 must therefore leave both the repository and prospective state path untouched.
+
+## Local workspace runbook
+
+Use Node 22.23 and pnpm 9.15 from a trusted local checkout. Choose a dedicated
+`ICARUS_HOME` outside every imported repository, then build and start the
+foreground server:
+
+```text
+ICARUS_HOME=/private/dedicated/icarus-state pnpm workspace:start
+```
+
+The process prints JSON containing its exact URL, fixed binding, and state root.
+The default is `http://127.0.0.1:8787`; `ICARUS_PORT` may select another explicit
+local port. Binding or port conflicts fail closed without address/port fallback.
+Stop the foreground process with `SIGINT` or `SIGTERM`; projects and drafts are
+rediscovered from SQLite on restart.
+
+The browser golden path is:
+
+1. Import a clean committed local repository and create a project. Icarus records
+   the canonical source identity but leaves source content and Git metadata
+   unchanged.
+2. Select a tracked text target and request context preview. The response contains
+   committed-tree metadata only and deterministically filters all `.env*`,
+   dependency/generated paths, binary or invalid UTF-8 files, model-hidden paths,
+   and secret-shaped content.
+3. Enter a task plus explicit loopback Ollama model/base URL. Draft creation first
+   persists a real `preparing` run without contacting the provider; planning is a
+   separate action.
+4. Review exact state, product phase, plan, any edit action that actually exists,
+   involved/changed files, verification/check output, warnings, approvals, usage,
+   failures, and timestamps. `unconfigured` and
+   `not_run` are real outcomes, never aliases for completion or passing checks.
+5. Continue any digest approval, edit, sandbox check, review decision, rollback,
+   or restore through the CLI. The browser intentionally has no such route.
+
+Treat the loopback server as same-user local authority. It has no authentication
+because it is not a remote service: do not reverse-proxy it, bind it to a LAN or
+Tailscale address, publish it through a tunnel, or weaken Host/Origin checks. The
+server accepts bounded JSON mutations, serves UI/API from one origin, and grants
+no CORS permission. API presenters omit raw context/source blobs and private
+cache/worktree/artifact paths; explicitly stored diff/check output stays bounded
+and redacted.
+
+The browser accepts loopback Ollama planning only. It has no cloud-provider key
+entry, provider fallback, arbitrary shell, account, telemetry, commit, push,
+deployment, or fleet-control integration.
 
 ## Preflight
 
@@ -73,6 +128,9 @@ preserve the state and require explicit operator recovery.
   CLI output. Non-success HTTP response bodies are not copied into surfaced or
   durable errors.
 - Model identifiers are explicit. Icarus never silently substitutes a model.
+- The workspace accepts only an explicit loopback Ollama model/base URL. It
+  rejects remote, LAN, Tailscale, public, OpenAI, and other cloud endpoints
+  before persisting the draft; the broader CLI provider contract is unchanged.
 
 ## Runbook
 
@@ -147,6 +205,11 @@ If a process stops:
 
 ## Observability
 
+The workspace reads the same SQLite state and append-only history through an
+allowlisted presenter. It exposes exact state plus a derived product phase,
+warnings, timestamps, and bounded/redacted evidence. Missing provider/execution
+capability stays `unconfigured`; missing checks stay `not_run`.
+
 Events record transition, actor where applicable, bounded/redacted detail, and
 timestamps. Operation events expose reservations, interruption, and final
 outcome. Verification evidence records exact argv, exit status/signal, duration,
@@ -187,6 +250,7 @@ record the observed exit status and counts in `docs/PLANS.md`:
 ```text
 pnpm exec vitest run tests/integration/security-regressions.test.ts
 pnpm exec vitest run tests/integration/runtime-ceiling-cancellation.test.ts
+pnpm smoke:workspace
 pnpm exec vitest run tests/integration/docker-containment.test.ts
 pnpm exec vitest run tests/unit/git-file-safety.test.ts tests/unit/lease.test.ts tests/unit/sandbox-wire.test.ts
 pnpm eval

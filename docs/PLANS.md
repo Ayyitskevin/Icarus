@@ -1,6 +1,46 @@
 # Implementation plans
 
-## Current plan: Milestone 0 plus minimal Milestone 1
+## Current plan: first M3 local workspace vertical slice
+
+Status values are evidence claims. The bounded implementation and local
+verification are complete on this branch, with exact evidence prepared for the
+handoff. This is not a claim that full M3 is complete.
+
+### Product and persistence
+
+- [x] Add `@icarus/api` and a React/Vite workspace that call the existing core
+      service and SQLite store
+- [x] Persist repository/project state and a `preparing` task draft before any
+      planning request
+- [x] Add deterministic, metadata-only committed-tree context preview with
+      `.env*`, dependency/generated, binary/invalid-UTF-8, model-hidden, and
+      secret-content filtering
+- [x] Keep imported source repositories read-only and keep context previews
+      non-persisted
+
+### Browser authority and evidence
+
+- [x] Bind the server to `127.0.0.1`, serve UI/API from one origin, validate
+      Host/Origin, bound JSON bodies, and emit no CORS permission
+- [x] Allow only explicitly configured loopback Ollama planning from the browser
+- [x] Expose exact internal state plus the seven product phases, allowlisted
+      evidence, explicit `unconfigured` capabilities, and `not_run` checks
+- [x] Expose no browser route for approval, edit/check execution, arbitrary
+      commands, commit, push, deployment, accounts, telemetry, or fleet services
+
+### Verification and handoff
+
+- [x] Reinstall from the updated lockfile with the frozen/offline dependency path
+- [x] Run formatting, lint, type checking, and production builds
+- [x] Run the complete unit, integration, evaluation, and security gate
+- [x] Run the loopback API/production-asset restart smoke against a temporary Git repo
+- [x] Prove the imported source checkout fingerprint remains unchanged
+- [x] Record the intentionally skipped networked dependency audit and run
+      `git diff --check`
+- [x] Prepare exact command output, counts, and limitations for the local commit
+      and M3 handoff
+
+## Prior plan: Milestone 0 plus minimal Milestone 1
 
 Status values are evidence claims. A checked item must be backed by a command or
 test named below.
@@ -162,7 +202,8 @@ Final adversarial candidate local evidence on 2026-07-20:
 
 ## Deferred plan
 
-First close the repair, exact-head hosted-CI, and ADR 0010 security holds. The
-next feature slice after release is a read-only explanation run using the same
-context and history boundaries. It should not widen write or shell permissions.
-See `docs/ROADMAP.md`.
+The inherited ADR 0010 security hold remains separate from this local feature
+branch. After the first workspace slice passes its gate, continue M3 with
+read-only repository status, live event/evidence navigation, file/diff views,
+and server-held provider profiles. Browser approval and execution remain a
+later, explicitly reviewed authority expansion. See `docs/ROADMAP.md`.

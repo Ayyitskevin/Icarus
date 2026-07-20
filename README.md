@@ -40,25 +40,60 @@ diff. Before any context artifact, provider request, private Git cache, or
 worktree exists, preparation also audits the complete tracked tree within fixed
 file and aggregate byte limits and fails closed on credential material.
 
-Not yet included: a web UI, arbitrary agent tool use, model-written shell
-commands, semantic search, commits or pushes, previews, deployment, backend
-platform primitives, multi-agent orchestration, and distributed workers.
+The first Milestone 3 vertical slice adds a same-origin React workspace and a
+loopback-only local API. It can persist a repository/project, preview a
+deterministic filtered map of the committed tree, save a task as a draft, ask a
+configured loopback Ollama model for a plan, and reopen browser-safe evidence
+after restart. The browser is deliberately review-only: it cannot approve a
+plan, create a worktree, execute checks, mutate the imported repository, or
+claim that unrun work completed.
+
+Not yet included: browser approval or execution, arbitrary agent tool use,
+model-written shell commands, semantic search, commits or pushes, application
+previews, deployment, backend platform primitives, multi-agent orchestration,
+and distributed workers.
 
 ## Requirements
 
 - Node.js 22.23 or newer in the Node 22 line
 - pnpm 9.15 or newer in the pnpm 9 line
 - Git 2.40 or newer
-- util-linux `flock` available at `/usr/bin/flock`
-- Docker with seccomp support and a locally present digest-pinned check image
-- a repository with at least one commit for an agent run
+- a clean local repository with at least one commit for workspace import
+
+The loopback HTTP/UI, repository import, context preview, and draft inspection
+use portable Node/browser primitives and require no homelab, cloud service,
+account, telemetry, or global install. Guarded planning and execution currently
+inherit the Milestone 1 Linux lease runtime and require util-linux `flock` at
+`/usr/bin/flock`; execution additionally requires Docker with seccomp support
+and a locally present digest-pinned check image. Windows and macOS planning and
+execution are not yet supported.
 
 ## Quick start
 
 ```text
 pnpm install --frozen-lockfile
 pnpm check
+```
+
+Start the local workspace with a dedicated state root:
+
+```text
 export ICARUS_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/icarus"
+pnpm workspace:start
+```
+
+Open `http://127.0.0.1:8787`. The server binds only to `127.0.0.1`,
+validates browser `Host` and `Origin`, and never enables cross-origin
+access. Importing and previewing a repository reads its committed Git objects;
+it does not copy, edit, check, commit, or push the source. Planning is available
+only when the chosen model is served by loopback Ollama. Until an endpoint and
+model are entered, the workspace clearly reports provider and execution
+capabilities as `unconfigured`. Saving a configured draft contacts no provider;
+the separate plan action does.
+
+The existing CLI golden path begins with:
+
+```text
 node packages/cli/dist/main.js init
 node packages/cli/dist/main.js repo add \
   --name fixture \

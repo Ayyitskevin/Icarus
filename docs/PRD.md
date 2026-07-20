@@ -9,11 +9,12 @@ by an explicit "sun ceiling" and human decisions.
 
 ## First user
 
-Kevin operates multiple Git repositories, Linux hosts, local model servers, and
-cloud APIs. Mickey is the intended future control plane; Flow and Highwind are
-future workers; Zenbook is an operator client. Milestone 1 is local-only and has
-no dependency on Mise, Athena, KleeOS, Chronos, Odysseus, or any production
-system.
+Kevin operates multiple Git repositories, local hosts, and explicitly configured
+local or cloud model endpoints. Milestone 1 and the first M3 workspace slice run
+on one operator-controlled machine. They do not depend on Mickey, Flow,
+Highwind, Zenbook, Mise, Athena, KleeOS, Chronos, Odysseus, or any production,
+homelab, account, or telemetry service. Fleet control and workers remain future
+distributed-execution concerns.
 
 ## Milestone 1 job to be done
 
@@ -76,6 +77,38 @@ roll it back, or restore the recorded checkpoint.
 19. Support one real local adapter (Ollama HTTP) and one real cloud adapter
     (OpenAI Responses HTTP) without persisting credentials.
 
+## First M3 local-workspace slice
+
+The first browser path is intentionally narrower than the guarded CLI lifecycle:
+
+1. A Node API persists repository/project records in the existing SQLite state
+   root and serves a React workspace from the same fixed `127.0.0.1` origin.
+   Host and Origin values are loopback-only, mutation bodies are bounded JSON,
+   and the server grants no CORS access.
+2. Import records an existing local Git repository but does not modify its
+   content, refs, config, index, or worktree metadata.
+3. Context preview is deterministic metadata over one committed tree and target.
+   It returns paths, reasons, sizes, digests, counts, and warnings, never file
+   contents. All `.env*` paths, dependency/generated directories, binary or
+   invalid UTF-8 data, model-hidden paths, and secret-shaped content are omitted.
+4. Submitting a task first persists a `preparing` draft without context, provider
+   work, cache creation, worktree creation, or source mutation. Planning is a
+   separate request and accepts only an explicitly configured loopback Ollama
+   endpoint.
+5. The workspace presents the exact internal state and derives only these product
+   phases: `draft`, `planned`, `awaiting_approval`, `running`, `completed`,
+   `failed`, and `cancelled`. The mapping never turns an approval, recovery, or
+   failed state into success.
+6. Allowlisted responses expose the plan, any edit action that actually exists,
+   involved/changed files, verification, checks, bounded/redacted output,
+   warnings, approvals, usage, failures, and timestamps without
+   returning raw context/source blobs or private cache/worktree paths. Explicit
+   diff/check output remains bounded and redacted. An absent check is `not_run`;
+   missing provider/execution capability is `unconfigured`.
+7. The browser has no approval, edit, check-execution, arbitrary-shell, commit,
+   push, deployment, account, telemetry, cloud-control, or fleet-control route.
+   Guarded approval and execution remain CLI-only.
+
 ## Sun ceiling
 
 Every run records maximum active runtime, provider output tokens, total tokens,
@@ -107,14 +140,19 @@ additional tool calls and runtime remain visible.
 - Known credentials and detected spans are redacted with constant markers.
   Non-success provider HTTP response bodies are not surfaced or persisted, and
   transport errors are sanitized before crossing the provider adapter boundary.
-- Linux is the supported Milestone 1 platform.
+- The HTTP/UI shell, repository import, context preview, and draft inspection
+  use platform-neutral Node/browser primitives. Guarded planning and execution
+  are supported only on Linux because they inherit `/usr/bin/flock` and
+  `/proc`; execution also inherits Docker requirements. Windows and macOS are
+  not planning/execution support claims.
 
 ## Explicit non-goals
 
 Public signup, billing, teams, browser-held provider keys, Kubernetes, semantic
 retrieval, arbitrary commands, creates/deletes, binary patches, commits, pushes,
-deployments, previews, database migrations, customer data, production access,
-backend-as-a-service primitives, and distributed execution.
+deployments, application previews, remote API exposure, database migrations,
+customer data, production access, backend-as-a-service primitives, distributed
+execution, accounts, and telemetry.
 
 ## Preserved future contracts
 
@@ -124,10 +162,11 @@ exist in Milestone 1:
 - Context intelligence will add project skills, language/framework detection,
   `rg`-based search, syntax/LSP signals, semantic retrieval, project memory,
   file-and-line provenance, and measured context-budget fixtures.
-- The local workspace will expose repository status, sessions, live events,
-  task state, file tree, diffs, checks, terminal evidence, previews, approvals,
-  checkpoints, prompt history, and token/cost telemetry without placing provider
-  keys in a browser.
+- The first local-workspace slice exposes persisted projects, context metadata,
+  task drafts, loopback planning, run state, and allowlisted evidence. Later M3
+  slices may add repository status, sessions, live events, file tree, richer
+  diffs/check evidence, application previews, approvals, checkpoints, prompt
+  history, and token/cost telemetry without placing provider keys in a browser.
 - Application-factory templates may add an application starter, API layer,
   database, authentication, storage, realtime events, jobs, vector search,
   environment references, local preview, and deployment configuration only as
@@ -154,3 +193,11 @@ exist in Milestone 1:
   fixture validation all pass in CI.
 - The evaluation report states unsupported scenarios rather than counting them
   as successes.
+- The workspace API rejects non-loopback Host/Origin requests, oversized or
+  malformed mutations, and remote planning endpoints without mutating state.
+- Context preview is deterministic for one commit and target, returns metadata
+  rather than source contents, and omits every prohibited path/content class.
+- A task draft survives process restart before planning, and unavailable
+  providers/execution or absent checks are never presented as completion or pass.
+- Project import, context preview, draft, and planning leave the source checkout
+  content and Git metadata unchanged.

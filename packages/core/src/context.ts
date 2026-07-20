@@ -21,6 +21,40 @@ const MAX_VALUE_INSPECTION_CHARS = 4_096;
 const MAX_SECRET_SPANS = 4_096;
 const SAFE_ENV_TEMPLATE_PATH_PATTERN = /(^|\/)\.env\.(?:example|sample|template)$/i;
 const MODEL_HIDDEN_ENV_PATH_PATTERN = /(^|\/)\.env[^/]*(?:\/|$)/i;
+const WORKSPACE_ENV_PATH_PATTERN = /(^|\/)\.env[^/]*(?:\/|$)/i;
+const WORKSPACE_EXCLUDED_DIRECTORY_NAMES = new Set([
+  ".angular",
+  ".cache",
+  ".dart_tool",
+  ".expo",
+  ".gradle",
+  ".mypy_cache",
+  ".next",
+  ".nuxt",
+  ".output",
+  ".pnpm",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".svelte-kit",
+  ".turbo",
+  ".venv",
+  ".vite",
+  "__pycache__",
+  "bin",
+  "bower_components",
+  "build",
+  "coverage",
+  "deriveddata",
+  "dist",
+  "generated",
+  "node_modules",
+  "obj",
+  "out",
+  "pods",
+  "target",
+  "vendor",
+  "venv",
+]);
 
 const MODEL_HIDDEN_PATH_PATTERNS = [
   /(^|\/)(?:\.boto|\.bundle\/config|\.git-credentials|\.gitcookies|\.netrc|\.npmrc|\.pgpass|\.pypirc|\.s3cfg|\.terraformrc|\.vault-token|\.yarnrc(?:\.ya?ml)?|_netrc|application_default_credentials\.json|auth\.json|credentials\.tfrc\.json|terraform\.rc)(?:\/|$)/i,
@@ -76,6 +110,19 @@ export function isProtectedEditPath(filePath: string): boolean {
 export function isIntrinsicallySecretPath(filePath: string): boolean {
   const normalized = normalizedPath(filePath);
   return INTRINSIC_SECRET_PATH_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+export function isWorkspaceContextPathExcluded(filePath: string): boolean {
+  const normalized = normalizedPath(filePath);
+  const parentComponents = normalized.split("/").slice(0, -1);
+  return (
+    WORKSPACE_ENV_PATH_PATTERN.test(normalized) ||
+    parentComponents.some((component) =>
+      WORKSPACE_EXCLUDED_DIRECTORY_NAMES.has(component.toLowerCase()),
+    ) ||
+    shouldHidePathFromModel(normalized) ||
+    isIntrinsicallySecretPath(normalized)
+  );
 }
 
 function appendBoundedSpan(spans: SecretSpan[], span: SecretSpan, inputLength: number): boolean {
@@ -458,8 +505,9 @@ async function assertTrackedTreeSafe(
   repositoryPath: string,
   tree: readonly TreeEntry[],
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<ReadonlySet<string>> {
   let totalBytes = 0;
+  const modelVisibleTextPaths = new Set<string>();
   for (const entry of tree) {
     if (entry.type !== "blob") continue;
     invariant(
@@ -484,20 +532,33 @@ async function assertTrackedTreeSafe(
       "REPOSITORY_SECRET_DETECTED",
       `Secret-shaped tracked content is denied before persistence or egress: ${entry.path}`,
     );
+    if (
+      entry.mode !== "120000" &&
+      !isWorkspaceContextPathExcluded(entry.path) &&
+      decodeTextOrNull(bytes) !== null
+    ) {
+      modelVisibleTextPaths.add(entry.path);
+    }
+  }
+  return modelVisibleTextPaths;
+}
+
+function decodeTextOrNull(bytes: Uint8Array): string | null {
+  if (Buffer.from(bytes).includes(0)) return null;
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return null;
   }
 }
 
 function decodeText(bytes: Uint8Array, filePath: string): string {
-  invariant(
-    !Buffer.from(bytes).includes(0),
-    "BINARY_CONTEXT_DENIED",
-    `Context file is binary: ${filePath}`,
-  );
-  try {
-    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-  } catch {
-    throw new IcarusError("INVALID_UTF8", `Context file is not valid UTF-8: ${filePath}`);
+  const text = decodeTextOrNull(bytes);
+  if (text !== null) return text;
+  if (Buffer.from(bytes).includes(0)) {
+    throw new IcarusError("BINARY_CONTEXT_DENIED", `Context file is binary: ${filePath}`);
   }
+  throw new IcarusError("INVALID_UTF8", `Context file is not valid UTF-8: ${filePath}`);
 }
 
 function assertNoSecrets(content: string, filePath: string): void {
@@ -542,7 +603,7 @@ export async function assembleContext(
     "SUBMODULE_DENIED",
     "Milestone 1 does not support repositories containing submodules",
   );
-  await assertTrackedTreeSafe(git, repositoryPath, tree, signal);
+  const modelVisibleTextPaths = await assertTrackedTreeSafe(git, repositoryPath, tree, signal);
   const byPath = new Map(tree.map((entry) => [entry.path, entry]));
   const targetEntry = byPath.get(target);
   invariant(targetEntry?.type === "blob", "TARGET_NOT_TRACKED", "Target is not a tracked file");
@@ -551,10 +612,14 @@ export async function assembleContext(
     "TARGET_MODE_DENIED",
     "Target must be a non-executable regular file",
   );
-  invariant(!isProtectedEditPath(target), "PROTECTED_PATH", "Target has a protected path");
+  invariant(
+    !isWorkspaceContextPathExcluded(target),
+    "PROTECTED_PATH",
+    "Target is excluded from model context",
+  );
 
   const visiblePaths = tree
-    .filter((entry) => entry.type === "blob" && !shouldHidePathFromModel(entry.path))
+    .filter((entry) => entry.type === "blob" && modelVisibleTextPaths.has(entry.path))
     .map((entry) => entry.path)
     .sort((left, right) => left.localeCompare(right));
   const selectedMap = visiblePaths.slice(0, MAX_MAP_PATHS);
@@ -578,9 +643,9 @@ export async function assembleContext(
     }
     invariant(entry.type === "blob", "CONTEXT_ENTRY_INVALID", "Context entry is not a blob");
     invariant(
-      !shouldHidePathFromModel(entry.path),
-      "CONTEXT_SECRET_PATH",
-      "Secret-shaped context path is denied",
+      !isWorkspaceContextPathExcluded(entry.path) && modelVisibleTextPaths.has(entry.path),
+      "CONTEXT_ENTRY_EXCLUDED",
+      "Context entry is excluded from model input",
     );
     const bytes = await git.readBlob(repositoryPath, entry.objectId, ceiling.maxFileBytes, signal);
     const content = decodeText(bytes, entry.path);
@@ -598,13 +663,13 @@ export async function assembleContext(
   await addEntry(targetEntry, "target");
   for (const rulePath of ancestorRulePaths(target)) {
     const entry = byPath.get(rulePath);
-    if (entry?.type === "blob") {
+    if (entry?.type === "blob" && modelVisibleTextPaths.has(entry.path)) {
       await addEntry(entry, rulePath === "AGENTS.md" ? "root_rules" : "target_rules");
     }
   }
   for (const seedPath of ["README.md", "README", "package.json", "pyproject.toml", "Cargo.toml"]) {
     const entry = byPath.get(seedPath);
-    if (entry?.type === "blob") {
+    if (entry?.type === "blob" && modelVisibleTextPaths.has(entry.path)) {
       await addEntry(entry, "seed");
     }
   }

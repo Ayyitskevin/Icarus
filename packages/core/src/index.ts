@@ -1,12 +1,18 @@
+export {
+  type ContextPreviewCounts,
+  type ContextPreviewEntry,
+  createContextPreview,
+  type ProjectContextPreview,
+} from "./context-preview.js";
 export { IcarusError, invariant } from "./errors.js";
 export {
+  checkpointDigest,
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
   POLICY_VERSION,
-  checkpointDigest,
   planApprovalDigest,
 } from "./policy.js";
-export { createProviderConfig } from "./provider.js";
+export { createProviderConfig, parseProviderBaseUrl } from "./provider.js";
 export {
   assertRegistrationStateSeparation,
   createIcarusRuntime,

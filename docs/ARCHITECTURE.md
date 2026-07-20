@@ -2,36 +2,73 @@
 
 ## Shape of the first system
 
-Icarus is a pnpm workspace with two packages:
+Icarus is a pnpm workspace with four packages:
 
 - `@icarus/core`: domain types, state machine, SQLite repositories, context
-  assembly, provider ports/adapters, safety policy, Git worktree operations,
-  sandbox execution, and the run application service.
+  assembly and preview, provider ports/adapters, safety policy, Git worktree
+  operations, sandbox execution, and the run application service.
 - `@icarus/cli`: argument parsing, environment configuration, human approval
   commands, signal cancellation, and text/JSON presentation.
+- `@icarus/api`: a fixed-loopback Node HTTP composition layer, bounded request
+  contracts, safe response presenters, and same-origin static UI serving.
+- `@icarus/workspace`: a React/Vite review surface for projects, deterministic
+  context metadata, task drafts, planning, run state, and evidence.
 
-There is no server or browser in Milestone 1. A future API and React workspace
-will call the same application service instead of moving policy into HTTP
-handlers.
+The CLI retains the full guarded lifecycle. The browser packages call the same
+application service and add no second state machine or policy authority.
 
 ## Dependency direction
 
 ```text
-CLI -> application service -> injected collaborators
-                              |-- concrete SQLite run store
-                              |-- concrete artifact and Git controllers
-                              |-- deterministic context assembler
-                              |-- Ollama / OpenAI provider port and adapters
-                              `-- Docker check-runner port and adapter
+CLI ------------------------\
+                              -> application service -> injected collaborators
+React workspace -> HTTP API/                          |-- SQLite run store
+                                                     |-- artifact/Git controllers
+                                                     |-- deterministic context
+                                                     |-- Ollama/OpenAI adapters
+                                                     `-- Docker check runner
 ```
 
-The domain does not import CLI code. Provider-specific JSON ends at the adapter.
-Git and process adapters receive constructed argument arrays, never shell text.
-The current service injects concrete `IcarusStore`, `ArtifactStore`, and
-`GitController` instances. That is a testable composition boundary, not a claim
-that interchangeable storage, artifact, or Git ports already exist. Extract an
-interface only when a second implementation or isolated contract test requires
-one.
+The domain does not import CLI, HTTP, or React code. HTTP handlers validate and
+orchestrate calls; they do not duplicate lifecycle policy. Provider-specific JSON
+ends at the adapter. Git and process adapters receive constructed argument
+arrays, never shell text. The current service injects concrete `IcarusStore`,
+`ArtifactStore`, and `GitController` instances. That is a testable composition
+boundary, not a claim that interchangeable storage, artifact, or Git ports
+already exist. Extract an interface only when a second implementation or isolated
+contract test requires one.
+
+## Local workspace boundary
+
+The production server binds only to `127.0.0.1` and serves compiled UI assets
+and `/api` from one origin. It rejects non-loopback Host or Origin values,
+accepts only allowlisted methods/routes and bounded JSON mutation bodies, emits
+no CORS permission, and fails rather than choosing a different address or port.
+It is a foreground local process, not a remotely reachable daemon.
+
+The first route set can inspect workspace state, register a repository/project,
+preview committed-tree context metadata, persist a task draft, plan that draft
+with loopback Ollama, and read a run. Repository import, preview, draft, and
+planning do not create a private worktree or modify the source checkout. There
+is no HTTP route for approval, edit or check execution, arbitrary commands,
+commit, push, or deployment.
+
+The API presenter allowlists product evidence instead of returning `RunRecord`
+or history rows. It omits raw context/source blobs and private cache, worktree,
+and artifact paths; explicit diff/check output remains bounded and redacted.
+Missing verification is `not_run`; unavailable provider or execution capability
+is `unconfigured`; neither is inferred as success.
+
+The persisted `preparing` state appears as product phase `draft`. The other
+derived phases are `planned`, `awaiting_approval`, `running`, `completed`,
+`failed`, and `cancelled`, while the exact internal state remains visible. An
+approval/recovery state is never flattened into completion.
+
+The HTTP/UI shell, repository import, context preview, and draft inspection use
+platform-neutral Node/browser primitives and have no fleet or cloud dependency.
+Guarded planning and execution inherit Linux-only leases using
+`/usr/bin/flock` and `/proc`; execution checks also require a local Docker
+daemon. Windows and macOS planning/execution are not yet verified or supported.
 
 ## State and feedback
 
@@ -45,8 +82,10 @@ verification attempt also appends its complete bounded evidence and diff to the
 event stream, so restore/reverify does not erase the earlier attempt from
 history.
 
-Operator feedback lives in CLI output and the same durable event/evidence
-records. Provider and command output is bounded and redacted before storage.
+Operator feedback lives in CLI output, allowlisted API views, the React workspace,
+and the same durable event/evidence records. Provider and command output is
+bounded and redacted before storage; raw domain records are never serialized
+directly to the browser.
 
 Before `repo add` creates or opens the state root, the CLI resolves the existing
 repository and the prospective state path through their nearest existing
@@ -101,7 +140,7 @@ are outside that guarantee. Resume re-enters only a persisted safe stage. Exact 
 are replay-safe: a retry may accept baseline or identical approved bytes, but
 unexpected bytes are preserved and fail closed.
 
-## Golden-path sequence
+## Guarded CLI golden-path sequence
 
 1. Registration first rejects lexical or canonical repository/state overlap
    without creating the requested state root. It then canonicalizes a clean
@@ -158,6 +197,22 @@ fixed 120 seconds, has at most two persisted attempts, and remains charged and
 visible in usage. No other productive operation receives that exception.
 
 
+## Workspace review path
+
+1. The workspace reads a safe snapshot backed by the same SQLite store used by
+   the CLI; an empty store is rendered as an empty state, not sample data.
+2. Project creation first applies the existing repository/state separation and
+   clean local Git registration rules, then atomically persists a new repository
+   and project in one SQLite transaction.
+3. Context preview resolves the clean base commit and produces deterministic
+   filtered metadata without persisting source text or touching the checkout.
+4. Task submission persists a `preparing` run before provider work. A separate
+   plan request runs the existing context/planning service with explicit loopback
+   Ollama configuration and lands at the real guarded approval state.
+5. Restarted API processes rediscover the project and run. The presenter reports
+   real plan/action/file/check/output/warning/timestamp evidence; absent work
+   remains absent and the UI offers no control that can execute it.
+
 ## Provider contract
 
 The provider-neutral port accepts model identity, capability metadata, a typed
@@ -172,6 +227,11 @@ Milestone 1 adapters:
   explicit pricing, and context-egress approval.
 - OpenAI: official `POST /v1/responses` with environment bearer token,
   `store: false`, bounded output, and text extracted from response output items.
+
+The browser narrows that provider contract: draft planning accepts only an
+explicitly configured Ollama endpoint that classifies as loopback. Remote, LAN,
+Tailscale, public, OpenAI, and other cloud planning endpoints are rejected by
+the workspace route before a draft is persisted; CLI egress policy is unchanged.
 
 OpenAI request shape follows the official [Responses API reference](https://developers.openai.com/api/reference/resources/responses/methods/create).
 No provider SDK is required for this narrow contract. Tests exercise both
@@ -195,9 +255,24 @@ intrinsically secret. For example, a safe `.npmrc` is protected and omitted
 from model context but may be exported to the no-network sandbox; detected
 credential bytes never reach any of those derived surfaces.
 
+Workspace preview is a separate, non-persisted projection over committed Git
+objects. It returns only path/reason/size/digest/count/warning metadata and
+filters every `.env*` path, dependency/generated directory, binary or invalid
+UTF-8 file, model-hidden or intrinsically secret path, and secret-shaped text.
+This narrower display filter does not weaken the guarded run's full-tree,
+fail-closed audit or make imported repositories writable.
+
 
 ## Safety boundary
 
+- The HTTP server has a fixed loopback bind, same-origin UI/API, loopback Host
+  and Origin validation, bounded JSON contracts, no CORS grant, and safe response
+  headers. It fails closed on malformed or unrecognized mutations.
+- Browser repository data is rendered as untrusted text from allowlisted
+  presenters. Raw domain records, context/source blobs, private runtime paths,
+  and provider credentials do not cross the response boundary.
+- The browser exposes planning and review only; it cannot approve a digest,
+  execute an edit/check/command, or commit, push, or deploy.
 - Remote-context approval gates non-loopback egress, plan approval gates the
   first write/edit call, and human review gates completion.
 - Provider output with recognizable credential material fails before plan/edit
@@ -227,12 +302,14 @@ credential bytes never reach any of those derived surfaces.
 - **State:** SQLite owns run truth; worktree bytes and Git status prove mutation
   truth.
 - **Feedback:** append-only events retain every complete bounded verification
-  attempt and diff; latest check evidence and CLI status expose current progress
-  without erasing earlier failures.
+  attempt and diff; latest check evidence, CLI status, allowlisted API views, and
+  the workspace expose current progress without erasing earlier failures or
+  inventing results.
 - **Deletion coupling:** removing SQLite, a private cache, or a worktree destroys local run
   recovery, so cleanup is never automatic in Milestone 1.
-- **Timing:** run/operation intent is persisted before bounded external actions;
-  approval pauses are excluded from active budgets; interrupted reservations
-  are charged conservatively; cancellation intent precedes rollback writes; a
-  fixed, two-attempt emergency recovery is the only ordinary-ceiling carve-out;
-  and only replay-safe stages may resume.
+- **Timing:** a workspace task draft is persisted before planning, and all other
+  run/operation intent precedes bounded external actions; approval pauses are
+  excluded from active budgets; interrupted reservations are charged
+  conservatively; cancellation intent precedes rollback writes; a fixed,
+  two-attempt emergency recovery is the only ordinary-ceiling carve-out; and
+  only replay-safe stages may resume.

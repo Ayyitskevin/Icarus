@@ -1,13 +1,13 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
-async function collectTestSources(directory) {
+async function collectSources(directory, include) {
   const sources = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      sources.push(...(await collectTestSources(entryPath)));
-    } else if (entry.isFile() && entry.name.endsWith(".test.ts")) {
+      sources.push(...(await collectSources(entryPath, include)));
+    } else if (entry.isFile() && include(entry.name)) {
       sources.push(await readFile(entryPath, "utf8"));
     }
   }
@@ -16,10 +16,15 @@ async function collectTestSources(directory) {
 
 const processSource = await readFile("packages/core/src/process.ts", "utf8");
 const sandboxSource = await readFile("packages/core/src/sandbox.ts", "utf8");
+const workspaceServerSource = await readFile("packages/api/src/server.ts", "utf8");
+const workspaceUiSources = await collectSources(
+  "packages/workspace/src",
+  (name) => name.endsWith(".ts") || name.endsWith(".tsx"),
+);
 const providerSource = await readFile("packages/core/src/providers.ts", "utf8");
 const runtimeSource = await readFile("packages/core/src/runtime.ts", "utf8");
 const ignore = await readFile(".gitignore", "utf8");
-const testSources = await collectTestSources("tests");
+const testSources = await collectSources("tests", (name) => name.endsWith(".test.ts"));
 
 const assertions = {
   controllerNeverUsesShell:
@@ -36,6 +41,21 @@ const assertions = {
     providerSource.includes("tools: []") && providerSource.includes('tool_choice: "none"'),
   dedicatedStateMarker: runtimeSource.includes(".icarus-state-v1"),
   environmentFilesIgnored: ignore.split(/\r?\n/).includes(".env") && ignore.includes(".env.*"),
+  workspaceFixedLoopback:
+    workspaceServerSource.includes('server.listen(port, "127.0.0.1"') &&
+    !workspaceServerSource.includes('"0.0.0.0"'),
+  workspaceNoCorsGrant: !workspaceServerSource
+    .toLowerCase()
+    .includes("access-control-allow-origin"),
+  workspaceBoundedJson:
+    workspaceServerSource.includes("MAX_BODY_BYTES") &&
+    workspaceServerSource.includes('"application/json"'),
+  workspaceNoExecutionRoutes: !/\/(?:approve|execute|checks|commit|push|deploy)/.test(
+    workspaceServerSource,
+  ),
+  workspaceNoRawHtml: workspaceUiSources.every(
+    (source) => !source.includes("dangerouslySetInnerHTML") && !source.includes("innerHTML"),
+  ),
   noFocusedOrSkippedGateTests: testSources.every(
     (source) => !/\.(?:only|skip|todo)(?:\s*\(|\.)/.test(source),
   ),

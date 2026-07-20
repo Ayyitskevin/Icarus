@@ -5,6 +5,7 @@ import { TextDecoder } from "node:util";
 
 import type { ArtifactStore } from "./artifacts.js";
 import { assembleContext, containsSecretShapedContent, renderContextPrompt } from "./context.js";
+import { createContextPreview, type ProjectContextPreview } from "./context-preview.js";
 import { digestJson, sha256 } from "./digest.js";
 import { errorMessage, IcarusError, invariant } from "./errors.js";
 import type { GitController, RepositoryInspection } from "./git.js";
@@ -33,7 +34,6 @@ import { createGateway } from "./providers.js";
 import { sanitizeText } from "./redaction.js";
 import type { CheckRunner } from "./sandbox.js";
 import type { IcarusStore } from "./store.js";
-import { CONTEXT_AUDIT_POLICY_VERSION } from "./types.js";
 import type {
   CheckEvidence,
   CheckProfile,
@@ -50,6 +50,7 @@ import type {
   SunCeiling,
   VerificationEvidence,
 } from "./types.js";
+import { CONTEXT_AUDIT_POLICY_VERSION } from "./types.js";
 
 const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -102,6 +103,27 @@ function asNonnegativeInteger(value: unknown, name: string): number {
 function validateName(value: string, kind: string): string {
   invariant(NAME_PATTERN.test(value), "INVALID_NAME", `${kind} name is invalid`);
   return value;
+}
+
+function assertProjectDefinition(input: {
+  readonly name: string;
+  readonly baseRef: string;
+  readonly checks: readonly CheckProfile[];
+  readonly sandbox: SandboxProfile;
+  readonly ceiling: SunCeiling;
+}): void {
+  validateName(input.name, "Project");
+  invariant(
+    input.baseRef.length > 0 &&
+      input.baseRef.length <= 256 &&
+      !input.baseRef.startsWith("-") &&
+      !/[\r\n\0]/.test(input.baseRef),
+    "INVALID_REF",
+    "Project base ref is invalid",
+  );
+  assertCheckProfiles(input.checks);
+  assertSandboxProfile(input.sandbox);
+  assertSunCeiling(input.ceiling);
 }
 
 function taskText(value: string): string {
@@ -350,6 +372,42 @@ export class IcarusService {
     return this.#store.listRepositories();
   }
 
+  async registerRepositoryProject(
+    input: {
+      readonly repository: {
+        readonly name: string;
+        readonly path: string;
+      };
+      readonly project: {
+        readonly name: string;
+        readonly baseRef: string;
+        readonly checks: readonly CheckProfile[];
+        readonly sandbox: SandboxProfile;
+        readonly ceiling: SunCeiling;
+      };
+    },
+    signal?: AbortSignal,
+  ): Promise<{ readonly repository: RepositoryRecord; readonly project: ProjectRecord }> {
+    validateName(input.repository.name, "Repository");
+    assertProjectDefinition(input.project);
+    const inspection = await this.#git.inspectRepository(input.repository.path, signal);
+    invariant(
+      isStrictlyOutside(inspection.canonicalPath, this.#stateRoot) &&
+        isStrictlyOutside(this.#stateRoot, inspection.canonicalPath),
+      "STATE_REPOSITORY_OVERLAP",
+      "Icarus state and registered repositories must not contain one another",
+    );
+    return this.#store.addRepositoryAndProject({
+      repository: {
+        name: input.repository.name,
+        path: inspection.canonicalPath,
+        device: inspection.device,
+        inode: inspection.inode,
+      },
+      project: input.project,
+    });
+  }
+
   createProject(input: {
     readonly name: string;
     readonly repositoryName: string;
@@ -358,18 +416,7 @@ export class IcarusService {
     readonly sandbox: SandboxProfile;
     readonly ceiling: SunCeiling;
   }): ProjectRecord {
-    validateName(input.name, "Project");
-    invariant(
-      input.baseRef.length > 0 &&
-        input.baseRef.length <= 256 &&
-        !input.baseRef.startsWith("-") &&
-        !/[\r\n\0]/.test(input.baseRef),
-      "INVALID_REF",
-      "Project base ref is invalid",
-    );
-    assertCheckProfiles(input.checks);
-    assertSandboxProfile(input.sandbox);
-    assertSunCeiling(input.ceiling);
+    assertProjectDefinition(input);
     const repository = this.#store.getRepositoryByName(input.repositoryName);
     return this.#store.addProject({
       name: input.name,
@@ -383,6 +430,30 @@ export class IcarusService {
 
   listProjects(): ProjectRecord[] {
     return this.#store.listProjects();
+  }
+
+  async previewProjectContext(
+    projectId: string,
+    target: string,
+    signal?: AbortSignal,
+  ): Promise<ProjectContextPreview> {
+    const project = this.#store.getProject(projectId);
+    const repository = this.#store.getRepository(project.repositoryId);
+    const safeTarget = assertAllowedTarget(target);
+    const inspection = await this.#assertRepositoryCurrent(
+      repository,
+      project.baseRef,
+      null,
+      signal,
+    );
+    const baseCommit = await this.#git.resolveCommit(repository.path, project.baseRef, signal);
+    invariant(
+      inspection.head === baseCommit,
+      "BASE_REF_NOT_HEAD",
+      "Context preview requires the source checkout HEAD to equal the configured base ref",
+    );
+    await this.#assertRepositoryCurrent(repository, project.baseRef, baseCommit, signal);
+    return createContextPreview(this.#git, repository.path, baseCommit, safeTarget, signal);
   }
 
   getRun(runId: string): RunRecord {
@@ -407,27 +478,37 @@ export class IcarusService {
     };
   }
 
-  async planRun(input: PlanRunInput, signal?: AbortSignal): Promise<RunRecord> {
+  createRunDraft(input: PlanRunInput): RunRecord {
     const project = this.#store.getProjectByName(input.projectName);
     const provider = canonicalProvider(input.provider);
     const target = assertAllowedTarget(input.target);
     const task = taskText(input.task);
     const runId = this.#id();
-    const run = this.#store.createRun({
+    return this.#store.createRun({
       id: runId,
       projectId: project.id,
       task,
       target,
       provider,
     });
+  }
+
+  async planDraftRun(runId: string, signal?: AbortSignal): Promise<RunRecord> {
     try {
-      return await this.#leases.withLease(run.id, () =>
-        this.#guarded(run.id, "preparing", () => this.#prepareRun(run.id, signal), signal),
-      );
+      return await this.#leases.withLease(runId, () => {
+        const run = this.#store.getRun(runId);
+        invariant(run.state === "preparing", "INVALID_STATE", "Run draft is not preparing");
+        return this.#guarded(runId, "preparing", () => this.#prepareRun(runId, signal), signal);
+      });
     } catch (error) {
       const failure = asIcarusError(error, "RUN_PREPARATION_FAILED");
-      throw new IcarusError(failure.code, failure.message, { runId: run.id });
+      throw new IcarusError(failure.code, failure.message, { runId });
     }
+  }
+
+  async planRun(input: PlanRunInput, signal?: AbortSignal): Promise<RunRecord> {
+    const run = this.createRunDraft(input);
+    return this.planDraftRun(run.id, signal);
   }
 
   async approveEgress(

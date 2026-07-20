@@ -332,6 +332,35 @@ export class IcarusStore {
     return record;
   }
 
+  addRepositoryAndProject(input: {
+    repository: {
+      name: string;
+      path: string;
+      device: number;
+      inode: number;
+    };
+    project: {
+      name: string;
+      baseRef: string;
+      checks: readonly CheckProfile[];
+      sandbox: SandboxProfile;
+      ceiling: SunCeiling;
+    };
+  }): { readonly repository: RepositoryRecord; readonly project: ProjectRecord } {
+    assertCheckProfiles(input.project.checks);
+    assertSandboxProfile(input.project.sandbox);
+    assertSunCeiling(input.project.ceiling);
+    const transaction = this.#database.transaction(() => {
+      const repository = this.addRepository(input.repository);
+      const project = this.addProject({
+        ...input.project,
+        repositoryId: repository.id,
+      });
+      return { repository, project };
+    });
+    return transaction();
+  }
+
   getProject(id: string): ProjectRecord {
     const value = row(
       this.#database.prepare("SELECT * FROM projects WHERE id = ?").get(id),
