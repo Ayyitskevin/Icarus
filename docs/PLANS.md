@@ -2,10 +2,10 @@
 
 ## Current plan: second M3 read-only observation slice
 
-Status values are evidence claims. The ADR 0015 implementation and fresh local
-acceptance passed on the final working tree on 2026-07-20. Exact published-head
-hosted CI remains pending, so this is a locally verified candidate rather than
-published acceptance of the slice.
+Status values are evidence claims. The ADR 0015 implementation, fresh local
+acceptance, and exact published implementation-head hosted CI passed on
+2026-07-20. This accepts the second bounded M3 slice; it does not claim that full
+M3 is complete.
 
 ### Repository observation
 
@@ -77,7 +77,7 @@ published acceptance of the slice.
 - [x] `pnpm audit --audit-level high`
 - [x] `pnpm audit --prod --audit-level high`
 - [x] `git diff --check`
-- [ ] Hosted `ci` succeeds at the exact published implementation head
+- [x] Hosted `ci` succeeds at the exact published implementation head
 
 Fresh local candidate evidence on 2026-07-20:
 
@@ -105,9 +105,14 @@ Fresh local candidate evidence on 2026-07-20:
 - The coherent full-run claim is backed by one explicit SQLite read transaction
   plus bounded/corrupt-payload store and endpoint tests. No separate
   cross-process WAL-contention stress run is claimed.
-- `git diff --check` reported no errors. Exact implementation-head hosted CI is
-  deliberately left unchecked until publication.
+- `git diff --check` reported no errors. Four concurrent focused reruns of the
+  sandbox wire suite passed 40/40 tests after its hosted-runner cold-start budget
+  was separated from the fake command's deliberate hang.
 - Full and production dependency audits reported no known vulnerabilities.
+- Hosted `ci` run 29772889807 passed the release gate, production dependency
+  audit, and whitespace check in 1 minute 9 seconds at exact published
+  implementation-and-test-fix commit
+  `59507808e58ef2090aa9cebe4af5a165f00f1078`.
 - Config-hook rejection and command-scope `post-checkout` disabling are exercised
   structurally on the Git 2.43 host. The fail-closed regression does not depend on
   Git executing the command, but a real Git 2.55 configured-hook execution run is
@@ -344,8 +349,9 @@ Final adversarial candidate local evidence on 2026-07-20:
 ## Deferred plan
 
 The inherited ADR 0010 security hold remains separate from this local feature
-branch. ADR 0015 is locally verified; exact implementation-head hosted CI remains
-the final publication check. The next bounded read-only navigation slice requires
-its own ADR and safety contract. Richer file/status, diff, and history navigation,
-patch materialization, browser approval, and execution remain later, explicitly
-reviewed authority expansions. See `docs/ROADMAP.md`.
+work. ADR 0015 is accepted at exact implementation-and-test-fix commit
+`59507808e58ef2090aa9cebe4af5a165f00f1078`. The next bounded read-only
+navigation slice requires its own ADR and safety contract. Richer file/status,
+diff, and history navigation, patch materialization, browser approval, and
+execution remain later, explicitly reviewed authority expansions. See
+`docs/ROADMAP.md`.

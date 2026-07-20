@@ -34,9 +34,9 @@ evals, context budget allocation, and retrieval-quality fixtures.
 
 ## M3 — Workspace UI
 
-Status: first bounded vertical slice accepted on the final working tree; the
-second bounded observation slice is implemented and its local gate passed
-(2026-07-20), with exact-head hosted CI still pending; full M3 remains open.
+Status: the first bounded vertical slice and second bounded observation slice
+are accepted with fresh local evidence and exact implementation-head hosted CI
+(2026-07-20); full M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context

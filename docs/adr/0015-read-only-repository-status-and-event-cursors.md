@@ -83,4 +83,6 @@ so concurrent hostile same-user config mutation is a documented non-goal rather
 than an isolation claim.
 
 Implementation note (2026-07-20): the local release gate and real-browser
-acceptance pass. Exact published-head hosted CI remains pending.
+acceptance passed. Hosted `ci` run 29772889807 passed at exact published
+implementation-and-test-fix commit
+`59507808e58ef2090aa9cebe4af5a165f00f1078`.
