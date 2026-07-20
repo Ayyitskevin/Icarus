@@ -68,9 +68,9 @@ Closeout evidence on 2026-07-19:
 - Independent adversarial review findings were fixed and re-reviewed with no
   remaining runtime blocker.
 - The workflow syntax was parsed and the staged patch passed whitespace checks.
-  This new local repository has no remote, so hosted GitHub Actions evidence does
-  not yet exist; `.github/workflows/ci.yml` runs the same gate on first push and
-  pull requests.
+  The repository is published at `Ayyitskevin/Icarus`; `.github/workflows/ci.yml`
+  runs the same gate on `main` pushes and pull requests. Hosted results remain
+  separate evidence and must be checked at the exact commit being reviewed.
 
 ## Deferred plan
 
