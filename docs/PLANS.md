@@ -1,6 +1,78 @@
 # Implementation plans
 
-## Current plan: second M3 read-only observation slice
+## Current plan: third M3 bounded older-activity navigation
+
+Status values are evidence claims. ADR 0016 is accepted on 2026-07-20; no
+implementation or acceptance is claimed until every item below has fresh
+evidence.
+
+### Historical metadata contract
+
+- [ ] Add one selected-run reverse metadata endpoint with exactly one canonical
+      positive `before` cursor, one canonical positive pinned `snapshot`, and a
+      fixed service-owned 64-event page
+- [ ] Use an index-backed descending `LIMIT 65` query over sequence, run ID,
+      type, and timestamp only; never select or decode `payload_json`
+- [ ] Validate run existence, current high-water, pinned snapshot, exclusive
+      cursor, contiguous sequences, bounded event type/timestamp, `nextBefore`,
+      and `hasMore` in one coherent SQLite read transaction
+- [ ] Return only the existing host-label/fixed-anchor metadata projection and
+      keep historical and live cursors completely independent
+
+### Explicit browser navigation
+
+- [ ] Open older activity only from an operator action when the coherent recent
+      timeline is truncated; pin the first page to that run response's revision
+- [ ] Pause and abort live polling while the panel is open, then resume it
+      immediately on close without advancing its cursor from historical pages
+- [ ] Permit one historical request, abort on hidden/close/selection/unmount,
+      and reject late responses with exact run/cursor/snapshot generations
+- [ ] Replace rather than accumulate pages, allow at most four historical pages
+      per panel session while retaining one 64-row page plus at most three
+      newer-page cursors, and provide older/newer controls with CLI guidance
+      beyond that window
+- [ ] Preserve the last successful page on failure, expose honest retry/busy/
+      partial states, and describe any evidence link as current—not historical
+
+### Scope and safety
+
+- [ ] Add no schema/migration, dependency, write, event append, Git/source read,
+      dirty-path/file-content disclosure, diff/check/event payload presentation,
+      stream, watcher, daemon, or browser action authority
+- [ ] Preserve loopback Host/Origin, same-origin/CSP, fixed presenter, React-text,
+      guarded CLI, source-isolation, portability, and ADR 0010 boundaries
+- [ ] Leave workspace-wide run and approval pagination, file/status views, richer
+      diff/history payloads, patch materialization, browser approval, and
+      execution explicitly deferred
+
+### Acceptance coverage and commands
+
+- [ ] Store/API tests cover more than 200 events, reverse page boundaries,
+      reopen stability, invalid cursors/snapshots, gaps, index use, corrupt and
+      private payload non-disclosure, zero writes, and negative action routes
+- [ ] Pure client tests cover page replacement, four-page depth, older/newer,
+      mismatched run/cursor/snapshot, noncontiguous data, and stale responses
+- [ ] Real-browser acceptance covers explicit load-older navigation, fixed
+      current-evidence anchors, failure/retry, no overlap, live pause/resume,
+      hidden/selection/unmount cancellation, and preserved newer selection
+- [ ] Source and SQLite evidence proves browsing changes no checkout or durable
+      state
+- [ ] `pnpm format:check`
+- [ ] `pnpm lint`
+- [ ] `pnpm typecheck`
+- [ ] `pnpm test`
+- [ ] `pnpm test:integration`
+- [ ] `pnpm security`
+- [ ] `pnpm build`
+- [ ] `pnpm check`
+- [ ] `pnpm smoke:workspace`
+- [ ] `ICARUS_CHROMIUM_EXECUTABLE=/absolute/path/to/chromium pnpm smoke:workspace:browser`
+- [ ] `pnpm audit --audit-level high`
+- [ ] `pnpm audit --prod --audit-level high`
+- [ ] `git diff --check`
+- [ ] Hosted `ci` succeeds at the exact published implementation head
+
+## Prior accepted plan: second M3 read-only observation slice
 
 Status values are evidence claims. The ADR 0015 implementation, fresh local
 acceptance, and exact published implementation-head hosted CI passed on
@@ -348,10 +420,8 @@ Final adversarial candidate local evidence on 2026-07-20:
 
 ## Deferred plan
 
-The inherited ADR 0010 security hold remains separate from this local feature
-work. ADR 0015 is accepted at exact implementation-and-test-fix commit
-`59507808e58ef2090aa9cebe4af5a165f00f1078`. The next bounded read-only
-navigation slice requires its own ADR and safety contract. Richer file/status,
-diff, and history navigation, patch materialization, browser approval, and
-execution remain later, explicitly reviewed authority expansions. See
-`docs/ROADMAP.md`.
+The inherited ADR 0010 security hold remains separate from local feature work.
+ADR 0016 selects only bounded older event metadata for the third M3 slice.
+Workspace-wide run and approval pagination, file/status views, richer diff or
+payload-bearing history, patch materialization, browser approval, and execution
+remain later, explicitly reviewed expansions. See `docs/ROADMAP.md`.

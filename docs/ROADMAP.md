@@ -35,8 +35,9 @@ evals, context budget allocation, and retrieval-quality fixtures.
 ## M3 — Workspace UI
 
 Status: the first bounded vertical slice and second bounded observation slice
-are accepted with fresh local evidence and exact implementation-head hosted CI
-(2026-07-20); full M3 remains open.
+are accepted with fresh local evidence and exact implementation-head hosted CI.
+ADR 0016 selects bounded older event-metadata navigation for the third slice;
+implementation evidence is pending (2026-07-20). Full M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
@@ -88,6 +89,14 @@ designed approval/recovery controls. Patch materialization is not the next slice
 Any browser execution path needs a separate safety contract and evidence;
 provider keys remain server-side.
 
+ADR 0016 chooses the smallest substantive history extension: an explicit,
+selected-run page immediately before the recent 200-event tail. It pins a
+revision, uses a fixed reverse sequence cursor, selects metadata rather than
+payloads, pauses live polling while the bounded historical panel is open, and
+keeps only one 64-row page plus a four-page cursor window in the browser. It adds
+no Git/source read or action authority. Workspace-wide run and approval
+pagination remain separate follow-up debt.
+
 ## M4 — Runtime and previews
 
 Status: planned.
@@ -134,9 +143,8 @@ remain human-gated and outside automatic dogfood.
 
 ## Next recommended slice
 
-Preserve the ADR 0010 security hold. After exact-head acceptance of ADR 0015,
-write a separate decision and safety contract for the next bounded read-only M3
-navigation slice before implementing it. Richer file/status, diff, and history
-views are candidates; patch materialization, browser approval, and execution are
-separate authority expansions and remain out of scope until explicitly designed
-and evidenced.
+Preserve the ADR 0010 security hold. Implement and evidence ADR 0016's bounded,
+metadata-only older-activity navigation before selecting another M3 candidate.
+File/status views, richer diff or payload-bearing history, patch materialization,
+browser approval, and execution are separate authority expansions and remain out
+of scope until explicitly designed and evidenced.

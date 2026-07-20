@@ -151,6 +151,35 @@ ADR 0015 implements this bounded observation contract:
    arbitrary-command, commit, push, or deployment authority. The guarded CLI
    lifecycle and ADR 0010 hold remain unchanged.
 
+## Third M3 bounded older-activity slice
+
+ADR 0016 defines this metadata-only navigation contract:
+
+1. Add one selected-run GET route that returns at most 64 event metadata rows
+   strictly before a required exclusive sequence cursor and at or below a
+   required pinned revision. Both values are canonical positive safe integers;
+   the client cannot choose a limit, fields, sort, filter, or search expression.
+2. Read only sequence, run ID, type, and timestamp through the existing
+   `(run_id, sequence)` index with descending `LIMIT 65`, then present the retained
+   rows in ascending order. Never select or decode event payloads.
+3. Keep the existing forward live cursor independent. Opening older activity is
+   explicit, pauses and aborts live polling, and pins the first page to the
+   coherent selected-run response. Closing the panel resumes live observation.
+4. Keep one historical request current; abort on document hiding, close,
+   selection change, or unmount; reject mismatched or late run/cursor/revision
+   responses; and preserve the last successful page on failure.
+5. Replace pages instead of accumulating them. Allow at most four historical
+   pages per panel session while retaining one 64-row page plus at most three
+   newer-page cursors; direct the operator to complete CLI history outside that
+   window.
+6. Return only sequence, bounded type, host-controlled label, bounded timestamp,
+   and fixed host-generated evidence-section metadata. Historical entries do not
+   expose payloads or claim that current evidence is a historical snapshot.
+7. Add no schema/migration, dependency, write, event append, Git/source read,
+   filename/content/diff/check disclosure, stream, watcher, daemon, browser
+   approval, execution, command, commit, push, or deployment authority. Preserve
+   portable read-only support and the unresolved ADR 0010 hold.
+
 ## Sun ceiling
 
 Every run records maximum active runtime, provider output tokens, total tokens,

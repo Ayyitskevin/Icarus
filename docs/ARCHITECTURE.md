@@ -306,6 +306,28 @@ hook commands therefore fail closed, and partial/promisor repositories must
 already contain every object needed by the requested operation because lazy fetch
 is disabled.
 
+## Third M3 older-activity path
+
+ADR 0016 defines the next implementation step without adding another source of
+truth. A selected run may request one metadata page strictly before an exclusive
+sequence and at or below a pinned event revision. SQLite validates the run,
+revision, and cursor in one read transaction, uses the unique
+`(run_id, sequence)` index in descending order with `LIMIT 65`, retains 64 rows,
+and reverses them for ascending display. The query selects no payload column.
+
+The manual historical cursor is separate from the existing forward live cursor.
+Opening the bounded panel aborts and pauses live polling; closing it resumes the
+poll from its unchanged high-water mark. Historical requests are explicit and
+single-flight, abort on visibility loss, close, selection, or unmount, and use a
+generation guard against late responses. The client replaces pages, reaches at
+most four per panel session, and retains only one page plus three newer-page
+cursors. Complete payload-bearing history remains CLI only.
+
+This path adds no persistence, repository/Git/source access, schema, dependency,
+streaming, background work, or browser action route. Workspace-wide run and
+approval enumeration remain the existing unpaginated local reads and are not
+made bounded by ADR 0016.
+
 ## Provider contract
 
 The provider-neutral port accepts model identity, capability metadata, a typed

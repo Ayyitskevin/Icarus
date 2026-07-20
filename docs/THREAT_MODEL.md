@@ -29,6 +29,8 @@
 10. In the second M3 slice, sanitized Git observations and event metadata cross
     the same presenter boundary without their raw command output or event
     payloads.
+11. In the third M3 slice, an explicit older-event cursor crosses that same
+    boundary while the pinned response remains metadata-only and constant-size.
 
 Repository rules, source, docs, issue text, model output, HTTP errors, command
 output, Host/Origin values, URLs, and JSON bodies are untrusted. Fixed host policy
@@ -78,6 +80,20 @@ The slice adds no Server-Sent Events, WebSocket, watcher, schema migration,
 runtime dependency, background daemon, or browser action route. Existing
 loopback and guarded CLI boundaries remain authoritative, and the ADR 0010 hold
 remains unresolved.
+
+## Third M3 older-activity threats
+
+| Threat | Required control | Required evidence and limits |
+| --- | --- | --- |
+| Browsing older events drains history or creates unbounded server/client work | direct reverse exclusive cursor pinned to a revision; index-backed descending `LIMIT 65`; one retained 64-row page and four-page cursor window; no count or forward drain from sequence zero | query-plan and more-than-200-event tests prove fixed page boundaries, page replacement, bounded depth, and CLI guidance beyond the window |
+| Historical browsing leaks private payload paths, diffs, or check output | select only sequence/run ID/type/timestamp and reuse the fixed host-label/evidence-section presenter; never select or decode `payload_json` | corrupt and private payload fixtures succeed without payload bytes in store, API, or browser output; complete payload history remains CLI-only |
+| A late or mismatched historical response overwrites another run or advances live freshness | exact run/before/snapshot validation plus request generation; historical and live cursors are separate; opening history aborts/pauses live polling and close resumes from the unchanged live cursor | pure client and real-browser tests cover held responses, no overlap, hidden/close/selection/unmount abort, preserved newer selection, and live pause/resume |
+| Corrupt metadata creates an oversized response, gap, or injected navigation target | canonical safe-integer query contract; bounded event type/timestamp; contiguous sequence validation; fixed host label/anchor fallback; React text rendering and CSP | malformed/duplicate/unknown query tests, database-corruption regressions, presenter tests, and static no-raw-HTML/route assertions |
+| A historical page is mistaken for the current evidence snapshot | pin and display the page revision; preserve the coherent recent timeline separately; describe any fixed anchor as current evidence rather than historical payload detail | UI copy and browser navigation tests distinguish the pinned metadata page from current evidence |
+
+ADR 0016 adds no write, event append, Git/source read, filename/content/diff/check
+disclosure, schema/dependency, stream, daemon, or browser action route. ADR 0010
+remains an independent release hold.
 
 ## Inherited repository automation hold
 

@@ -156,11 +156,19 @@ evidence anchors, not repository, provider, event, or check text. Only event
 history has the fixed bound; existing approval lists and workspace-wide run
 enumeration remain unpaginated local reads.
 
+ADR 0016 is the next implementation contract. It adds an explicit selected-run
+older-activity panel pinned to the coherent run revision, backed by a direct
+reverse 64-row metadata page rather than a forward drain from sequence zero.
+While that panel is open, live polling pauses; the client replaces pages within a
+four-page cursor window and complete payload-bearing history remains available
+only through `run history`. Until ADR 0016 implementation evidence passes, use
+the CLI for events before the browser's recent tail.
+
 No migration, dependency install, daemon, watcher, Server-Sent Events, or
-WebSocket setup accompanies this slice. It adds no browser approval, mutation,
-execution, command, commit, push, or deployment authority. Richer file/status,
-diff, and history navigation remains deferred, and the ADR 0010 release hold
-remains in force.
+WebSocket setup accompanies these read-only slices. They add no browser approval,
+mutation, execution, command, commit, push, or deployment authority. File/status,
+richer diff or payload-bearing history, and action controls remain deferred, and
+the ADR 0010 release hold remains in force.
 
 ## Preflight
 
