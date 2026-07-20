@@ -164,6 +164,14 @@ four-page cursor window and complete payload-bearing history remains available
 only through `run history`. Use the CLI for events outside that bounded browser
 window.
 
+ADR 0017 is the next implementation contract. It replaces the workspace's
+unbounded full-run bootstrap with one 12-row summary page and loads full evidence
+only after selection. Older/newer run pages use an ephemeral pinned SQLite
+insertion cursor and a four-page browser window; project matches describe only
+the loaded workspace page. Until ADR 0017 implementation evidence passes, the
+current workspace still hydrates every run even though its sidebar displays only
+the newest 12. Use `icarus run list [--project NAME]` for complete run listing.
+
 No migration, dependency install, daemon, watcher, Server-Sent Events, or
 WebSocket setup accompanies these read-only slices. They add no browser approval,
 mutation, execution, command, commit, push, or deployment authority. File/status,
