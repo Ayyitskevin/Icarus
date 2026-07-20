@@ -36,6 +36,7 @@ export type {
   RepositoryAvailability,
   RepositoryStatusIssueCode,
   RepositoryWorktreeStatus,
+  RunEventHistoryPage,
   RunEventPage,
   RunHistory,
   RunPresentationSnapshot,

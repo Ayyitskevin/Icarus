@@ -204,6 +204,15 @@ export interface RunEventPageView {
   readonly events: readonly TimelineEntryView[];
 }
 
+export interface RunEventHistoryPageView {
+  readonly runId: string;
+  readonly before: number;
+  readonly snapshot: number;
+  readonly nextBefore: number;
+  readonly hasMore: boolean;
+  readonly events: readonly TimelineEntryView[];
+}
+
 export interface RunFilesView {
   readonly involved: readonly string[];
   readonly changed: readonly string[];
@@ -416,6 +425,18 @@ export function getRunEvents(
 ): Promise<RunEventPageView> {
   return requestJson<RunEventPageView>(
     `/api/runs/${encodeURIComponent(runId)}/events?after=${encodeURIComponent(String(after))}`,
+    signal === undefined ? {} : { signal },
+  );
+}
+
+export function getRunEventHistory(
+  runId: string,
+  before: number,
+  snapshot: number,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return requestJson<unknown>(
+    `/api/runs/${encodeURIComponent(runId)}/events/history?before=${encodeURIComponent(String(before))}&snapshot=${encodeURIComponent(String(snapshot))}`,
     signal === undefined ? {} : { signal },
   );
 }

@@ -254,6 +254,15 @@ export interface RunEventPage {
   readonly events: readonly EventSummaryRecord[];
 }
 
+export interface RunEventHistoryPage {
+  readonly runId: string;
+  readonly before: number;
+  readonly snapshot: number;
+  readonly nextBefore: number;
+  readonly hasMore: boolean;
+  readonly events: readonly EventSummaryRecord[];
+}
+
 export interface ApprovalRecord {
   readonly runId: string;
   readonly kind: "egress" | "plan" | "review" | "rollback" | "restore";

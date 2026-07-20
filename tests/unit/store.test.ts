@@ -28,7 +28,11 @@ import {
 
 interface TestDatabase {
   exec(sql: string): void;
-  prepare(sql: string): { run(...parameters: unknown[]): unknown };
+  prepare(sql: string): {
+    run(...parameters: unknown[]): unknown;
+    get(...parameters: unknown[]): unknown;
+    all(...parameters: unknown[]): unknown[];
+  };
   close(): void;
 }
 
@@ -737,6 +741,167 @@ describe("SQLite run persistence", () => {
     mutator.prepare("DELETE FROM run_events WHERE run_id = ? AND sequence = ?").run(UNIT_RUN_ID, 3);
     mutator.close();
     expectIcarusCode(() => reopened.listEventPage(UNIT_RUN_ID, 0), "DATABASE_ERROR");
+    reopened.close();
+  });
+
+  it("pages pinned older metadata with fixed reverse work and fails closed on corruption", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    const { projectId } = seedUnitProject(fixture.store);
+    fixture.store.createRun({
+      id: UNIT_RUN_ID,
+      projectId,
+      task: "Inspect older event metadata",
+      target: UNIT_PLAN.target,
+      provider: UNIT_PROVIDER,
+    });
+
+    const privateSentinel = "/private/runtime/history-payload-sentinel";
+    const mutator = new Database(fixture.databasePath);
+    mutator
+      .prepare("UPDATE run_events SET payload_json = ? WHERE run_id = ? AND sequence = 1")
+      .run("not-json", UNIT_RUN_ID);
+    const insert = mutator.prepare(
+      `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (let sequence = 2; sequence <= 270; sequence += 1) {
+      insert.run(
+        UNIT_RUN_ID,
+        sequence,
+        "operation.finished",
+        JSON.stringify({ privateSentinel, sequence }),
+        "2026-07-20T12:00:00.000Z",
+      );
+    }
+    const persistedBefore = mutator
+      .prepare(
+        `SELECT COUNT(*) AS event_count,
+                MAX(sequence) AS high_water,
+                SUM(LENGTH(payload_json)) AS payload_bytes
+         FROM run_events
+         WHERE run_id = ?`,
+      )
+      .get(UNIT_RUN_ID);
+    const queryPlan = mutator
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT sequence, run_id, type, created_at
+         FROM run_events
+         WHERE run_id = ? AND sequence < ? AND sequence <= ?
+         ORDER BY sequence DESC
+         LIMIT ?`,
+      )
+      .all(UNIT_RUN_ID, 271, 270, 65)
+      .map((entry) => String((entry as Record<string, unknown>).detail));
+    expect(queryPlan.some((detail) => detail.includes("sqlite_autoindex_run_events_1"))).toBe(true);
+    expect(queryPlan.every((detail) => !detail.includes("SCAN run_events"))).toBe(true);
+    mutator.close();
+
+    const first = fixture.store.listEventHistoryPage(UNIT_RUN_ID, 271, 270);
+    expect(first).toMatchObject({
+      runId: UNIT_RUN_ID,
+      before: 271,
+      snapshot: 270,
+      nextBefore: 207,
+      hasMore: true,
+    });
+    expect(first.events).toHaveLength(64);
+    expect(first.events.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 64 }, (_, index) => index + 207),
+    );
+    expect(JSON.stringify(first)).not.toContain(privateSentinel);
+    expect(JSON.stringify(first)).not.toContain("payload");
+    expect(fixture.store.listEventHistoryPage(UNIT_RUN_ID, first.nextBefore, 270)).toMatchObject({
+      before: 207,
+      snapshot: 270,
+      nextBefore: 143,
+      hasMore: true,
+      events: [
+        expect.objectContaining({ sequence: 143 }),
+        ...Array.from({ length: 62 }, () => expect.any(Object)),
+        expect.objectContaining({ sequence: 206 }),
+      ],
+    });
+    expect(fixture.store.listEventHistoryPage(UNIT_RUN_ID, 15, 270)).toMatchObject({
+      nextBefore: 1,
+      hasMore: false,
+      events: [
+        expect.objectContaining({ sequence: 1, type: "run.created" }),
+        ...Array.from({ length: 12 }, () => expect.any(Object)),
+        expect.objectContaining({ sequence: 14 }),
+      ],
+    });
+    expect(fixture.store.listEventHistoryPage(UNIT_RUN_ID, 1, 270)).toEqual({
+      runId: UNIT_RUN_ID,
+      before: 1,
+      snapshot: 270,
+      nextBefore: 1,
+      hasMore: false,
+      events: [],
+    });
+
+    const observer = new Database(fixture.databasePath);
+    const persistedAfter = observer
+      .prepare(
+        `SELECT COUNT(*) AS event_count,
+                MAX(sequence) AS high_water,
+                SUM(LENGTH(payload_json)) AS payload_bytes
+         FROM run_events
+         WHERE run_id = ?`,
+      )
+      .get(UNIT_RUN_ID);
+    expect(persistedAfter).toEqual(persistedBefore);
+    observer.close();
+
+    expectIcarusCode(
+      () => fixture.store.listEventHistoryPage(UNIT_RUN_ID, 0, 270),
+      "INVALID_EVENT_CURSOR",
+    );
+    expectIcarusCode(
+      () => fixture.store.listEventHistoryPage(UNIT_RUN_ID, 271, 0),
+      "INVALID_EVENT_CURSOR",
+    );
+    expectIcarusCode(
+      () => fixture.store.listEventHistoryPage(UNIT_RUN_ID, 271, 271),
+      "INVALID_EVENT_CURSOR",
+    );
+    expectIcarusCode(
+      () => fixture.store.listEventHistoryPage(UNIT_RUN_ID, 272, 270),
+      "INVALID_EVENT_CURSOR",
+    );
+    expectIcarusCode(
+      () => fixture.store.listEventHistoryPage("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", 2, 1),
+      "NOT_FOUND",
+    );
+
+    fixture.store.close();
+    const reopened = new IcarusStore(fixture.databasePath, {
+      now: () => "2026-07-20T12:01:00.000Z",
+      id: makeUnitIdGenerator(),
+    });
+    expect(reopened.listEventHistoryPage(UNIT_RUN_ID, 271, 270)).toEqual(first);
+
+    const corruptor = new Database(fixture.databasePath);
+    corruptor
+      .prepare("UPDATE run_events SET type = ? WHERE run_id = ? AND sequence = ?")
+      .run("Invalid event type", UNIT_RUN_ID, 270);
+    expectIcarusCode(() => reopened.listEventHistoryPage(UNIT_RUN_ID, 271, 270), "DATABASE_ERROR");
+    corruptor
+      .prepare("UPDATE run_events SET type = ? WHERE run_id = ? AND sequence = ?")
+      .run("operation.finished", UNIT_RUN_ID, 270);
+    corruptor
+      .prepare("UPDATE run_events SET created_at = ? WHERE run_id = ? AND sequence = ?")
+      .run("2026-02-30T12:00:00.000Z", UNIT_RUN_ID, 270);
+    expectIcarusCode(() => reopened.listEventHistoryPage(UNIT_RUN_ID, 271, 270), "DATABASE_ERROR");
+    corruptor
+      .prepare("UPDATE run_events SET created_at = ? WHERE run_id = ? AND sequence = ?")
+      .run("2026-07-20T12:00:00.000Z", UNIT_RUN_ID, 270);
+    corruptor
+      .prepare("DELETE FROM run_events WHERE run_id = ? AND sequence = ?")
+      .run(UNIT_RUN_ID, 250);
+    corruptor.close();
+    expectIcarusCode(() => reopened.listEventHistoryPage(UNIT_RUN_ID, 271, 270), "DATABASE_ERROR");
     reopened.close();
   });
 

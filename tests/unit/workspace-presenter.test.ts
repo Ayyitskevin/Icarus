@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   presentRun,
+  presentRunEventHistoryPage,
   presentRunEventPage,
   workspaceRunPhase,
 } from "../../packages/api/src/present.js";
@@ -308,5 +309,42 @@ describe("workspace run presentation", () => {
     expect(serializedEventPage).not.toContain("createdAt");
     expect(serializedEventPage).not.toContain("/private/state/sentinel");
     expect(serializedEventPage).not.toContain("+private diff");
+
+    const historyPage = presentRunEventHistoryPage({
+      runId: run.id,
+      before: 3,
+      snapshot: 205,
+      nextBefore: 1,
+      hasMore: false,
+      events: events.slice(0, 2),
+    });
+    expect(historyPage).toEqual({
+      runId: run.id,
+      before: 3,
+      snapshot: 205,
+      nextBefore: 1,
+      hasMore: false,
+      events: [
+        {
+          sequence: 1,
+          type: "context.assembled",
+          label: "context assembled",
+          evidenceSection: "context",
+          timestamp: run.createdAt,
+        },
+        {
+          sequence: 2,
+          type: "operation.started",
+          label: "operation started",
+          evidenceSection: "usage",
+          timestamp: run.createdAt,
+        },
+      ],
+    });
+    const serializedHistoryPage = JSON.stringify(historyPage);
+    expect(serializedHistoryPage).not.toContain("payload");
+    expect(serializedHistoryPage).not.toContain("createdAt");
+    expect(serializedHistoryPage).not.toContain("/private/state/sentinel");
+    expect(serializedHistoryPage).not.toContain("+private diff");
   });
 });

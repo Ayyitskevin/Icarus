@@ -5,6 +5,7 @@ import type {
   ProjectRecord,
   ProjectRepositoryStatus,
   RepositoryRecord,
+  RunEventHistoryPage,
   RunEventPage,
   RunPresentationSnapshot,
   RunRecord,
@@ -199,6 +200,23 @@ export function presentRunEventPage(page: RunEventPage): Record<string, unknown>
     runId: page.runId,
     revision: page.revision,
     nextAfter: page.nextAfter,
+    hasMore: page.hasMore,
+    events: page.events.map((event) => ({
+      sequence: event.sequence,
+      type: event.type,
+      label: event.type.replaceAll(".", " "),
+      evidenceSection: evidenceSection(event.type),
+      timestamp: event.createdAt,
+    })),
+  };
+}
+
+export function presentRunEventHistoryPage(page: RunEventHistoryPage): Record<string, unknown> {
+  return {
+    runId: page.runId,
+    before: page.before,
+    snapshot: page.snapshot,
+    nextBefore: page.nextBefore,
     hasMore: page.hasMore,
     events: page.events.map((event) => ({
       sequence: event.sequence,

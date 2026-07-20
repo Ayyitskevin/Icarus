@@ -18,12 +18,14 @@ import {
   contextPreviewRequest,
   projectRequest,
   runDraftRequest,
+  runEventHistoryQuery,
   runEventsQuery,
 } from "./contracts.js";
 import {
   presentProject,
   presentRepositoryStatus,
   presentRun,
+  presentRunEventHistoryPage,
   presentRunEventPage,
 } from "./present.js";
 
@@ -438,7 +440,20 @@ async function routeApi(
     return true;
   }
   const runDetail = /^\/api\/runs\/([^/]+)$/.exec(pathname);
+  const runEventHistory = /^\/api\/runs\/([^/]+)\/events\/history$/.exec(pathname);
   const runEvents = /^\/api\/runs\/([^/]+)\/events$/.exec(pathname);
+  if (method === "GET" && runEventHistory !== null) {
+    const runId = decodedRouteId(runEventHistory[1] ?? "", "run id");
+    const { before, snapshot } = runEventHistoryQuery(searchParams);
+    json(
+      response,
+      200,
+      presentRunEventHistoryPage(
+        options.runtime.service.listRunEventHistory(runId, before, snapshot),
+      ),
+    );
+    return true;
+  }
   if (method === "GET" && runEvents !== null) {
     const runId = decodedRouteId(runEvents[1] ?? "", "run id");
     const { after } = runEventsQuery(searchParams);

@@ -28,6 +28,7 @@ import type {
   ProjectRecord,
   ProviderConfig,
   RepositoryRecord,
+  RunEventHistoryPage,
   RunEventPage,
   RunHistory,
   RunPresentationSnapshot,
@@ -46,6 +47,10 @@ export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
 export const RUN_EVENT_PAGE_LIMIT = 64;
 export const RUN_PRESENTATION_EVENT_LIMIT = 200;
+const EVENT_TYPE_MAX_BYTES = 128;
+const EVENT_TIMESTAMP_MAX_BYTES = 64;
+const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
+const EVENT_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const RUN_PRESENTATION_ACTION_EVENT_LIMIT = 2;
 const RUN_PRESENTATION_ACTION_EVENT_TYPES = [
   "edit.materialized",
@@ -216,6 +221,38 @@ function json(value: unknown): string {
 
 function asJsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue;
+}
+
+function eventSummaryRow(entry: unknown, name: string, expectedRunId: string): EventSummaryRecord {
+  const value = row(entry, name);
+  const sequence = numberValue(value.sequence, "event.sequence");
+  const runId = text(value.run_id, "event.run_id");
+  const type = text(value.type, "event.type");
+  const createdAt = text(value.created_at, "event.created_at");
+  const parsedTimestamp = Date.parse(createdAt);
+  const canonicalTimestamp = Number.isFinite(parsedTimestamp)
+    ? new Date(parsedTimestamp).toISOString()
+    : "";
+  invariant(
+    Number.isSafeInteger(sequence) && sequence > 0 && runId === expectedRunId,
+    "DATABASE_ERROR",
+    "Event summary identity is invalid",
+  );
+  invariant(
+    Buffer.byteLength(type, "utf8") <= EVENT_TYPE_MAX_BYTES && EVENT_TYPE_PATTERN.test(type),
+    "DATABASE_ERROR",
+    "Event type is invalid",
+  );
+  invariant(
+    Buffer.byteLength(createdAt, "utf8") <= EVENT_TIMESTAMP_MAX_BYTES &&
+      EVENT_TIMESTAMP_PATTERN.test(createdAt) &&
+      (createdAt === canonicalTimestamp ||
+        (canonicalTimestamp.endsWith(".000Z") &&
+          createdAt === canonicalTimestamp.replace(".000Z", "Z"))),
+    "DATABASE_ERROR",
+    "Event timestamp is invalid",
+  );
+  return { sequence, runId, type, createdAt };
 }
 
 export interface NewRunInput {
@@ -1628,6 +1665,86 @@ export class IcarusStore {
         runId,
         revision,
         nextAfter: events.at(-1)?.sequence ?? after,
+        hasMore,
+        events,
+      };
+    });
+    return transaction();
+  }
+
+  listEventHistoryPage(runId: string, before: number, snapshot: number): RunEventHistoryPage {
+    invariant(
+      Number.isSafeInteger(before) && before > 0,
+      "INVALID_EVENT_CURSOR",
+      "Historical event cursor must be a positive safe integer",
+    );
+    invariant(
+      Number.isSafeInteger(snapshot) && snapshot > 0,
+      "INVALID_EVENT_CURSOR",
+      "Historical event snapshot must be a positive safe integer",
+    );
+    const transaction = this.#database.transaction((): RunEventHistoryPage => {
+      const exists = this.#database.prepare("SELECT 1 FROM runs WHERE id = ?").get(runId);
+      invariant(exists !== undefined, "NOT_FOUND", "Run was not found");
+      const currentRevision = numberValue(
+        row(
+          this.#database
+            .prepare(
+              "SELECT COALESCE(MAX(sequence), 0) AS revision FROM run_events WHERE run_id = ?",
+            )
+            .get(runId),
+          "historical event revision",
+        ).revision,
+        "event.revision",
+      );
+      invariant(
+        Number.isSafeInteger(currentRevision) && currentRevision > 0,
+        "DATABASE_ERROR",
+        "Historical event revision is invalid",
+      );
+      invariant(
+        snapshot <= currentRevision,
+        "INVALID_EVENT_CURSOR",
+        "Historical event snapshot is ahead of the persisted revision",
+      );
+      const maximumBefore =
+        snapshot === Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : snapshot + 1;
+      invariant(
+        before <= maximumBefore,
+        "INVALID_EVENT_CURSOR",
+        "Historical event cursor is ahead of the pinned snapshot",
+      );
+      const rows = this.#database
+        .prepare(
+          `SELECT sequence, run_id, type, created_at
+           FROM run_events
+           WHERE run_id = ? AND sequence < ? AND sequence <= ?
+           ORDER BY sequence DESC
+           LIMIT ?`,
+        )
+        .all(runId, before, snapshot, RUN_EVENT_PAGE_LIMIT + 1) as unknown[];
+      const expectedRows = Math.min(RUN_EVENT_PAGE_LIMIT + 1, before - 1);
+      invariant(
+        rows.length === expectedRows,
+        "DATABASE_ERROR",
+        "Historical event sequence has a gap",
+      );
+      const summaries = rows.map((entry, index) => {
+        const event = eventSummaryRow(entry, "historical event summary", runId);
+        invariant(
+          event.sequence === before - index - 1 && event.sequence <= snapshot,
+          "DATABASE_ERROR",
+          "Historical event sequence is not contiguous",
+        );
+        return event;
+      });
+      const hasMore = summaries.length > RUN_EVENT_PAGE_LIMIT;
+      const events = summaries.slice(0, RUN_EVENT_PAGE_LIMIT).reverse();
+      return {
+        runId,
+        before,
+        snapshot,
+        nextBefore: events.at(0)?.sequence ?? before,
         hasMore,
         events,
       };

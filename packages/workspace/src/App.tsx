@@ -17,12 +17,23 @@ import {
   errorMessage,
   getRepositoryStatus,
   getRun,
+  getRunEventHistory,
   getRunEvents,
   getWorkspace,
   planRun,
   previewProjectContext,
   unwrapContextPreview,
 } from "./api.js";
+import {
+  acceptHistoryPage,
+  canNavigateNewer,
+  canNavigateOlder,
+  createHistorySession,
+  HISTORY_MAX_PAGES,
+  historyPageDepth,
+  historyRequest,
+} from "./history-nav.js";
+import type { HistoryDirection, HistoryRequest, HistorySession } from "./history-nav.js";
 import {
   advanceEventPoll,
   eventPollDelayMs,
@@ -93,7 +104,7 @@ function pageIsVisible(): boolean {
   return document.visibilityState !== "hidden";
 }
 
-type LivePollState = "checking" | "current" | "catching_up" | "paused" | "stale";
+type LivePollState = "checking" | "current" | "catching_up" | "paused" | "history_paused" | "stale";
 
 function livePollLabel(state: LivePollState): string {
   switch (state) {
@@ -105,6 +116,8 @@ function livePollLabel(state: LivePollState): string {
       return "catching up";
     case "paused":
       return "paused while hidden";
+    case "history_paused":
+      return "paused for older activity";
     case "stale":
       return "evidence may be stale";
   }
@@ -1008,9 +1021,16 @@ interface RunEvidenceProps {
   readonly planningCapability: CapabilityView;
   readonly onRunChanged: (run: RunView) => Promise<void>;
   readonly onRefresh: (runId: string) => Promise<void>;
+  readonly registerHistoryCancellation: (cancel: (() => void) | null) => void;
 }
 
-function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEvidenceProps) {
+function RunEvidence({
+  run,
+  planningCapability,
+  onRunChanged,
+  onRefresh,
+  registerHistoryCancellation,
+}: RunEvidenceProps) {
   const [planning, setPlanning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1021,8 +1041,61 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
   );
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [retryGeneration, setRetryGeneration] = useState(0);
+  const [historySession, setHistorySession] = useState<HistorySession | null>(null);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyRetryRequest, setHistoryRetryRequest] = useState<HistoryRequest | null>(null);
   const cursorRef = useRef(runEventCursor(run));
   const cursorRunIdRef = useRef(run.id);
+  const liveRequestRef = useRef<AbortController | null>(null);
+  const liveFailureCountRef = useRef(0);
+  const historySessionRef = useRef<HistorySession | null>(null);
+  const historyOpenRef = useRef(false);
+  const historyRequestRef = useRef<AbortController | null>(null);
+  const historyGenerationRef = useRef(0);
+  const historyLaunchButtonRef = useRef<HTMLButtonElement | null>(null);
+  const historyCloseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const restoreHistoryFocusRef = useRef(false);
+  const historyOpen = historySession !== null;
+
+  const storeHistorySession = useCallback((next: HistorySession | null): void => {
+    historySessionRef.current = next;
+    setHistorySession(next);
+  }, []);
+
+  const abortHistoryRequest = useCallback((): boolean => {
+    historyGenerationRef.current += 1;
+    const controller = historyRequestRef.current;
+    historyRequestRef.current = null;
+    controller?.abort();
+    return controller !== null;
+  }, []);
+
+  const cancelHistorySession = useCallback((): void => {
+    if (!historyOpenRef.current && historyRequestRef.current === null) return;
+    restoreHistoryFocusRef.current = false;
+    historyOpenRef.current = false;
+    abortHistoryRequest();
+    storeHistorySession(null);
+    setHistoryBusy(false);
+    setHistoryError(null);
+    setHistoryRetryRequest(null);
+  }, [abortHistoryRequest, storeHistorySession]);
+
+  useEffect(() => {
+    registerHistoryCancellation(cancelHistorySession);
+    return () => registerHistoryCancellation(null);
+  }, [cancelHistorySession, registerHistoryCancellation]);
+
+  useEffect(() => {
+    if (historyOpen) {
+      historyCloseButtonRef.current?.focus();
+      return;
+    }
+    if (!restoreHistoryFocusRef.current) return;
+    restoreHistoryFocusRef.current = false;
+    historyLaunchButtonRef.current?.focus();
+  }, [historyOpen]);
 
   useEffect(() => {
     if (cursorRunIdRef.current !== run.id) {
@@ -1037,8 +1110,13 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let request: AbortController | null = null;
-    let failureCount = 0;
     let hasSynced = false;
+
+    if (historyOpen) {
+      setLiveState("history_paused");
+      setLiveAnnouncement("Automatic event refresh is paused while older activity is open.");
+      return;
+    }
 
     if (retryGeneration > 0) {
       setLiveAnnouncement("Retrying automatic persisted-event refresh.");
@@ -1046,14 +1124,15 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
 
     const schedule = (delayMs: number): void => {
       if (timer !== undefined) clearTimeout(timer);
-      if (disposed || !pageIsVisible()) return;
+      if (disposed || historyOpenRef.current || !pageIsVisible()) return;
       timer = setTimeout(() => void poll(), delayMs);
     };
 
     async function poll(): Promise<void> {
-      if (disposed || !pageIsVisible() || request !== null) return;
+      if (disposed || historyOpenRef.current || !pageIsVisible() || request !== null) return;
       const controller = new AbortController();
       request = controller;
+      liveRequestRef.current = controller;
       let cursor = cursorRef.current;
       let observedEvents = 0;
       let latestLabel: string | null = null;
@@ -1064,6 +1143,7 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
         let hasMore: boolean;
         do {
           const page = await getRunEvents(run.id, cursor, controller.signal);
+          if (disposed || historyOpenRef.current) return;
           pageCount += 1;
           const progress = advanceEventPoll(run.id, cursor, observedRevision, page);
           cursor = progress.cursor;
@@ -1078,13 +1158,13 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
           if (hasMore && !disposed) setLiveState("catching_up");
         } while (hasMore && !disposed);
 
-        if (disposed) return;
+        if (disposed || historyOpenRef.current) return;
         if (observedEvents > 0 || drainCapped) {
           const nextRun = await getRun(run.id, controller.signal);
           if (!snapshotIncludesObservedRevision(runEventCursor(nextRun), observedRevision)) {
             throw new Error("The run evidence snapshot is older than its event cursor.");
           }
-          if (disposed) return;
+          if (disposed || historyOpenRef.current) return;
           await onRunChanged(nextRun);
           cursorRef.current = Math.max(cursorRef.current, runEventCursor(nextRun));
           setLiveAnnouncement(
@@ -1095,20 +1175,21 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
           if (!hasSynced) setLiveAnnouncement("Persisted run evidence is current.");
         }
         hasSynced = true;
-        failureCount = 0;
+        liveFailureCountRef.current = 0;
         setLiveError(null);
         setLiveState("current");
         setLastSyncedAt(new Date().toISOString());
       } catch (error) {
         if (controller.signal.aborted || disposed) return;
-        failureCount += 1;
+        liveFailureCountRef.current += 1;
         setLiveError(errorMessage(error));
         setLiveState("stale");
         setLiveAnnouncement("Automatic refresh failed; the last known evidence remains visible.");
       } finally {
         if (request === controller) request = null;
-        if (!disposed && pageIsVisible()) {
-          schedule(eventPollDelayMs(failureCount));
+        if (liveRequestRef.current === controller) liveRequestRef.current = null;
+        if (!disposed && !historyOpenRef.current && pageIsVisible()) {
+          schedule(eventPollDelayMs(liveFailureCountRef.current));
         }
       }
     }
@@ -1134,9 +1215,117 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
       disposed = true;
       if (timer !== undefined) clearTimeout(timer);
       request?.abort();
+      if (liveRequestRef.current === request) liveRequestRef.current = null;
       document.removeEventListener("visibilitychange", visibilityChanged);
     };
-  }, [onRunChanged, retryGeneration, run.id]);
+  }, [historyOpen, onRunChanged, retryGeneration, run.id]);
+
+  useEffect(() => {
+    const visibilityChanged = (): void => {
+      if (document.visibilityState !== "hidden" || !historyOpenRef.current) return;
+      if (abortHistoryRequest()) {
+        setHistoryBusy(false);
+        setHistoryError(
+          "Older activity loading was cancelled while this tab was hidden. Retry when visible.",
+        );
+      }
+    };
+    document.addEventListener("visibilitychange", visibilityChanged);
+    return () => document.removeEventListener("visibilitychange", visibilityChanged);
+  }, [abortHistoryRequest]);
+
+  useEffect(
+    () => () => {
+      historyOpenRef.current = false;
+      abortHistoryRequest();
+    },
+    [abortHistoryRequest],
+  );
+
+  const loadHistoricalPage = async (historicalRequest: HistoryRequest): Promise<void> => {
+    if (historyRequestRef.current !== null) return;
+    if (!pageIsVisible()) {
+      setHistoryRetryRequest(historicalRequest);
+      setHistoryError("Older activity can load only while this tab is visible.");
+      return;
+    }
+
+    const controller = new AbortController();
+    const generation = historyGenerationRef.current + 1;
+    historyGenerationRef.current = generation;
+    historyRequestRef.current = controller;
+    setHistoryBusy(true);
+    setHistoryError(null);
+    setHistoryRetryRequest(historicalRequest);
+    try {
+      const page = await getRunEventHistory(
+        historicalRequest.runId,
+        historicalRequest.before,
+        historicalRequest.snapshot,
+        controller.signal,
+      );
+      if (
+        controller.signal.aborted ||
+        historyGenerationRef.current !== generation ||
+        !historyOpenRef.current
+      ) {
+        return;
+      }
+      const current = historySessionRef.current;
+      if (current === null) {
+        throw new Error("The historical run session was closed before its response arrived.");
+      }
+      storeHistorySession(acceptHistoryPage(current, historicalRequest, page));
+      setHistoryRetryRequest(null);
+    } catch (error) {
+      if (controller.signal.aborted || historyGenerationRef.current !== generation) return;
+      setHistoryError(errorMessage(error));
+    } finally {
+      if (historyRequestRef.current === controller && historyGenerationRef.current === generation) {
+        historyRequestRef.current = null;
+        setHistoryBusy(false);
+      }
+    }
+  };
+
+  const openHistory = (): void => {
+    if (!run.timelineTruncated || historyOpenRef.current) return;
+    setActionError(null);
+    try {
+      const session = createHistorySession(run);
+      restoreHistoryFocusRef.current = false;
+      historyOpenRef.current = true;
+      liveRequestRef.current?.abort();
+      storeHistorySession(session);
+      setHistoryError(null);
+      setHistoryRetryRequest(null);
+      void loadHistoricalPage(historyRequest(session, "initial"));
+    } catch (error) {
+      setActionError(errorMessage(error));
+    }
+  };
+
+  const navigateHistory = (direction: HistoryDirection): void => {
+    const session = historySessionRef.current;
+    if (session === null || historyBusy) return;
+    try {
+      void loadHistoricalPage(historyRequest(session, direction));
+    } catch (error) {
+      setHistoryError(errorMessage(error));
+    }
+  };
+
+  const retryHistory = (): void => {
+    if (historyRetryRequest === null || historyBusy) return;
+    void loadHistoricalPage(historyRetryRequest);
+  };
+
+  const closeHistory = (): void => {
+    cancelHistorySession();
+    restoreHistoryFocusRef.current = true;
+    setLiveState(pageIsVisible() ? "checking" : "paused");
+    setLiveAnnouncement("Automatic event refresh resumed after closing older activity.");
+  };
 
   const requestPlan = async (): Promise<void> => {
     setActionError(null);
@@ -1224,11 +1413,19 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
       </div>
       {liveError === null ? null : (
         <div className="message message--warning live-refresh__error" role="status">
-          <span>Last-known evidence is preserved — {liveError}</span>
+          <span>
+            {historyOpen
+              ? "Automatic event refresh remains paused for older activity; its last error is preserved"
+              : "Last-known evidence is preserved"}
+            {` — ${liveError}`}
+          </span>
           <button
             type="button"
             className="button--secondary"
-            onClick={() => setRetryGeneration((current) => current + 1)}
+            disabled={historyOpen}
+            onClick={() => {
+              if (!historyOpen) setRetryGeneration((current) => current + 1);
+            }}
           >
             Retry event refresh
           </button>
@@ -1594,9 +1791,160 @@ function RunEvidence({ run, planningCapability, onRunChanged, onRefresh }: RunEv
           </span>
         </div>
         {run.timelineTruncated ? (
-          <p className="message message--info">
-            Showing the {run.timeline.length} most recent of {run.timelineTotal} persisted events.
-          </p>
+          <>
+            <div className="message message--info history-launch">
+              <span>
+                Showing the {run.timeline.length} most recent of {run.timelineTotal} persisted
+                events. Older activity loads only when requested.
+              </span>
+              {historyOpen ? null : (
+                <button
+                  ref={historyLaunchButtonRef}
+                  type="button"
+                  className="button--secondary"
+                  onClick={openHistory}
+                >
+                  Load older activity
+                </button>
+              )}
+            </div>
+            {historySession === null ? null : (
+              <section
+                className="history-panel"
+                aria-labelledby="history-panel-heading"
+                aria-busy={historyBusy}
+              >
+                <div className="history-panel__heading">
+                  <div>
+                    <p className="eyebrow">Bounded metadata history</p>
+                    <h4 id="history-panel-heading">Older activity</h4>
+                  </div>
+                  <button
+                    ref={historyCloseButtonRef}
+                    type="button"
+                    className="button--secondary"
+                    onClick={closeHistory}
+                  >
+                    Close older activity
+                  </button>
+                </div>
+                <p className="history-panel__notice">
+                  This page is pinned to persisted event revision {historySession.snapshot}. It
+                  neither updates current run evidence nor advances the live event cursor.
+                </p>
+                <p className="empty-state">
+                  Event links navigate to the current allowlisted evidence section. They do not
+                  reconstruct historical payload details.
+                </p>
+                {historyError === null ? null : (
+                  <div className="message message--warning history-panel__error" role="status">
+                    <span>
+                      {historySession.page === null
+                        ? "No historical page is available"
+                        : "The last successful pinned page remains visible"}
+                      {` — ${historyError}`}
+                    </span>
+                    {historyRetryRequest === null ? null : (
+                      <button
+                        type="button"
+                        className="button--secondary"
+                        disabled={historyBusy}
+                        onClick={retryHistory}
+                      >
+                        Retry older activity
+                      </button>
+                    )}
+                  </div>
+                )}
+                {historySession.page === null ? (
+                  <p className="empty-state" aria-live="polite">
+                    {historyBusy ? "Loading one pinned historical page…" : "No page loaded."}
+                  </p>
+                ) : (
+                  <>
+                    <dl className="facts facts--compact history-panel__facts">
+                      <div>
+                        <dt>Browser window</dt>
+                        <dd>
+                          Page {historyPageDepth(historySession)} of at most {HISTORY_MAX_PAGES}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Pinned revision</dt>
+                        <dd>{historySession.page.snapshot}</dd>
+                      </div>
+                      <div>
+                        <dt>Requested before</dt>
+                        <dd>{historySession.page.before}</dd>
+                      </div>
+                      <div>
+                        <dt>Sequences shown</dt>
+                        <dd>
+                          {historySession.page.events.length === 0
+                            ? "None"
+                            : `${historySession.page.events.at(0)?.sequence}–${historySession.page.events.at(-1)?.sequence}`}
+                        </dd>
+                      </div>
+                    </dl>
+                    {historySession.page.events.length === 0 ? (
+                      <p className="empty-state">
+                        No older event metadata exists before this page.
+                      </p>
+                    ) : (
+                      <ol className="timeline timeline--historical">
+                        {historySession.page.events.map((entry, index) => (
+                          <li
+                            key={`${entry.sequence ?? index}:${entry.timestamp ?? entry.createdAt ?? "event"}`}
+                          >
+                            <div>
+                              <a
+                                className="timeline__evidence-link"
+                                href={`#${evidenceTarget(entry.evidenceSection)}`}
+                              >
+                                {timelineLabel(entry)}
+                              </a>
+                              <time dateTime={entry.timestamp ?? entry.createdAt}>
+                                {formatTimestamp(entry.timestamp ?? entry.createdAt)}
+                              </time>
+                            </div>
+                            <p className="empty-state">Persisted sequence {entry.sequence}</p>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                    <div className="history-panel__navigation">
+                      <button
+                        type="button"
+                        className="button--secondary"
+                        disabled={historyBusy || !canNavigateOlder(historySession)}
+                        onClick={() => navigateHistory("older")}
+                      >
+                        {historyBusy ? "Loading…" : "← Older events"}
+                      </button>
+                      <button
+                        type="button"
+                        className="button--secondary"
+                        disabled={historyBusy || !canNavigateNewer(historySession)}
+                        onClick={() => navigateHistory("newer")}
+                      >
+                        Newer events →
+                      </button>
+                    </div>
+                    {historySession.page.hasMore && !canNavigateOlder(historySession) ? (
+                      <p className="message message--info">
+                        This four-page browser window has reached its limit. Use CLI run history for
+                        complete persisted history.
+                      </p>
+                    ) : historySession.page.hasMore ? null : (
+                      <p className="empty-state">
+                        This pinned page reaches the beginning of persisted event history.
+                      </p>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+          </>
         ) : null}
         {run.timeline.length === 0 ? (
           <p className="empty-state">No timeline events were returned.</p>
@@ -1653,6 +2001,11 @@ export function App() {
   const workspaceGenerationRef = useRef(0);
   const selectionRequestRef = useRef<AbortController | null>(null);
   const selectionGenerationRef = useRef(0);
+  const historyCancellationRef = useRef<(() => void) | null>(null);
+
+  const registerHistoryCancellation = useCallback((cancel: (() => void) | null): void => {
+    historyCancellationRef.current = cancel;
+  }, []);
 
   const cancelPendingRunSelection = useCallback((): void => {
     selectionGenerationRef.current += 1;
@@ -1769,6 +2122,7 @@ export function App() {
 
   const selectRun = useCallback(
     async (runId: string): Promise<void> => {
+      if (selectedRun?.id !== runId) historyCancellationRef.current?.();
       selectionRequestRef.current?.abort();
       const controller = new AbortController();
       const generation = selectionGenerationRef.current + 1;
@@ -1788,11 +2142,12 @@ export function App() {
         if (selectionRequestRef.current === controller) selectionRequestRef.current = null;
       }
     },
-    [openRun],
+    [openRun, selectedRun?.id],
   );
 
   const selectProject = useCallback(
     (projectId: string): void => {
+      historyCancellationRef.current?.();
       cancelPendingRunSelection();
       setSelectedProjectId(projectId);
       setSelectedRun(null);
@@ -1801,6 +2156,7 @@ export function App() {
   );
 
   const closeRun = useCallback((): void => {
+    historyCancellationRef.current?.();
     cancelPendingRunSelection();
     setSelectedRun(null);
   }, [cancelPendingRunSelection]);
@@ -1960,6 +2316,7 @@ export function App() {
                   planningCapability={workspace.capabilities.planning}
                   onRunChanged={mergeRun}
                   onRefresh={refreshRun}
+                  registerHistoryCancellation={registerHistoryCancellation}
                 />
               </div>
             )}

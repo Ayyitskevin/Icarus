@@ -24,8 +24,15 @@ const workspaceUiSources = await collectSources(
 );
 const providerSource = await readFile("packages/core/src/providers.ts", "utf8");
 const runtimeSource = await readFile("packages/core/src/runtime.ts", "utf8");
+const storeSource = await readFile("packages/core/src/store.ts", "utf8");
 const ignore = await readFile(".gitignore", "utf8");
 const testSources = await collectSources("tests", (name) => name.endsWith(".test.ts"));
+const historyMethodStart = storeSource.indexOf("  listEventHistoryPage(");
+const historyMethodEnd = storeSource.indexOf("\n  #appendEvent(", historyMethodStart);
+const historyStoreSource =
+  historyMethodStart >= 0 && historyMethodEnd > historyMethodStart
+    ? storeSource.slice(historyMethodStart, historyMethodEnd)
+    : "";
 
 const assertions = {
   controllerNeverUsesShell:
@@ -69,6 +76,11 @@ const assertions = {
   workspaceNoExecutionRoutes: !/\/(?:approve|execute|checks|commit|push|deploy)/.test(
     workspaceServerSource,
   ),
+  workspaceHistoryMetadataOnly:
+    historyStoreSource.includes("SELECT sequence, run_id, type, created_at") &&
+    historyStoreSource.includes("ORDER BY sequence DESC") &&
+    historyStoreSource.includes("RUN_EVENT_PAGE_LIMIT + 1") &&
+    !historyStoreSource.includes("payload_json"),
   workspaceNoRawHtml: workspaceUiSources.every(
     (source) => !source.includes("dangerouslySetInnerHTML") && !source.includes("innerHTML"),
   ),

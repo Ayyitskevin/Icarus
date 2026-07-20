@@ -46,6 +46,7 @@ import type {
   ProjectRepositoryStatus,
   ProviderConfig,
   RepositoryRecord,
+  RunEventHistoryPage,
   RunEventPage,
   RunHistory,
   RunPresentationSnapshot,
@@ -568,6 +569,10 @@ export class IcarusService {
 
   listRunEvents(runId: string, after: number): RunEventPage {
     return this.#store.listEventPage(runId, after);
+  }
+
+  listRunEventHistory(runId: string, before: number, snapshot: number): RunEventHistoryPage {
+    return this.#store.listEventHistoryPage(runId, before, snapshot);
   }
 
   createRunDraft(input: PlanRunInput): RunRecord {

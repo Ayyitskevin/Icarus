@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
@@ -21,6 +22,12 @@ const START_TIMEOUT_MS = 15_000;
 const UI_TIMEOUT_MS = 10_000;
 const EVENT_POLL_INTERVAL_MS = 2_000;
 const EVENT_POLL_FIRST_BACKOFF_MS = 4_000;
+const HISTORICAL_EVENT_HIGH_WATER = 500;
+const HISTORICAL_EVENT_SENTINEL = "/private/browser-history-payload-sentinel";
+
+const Database = createRequire(new URL("../packages/core/package.json", import.meta.url))(
+  "better-sqlite3",
+);
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -85,6 +92,24 @@ async function fingerprint(repository) {
       .update(await readFile(path.join(repository, TARGET)))
       .digest("hex"),
   };
+}
+
+function workspaceStateSnapshot(databasePath) {
+  const database = new Database(databasePath);
+  try {
+    return {
+      repositories: database.prepare("SELECT * FROM repositories ORDER BY id").all(),
+      projects: database.prepare("SELECT * FROM projects ORDER BY id").all(),
+      runs: database.prepare("SELECT * FROM runs ORDER BY id").all(),
+      events: database.prepare("SELECT * FROM run_events ORDER BY id").all(),
+      approvals: database.prepare("SELECT * FROM approvals ORDER BY id").all(),
+      operations: database.prepare("SELECT * FROM operations ORDER BY id").all(),
+      checkpoints: database.prepare("SELECT * FROM checkpoints ORDER BY run_id").all(),
+      sequences: database.prepare("SELECT * FROM sqlite_sequence ORDER BY name").all(),
+    };
+  } finally {
+    database.close();
+  }
 }
 
 async function startProvider() {
@@ -503,6 +528,16 @@ class BrowserPage {
     }, label);
   }
 
+  historyFact(label) {
+    return this.call((factLabel) => {
+      const root = document.querySelector(".history-panel");
+      const term = Array.from(root?.querySelectorAll("dt") ?? []).find(
+        (candidate) => candidate.textContent?.trim() === factLabel,
+      );
+      return term?.parentElement?.querySelector("dd")?.textContent?.trim() ?? null;
+    }, label);
+  }
+
   contextFact(label) {
     return this.call((factLabel) => {
       const root = document.querySelector("#context-summary-heading")?.closest("section");
@@ -592,8 +627,10 @@ async function createBrowserPage(chromium, workspaceUrl) {
   const blockedExternalRequests = [];
   const browserErrors = [];
   let eventFailuresRemaining = 0;
+  let eventHistoryFailuresRemaining = 0;
   let repositoryStatusFailuresRemaining = 0;
   let eventRequestHold = null;
+  let historyRequestHold = null;
   let workspaceRequestHold = null;
   chromium.cdp.on(sessionId, "Network.requestWillBeSent", (event) => {
     networkRequestUrls.set(event.requestId, event.request?.url);
@@ -642,6 +679,7 @@ async function createBrowserPage(chromium, workspaceUrl) {
     const requestUrl = event.request?.url ?? "";
     let external = false;
     let localEventPoll = false;
+    let localEventHistory = false;
     let localRepositoryStatus = false;
     let localWorkspaceRead = false;
     try {
@@ -653,6 +691,10 @@ async function createBrowserPage(chromium, workspaceUrl) {
         parsed.origin === workspaceUrl &&
         event.request?.method === "GET" &&
         parsed.pathname.endsWith("/events");
+      localEventHistory =
+        parsed.origin === workspaceUrl &&
+        event.request?.method === "GET" &&
+        parsed.pathname.endsWith("/events/history");
       localRepositoryStatus =
         parsed.origin === workspaceUrl &&
         event.request?.method === "GET" &&
@@ -686,11 +728,25 @@ async function createBrowserPage(chromium, workspaceUrl) {
       eventRequestHold.observed(observation);
       return;
     }
+    if (localEventHistory && historyRequestHold !== null && historyRequestHold.event === null) {
+      const observation = {
+        requestId: event.requestId,
+        networkId: event.networkId ?? null,
+        url: requestUrl,
+        observedAt: Date.now(),
+      };
+      historyRequestHold.event = event;
+      historyRequestHold.observation = observation;
+      historyRequestHold.observed(observation);
+      return;
+    }
     const failEventPoll = localEventPoll && eventFailuresRemaining > 0;
+    const failEventHistory = localEventHistory && eventHistoryFailuresRemaining > 0;
     const failRepositoryStatus = localRepositoryStatus && repositoryStatusFailuresRemaining > 0;
     if (failEventPoll) eventFailuresRemaining -= 1;
+    if (failEventHistory) eventHistoryFailuresRemaining -= 1;
     if (failRepositoryStatus) repositoryStatusFailuresRemaining -= 1;
-    if (failEventPoll || failRepositoryStatus) {
+    if (failEventPoll || failEventHistory || failRepositoryStatus) {
       void chromium.cdp
         .send(
           "Fetch.fulfillRequest",
@@ -743,6 +799,9 @@ async function createBrowserPage(chromium, workspaceUrl) {
     browserErrors,
     failNextEventPoll: () => {
       eventFailuresRemaining += 1;
+    },
+    failNextEventHistory: () => {
+      eventHistoryFailuresRemaining += 1;
     },
     failNextRepositoryStatus: () => {
       repositoryStatusFailuresRemaining += 1;
@@ -815,6 +874,74 @@ async function createBrowserPage(chromium, workspaceUrl) {
         finish,
       };
     },
+    holdNextEventHistory: () => {
+      if (historyRequestHold !== null) throw new Error("A history request is already held");
+      let markObserved;
+      const observed = new Promise((resolve) => {
+        markObserved = resolve;
+      });
+      const hold = {
+        event: null,
+        observation: null,
+        observed: markObserved,
+      };
+      historyRequestHold = hold;
+      let finishPromise = null;
+      const finish = () => {
+        if (finishPromise !== null) return finishPromise;
+        finishPromise = (async () => {
+          if (historyRequestHold === hold) historyRequestHold = null;
+          const held = hold.event;
+          if (held === null) return "not_observed";
+          try {
+            await chromium.cdp.send(
+              "Fetch.continueRequest",
+              { requestId: held.requestId },
+              sessionId,
+            );
+            return "continued";
+          } catch (releaseError) {
+            const sawCancellation = () =>
+              held.networkId !== null &&
+              held.networkId !== undefined &&
+              networkFailures.some(
+                (failure) => failure.requestId === held.networkId && failure.canceled,
+              );
+            if (!sawCancellation()) {
+              await waitForObserved(
+                sawCancellation,
+                "the browser cancellation for an aborted held history request",
+                500,
+              ).catch(() => undefined);
+            }
+            if (sawCancellation()) return "cancelled";
+            try {
+              await chromium.cdp.send(
+                "Fetch.failRequest",
+                { requestId: held.requestId, errorReason: "Aborted" },
+                sessionId,
+              );
+              return "failed";
+            } catch (cleanupError) {
+              if (sawCancellation()) return "cancelled";
+              throw new Error(
+                `Could not release or fail the held history request: ${
+                  releaseError instanceof Error ? releaseError.message : String(releaseError)
+                }; cleanup failed: ${
+                  cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+                }`,
+              );
+            }
+          }
+        })();
+        return finishPromise;
+      };
+      return {
+        observed,
+        observation: () => hold.observation,
+        finish,
+      };
+    },
     holdNextWorkspaceRequest: () => {
       if (workspaceRequestHold !== null) throw new Error("A workspace request is already held");
       let markObserved;
@@ -865,6 +992,7 @@ let provider;
 let chromium;
 let releaseProviderResponse;
 let finishHeldBrowserEventPoll;
+let finishHeldBrowserHistoryRequest;
 try {
   const repository = path.join(root, "repository");
   const stateRoot = path.join(root, "state");
@@ -1139,6 +1267,31 @@ try {
   assert.equal(typeof browserRunId, "string");
   assert.match(browserRunId, /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
 
+  const historyDatabase = new Database(path.join(stateRoot, "icarus.sqlite3"));
+  try {
+    const revision = historyDatabase
+      .prepare("SELECT MAX(sequence) AS revision FROM run_events WHERE run_id = ?")
+      .get(browserRunId)?.revision;
+    assert.equal(revision, 1, "the browser fixture must begin with only run.created");
+    const insertHistoryEvent = historyDatabase.prepare(
+      `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    historyDatabase.transaction(() => {
+      for (let sequence = 2; sequence <= HISTORICAL_EVENT_HIGH_WATER; sequence += 1) {
+        insertHistoryEvent.run(
+          browserRunId,
+          sequence,
+          sequence === 300 ? "context.assembled" : "operation.finished",
+          `${HISTORICAL_EVENT_SENTINEL}:${sequence}`,
+          "2026-07-20T12:00:00.000Z",
+        );
+      }
+    })();
+  } finally {
+    historyDatabase.close();
+  }
+
   await reloadPage(chromium, browserPage);
   await page.waitFor(
     (task) =>
@@ -1373,6 +1526,455 @@ try {
     [browserRunId],
     "the original run after the held-poll isolation check",
   );
+
+  await page.waitFor(
+    () =>
+      document.querySelector(".live-refresh .status")?.textContent?.trim() === "auto-refresh on",
+    [],
+    "live polling before explicit historical navigation",
+  );
+  const historyPersistenceBefore = workspaceStateSnapshot(path.join(stateRoot, "icarus.sqlite3"));
+  const livePollHeldForHistory = browserPage.holdNextEventPoll();
+  finishHeldBrowserEventPoll = livePollHeldForHistory.finish;
+  await waitForObserved(
+    () => livePollHeldForHistory.observation() !== null,
+    "the active live poll held before opening historical activity",
+  );
+  const historyOpenLiveObservation = livePollHeldForHistory.observation();
+  assert.notEqual(historyOpenLiveObservation, null);
+  const historyRequestBaseline = networkRequests.length;
+  await page.clickButton("Load older activity");
+  const historyOpenLiveReleaseOutcome = await livePollHeldForHistory.finish();
+  finishHeldBrowserEventPoll = undefined;
+  assert.notEqual(historyOpenLiveReleaseOutcome, "not_observed");
+  const matchesHistoryOpenLivePoll = (record) =>
+    historyOpenLiveObservation.networkId === null
+      ? record.url === historyOpenLiveObservation.url &&
+        record.observedAt >= historyOpenLiveObservation.observedAt
+      : record.requestId === historyOpenLiveObservation.networkId;
+  await waitForObserved(
+    () =>
+      networkFinished.some(matchesHistoryOpenLivePoll) ||
+      networkFailures.some(matchesHistoryOpenLivePoll),
+    "the terminal outcome for the live poll aborted by historical activity",
+  );
+  assert.equal(
+    networkFailures.some(
+      (failure) => matchesHistoryOpenLivePoll(failure) && failure.canceled === true,
+    ),
+    true,
+    "opening historical activity must cancel the active live poll",
+  );
+  const historyOpenLivePollOutcome = "cancelled";
+  await page.waitFor(
+    () =>
+      document.querySelector(".history-panel")?.getAttribute("aria-busy") === "false" &&
+      document.body.innerText.includes("Persisted sequence 300"),
+    [],
+    "the first pinned historical metadata page",
+  );
+  assert.equal(
+    await page.call(
+      () =>
+        document.querySelector(".live-refresh .status")?.textContent?.trim() ===
+        "paused for older activity",
+    ),
+    true,
+  );
+  assert.equal(
+    await page.call(
+      () =>
+        document.activeElement instanceof HTMLButtonElement &&
+        document.activeElement.textContent?.trim() === "Close older activity",
+    ),
+    true,
+    "opening historical activity must move focus into the disclosure",
+  );
+  const firstHistoryRange = await page.historyFact("Sequences shown");
+  const historySnapshot = Number(await page.historyFact("Pinned revision"));
+  assert.match(firstHistoryRange ?? "", /^\d+–\d+$/);
+  assert.equal(Number.isSafeInteger(historySnapshot) && historySnapshot > 0, true);
+  body = await page.bodyText();
+  assert.equal(body.includes(HISTORICAL_EVENT_SENTINEL), false);
+  assert.equal(
+    body.includes("Event links navigate to the current allowlisted evidence section."),
+    true,
+  );
+  const historicalContextEvidenceHref = await page.call(() => {
+    const link = Array.from(
+      document.querySelectorAll(".history-panel .timeline__evidence-link"),
+    ).find(
+      (candidate) => candidate.textContent?.replaceAll(/\s+/g, " ").trim() === "context assembled",
+    );
+    if (!(link instanceof HTMLAnchorElement)) return null;
+    const href = link.getAttribute("href");
+    link.click();
+    return href;
+  });
+  assert.equal(historicalContextEvidenceHref, "#run-context");
+  await page.waitFor(
+    () =>
+      window.location.hash === "#run-context" && document.querySelector("#run-context") !== null,
+    [],
+    "historical metadata navigation to the current context evidence section",
+  );
+  assert.equal(
+    await page.call(() => {
+      history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      return window.location.hash;
+    }),
+    "",
+  );
+
+  const pausedLiveEventRequestCount = networkRequests.filter(
+    (request) => request.method === "GET" && request.url?.includes("/events?after="),
+  ).length;
+  await delay(EVENT_POLL_INTERVAL_MS + 500);
+  assert.equal(
+    networkRequests.filter(
+      (request) => request.method === "GET" && request.url?.includes("/events?after="),
+    ).length,
+    pausedLiveEventRequestCount,
+    "live polling must remain paused while the historical panel is open",
+  );
+
+  browserPage.failNextEventHistory();
+  await page.clickButton("← Older events");
+  await page.waitFor(
+    () =>
+      document.querySelector(".history-panel")?.getAttribute("aria-busy") === "false" &&
+      document.body.innerText.includes("The last successful pinned page remains visible"),
+    [],
+    "a truthful failed historical-page state",
+  );
+  assert.equal(await page.historyFact("Sequences shown"), firstHistoryRange);
+  assert.equal((await page.bodyText()).includes("Persisted sequence 300"), true);
+
+  await page.clickButton("Retry older activity");
+  await page.waitFor(
+    () =>
+      document.querySelector(".history-panel")?.getAttribute("aria-busy") === "false" &&
+      Array.from(document.querySelectorAll(".history-panel dt")).some(
+        (term) =>
+          term.textContent?.trim() === "Browser window" &&
+          term.parentElement?.querySelector("dd")?.textContent?.trim() === "Page 2 of at most 4",
+      ),
+    [],
+    "the retried second historical page",
+  );
+  assert.notEqual(await page.historyFact("Sequences shown"), firstHistoryRange);
+  assert.equal((await page.bodyText()).includes("Persisted sequence 300"), false);
+
+  for (const pageNumber of [3, 4]) {
+    await page.clickButton("← Older events");
+    await page.waitFor(
+      (expectedPage) =>
+        document.querySelector(".history-panel")?.getAttribute("aria-busy") === "false" &&
+        Array.from(document.querySelectorAll(".history-panel dt")).some(
+          (term) =>
+            term.textContent?.trim() === "Browser window" &&
+            term.parentElement?.querySelector("dd")?.textContent?.trim() ===
+              `Page ${expectedPage} of at most 4`,
+        ),
+      [pageNumber],
+      `historical page ${pageNumber}`,
+    );
+  }
+  assert.equal(await page.buttonDisabled("← Older events"), true);
+  assert.equal(
+    (await page.bodyText()).includes("This four-page browser window has reached its limit."),
+    true,
+  );
+
+  await page.clickButton("Newer events →");
+  await page.waitFor(
+    () =>
+      document.querySelector(".history-panel")?.getAttribute("aria-busy") === "false" &&
+      Array.from(document.querySelectorAll(".history-panel dt")).some(
+        (term) =>
+          term.textContent?.trim() === "Browser window" &&
+          term.parentElement?.querySelector("dd")?.textContent?.trim() === "Page 3 of at most 4",
+      ),
+    [],
+    "newer navigation inside the bounded historical window",
+  );
+  const liveEventRequestCountBeforeHistoryClose = networkRequests.filter(
+    (request) => request.method === "GET" && request.url?.includes("/events?after="),
+  ).length;
+  await page.clickButton("Close older activity");
+  await page.waitFor(
+    () =>
+      document.querySelector(".history-panel") === null &&
+      document.querySelector(".live-refresh .status")?.textContent?.trim() === "auto-refresh on",
+    [],
+    "live polling after historical navigation closes",
+  );
+  await waitForObserved(
+    () =>
+      networkRequests.filter(
+        (request) => request.method === "GET" && request.url?.includes("/events?after="),
+      ).length > liveEventRequestCountBeforeHistoryClose,
+    "an immediate live event poll after historical navigation",
+  );
+  assert.equal(
+    await page.call(
+      () =>
+        document.activeElement instanceof HTMLButtonElement &&
+        document.activeElement.textContent?.trim() === "Load older activity",
+    ),
+    true,
+    "closing historical activity must restore focus to its launch control",
+  );
+  const historicalRequestsDuringNavigation = networkRequests
+    .slice(historyRequestBaseline)
+    .filter(
+      (request) => request.method === "GET" && request.url?.includes("/events/history?before="),
+    );
+  assert.equal(historicalRequestsDuringNavigation.length, 6);
+  for (const request of historicalRequestsDuringNavigation) {
+    const requestUrl = new URL(request.url);
+    assert.equal(
+      requestUrl.pathname,
+      `/api/runs/${encodeURIComponent(browserRunId)}/events/history`,
+    );
+    assert.deepEqual([...requestUrl.searchParams.keys()], ["before", "snapshot"]);
+    assert.equal(Number(requestUrl.searchParams.get("snapshot")), historySnapshot);
+  }
+
+  const settleHeldHistoryRequest = async (held, observation, description) => {
+    const releaseOutcome = await held.finish();
+    finishHeldBrowserHistoryRequest = undefined;
+    assert.notEqual(releaseOutcome, "not_observed");
+    const matches = (record) =>
+      observation.networkId === null
+        ? record.url === observation.url && record.observedAt >= observation.observedAt
+        : record.requestId === observation.networkId;
+    await waitForObserved(
+      () => networkFinished.some(matches) || networkFailures.some(matches),
+      description,
+    );
+    assert.equal(
+      networkFailures.some((failure) => matches(failure) && failure.canceled === true),
+      true,
+      `${description} must be a transport cancellation`,
+    );
+    return "cancelled";
+  };
+
+  const hiddenHistoryRequest = browserPage.holdNextEventHistory();
+  finishHeldBrowserHistoryRequest = hiddenHistoryRequest.finish;
+  await page.clickButton("Load older activity");
+  const hiddenHistoryObservation = await hiddenHistoryRequest.observed;
+  const heldHistoryRequestCount = networkRequests.filter(
+    (request) => request.method === "GET" && request.url?.includes("/events/history?before="),
+  ).length;
+  await delay(250);
+  assert.equal(
+    networkRequests.filter(
+      (request) => request.method === "GET" && request.url?.includes("/events/history?before="),
+    ).length,
+    heldHistoryRequestCount,
+    "a held historical request must not overlap another historical request",
+  );
+  await page.setVisibility("hidden");
+  await page.waitFor(
+    () =>
+      document.querySelector(".history-panel")?.getAttribute("aria-busy") === "false" &&
+      document.body.innerText.includes("cancelled while this tab was hidden"),
+    [],
+    "the hidden-tab historical cancellation state",
+  );
+  const hiddenHistoryReleaseOutcome = await settleHeldHistoryRequest(
+    hiddenHistoryRequest,
+    hiddenHistoryObservation,
+    "the terminal outcome for the hidden historical request",
+  );
+  assert.equal(await page.historyFact("Sequences shown"), null);
+  await page.setVisibility("visible");
+  await page.clickButton("Retry older activity");
+  await page.waitFor(
+    () =>
+      document.querySelector(".history-panel")?.getAttribute("aria-busy") === "false" &&
+      document.body.innerText.includes("Persisted sequence 300"),
+    [],
+    "a successful retry after hidden historical cancellation",
+  );
+
+  const closeHistoryRequest = browserPage.holdNextEventHistory();
+  finishHeldBrowserHistoryRequest = closeHistoryRequest.finish;
+  await page.clickButton("← Older events");
+  const closeHistoryObservation = await closeHistoryRequest.observed;
+  const contendedHistoryRequestCount = networkRequests.filter(
+    (request) => request.method === "GET" && request.url?.includes("/events/history?before="),
+  ).length;
+  assert.equal(
+    await page.call(() => {
+      const buttons = Array.from(document.querySelectorAll(".history-panel__navigation button"));
+      if (buttons.length !== 2 || !buttons.every((button) => button.disabled)) return false;
+      for (const button of buttons) button.click();
+      return true;
+    }),
+    true,
+    "historical navigation controls must disable while a request is active",
+  );
+  await delay(250);
+  assert.equal(
+    networkRequests.filter(
+      (request) => request.method === "GET" && request.url?.includes("/events/history?before="),
+    ).length,
+    contendedHistoryRequestCount,
+    "attempted historical navigation must not overlap an active request",
+  );
+  await page.clickButton("Close older activity");
+  await page.waitFor(
+    () => document.querySelector(".history-panel") === null,
+    [],
+    "the closed panel while a historical request is held",
+  );
+  const closeHistoryReleaseOutcome = await settleHeldHistoryRequest(
+    closeHistoryRequest,
+    closeHistoryObservation,
+    "the terminal outcome for the closed historical request",
+  );
+  assert.equal(
+    await page.call(() => document.querySelector(".history-panel") === null),
+    true,
+    "a held closed-panel outcome must not reopen historical activity",
+  );
+  await page.waitFor(
+    () =>
+      document.querySelector(".live-refresh .status")?.textContent?.trim() === "auto-refresh on",
+    [],
+    "live polling after the held historical request closes",
+  );
+
+  assert.equal(
+    await page.call(() => {
+      const originalFetch = window.fetch;
+      const state = {
+        observed: false,
+        release: null,
+        originalFetch,
+      };
+      window.__icarusLateHistoryResponse = state;
+      window.fetch = (input, init) => {
+        const requestUrl =
+          typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+        if (state.observed || !requestUrl.includes("/events/history?before=")) {
+          return originalFetch.call(window, input, init);
+        }
+        state.observed = true;
+        return new Promise((resolve, reject) => {
+          state.release = async () => {
+            try {
+              const options = init === undefined ? {} : { ...init, signal: undefined };
+              resolve(await originalFetch.call(window, input, options));
+            } catch (error) {
+              reject(error);
+            }
+          };
+        });
+      };
+      return true;
+    }),
+    true,
+  );
+  await page.clickButton("Load older activity");
+  await page.waitFor(
+    () => window.__icarusLateHistoryResponse?.observed === true,
+    [],
+    "the deliberately delayed cancellation-ignoring historical request",
+  );
+  await page.clickButton("Close older activity");
+  await page.waitFor(
+    () => document.querySelector(".history-panel") === null,
+    [],
+    "the closed panel before a delayed successful history response",
+  );
+  const lateHistoryReleaseStartedAt = Date.now();
+  assert.equal(
+    await page.call(async () => {
+      const state = window.__icarusLateHistoryResponse;
+      if (state === undefined || typeof state.release !== "function") return false;
+      window.fetch = state.originalFetch;
+      await state.release();
+      delete window.__icarusLateHistoryResponse;
+      return true;
+    }),
+    true,
+  );
+  await waitForObserved(
+    () =>
+      networkResponses.some(
+        (response) =>
+          response.status === 200 &&
+          response.url?.includes("/events/history?before=") &&
+          response.observedAt >= lateHistoryReleaseStartedAt,
+      ),
+    "the delayed successful historical response after panel close",
+  );
+  await delay(100);
+  assert.equal(
+    await page.call(
+      () =>
+        document.querySelector(".history-panel") === null &&
+        document.querySelector(".live-refresh .status")?.textContent?.trim() === "auto-refresh on",
+    ),
+    true,
+    "the generation guard must reject a late successful historical response",
+  );
+  const lateHistorySuccessRejected = true;
+
+  const selectionHistoryRequest = browserPage.holdNextEventHistory();
+  finishHeldBrowserHistoryRequest = selectionHistoryRequest.finish;
+  await page.clickButton("Load older activity");
+  const selectionHistoryObservation = await selectionHistoryRequest.observed;
+  await page.clickProject("browser-project-two");
+  await page.waitFor(
+    () =>
+      document.querySelector("#project-detail-heading")?.textContent === "browser-project-two" &&
+      document.querySelector("#run-evidence-heading") === null,
+    [],
+    "the project selection that unmounts held historical activity",
+  );
+  const selectionHistoryReleaseOutcome = await settleHeldHistoryRequest(
+    selectionHistoryRequest,
+    selectionHistoryObservation,
+    "the terminal outcome for the unmounted historical request",
+  );
+  assert.equal(
+    await page.call(
+      () =>
+        document.querySelector("#project-detail-heading")?.textContent === "browser-project-two" &&
+        document.querySelector("#run-evidence-heading") === null,
+    ),
+    true,
+    "a held historical outcome must not overwrite the newer project selection",
+  );
+
+  await page.clickProject("browser-project");
+  await page.waitFor(
+    () => document.querySelector("#project-detail-heading")?.textContent === "browser-project",
+    [],
+    "the original project after held historical isolation",
+  );
+  await page.clickRecentRun(TASK);
+  await page.waitFor(
+    (runId) =>
+      Array.from(document.querySelectorAll(".run-evidence dt")).some(
+        (term) =>
+          term.textContent?.trim() === "Run ID" &&
+          term.parentElement?.querySelector("dd")?.textContent?.trim() === runId,
+      ),
+    [browserRunId],
+    "the original run after held historical isolation",
+  );
+  assert.deepEqual(
+    workspaceStateSnapshot(path.join(stateRoot, "icarus.sqlite3")),
+    historyPersistenceBefore,
+    "historical browsing must not mutate durable control state",
+  );
+
   await page.waitFor(
     (eventLabel) =>
       Array.from(document.querySelectorAll("#run-activity .timeline__evidence-link")).some(
@@ -1483,16 +2085,32 @@ try {
   const eventRequests = networkRequests.filter(
     (request) => request.method === "GET" && request.url?.includes("/events?after="),
   );
+  const historyRequests = networkRequests.filter(
+    (request) => request.method === "GET" && request.url?.includes("/events/history?before="),
+  );
   const liveReadErrors = networkResponses.filter(
     (response) =>
       (response.url?.endsWith("/repository-status") || response.url?.includes("/events?after=")) &&
       response.status !== 200,
+  );
+  const historyReadErrors = networkResponses.filter(
+    (response) => response.url?.includes("/events/history?before=") && response.status !== 200,
   );
   assert.equal(contextRequests.length, 3);
   assert.equal(draftRequests.length, 1);
   assert.equal(planRequests.length, 1);
   assert.ok(repositoryStatusRequests.length >= 3);
   assert.ok(eventRequests.length > 0);
+  assert.equal(historyRequests.length, historicalRequestsDuringNavigation.length + 5);
+  for (const request of historyRequests) {
+    const historyUrl = new URL(request.url);
+    assert.equal(
+      historyUrl.pathname,
+      `/api/runs/${encodeURIComponent(browserRunId)}/events/history`,
+    );
+    assert.deepEqual([...historyUrl.searchParams.keys()], ["before", "snapshot"]);
+    assert.equal(Number(historyUrl.searchParams.get("snapshot")), historySnapshot);
+  }
   for (const request of eventRequests) {
     const eventUrl = new URL(request.url);
     assert.equal(
@@ -1506,8 +2124,13 @@ try {
     liveReadErrors.map(({ status }) => status),
     [503, 503],
   );
+  assert.deepEqual(
+    historyReadErrors.map(({ status }) => status),
+    [503],
+  );
   assert.deepEqual(blockedExternalRequests, []);
   assert.deepEqual(browserErrors, []);
+  assert.equal((await page.bodyText()).includes(HISTORICAL_EVENT_SENTINEL), false);
 
   const projects = runtime.service.listProjects();
   const runs = runtime.service.listRuns();
@@ -1546,7 +2169,31 @@ try {
           terminal: heldEventTerminal,
           selectionPreserved: true,
         },
+        historicalEventNavigation: {
+          pinnedRevision: historySnapshot,
+          firstPageRange: firstHistoryRange,
+          pageReplacement: true,
+          retryPreservedPage: true,
+          maximumPages: 4,
+          historicalEvidenceAnchor: historicalContextEvidenceHref,
+          activeLivePollCancelled: historyOpenLivePollOutcome,
+          livePollingPaused: true,
+          livePollingResumed: true,
+          singleFlightContended: true,
+          lateSuccessRejected: lateHistorySuccessRejected,
+          focusRestored: true,
+          payloadPrivate: true,
+          durableStateUnchanged: true,
+          heldRequests: {
+            hidden: hiddenHistoryReleaseOutcome,
+            close: closeHistoryReleaseOutcome,
+            selection: selectionHistoryReleaseOutcome,
+            statePreserved: true,
+          },
+          requests: historyRequests.length,
+        },
         controlledReadFailures: liveReadErrors.length,
+        controlledHistoryReadFailures: historyReadErrors.length,
         eventRecoveryDelayMs: recoveryDelayMs,
         evidenceAnchor: contextEvidenceHref,
         repositoryStatusRequests: repositoryStatusRequests.length,
@@ -1560,6 +2207,8 @@ try {
     )}\n`,
   );
 } finally {
+  await finishHeldBrowserHistoryRequest?.().catch(() => undefined);
+  finishHeldBrowserHistoryRequest = undefined;
   await finishHeldBrowserEventPoll?.().catch(() => undefined);
   finishHeldBrowserEventPoll = undefined;
   releaseProviderResponse?.();

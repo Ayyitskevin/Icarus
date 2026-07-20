@@ -23,7 +23,11 @@ import {
 const cleanups: Array<() => Promise<void>> = [];
 
 interface TestDatabase {
-  prepare(sql: string): { run(...parameters: unknown[]): unknown };
+  prepare(sql: string): {
+    run(...parameters: unknown[]): unknown;
+    get(...parameters: unknown[]): unknown;
+    all(...parameters: unknown[]): unknown[];
+  };
   close(): void;
 }
 
@@ -49,6 +53,19 @@ async function postJson(url: string, value: unknown): Promise<Response> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(value),
   });
+}
+
+function persistenceSnapshot(database: TestDatabase): Record<string, readonly unknown[]> {
+  return {
+    repositories: database.prepare("SELECT * FROM repositories ORDER BY id").all(),
+    projects: database.prepare("SELECT * FROM projects ORDER BY id").all(),
+    runs: database.prepare("SELECT * FROM runs ORDER BY id").all(),
+    events: database.prepare("SELECT * FROM run_events ORDER BY id").all(),
+    approvals: database.prepare("SELECT * FROM approvals ORDER BY id").all(),
+    operations: database.prepare("SELECT * FROM operations ORDER BY id").all(),
+    checkpoints: database.prepare("SELECT * FROM checkpoints ORDER BY run_id").all(),
+    sequences: database.prepare("SELECT * FROM sqlite_sequence ORDER BY name").all(),
+  };
 }
 
 async function rawRequest(
@@ -402,12 +419,13 @@ describe("loopback local workspace API", () => {
   test("serves bounded coherent run snapshots without decoding private event payloads", async () => {
     const fixture = await createFixtureRepository();
     cleanups.push(fixture.cleanup);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
     const workspaceDist = path.join(fixture.root, "workspace-dist");
     await mkdir(workspaceDist);
     await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
-    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    let runtime = await createIcarusRuntime(fixture.stateRoot);
     cleanups.push(async () => runtime.close());
-    const server = await startWorkspaceServer(
+    let server = await startWorkspaceServer(
       { runtime, stateRoot: fixture.stateRoot, workspaceDist },
       0,
     );
@@ -465,6 +483,7 @@ describe("loopback local workspace API", () => {
         "2026-07-20T12:00:00.000Z",
       );
     }
+    const persistenceBefore = persistenceSnapshot(database);
     database.close();
 
     const selected = await responseJson(await fetch(`${server.url}/api/runs/${runId}`));
@@ -490,6 +509,130 @@ describe("loopback local workspace API", () => {
       timelineTotal: 206,
     });
     expect(JSON.stringify(workspaceRun)).not.toContain(privateSentinel);
+
+    const newestHistoryResponse = await fetch(
+      `${server.url}/api/runs/${runId}/events/history?snapshot=206&before=207`,
+    );
+    expect(newestHistoryResponse.status).toBe(200);
+    const newestHistory = await responseJson(newestHistoryResponse);
+    expect(Object.keys(newestHistory).sort()).toEqual(
+      ["runId", "before", "snapshot", "nextBefore", "hasMore", "events"].sort(),
+    );
+    expect(newestHistory).toMatchObject({
+      runId,
+      before: 207,
+      snapshot: 206,
+      nextBefore: 143,
+      hasMore: true,
+    });
+    const newestHistoryEvents = newestHistory.events as Array<Record<string, unknown>>;
+    expect(newestHistoryEvents).toHaveLength(64);
+    expect(newestHistoryEvents.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 64 }, (_, index) => index + 143),
+    );
+    expect(Object.keys(newestHistoryEvents[0] ?? {}).sort()).toEqual(
+      ["sequence", "type", "label", "evidenceSection", "timestamp"].sort(),
+    );
+    expect(JSON.stringify(newestHistory)).not.toContain(privateSentinel);
+    expect(JSON.stringify(newestHistory)).not.toContain("payload");
+    expect(JSON.stringify(newestHistory)).not.toContain("createdAt");
+
+    const nextHistory = await responseJson(
+      await fetch(
+        `${server.url}/api/runs/${runId}/events/history?before=${String(
+          newestHistory.nextBefore,
+        )}&snapshot=206`,
+      ),
+    );
+    expect(nextHistory).toMatchObject({
+      runId,
+      before: 143,
+      snapshot: 206,
+      nextBefore: 79,
+      hasMore: true,
+    });
+    expect(
+      (nextHistory.events as Array<{ sequence: number }>).map((event) => event.sequence),
+    ).toEqual(Array.from({ length: 64 }, (_, index) => index + 79));
+
+    const precedingVisibleTail = await responseJson(
+      await fetch(`${server.url}/api/runs/${runId}/events/history?before=7&snapshot=206`),
+    );
+    expect(precedingVisibleTail).toMatchObject({
+      runId,
+      before: 7,
+      snapshot: 206,
+      nextBefore: 1,
+      hasMore: false,
+    });
+    expect(
+      (precedingVisibleTail.events as Array<{ sequence: number }>).map((event) => event.sequence),
+    ).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(JSON.stringify(precedingVisibleTail)).not.toContain(privateSentinel);
+    expect(JSON.stringify(precedingVisibleTail)).not.toContain("not-json");
+
+    const pinnedHistory = await responseJson(
+      await fetch(`${server.url}/api/runs/${runId}/events/history?before=151&snapshot=150`),
+    );
+    expect(pinnedHistory).toMatchObject({
+      runId,
+      before: 151,
+      snapshot: 150,
+      nextBefore: 87,
+      hasMore: true,
+    });
+    expect((pinnedHistory.events as Array<{ sequence: number }>).at(-1)?.sequence).toBe(150);
+
+    for (const query of [
+      "",
+      "?before=207",
+      "?snapshot=206",
+      "?before=&snapshot=206",
+      "?before=0&snapshot=206",
+      "?before=-1&snapshot=206",
+      "?before=0.5&snapshot=206",
+      "?before=0207&snapshot=206",
+      "?before=2e2&snapshot=206",
+      "?before=9007199254740992&snapshot=206",
+      "?before=207&snapshot=9007199254740992",
+      "?before=207&before=207&snapshot=206",
+      "?before=207&snapshot=206&snapshot=206",
+      "?before=207&snapshot=206&extra=1",
+      "?before=208&snapshot=206",
+      "?before=207&snapshot=207",
+    ]) {
+      const invalidHistory = await fetch(`${server.url}/api/runs/${runId}/events/history${query}`);
+      expect(invalidHistory.status).toBe(422);
+    }
+    const missingHistory = await fetch(
+      `${server.url}/api/runs/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/events/history?before=2&snapshot=1`,
+    );
+    expect(missingHistory.status).toBe(404);
+    const forbiddenHistoryPost = await postJson(
+      `${server.url}/api/runs/${runId}/events/history?before=207&snapshot=206`,
+      {},
+    );
+    expect(forbiddenHistoryPost.status).toBe(404);
+
+    await server.close();
+    runtime.close();
+    runtime = await createIcarusRuntime(fixture.stateRoot);
+    server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+    expect(
+      await responseJson(
+        await fetch(`${server.url}/api/runs/${runId}/events/history?before=207&snapshot=206`),
+      ),
+    ).toEqual(newestHistory);
+
+    const observer = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    const persistenceAfter = persistenceSnapshot(observer);
+    observer.close();
+    expect(persistenceAfter).toEqual(persistenceBefore);
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
     expect(() => runtime.service.history(runId)).toThrowError(
       expect.objectContaining({ code: "DATABASE_ERROR" }),
     );

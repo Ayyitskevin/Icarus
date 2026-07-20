@@ -529,6 +529,60 @@ pre {
   margin-top: 0.5rem;
 }
 
+.history-launch span {
+  flex: 1;
+}
+
+.history-panel {
+  margin: 1rem 0;
+  border: 1px solid rgb(118 183 255 / 38%);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: rgb(12 27 43 / 45%);
+}
+
+.history-panel__heading,
+.history-panel__navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.history-panel__heading h4,
+.history-panel__heading .eyebrow,
+.history-panel__notice,
+.history-panel__facts,
+.history-panel__error {
+  margin-bottom: 0;
+}
+
+.history-panel__notice {
+  margin-top: 1rem;
+  color: #b9d9ff;
+}
+
+.history-panel__error {
+  margin-top: 1rem;
+}
+
+.history-panel__navigation {
+  margin-top: 0.75rem;
+}
+
+.timeline--historical {
+  overflow-y: auto;
+  max-height: 32rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.timeline--historical li > p {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -701,6 +755,10 @@ footer p {
   .run-toolbar,
   .repository-status__actions,
   .live-refresh__error,
+  .history-launch,
+  .history-panel__heading,
+  .history-panel__navigation,
+  .history-panel__error,
   .timeline li > div {
     align-items: stretch;
     flex-direction: column;
