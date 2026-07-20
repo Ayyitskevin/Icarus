@@ -499,6 +499,7 @@ export class IcarusService {
 
   async resume(runId: string, signal?: AbortSignal): Promise<RunRecord> {
     return this.#leases.withLease(runId, async () => {
+      this.#store.recordResumeRequested(runId);
       this.#store.markStartedOperationsInterrupted(runId);
       let run = this.#store.getRun(runId);
       if (run.state === "failed") {

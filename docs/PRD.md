@@ -28,7 +28,9 @@ roll it back, or restore the recorded checkpoint.
 
 ## Functional requirements
 
-1. Register a canonical local Git repository and create an Icarus project.
+1. Before creating or opening the requested state root, reject lexical or
+   canonical containment between it and the repository. Then register the
+   canonical local Git repository and create an Icarus project.
 2. Persist project checks, sandbox limits, and run ceilings. Milestone 1 path,
    network, shell, and approval policy is fixed host policy, not project data.
 3. Start a run with a task, existing tracked target, provider, model, and bounded
@@ -51,15 +53,18 @@ roll it back, or restore the recorded checkpoint.
 12. Reject absolute paths, traversal, symlink/hardlink targets, protected paths,
     binaries, non-unique matches, creates/deletes/mode changes, stale hashes, and
     proposals over the configured byte ceiling.
-13. Apply the replacement atomically.
+13. Apply the replacement atomically from a private temporary outside the Git
+    worktree, so an interrupted pre-rename write cannot add an unreviewed path.
 14. Run only exact project checks inside a digest-pinned, no-network, read-only
     Docker sandbox with no capabilities, no host secrets, a timeout,
-    cancellation, resource limits, and bounded/redacted output. Never fall back
-    to host execution.
+    cancellation, resource limits, and bounded/redacted output. A timed-out or
+    cancelled command cannot pass merely by trapping the signal and exiting
+    zero. Never fall back to host execution.
 15. Verify the changed-file set equals the approved target and stays under the
     file ceiling.
 16. Persist diff, check evidence, provider usage, state transitions, and a
-    restorable checkpoint.
+    restorable checkpoint. Retain every bounded verification attempt and its
+    diff in append-only history even when the latest run snapshot is replaced.
 17. Stop in `awaiting_review`; failed checks remain reviewable but cannot be
     accepted. Completion requires a second human decision, passing checks, and
     a fresh match between live worktree bytes/path set/diff and the reviewed
@@ -89,7 +94,8 @@ Milestone 1 host policy. Unknown remote pricing is a hard stop.
 - Deterministic tests do not call paid or installed models.
 - Secrets are environment-only, redacted from errors/evidence, and recognizable
   credential material in successful provider output is discarded before
-  proposal persistence.
+  proposal persistence. Known credentials reflected by thrown transport errors
+  are sanitized before the error crosses the provider adapter boundary.
 - Linux is the supported Milestone 1 platform.
 
 ## Explicit non-goals
@@ -104,7 +110,11 @@ backend-as-a-service primitives, and distributed execution.
 - A fixture golden path completes in the sandbox with the source checkout and
   source Git metadata unchanged.
 - A traversal or symlink proposal is rejected before write.
+- Repository/state overlap is rejected before the requested state root is
+  created.
+- A timed-out check is failed even if it handles termination and exits zero.
 - A failing provider call leaves a resumable run with an audit event.
+- Multiple verification attempts remain independently inspectable in history.
 - Rollback restores the baseline bytes; restore recreates the approved bytes.
 - Formatting, lint, type checking, unit/integration tests, security checks, and
   fixture validation all pass in CI.

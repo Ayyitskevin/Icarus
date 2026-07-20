@@ -200,7 +200,10 @@ describe("CLI lifecycle across process restarts", () => {
 
     const history = jsonOutput<{
       readonly approvals: readonly { readonly kind: string; readonly decision: string }[];
-      readonly events: readonly { readonly type: string }[];
+      readonly events: readonly {
+        readonly type: string;
+        readonly payload: Record<string, unknown>;
+      }[];
     }>(await runCli(fixture.stateRoot, ["run", "history", planned.id]));
     expect(history.approvals.map(({ kind, decision }) => `${kind}:${decision}`)).toEqual([
       "plan:approve",
@@ -223,6 +226,19 @@ describe("CLI lifecycle across process restarts", () => {
         "review.accepted",
       ]),
     );
+    const verificationAttempts = history.events.filter(
+      (event) => event.type === "verification.completed",
+    );
+    expect(verificationAttempts).toHaveLength(2);
+    for (const attempt of verificationAttempts) {
+      expect(attempt.payload.diff).toContain("+Hello, Icarus!");
+      expect(attempt.payload.verification).toEqual(
+        expect.objectContaining({
+          outcome: "passed",
+          checks: [expect.objectContaining({ checkId: "verify", outcome: "passed" })],
+        }),
+      );
+    }
     expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
   }, 180_000);
 

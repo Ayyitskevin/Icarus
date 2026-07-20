@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  assertRegistrationStateSeparation,
   createIcarusRuntime,
   createProviderConfig,
   DEFAULT_CEILING,
@@ -147,6 +148,17 @@ function stateRoot(): string {
       ? path.join(stateHome, "icarus")
       : path.join(os.homedir(), ".local", "state", "icarus"),
   );
+}
+
+function registrationPathForPreflight(args: readonly string[]): string | undefined {
+  const [group, action, ...rest] = args;
+  if (group !== "repo" || action !== "add") {
+    return undefined;
+  }
+  const options = parseOptions(rest, ["--name", "--path"]);
+  noPositionals(options);
+  required(options, "--name");
+  return required(options, "--path");
 }
 
 function publicRun(run: RunRecord): Record<string, unknown> {
@@ -432,8 +444,14 @@ async function main(): Promise<void> {
   process.once("SIGTERM", abort);
   let runtime: IcarusRuntime | undefined;
   try {
-    runtime = await createIcarusRuntime(stateRoot());
-    await dispatch(runtime, process.argv.slice(2), controller.signal);
+    const args = process.argv.slice(2);
+    const root = stateRoot();
+    const registrationPath = registrationPathForPreflight(args);
+    if (registrationPath !== undefined) {
+      await assertRegistrationStateSeparation(root, registrationPath);
+    }
+    runtime = await createIcarusRuntime(root);
+    await dispatch(runtime, args, controller.signal);
   } catch (error) {
     const code = error instanceof IcarusError ? error.code : "INTERNAL_ERROR";
     const message = error instanceof Error ? error.message : String(error);

@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import net from "node:net";
 import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
@@ -16,6 +17,21 @@ describe("real Docker containment", () => {
   test("runs with no network/capabilities/host environment and leaves no managed container", async () => {
     const fixture = await createFixtureRepository();
     cleanups.push(fixture.cleanup);
+    const hostLoopback = net.createServer((socket) => socket.destroy());
+    await new Promise<void>((resolve, reject) => {
+      hostLoopback.once("error", reject);
+      hostLoopback.listen(0, "127.0.0.1", resolve);
+    });
+    cleanups.push(
+      () =>
+        new Promise<void>((resolve, reject) =>
+          hostLoopback.close((error) => (error === undefined ? resolve() : reject(error))),
+        ),
+    );
+    const hostAddress = hostLoopback.address();
+    if (hostAddress === null || typeof hostAddress === "string") {
+      throw new Error("Host loopback probe did not bind");
+    }
     const stateRoot = path.join(fixture.root, "sandbox-state");
     const controllerHome = path.join(stateRoot, "controller-home");
     const runsRoot = path.join(stateRoot, "runs");
@@ -36,8 +52,10 @@ describe("real Docker containment", () => {
       "try:\n pathlib.Path('/workspace/src/greeting.txt').write_text('escape')\n raise AssertionError('workspace writable')\nexcept OSError:\n pass",
       "try:\n pathlib.Path('/icarus-host-write').write_text('escape')\n raise AssertionError('root writable')\nexcept OSError:\n pass",
       "pathlib.Path('/tmp/icarus-probe').write_text('ok')",
-      "sock = socket.socket(); sock.settimeout(0.25)",
-      "assert sock.connect_ex(('1.1.1.1', 53)) != 0",
+      `for host, port in [('1.1.1.1', 53), ('127.0.0.1', ${hostAddress.port}), ('100.64.0.1', ${hostAddress.port})]:`,
+      " sock = socket.socket(); sock.settimeout(0.25)",
+      " assert sock.connect_ex((host, port)) != 0",
+      " sock.close()",
       "print('containment-ok')",
     ].join("\n");
     const previousSentinel = process.env.ICARUS_HOST_SENTINEL;

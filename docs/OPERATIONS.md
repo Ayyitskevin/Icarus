@@ -26,11 +26,16 @@ never chmods an unowned/general-purpose root. Do not place state inside a
 registered repository or place a repository inside state. Avoid network,
 shared, or synced filesystems for SQLite and private worktrees.
 
+For `repo add`, repository/state lexical and canonical overlap is checked
+before Icarus creates or opens the requested state root. A rejected nested path
+must therefore leave both the repository and prospective state path untouched.
+
 ## Preflight
 
 1. Confirm the repository is a non-bare, clean Git worktree with at least one
-   commit. The configured base ref must resolve to the source HEAD when a run is
-   prepared and again before plan approval.
+   commit. Confirm the prospective state root and repository do not contain one
+   another. The configured base ref must resolve to the source HEAD when a run
+   is prepared and again before plan approval.
 2. Register only offline verification commands that can run against a read-only
    tracked-file export with temporary writes confined to `/tmp`.
 3. Choose a provider whose privacy class permits the selected repository.
@@ -50,6 +55,9 @@ shared, or synced filesystems for SQLite and private worktrees.
 - OpenAI defaults to `https://api.openai.com/v1`, reads `OPENAI_API_KEY`, and
   sends `POST /responses` with `store: false`, no tools, and no redirects.
   Remote OpenAI credentials are restricted to `api.openai.com:443`.
+- Provider transport exceptions are converted to bounded Icarus errors and
+  sanitized with the adapter's known credential before they can reach state or
+  CLI output.
 - Model identifiers are explicit. Icarus never silently substitutes a model.
 
 ## Runbook
@@ -59,7 +67,9 @@ shared, or synced filesystems for SQLite and private worktrees.
 - `run status <run-id>` shows public state, context provenance, plan, usage,
   diff, and latest verification; private cache/worktree paths are intentionally
   omitted from CLI output.
-- `run history <run-id>` shows append-only events and approval records.
+- `run history <run-id>` shows append-only events and approval records. Every
+  completed verification event contains that attempt's bounded check evidence
+  and diff; later restore/reverify attempts do not erase earlier evidence.
 - `run approve-egress <run-id> --context-sha <sha> --actor <actor>` binds exact
   remote context release.
 - `run approve <run-id> --plan-sha <sha> --actor <actor>` revalidates the source
@@ -85,6 +95,11 @@ automatically deletes artifacts, caches, or worktrees. Missing or drifted privat
 state is preserved for investigation; Milestone 1 has no reconstruction or
 cleanup command.
 
+Atomic replacement writes its pre-rename temporary in the Icarus-private run
+directory, not the Git worktree. A failed write or rename is cleaned best-effort;
+even a process death cannot introduce an extra worktree path that blocks
+deterministic resume or rollback.
+
 ## Backup and recovery
 
 Stop active Icarus CLI processes. Copy `icarus.sqlite3` together with any
@@ -109,6 +124,50 @@ outcome. Verification evidence records exact argv, exit status/signal, duration,
 timeout message, truncation, and redacted stdout/stderr. Empty output is never
 proof; exit status, containment, changed-path, diff, and checkpoint assertions
 are required.
+
+A check is failed if it timed out or was cancelled, even if it traps termination
+and eventually exits zero. The historical event evidence and the latest run
+snapshot should agree on the current attempt while preserving earlier attempts.
+
+## Repository automation and release hold
+
+The inherited `.github/workflows/opencode.yml` is outside the local runtime but
+inside the repository's security posture. It was preserved from remote commit
+`0fb3476787573c1285974c2d53cfa28ec2233fc0`; see ADR 0010. Do not change,
+disable, or bless it without Kevin's explicit decision. Do not treat its current
+upstream collaborator check as a repository-owned gate, and do not claim M0/M1
+security completion while the decision remains pending.
+
+Hosted CI is separate evidence. YAML parsing and a local `pnpm check` do not
+prove that GitHub accepted or executed the workflow. For every candidate release,
+query the exact head and require a successful `ci` run:
+
+```text
+git rev-parse HEAD
+gh workflow list -R Ayyitskevin/Icarus
+gh run list -R Ayyitskevin/Icarus --workflow ci.yml --commit "$(git rev-parse HEAD)"
+gh api "repos/Ayyitskevin/Icarus/commits/$(git rev-parse HEAD)/check-runs"
+```
+
+## Re-runnable adversarial evidence
+
+The durable review evidence is the named test source plus fresh command output;
+do not replace it with a prose claim. Run these from a clean candidate tree and
+record the observed exit status and counts in `docs/PLANS.md`:
+
+```text
+pnpm exec vitest run tests/integration/security-regressions.test.ts
+pnpm exec vitest run tests/integration/docker-containment.test.ts
+pnpm exec vitest run tests/unit/git-file-safety.test.ts tests/unit/sandbox-wire.test.ts
+pnpm eval
+pnpm check
+pnpm audit --audit-level high
+git diff --check
+```
+
+The evaluation report is generated at `.local/eval-report.json` and is ignored
+by Git. Preserve command output in the release handoff; never commit provider
+credentials, raw secret-bearing output, or private repository content.
 
 ## Upgrade policy
 

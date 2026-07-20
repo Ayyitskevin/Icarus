@@ -17,16 +17,21 @@ handlers.
 ## Dependency direction
 
 ```text
-CLI -> application service -> domain ports
-                              |-- SQLite run store
+CLI -> application service -> injected collaborators
+                              |-- concrete SQLite run store
+                              |-- concrete artifact and Git controllers
                               |-- deterministic context assembler
-                              |-- Ollama / OpenAI provider adapters
-                              |-- private Git cache/worktree adapter
-                              `-- Docker sandbox check runner
+                              |-- Ollama / OpenAI provider port and adapters
+                              `-- Docker check-runner port and adapter
 ```
 
 The domain does not import CLI code. Provider-specific JSON ends at the adapter.
 Git and process adapters receive constructed argument arrays, never shell text.
+The current service injects concrete `IcarusStore`, `ArtifactStore`, and
+`GitController` instances. That is a testable composition boundary, not a claim
+that interchangeable storage, artifact, or Git ports already exist. Extract an
+interface only when a second implementation or isolated contract test requires
+one.
 
 ## State and feedback
 
@@ -35,10 +40,18 @@ Authoritative control state lives in one SQLite database under `ICARUS_HOME`
 runs, append-only events, check evidence, provider usage, and checkpoints. It
 does not store credentials or environment snapshots.
 
+The run row retains the latest verification for efficient status reads. Every
+verification attempt also appends its complete bounded evidence and diff to the
+event stream, so restore/reverify does not erase the earlier attempt from
+history.
+
 Operator feedback lives in CLI output and the same durable event/evidence
 records. Provider and command output is bounded and redacted before storage.
 
-The registered source repository is read-only from Icarus's perspective and
+Before `repo add` creates or opens the state root, the CLI resolves the existing
+repository and the prospective state path through their nearest existing
+ancestors. It rejects either path containing the other. The registered source
+repository is then read-only from Icarus's perspective and
 never owns an Icarus worktree. A copied Git cache and mutable worktree live only
 below `ICARUS_HOME/runs/<run-id>/`, whose ownership is proved by generated IDs,
 path containment, and the persisted run record.
@@ -81,8 +94,10 @@ unexpected bytes are preserved and fail closed.
 
 ## Golden-path sequence
 
-1. Registration canonicalizes a clean repository, stores its device/inode, and
-   project creation stores a syntactically valid base ref and exact check arrays.
+1. Registration first rejects lexical or canonical repository/state overlap
+   without creating the requested state root. It then canonicalizes a clean
+   repository, stores its device/inode, and project creation stores a
+   syntactically valid base ref and exact check arrays.
 2. `run plan` first persists a `preparing` intent. It then verifies repository
    identity, resolves the base ref to the clean source HEAD, and immediately
    persists that immutable commit before further work.
@@ -100,11 +115,15 @@ unexpected bytes are preserved and fail closed.
    approved target preimage.
 7. The provider returns one strict path/hash/find/replace edit. Icarus discards
    recognizable credential material before persistence, then validates a
-   unique match and atomically applies it.
+   unique match and atomically applies it. The pre-rename temporary is created
+   in the Icarus-private run directory outside the Git worktree, so a process
+   death cannot strand an extra changed path inside the review surface.
 8. Icarus exports only tracked worktree files to a private snapshot and runs
    exact registered checks in a digest-pinned Docker container with network
-   disabled. It verifies the changed-file set and stores a
-   binary-capable Git diff and checkpoint, and stops at `awaiting_review`.
+   disabled. A timeout or cancellation cannot pass even when the child traps the
+   signal and exits zero. Icarus verifies the changed-file set, stores a
+   binary-capable Git diff and checkpoint, appends the full bounded verification
+   attempt to history, and stops at `awaiting_review`.
 9. Review approval rereads the live target, changed-path set, diff, source HEAD,
    and checkpoint binding; it is refused unless those still match passing
    evidence. It then marks the run complete without committing, pushing, or
@@ -141,7 +160,9 @@ OpenAI request shape follows the official [Responses API reference](https://deve
 No provider SDK is required for this narrow contract. Tests exercise both
 adapters against deterministic HTTP contracts; an OpenAI lifecycle test uses
 the production adapter from exact egress approval through review without making
-a paid request. Tests do not substitute a fake production adapter.
+a paid request. Known credentials are supplied to transport-error sanitization,
+so a thrown HTTP transport error cannot copy a bearer value into durable state
+or CLI output. Tests do not substitute a fake production adapter.
 
 ## Context boundary
 
@@ -156,7 +177,8 @@ evidence.
 - Remote-context approval gates non-loopback egress, plan approval gates the
   first write/edit call, and human review gates completion.
 - Provider output with recognizable credential material fails before plan/edit
-  persistence; known credentials and command/error output are redacted.
+  persistence; known credentials, including credentials reflected by thrown
+  transport errors, and command/error output are redacted.
 - A proposal is one exact replacement in an existing tracked UTF-8 text file.
 - Protected names include `.git`, `.env*`, credential/key material, Icarus
   metadata, and repository rule files.
@@ -168,7 +190,8 @@ evidence.
   and uses a locally present digest-pinned image, `--pull=never`, non-root
   user, read-only root, all capabilities dropped, no-new-privileges, no host
   sockets/secrets, PID/memory/CPU limits, timeout, cancellation, truncation, and
-  redaction. Preflight failure is a hard verification failure.
+  redaction. Timeout, cancellation, or preflight failure is a hard verification
+  failure regardless of the child process's eventual exit code.
 - Network access for providers is separate from command network permission.
 - Git subprocesses are fixed controller operations with system/global config,
   hooks, filters, pagers, prompts, external diffs, and network fetch disabled.
@@ -177,8 +200,9 @@ evidence.
 
 - **State:** SQLite owns run truth; worktree bytes and Git status prove mutation
   truth.
-- **Feedback:** append-only events, check evidence, diff, and CLI status expose
-  progress and failures.
+- **Feedback:** append-only events retain every complete bounded verification
+  attempt and diff; latest check evidence and CLI status expose current progress
+  without erasing earlier failures.
 - **Deletion coupling:** removing SQLite, a private cache, or a worktree destroys local run
   recovery, so cleanup is never automatic in Milestone 1.
 - **Timing:** run/operation intent is persisted before bounded external actions;

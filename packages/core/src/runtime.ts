@@ -15,6 +15,59 @@ export interface IcarusRuntime {
 
 const STATE_MARKER = '{"application":"icarus","format":1}\n';
 
+function isStrictlyOutside(base: string, candidate: string): boolean {
+  const relative = path.relative(base, candidate);
+  return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+}
+
+async function canonicalProspectivePath(requestedPath: string): Promise<string> {
+  let current = path.resolve(requestedPath);
+  const missing: string[] = [];
+  while (true) {
+    try {
+      const existing = await realpath(current);
+      return path.join(existing, ...missing.reverse());
+    } catch (error) {
+      if (
+        typeof error !== "object" ||
+        error === null ||
+        !("code" in error) ||
+        (error as NodeJS.ErrnoException).code !== "ENOENT"
+      ) {
+        throw error;
+      }
+      const parent = path.dirname(current);
+      invariant(parent !== current, "UNSAFE_STATE_ROOT", "State root has no existing ancestor");
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+export async function assertRegistrationStateSeparation(
+  requestedStateRoot: string,
+  repositoryPath: string,
+): Promise<void> {
+  const requestedRepository = path.resolve(repositoryPath);
+  const requestedRoot = path.resolve(requestedStateRoot);
+  invariant(
+    isStrictlyOutside(requestedRepository, requestedRoot) &&
+      isStrictlyOutside(requestedRoot, requestedRepository),
+    "STATE_REPOSITORY_OVERLAP",
+    "Icarus state and registered repositories must not contain one another",
+  );
+  const [canonicalRepository, prospectiveStateRoot] = await Promise.all([
+    canonicalProspectivePath(requestedRepository),
+    canonicalProspectivePath(requestedRoot),
+  ]);
+  invariant(
+    isStrictlyOutside(canonicalRepository, prospectiveStateRoot) &&
+      isStrictlyOutside(prospectiveStateRoot, canonicalRepository),
+    "STATE_REPOSITORY_OVERLAP",
+    "Icarus state and registered repositories must not contain one another",
+  );
+}
+
 async function prepareStateRoot(requestedRoot: string): Promise<string> {
   const root = path.resolve(requestedRoot);
   invariant(root !== path.parse(root).root, "UNSAFE_STATE_ROOT", "State root must be dedicated");

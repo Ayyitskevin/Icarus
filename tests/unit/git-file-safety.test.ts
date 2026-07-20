@@ -1,4 +1,14 @@
-import { chmod, link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -88,5 +98,37 @@ describe("private worktree file boundaries", () => {
       "HARDLINK_DENIED",
     );
     await expectCode(git.readRegularUtf8File(worktree, "src/executable.txt", 1024), "MODE_DENIED");
+  });
+
+  it("creates atomic-write temporaries outside the worktree", async () => {
+    const { root, git, worktree } = await fixture();
+    const target = path.join(worktree, "src", "greeting.txt");
+    await writeFile(target, "before\n", { mode: 0o644 });
+    await chmod(root, 0o500);
+    try {
+      await expect(git.atomicWriteUtf8(worktree, "src/greeting.txt", "after\n")).rejects.toThrow();
+    } finally {
+      await chmod(root, 0o700);
+    }
+
+    expect(await readFile(target, "utf8")).toBe("before\n");
+    expect((await readdir(root)).filter((name) => name.startsWith(".icarus-write-"))).toEqual([]);
+  });
+
+  it("cleans an outside-worktree temporary when rename fails", async () => {
+    const { root, git, worktree } = await fixture();
+    const target = path.join(worktree, "src", "greeting.txt");
+    const targetParent = path.dirname(target);
+    await writeFile(target, "before\n", { mode: 0o644 });
+    await chmod(targetParent, 0o500);
+    try {
+      await expect(git.atomicWriteUtf8(worktree, "src/greeting.txt", "after\n")).rejects.toThrow();
+    } finally {
+      await chmod(targetParent, 0o700);
+    }
+
+    expect(await readFile(target, "utf8")).toBe("before\n");
+    expect((await readdir(targetParent)).filter((name) => name.startsWith(".icarus-"))).toEqual([]);
+    expect((await readdir(root)).filter((name) => name.startsWith(".icarus-write-"))).toEqual([]);
   });
 });

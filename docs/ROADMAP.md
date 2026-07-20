@@ -2,19 +2,24 @@
 
 ## M0 — Foundation
 
-Status: complete (2026-07-19).
+Status: implementation present; release hold (2026-07-19).
 
 Deliver documentation contracts, workspace tooling, CI, security checks, and
 the versioned evaluation fixture catalog.
 
+Release requires a successful hosted `ci` run at the exact candidate commit and
+Kevin's explicit decision on the inherited OpenCode workflow in ADR 0010.
+
 ## M1 — Golden path
 
-Status: complete (2026-07-19).
+Status: repaired candidate passes the local gate; release hold (2026-07-19).
 
 Deliver one planned, approved, isolated, verified, reviewable, resumable, and
 reversible one-file change with Ollama and OpenAI adapters.
 
-Exit gate: every item in `docs/PLANS.md` Phase A-D is checked with evidence.
+Exit gate: every item in `docs/PLANS.md` Phase A-D and Repair continuation is
+checked with evidence, hosted `ci` is green at the exact candidate commit, and
+the ADR 0010 security hold is resolved.
 
 ## M2 — Context intelligence
 
@@ -38,6 +43,13 @@ Status: planned.
 
 Add stronger sandbox profiles, declared application commands, local preview,
 environment references, resource limits, and crash recovery drills.
+
+Add capability-aware provider routing only after task/context evaluation has a
+measured baseline. Route private/routine work to local models, ordinary reasoning
+to configured mid-cost APIs, and difficult planning/review to explicitly
+approved frontier models. Add Anthropic, xAI, GLM, and other adapters one at a
+time with capability metadata, pricing/privacy policy, and production-adapter
+contract tests; never silently substitute providers.
 
 ## M5 — Backend platform
 
@@ -64,5 +76,6 @@ remain human-gated and outside automatic dogfood.
 
 ## Next recommended slice
 
-After M1, add a read-only explanation run and its evaluation. It exercises richer
-context without widening filesystem or command authority.
+Close the M0/M1 repair, exact-head hosted-CI, and inherited-workflow security
+holds first. Then add a read-only explanation run and its evaluation. It
+exercises richer context without widening filesystem or command authority.

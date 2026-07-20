@@ -1,5 +1,18 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "currentMilestone": 1,
+  "requiredMeasures": [
+    "taskSuccess",
+    "testSuccess",
+    "incorrectEdits",
+    "contextRetrievalQuality",
+    "toolFailures",
+    "runtime",
+    "tokenUsage",
+    "apiCost",
+    "humanApprovalFrequency",
+    "rollbackSuccess"
+  ],
   "cases": [
     {
       "id": "add-feature-single-file",
@@ -7,11 +20,25 @@
       "repository": "repos/basic",
       "task": "tasks/add-feature.md",
       "target": "src/greeting.txt",
-      "expectedOutcome": "passed",
-      "requiredEvidence": ["exact_bytes", "one_changed_path", "passing_check", "source_unchanged"],
-      "minimumMilestone": 1,
-      "supported": true,
-      "evaluator": "exact_replacement",
+      "expectedOutcome": "completed",
+      "requiredCapability": "single_file_exact_replacement",
+      "plannedMilestone": 1,
+      "supportStatus": "supported",
+      "evaluator": "production_lifecycle",
+      "requiredEvidence": [
+        "full_run_completed",
+        "production_ollama_adapter_http",
+        "exact_target_bytes",
+        "one_changed_path",
+        "passing_check",
+        "source_unchanged",
+        "context_quality_measured",
+        "usage_measured",
+        "approval_history",
+        "rollback_success",
+        "restore_success"
+      ],
+      "expectedContextPaths": ["src/greeting.txt", "AGENTS.md", "README.md"],
       "baseline": "Hello, world!\n",
       "approved": "Hello, Icarus!\n"
     },
@@ -22,9 +49,12 @@
       "task": "tasks/fix-bug.md",
       "target": "src/greeting.txt",
       "expectedOutcome": "unsupported",
-      "requiredEvidence": ["multi_file_diff", "regression_check"],
-      "minimumMilestone": 2,
-      "supported": false,
+      "requiredCapability": "multi_file_edit",
+      "plannedMilestone": null,
+      "supportStatus": "unsupported",
+      "evaluator": "unsupported_contract",
+      "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
+      "futureEvidence": ["multi_file_diff", "regression_check"],
       "unsupportedReason": "Milestone 1 permits exactly one existing file"
     },
     {
@@ -34,9 +64,12 @@
       "task": "tasks/refactor-module.md",
       "target": "src/greeting.txt",
       "expectedOutcome": "unsupported",
-      "requiredEvidence": ["behavior_equivalence", "multi_file_diff"],
-      "minimumMilestone": 3,
-      "supported": false,
+      "requiredCapability": "multi_file_behavior_preserving_refactor",
+      "plannedMilestone": null,
+      "supportStatus": "unsupported",
+      "evaluator": "unsupported_contract",
+      "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
+      "futureEvidence": ["behavior_equivalence", "multi_file_diff"],
       "unsupportedReason": "Module-scale refactors are outside the one-replacement slice"
     },
     {
@@ -46,10 +79,18 @@
       "task": "tasks/update-schema.md",
       "target": "migrations/001_add_column.sql",
       "expectedOutcome": "rejected",
-      "requiredEvidence": ["protected_path_error", "zero_workspace_writes"],
-      "minimumMilestone": 1,
-      "supported": true,
-      "evaluator": "forbidden_target"
+      "expectedErrorCode": "PROTECTED_PATH",
+      "requiredCapability": "protected_target_rejection",
+      "plannedMilestone": 1,
+      "supportStatus": "supported",
+      "evaluator": "service_rejection",
+      "requiredEvidence": [
+        "service_error_code",
+        "zero_run_records",
+        "zero_provider_calls",
+        "zero_workspace_writes",
+        "source_unchanged"
+      ]
     },
     {
       "id": "repair-failing-test",
@@ -58,9 +99,12 @@
       "task": "tasks/repair-test.md",
       "target": "checks/verify.py",
       "expectedOutcome": "unsupported",
-      "requiredEvidence": ["reproduced_failure", "passing_regression"],
-      "minimumMilestone": 2,
-      "supported": false,
+      "requiredCapability": "diagnostic_target_selection",
+      "plannedMilestone": null,
+      "supportStatus": "unsupported",
+      "evaluator": "unsupported_contract",
+      "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
+      "futureEvidence": ["reproduced_failure", "passing_regression"],
       "unsupportedReason": "Milestone 1 does not diagnose or select a repair target"
     },
     {
@@ -70,9 +114,12 @@
       "task": "tasks/security-review.md",
       "target": "src/greeting.txt",
       "expectedOutcome": "unsupported",
-      "requiredEvidence": ["finding", "severity", "source_location"],
-      "minimumMilestone": 2,
-      "supported": false,
+      "requiredCapability": "read_only_security_findings",
+      "plannedMilestone": null,
+      "supportStatus": "unsupported",
+      "evaluator": "unsupported_contract",
+      "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
+      "futureEvidence": ["finding", "severity", "source_location"],
       "unsupportedReason": "Read-only review runs are deferred"
     },
     {
@@ -82,9 +129,12 @@
       "task": "tasks/explain-codebase.md",
       "target": "README.md",
       "expectedOutcome": "unsupported",
-      "requiredEvidence": ["provenance", "source_citations"],
-      "minimumMilestone": 2,
-      "supported": false,
+      "requiredCapability": "read_only_explanation",
+      "plannedMilestone": 2,
+      "supportStatus": "unsupported",
+      "evaluator": "unsupported_contract",
+      "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
+      "futureEvidence": ["provenance", "source_citations"],
       "unsupportedReason": "Read-only explanation runs are the next planned slice"
     },
     {
@@ -94,10 +144,18 @@
       "task": "tasks/forbidden-change.md",
       "target": "../escape",
       "expectedOutcome": "rejected",
-      "requiredEvidence": ["invalid_path_error", "zero_workspace_writes"],
-      "minimumMilestone": 1,
-      "supported": true,
-      "evaluator": "forbidden_target"
+      "expectedErrorCode": "INVALID_PATH",
+      "requiredCapability": "unsafe_target_rejection",
+      "plannedMilestone": 1,
+      "supportStatus": "supported",
+      "evaluator": "service_rejection",
+      "requiredEvidence": [
+        "service_error_code",
+        "zero_run_records",
+        "zero_provider_calls",
+        "zero_workspace_writes",
+        "source_unchanged"
+      ]
     },
     {
       "id": "recover-provider-failure",
@@ -105,12 +163,24 @@
       "repository": "repos/basic",
       "task": "tasks/recover-provider.md",
       "target": "src/greeting.txt",
-      "expectedOutcome": "passed",
-      "requiredEvidence": ["failed_state", "resume_state", "passing_verification"],
-      "minimumMilestone": 1,
-      "supported": true,
-      "evaluator": "vitest",
-      "testFile": "tests/integration/recovery-resume.test.ts"
+      "expectedOutcome": "recovered",
+      "requiredCapability": "provider_failure_resume",
+      "plannedMilestone": 1,
+      "supportStatus": "supported",
+      "evaluator": "provider_recovery",
+      "requiredEvidence": [
+        "production_ollama_adapter_http",
+        "provider_http_failure",
+        "failed_state",
+        "resume_state",
+        "run_resumed_event",
+        "passing_verification",
+        "source_unchanged",
+        "metrics_recorded"
+      ],
+      "expectedContextPaths": ["src/greeting.txt", "AGENTS.md", "README.md"],
+      "baseline": "Hello, world!\n",
+      "approved": "Hello, Icarus!\n"
     },
     {
       "id": "resume-interrupted-operation",
@@ -118,12 +188,22 @@
       "repository": "repos/basic",
       "task": "tasks/resume-interrupted.md",
       "target": "src/greeting.txt",
-      "expectedOutcome": "passed",
-      "requiredEvidence": ["interrupted_event", "conservative_charge", "explicit_resume"],
-      "minimumMilestone": 1,
-      "supported": true,
-      "evaluator": "vitest",
-      "testFile": "tests/unit/store.test.ts"
+      "expectedOutcome": "resumed",
+      "requiredCapability": "interrupted_operation_resume",
+      "plannedMilestone": 1,
+      "supportStatus": "supported",
+      "evaluator": "interrupted_resume",
+      "requiredEvidence": [
+        "store_backed_started_operation",
+        "interrupted_event",
+        "conservative_charge",
+        "explicit_resume_invocation",
+        "passing_verification",
+        "source_unchanged"
+      ],
+      "expectedContextPaths": ["src/greeting.txt", "AGENTS.md", "README.md"],
+      "baseline": "Hello, world!\n",
+      "approved": "Hello, Icarus!\n"
     }
   ]
 }

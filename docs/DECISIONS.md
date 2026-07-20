@@ -1,6 +1,6 @@
 # Decision index
 
-Accepted decisions for the current milestone:
+Decision records for the current milestone:
 
 | ADR | Decision | Status |
 | --- | --- | --- |
@@ -13,6 +13,7 @@ Accepted decisions for the current milestone:
 | [0007](adr/0007-fail-closed-docker-check-sandbox.md) | No-network Docker sandbox for pre-review checks | Accepted |
 | [0008](adr/0008-dedicated-state-root-and-run-leases.md) | Marker-owned private state root and per-run mutation leases | Accepted |
 | [0009](adr/0009-persisted-intent-and-conservative-reservations.md) | Preparing intent and conservative external-operation reservations | Accepted |
+| [0010](adr/0010-inherited-opencode-workflow-security-hold.md) | Inherited OpenCode workflow requires an operator security decision | Pending operator decision |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.

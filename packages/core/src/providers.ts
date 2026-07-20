@@ -1,4 +1,4 @@
-import { IcarusError, invariant } from "./errors.js";
+import { errorMessage, IcarusError, invariant } from "./errors.js";
 import {
   calculateReportedCost,
   parseProviderBaseUrl,
@@ -94,11 +94,19 @@ async function fetchJson(
   timeout.unref();
   const startedAt = performance.now();
   try {
-    const response = await fetchImplementation(url, {
-      ...init,
-      redirect: "manual",
-      signal: controller.signal,
-    });
+    let response: Response;
+    try {
+      response = await fetchImplementation(url, {
+        ...init,
+        redirect: "manual",
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw new IcarusError(
+        "PROVIDER_TRANSPORT_ERROR",
+        `Provider transport failed: ${sanitizeText(errorMessage(error), knownSecrets)}`,
+      );
+    }
     const body = await readBoundedBody(response);
     if (!response.ok) {
       throw new IcarusError(
@@ -128,7 +136,13 @@ async function fetchJson(
         "Provider request was interrupted",
       );
     }
-    throw error;
+    if (error instanceof IcarusError) {
+      throw error;
+    }
+    throw new IcarusError(
+      "PROVIDER_TRANSPORT_ERROR",
+      `Provider transport failed: ${sanitizeText(errorMessage(error), knownSecrets)}`,
+    );
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener("abort", onAbort);

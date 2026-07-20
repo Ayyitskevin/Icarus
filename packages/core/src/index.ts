@@ -7,7 +7,11 @@ export {
   planApprovalDigest,
 } from "./policy.js";
 export { createProviderConfig } from "./provider.js";
-export { createIcarusRuntime, type IcarusRuntime } from "./runtime.js";
+export {
+  assertRegistrationStateSeparation,
+  createIcarusRuntime,
+  type IcarusRuntime,
+} from "./runtime.js";
 export { IcarusService, type PlanRunInput } from "./service.js";
 export type {
   ApprovalRecord,

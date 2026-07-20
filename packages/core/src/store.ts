@@ -719,6 +719,18 @@ export class IcarusStore {
     );
   }
 
+  recordResumeRequested(runId: string): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const current = this.getRun(runId);
+      this.#appendEvent(runId, "resume.requested", {
+        state: current.state,
+        resumeState: current.resumeState,
+      });
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
   listApprovals(runId: string): ApprovalRecord[] {
     return (
       this.#database
@@ -854,6 +866,8 @@ export class IcarusStore {
         to: "awaiting_review",
         outcome: verification.outcome,
         diffSha256: verification.diffSha256,
+        diff,
+        verification,
       });
     });
     transaction();

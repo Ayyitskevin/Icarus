@@ -307,6 +307,25 @@ describe("Docker sandbox wire contract", () => {
     expect(calls.some((call) => call.argv[0] === "container" && call.argv[1] === "rm")).toBe(true);
   });
 
+  it("cannot pass a timed-out check that traps SIGTERM and exits zero", async () => {
+    const { evidence } = await runScenario(
+      {
+        imageConfig: { Volumes: null },
+        run: { delayMs: 1_000, sigtermExitCode: 0 },
+      },
+      { ceiling: { ...CEILING, commandTimeoutMs: 40 } },
+    );
+
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]).toMatchObject({
+      checkId: CHECK.id,
+      exitCode: 0,
+      signal: null,
+      outcome: "failed",
+    });
+    expect(evidence[0]?.stderr).toContain("exceeded its configured timeout");
+  });
+
   it("cancels a live check and performs cleanup without the aborted signal", async () => {
     const root = await makeRoot();
     const docker = await createRecordingDocker(root, {

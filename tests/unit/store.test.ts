@@ -146,6 +146,7 @@ describe("SQLite run persistence", () => {
       now: () => "2026-07-19T12:01:00.000Z",
       id: makeUnitIdGenerator(),
     });
+    reopened.recordResumeRequested(UNIT_RUN_ID);
     const interrupted = reopened.markStartedOperationsInterrupted(UNIT_RUN_ID);
     expect(interrupted.usage).toEqual({
       toolCalls: 1,
@@ -158,6 +159,14 @@ describe("SQLite run persistence", () => {
     expect(
       reopened.listEvents(UNIT_RUN_ID).filter((event) => event.type === "operation.interrupted"),
     ).toHaveLength(1);
+    expect(
+      reopened
+        .listEvents(UNIT_RUN_ID)
+        .filter(
+          (event) => event.type === "resume.requested" || event.type === "operation.interrupted",
+        )
+        .map((event) => event.type),
+    ).toEqual(["resume.requested", "operation.interrupted"]);
 
     expect(reopened.markStartedOperationsInterrupted(UNIT_RUN_ID).usage).toEqual(interrupted.usage);
     reopened.close();

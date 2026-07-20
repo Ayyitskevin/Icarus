@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { IcarusError } from "../../packages/core/src/errors.js";
 import type { StructuredGenerationRequest } from "../../packages/core/src/provider.js";
 import { createProviderConfig } from "../../packages/core/src/provider.js";
 import { OpenAIResponsesGateway } from "../../packages/core/src/providers.js";
@@ -187,6 +188,52 @@ describe("OpenAIResponsesGateway HTTP contract", () => {
       .catch((reason: unknown) => reason);
 
     expect(error).toEqual(expect.objectContaining({ code: "PROVIDER_HTTP_ERROR" }));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toContain(apiKey);
+    expect((error as Error).message).toContain("<redacted:known-secret:");
+  });
+
+  it("redacts the API key from thrown transport errors", async () => {
+    const config = createProviderConfig({
+      kind: "openai",
+      model: "test-model",
+      baseUrl: "https://api.openai.com/v1/",
+      inputUsdPerMillionTokens: 1,
+      outputUsdPerMillionTokens: 1,
+    });
+    const throwingFetch = (() =>
+      Promise.reject(new Error(`transport rejected bearer ${apiKey}`))) as typeof fetch;
+    const gateway = new OpenAIResponsesGateway(config, apiKey, throwingFetch);
+
+    const error = await gateway
+      .generateStructured(generationRequest)
+      .catch((reason: unknown) => reason);
+
+    expect(error).toEqual(expect.objectContaining({ code: "PROVIDER_TRANSPORT_ERROR" }));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toContain(apiKey);
+    expect((error as Error).message).toContain("<redacted:known-secret:");
+  });
+
+  it("rewraps and redacts an IcarusError thrown by the transport", async () => {
+    const config = createProviderConfig({
+      kind: "openai",
+      model: "test-model",
+      baseUrl: "https://api.openai.com/v1/",
+      inputUsdPerMillionTokens: 1,
+      outputUsdPerMillionTokens: 1,
+    });
+    const throwingFetch = (() =>
+      Promise.reject(
+        new IcarusError("INJECTED_TRANSPORT_ERROR", `transport rejected bearer ${apiKey}`),
+      )) as typeof fetch;
+    const gateway = new OpenAIResponsesGateway(config, apiKey, throwingFetch);
+
+    const error = await gateway
+      .generateStructured(generationRequest)
+      .catch((reason: unknown) => reason);
+
+    expect(error).toEqual(expect.objectContaining({ code: "PROVIDER_TRANSPORT_ERROR" }));
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).not.toContain(apiKey);
     expect((error as Error).message).toContain("<redacted:known-secret:");

@@ -473,7 +473,7 @@ export class DockerSandboxRunner implements CheckRunner {
             outcome:
               result.cancelled || input.signal?.aborted
                 ? "cancelled"
-                : result.exitCode === 0 && !result.rawLimitExceeded
+                : result.exitCode === 0 && !result.timedOut && !result.rawLimitExceeded
                   ? "passed"
                   : "failed",
           };

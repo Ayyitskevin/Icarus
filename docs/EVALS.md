@@ -7,15 +7,22 @@ Unsupported scenarios are reported as unsupported, never converted to passes.
 
 ## Fixture contract
 
-`fixtures/evals/manifest.json` names each repeatable scenario, its repository
-fixture, task, expected outcome, required evidence, and minimum milestone.
-`pnpm eval` validates every fixture, copies static cases into private temporary
-workspaces, executes exact edit and policy assertions, runs the registered check
-through the production no-network Docker sandbox, measures final bytes and
-changed paths, verifies the source fixture stayed unchanged, runs named
-test-backed scenarios, and writes
-`.local/eval-report.json`. The report includes only measured evidence and
-separates passed, failed, and unsupported counts.
+`fixtures/evals/manifest.json` schema v2 names each repeatable scenario, fixture,
+task, expected outcome, required capability/evidence, planned milestone, support
+status, and evaluator. It also declares the ten measurement keys every result
+must carry.
+
+`pnpm eval` validates the manifest and immutable fixture contracts, creates
+private temporary Git repositories, and exercises five M1 outcomes through
+production runtime/service code. Provider-backed cases use the production
+Ollama adapter over a deterministic loopback HTTP contract; this is not a live
+installed model claim. The executable change runs its registered check through
+the production no-network Docker sandbox and proves source content and Git
+metadata remain unchanged.
+
+The evaluator writes `.local/eval-report.json` with report schema v2, manifest
+and fixture digests, per-case evidence, fixed per-case measurements, aggregate
+measurements, limitations, and separate passed, failed, and unsupported counts.
 
 Required scenario classes:
 
@@ -30,54 +37,81 @@ Required scenario classes:
 9. recover from a failed tool/provider call;
 10. resume an interrupted run.
 
-The initial catalog has all ten classes. Milestone 1 executes five: one-file
-replacement, schema/forbidden-path rejection, provider retry/resume, and
-interrupted-operation accounting. Five broader classes remain explicitly
-unsupported. Docker containment and rollback/restore are release-gate
-integration evidence attached to the executable golden path rather than extra
-catalog classes.
+The catalog has all ten classes. Milestone 1 executes five outcomes:
+
+1. a complete single-file production lifecycle, including review,
+   rollback, restore, and re-review;
+2. rejection of the schema target before run/provider/workspace creation;
+3. rejection of a traversal target before run/provider/workspace creation;
+4. provider HTTP failure followed by explicit resume and passing verification;
+5. a store-backed interrupted-operation simulation followed by explicit resume.
+
+The schema case measures safe rejection; it does not claim schema-edit support.
+Five capabilities remain honestly unsupported: multi-file bug repair,
+behavior-preserving module refactor, failing-test diagnosis/target selection,
+read-only security findings, and read-only codebase explanation. The explanation
+capability is planned for M2; the others require later explicit roadmap
+decisions. Unsupported contracts validate their fixtures and capability
+classification but are never converted into passes.
 
 ## Measures
 
-- task outcome and expected file bytes;
-- registered check outcome;
-- changed file count and incorrect edit count;
-- context entry relevance/provenance;
-- provider and tool failures;
-- active runtime;
-- input/output token usage;
-- estimated API cost when explicit rates exist;
-- approval count;
-- rollback byte equality and restore success.
+Every result contains:
+
+- `taskSuccess`;
+- `testSuccess`;
+- `incorrectEdits`;
+- `contextRetrievalQuality`;
+- `toolFailures`;
+- `runtime`;
+- `tokenUsage`;
+- `apiCost`;
+- `humanApprovalFrequency`;
+- `rollbackSuccess`.
+
+Each measurement is labeled `measured`, `estimated`, `not_applicable`,
+`unsupported`, or `not_measured`. Actual billed cost is never inferred:
+`actualBilledUsd` remains null and configured-rate results are labeled estimated.
+Context quality is expected-path recall/precision plus digest-provenance validity
+for the deterministic M1 selector, not semantic-retrieval quality. The
+interrupted-run case persists a started operation directly to simulate a crash
+boundary; it does not claim to kill an operating-system process.
 
 ## Determinism
 
-Tests use deterministic HTTP transports that implement captured Ollama/OpenAI
-response contracts. They test the real production adapters and request shapes;
-the OpenAI path also crosses the exact remote-egress gate through final review.
-They are not alternate fake adapters. No paid provider call is part of CI.
+Evaluations use deterministic loopback HTTP responses with the production Ollama
+adapter and normal Icarus runtime. Provider unit/integration tests also exercise
+the production OpenAI adapter and request shape; the OpenAI lifecycle crosses
+the exact remote-egress gate through final review with injected deterministic
+transport. These are not alternate production adapters, but neither is evidence
+of a live Ollama model or paid OpenAI request. No paid call is part of CI.
 
 ## Adversarial cases
 
 - `../escape`, absolute paths, `.git`, `.env`, and rule-file proposals;
 - parent and target symlinks;
-- repository text instructing Icarus to ignore host policy;
+- a malicious fixture `AGENTS.md` instruction that reaches the real provider
+  prompt and attempts to widen the selected target; the target is rejected and
+  repository instructions remain untrusted data rather than host policy;
 - malformed/oversized provider JSON;
 - provider authorization values reflected in errors;
 - command output containing token-like strings;
-- timeout/cancellation and partial worktree state;
+- timeout/cancellation, including a command that traps termination and exits
+  zero, and partial atomic-write state;
 - unexpected modification between approval and resume;
 - more changed files than approved;
 - failed verification presented as success.
 - source hooks/config/refs that must remain inert through private caching;
-- sandbox attempts to read host secrets, reach public/loopback/Tailscale
-  services, write the approved worktree, survive cancellation, or exceed limits;
+- production-sandbox attempts to read host secrets, reach public,
+  host-loopback, or Tailscale address space, write the approved worktree, survive
+  cancellation, or exceed limits;
 - absent Docker/image/security preflight with no host fallback.
 
 ## Evidence retention
 
-Each executable runtime evaluation records its normal run/provider/check
-evidence in temporary test state. The catalog evaluator records manifest digest,
-result, evidence labels only after their assertions pass, honest unsupported
-reasons, and counts in the ignored local report. Generated reports are never
-committed.
+Each executable runtime evaluation records normal run/provider/check evidence in
+temporary state. Every completed verification attempt also remains in the
+append-only event history with its bounded check evidence and diff. The evaluator
+records manifest/fixture digests, observed evidence only after assertions pass,
+honest unsupported reasons, measurements, aggregates, limitations, and counts in
+the ignored local report. Generated reports are never committed.

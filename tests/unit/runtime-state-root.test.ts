@@ -5,7 +5,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { IcarusError } from "../../packages/core/src/errors.js";
-import { createIcarusRuntime } from "../../packages/core/src/runtime.js";
+import {
+  assertRegistrationStateSeparation,
+  createIcarusRuntime,
+} from "../../packages/core/src/runtime.js";
 
 const temporaryRoots: string[] = [];
 
@@ -76,5 +79,19 @@ describe("state-root ownership boundary", () => {
     await symlink(realParent, linkedParent);
 
     await expectUnsafe(() => createIcarusRuntime(path.join(linkedParent, "state")));
+  });
+
+  it("detects a prospective state root inside a repository through a symlink alias", async () => {
+    const parent = await makeTemporaryRoot();
+    const repository = path.join(parent, "repository");
+    const alias = path.join(parent, "repository-alias");
+    const nestedState = path.join(alias, ".state");
+    await mkdir(repository, { mode: 0o700 });
+    await symlink(repository, alias);
+
+    await expect(assertRegistrationStateSeparation(nestedState, repository)).rejects.toMatchObject({
+      code: "STATE_REPOSITORY_OVERLAP",
+    });
+    await expect(lstat(path.join(repository, ".state"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

@@ -518,7 +518,6 @@ export class GitController {
     );
     const safeTarget = assertRepositoryRelativePath(target);
     const targetPath = path.join(worktreePath, ...safeTarget.split("/"));
-    const parentPath = path.dirname(targetPath);
     let current = worktreePath;
     for (const component of safeTarget.split("/").slice(0, -1)) {
       current = path.join(current, component);
@@ -537,23 +536,38 @@ export class GitController {
     );
     invariant(targetStat.nlink === 1, "HARDLINK_DENIED", "Hard-linked targets are not supported");
 
-    const temporaryPath = path.join(parentPath, `.icarus-${randomUUID()}.tmp`);
+    const privateRunRoot = path.dirname(path.resolve(worktreePath));
+    const privateRunRootStat = await lstat(privateRunRoot);
+    invariant(
+      privateRunRootStat.isDirectory() &&
+        !privateRunRootStat.isSymbolicLink() &&
+        (await realpath(privateRunRoot)) === privateRunRoot,
+      "WORKSPACE_IDENTITY_CHANGED",
+      "Private run root is unsafe",
+    );
+    // Keep the pre-rename file outside the Git worktree. A process death can
+    // strand the file, but it cannot create an extra changed path that blocks
+    // deterministic resume or rollback.
+    const temporaryPath = path.join(privateRunRoot, `.icarus-write-${randomUUID()}.tmp`);
     const handle = await open(
       temporaryPath,
       fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
       0o600,
     );
+    let closed = false;
     try {
       await handle.writeFile(content, "utf8");
       await handle.chmod(targetStat.mode & 0o777);
       await handle.sync();
-    } catch (error) {
       await handle.close();
+      closed = true;
+      await rename(temporaryPath, targetPath);
+    } finally {
+      if (!closed) {
+        await handle.close().catch(() => undefined);
+      }
       await unlink(temporaryPath).catch(() => undefined);
-      throw error;
     }
-    await handle.close();
-    await rename(temporaryPath, targetPath);
   }
 
   async changedPaths(worktreePath: string, signal?: AbortSignal): Promise<string[]> {

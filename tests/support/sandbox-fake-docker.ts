@@ -14,6 +14,7 @@ export interface FakeDockerScenario {
   readonly run?: {
     readonly delayMs?: number;
     readonly exitCode?: number;
+    readonly sigtermExitCode?: number;
     readonly stdout?: string;
     readonly stderr?: string;
   };
@@ -149,9 +150,12 @@ if (argv[0] === "run") {
   }));
   const state = readState();
   state.containers[name] = { labels };
-  writeState(state);
-  const behavior = scenario.run ?? {};
-  if ((behavior.delayMs ?? 0) > 0) await new Promise((resolve) => setTimeout(resolve, behavior.delayMs));
+ writeState(state);
+ const behavior = scenario.run ?? {};
+  if (behavior.sigtermExitCode !== undefined) {
+    process.once("SIGTERM", () => process.exit(behavior.sigtermExitCode));
+  }
+ if ((behavior.delayMs ?? 0) > 0) await new Promise((resolve) => setTimeout(resolve, behavior.delayMs));
   writeOutput(behavior.stdout ?? "", behavior.stderr ?? "");
   process.exit(behavior.exitCode ?? 0);
 }
