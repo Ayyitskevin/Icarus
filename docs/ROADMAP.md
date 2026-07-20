@@ -36,7 +36,9 @@ evals, context budget allocation, and retrieval-quality fixtures.
 
 Status: the first bounded vertical slice, second bounded observation slice, and
 third bounded older-activity slice are accepted with fresh local evidence and
-exact implementation-head hosted CI (2026-07-20). Full M3 remains open.
+exact implementation-head hosted CI. ADR 0017 selects bounded workspace run
+summaries for the fourth slice; implementation evidence is pending (2026-07-20).
+Full M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
@@ -94,8 +96,16 @@ selected-run page immediately before the recent 200-event tail. It pins a
 revision, uses a fixed reverse sequence cursor, selects metadata rather than
 payloads, pauses live polling while the bounded historical panel is open, and
 keeps only one 64-row page plus a four-page cursor window in the browser. It adds
-no Git/source read or action authority. Workspace-wide run and approval
-pagination remain separate follow-up debt.
+no Git/source read or action authority. It left workspace-wide run enumeration
+and selected-run approval lists as separate follow-up debt.
+
+ADR 0017 selects the outer chronological layer next: replace the workspace's
+unbounded full-run hydration with a fixed 12-row metadata page and lazily fetch
+full evidence only for a selected run. A session-only pinned SQLite insertion
+cursor provides indexed `LIMIT 13` work without a schema migration. The browser
+replaces pages inside a four-page cursor window and labels project matches as
+only the loaded workspace page. Project/repository enumeration and selected-run
+approval lists remain separate unpaginated debt.
 
 ## M4 — Runtime and previews
 
@@ -143,8 +153,9 @@ remain human-gated and outside automatic dogfood.
 
 ## Next recommended slice
 
-Preserve the ADR 0010 security hold. Select the smallest remaining read-only M3
-observation candidate through a dedicated design and evidence contract before
-implementation. File/status views, richer diff or payload-bearing history, patch
-materialization, browser approval, and execution are separate authority
-expansions and remain out of scope until explicitly designed and evidenced.
+Preserve the ADR 0010 security hold. Implement and evidence ADR 0017's bounded,
+metadata-only workspace run pages before selecting another M3 candidate.
+Project/repository enumeration, selected-run approval pagination, file/status
+views, richer diff or payload-bearing history, patch materialization, browser
+approval, and execution remain separate expansions until explicitly designed and
+evidenced.
