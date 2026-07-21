@@ -25,6 +25,15 @@ const workspaceUiSources = await collectSources(
 const providerSource = await readFile("packages/core/src/providers.ts", "utf8");
 const runtimeSource = await readFile("packages/core/src/runtime.ts", "utf8");
 const storeSource = await readFile("packages/core/src/store.ts", "utf8");
+const actionlintToolSource = await readFile("scripts/actionlint-tool.mjs", "utf8");
+const actionlintSetupSource = await readFile("scripts/setup-actionlint.mjs", "utf8");
+const workflowLintSource = await readFile("scripts/workflow-lint.mjs", "utf8");
+const packageSource = await readFile("package.json", "utf8");
+const packageJson = JSON.parse(packageSource);
+const ciWorkflowSource = await readFile(".github/workflows/ci.yml", "utf8");
+const workflowSetupIndex = ciWorkflowSource.indexOf("run: pnpm workflow:setup");
+const workflowLintIndex = ciWorkflowSource.indexOf("run: pnpm workflow:lint");
+const frozenInstallIndex = ciWorkflowSource.indexOf("run: pnpm install --frozen-lockfile");
 const ignore = await readFile(".gitignore", "utf8");
 const testSources = await collectSources("tests", (name) => name.endsWith(".test.ts"));
 const historyMethodStart = storeSource.indexOf("  listEventHistoryPage(");
@@ -64,6 +73,27 @@ const assertions = {
     providerSource.includes("tools: []") && providerSource.includes('tool_choice: "none"'),
   dedicatedStateMarker: runtimeSource.includes(".icarus-state-v1"),
   environmentFilesIgnored: ignore.split(/\r?\n/).includes(".env") && ignore.includes(".env.*"),
+  workflowBootstrapPinnedAndBounded:
+    actionlintToolSource.includes('ACTIONLINT_VERSION = "1.7.12"') &&
+    actionlintToolSource.includes("archiveSha256") &&
+    actionlintToolSource.includes("binarySha256") &&
+    actionlintSetupSource.includes("AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)") &&
+    actionlintSetupSource.includes("MAX_ARCHIVE_BYTES") &&
+    actionlintSetupSource.includes("constants.COPYFILE_EXCL") &&
+    actionlintSetupSource.includes("ensureRealDirectory(path.dirname(binaryPath))"),
+  workflowLintFailClosed:
+    packageJson.scripts?.["workflow:setup"] === "node scripts/setup-actionlint.mjs" &&
+    packageJson.scripts?.["workflow:lint"] === "node scripts/workflow-lint.mjs" &&
+    packageJson.scripts?.check?.startsWith("pnpm workflow:lint &&") &&
+    workflowSetupIndex >= 0 &&
+    workflowSetupIndex < workflowLintIndex &&
+    workflowLintIndex < frozenInstallIndex &&
+    workflowLintSource.includes('"no GitHub Actions workflow files were found"') &&
+    workflowLintSource.includes('"known-invalid.yml"') &&
+    workflowLintSource.includes('"actionlint accepted the known-invalid self-test workflow"') &&
+    workflowLintSource.includes("verifyDefaultBinaryAncestors") &&
+    workflowLintSource.includes('"-shellcheck="') &&
+    workflowLintSource.includes('"-pyflakes="'),
   workspaceFixedLoopback:
     workspaceServerSource.includes('server.listen(port, "127.0.0.1"') &&
     !workspaceServerSource.includes('"0.0.0.0"'),

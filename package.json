@@ -17,6 +17,8 @@
     "workspace:ui": "pnpm --filter @icarus/workspace dev",
     "smoke:workspace": "pnpm build && node scripts/smoke-workspace.mjs",
     "smoke:workspace:browser": "pnpm build && node scripts/smoke-workspace-browser.mjs",
+    "workflow:setup": "node scripts/setup-actionlint.mjs",
+    "workflow:lint": "node scripts/workflow-lint.mjs",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint .",
@@ -26,7 +28,7 @@
     "test:integration": "pnpm build && vitest run tests/integration",
     "eval": "pnpm build && node scripts/eval-fixtures.mjs",
     "security": "vitest run tests/security && node scripts/security-check.mjs",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm eval && pnpm security && pnpm build"
+    "check": "pnpm workflow:lint && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm eval && pnpm security && pnpm build"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4",

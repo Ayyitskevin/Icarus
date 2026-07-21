@@ -252,6 +252,15 @@ preserve the state and require explicit operator recovery.
   and is refused unless verification passed and the live source/worktree,
   changed-path set, diff, and checkpoint still match the reviewed evidence.
 
+Egress, plan, and review requests validate actor, digest, persisted gate, active
+run ownership, and any verification prerequisite under the run lease before
+metered host validation or reconciliation begins. A malformed, stale,
+wrong-state, conflicting, or failed-verification request leaves run state,
+usage, operations, events, approvals, provider calls, and worktree bytes
+unchanged. Accepted requests are rechecked in the final SQLite approval
+transaction after authoritative live validation where that validation is
+required, preserving the gate against time-of-check/time-of-use drift.
+
 Portable planning first inserts a SQLite `started` operation in a transaction.
 The partial unique index allowing one started operation per run rejects
 concurrent planning before a second process performs provider work.
@@ -325,7 +334,33 @@ disable, or bless it without Kevin's explicit decision. Do not treat its current
 upstream collaborator check as a repository-owned gate, and do not claim M0/M1
 security completion while the decision remains pending.
 
-Hosted CI is separate evidence. YAML parsing and a local `pnpm check` do not
+The deterministic release gate pins actionlint v1.7.12 by the official release
+archive SHA-256 plus an independently recorded extracted-executable SHA-256.
+Bootstrap is explicit and writes only to ignored `.local/tools/` state:
+
+```text
+pnpm workflow:setup
+pnpm workflow:lint
+```
+
+The target table covers x64 and arm64 Linux, macOS, and Windows release
+artifacts; all archive/executable hashes were checked, while this change records
+native execution only on Linux x64. Setup fails on a missing extractor,
+redirect/download error, time or size ceiling, checksum mismatch, unexpected
+binary/version, symlinked default tool directory, or unsupported platform. It
+never searches for or silently substitutes a system binary. An explicit
+`ACTIONLINT_BIN` override is accepted only when it is a regular file with the
+exact current-target executable hash and version.
+
+Linting disables host-dependent shellcheck/pyflakes integrations, requires at
+least one regular `.yml` or `.yaml` workflow, validates every such file, and
+requires the exact binary to reject a generated known-invalid workflow. Missing
+or modified tool state therefore fails `pnpm check`. Hosted `ci` bootstraps
+and runs workflow lint before dependency installation; the later release gate
+repeats it. Syntax-checking the inherited OpenCode workflow does not alter or
+satisfy its separate ADR 0010 security hold.
+
+Hosted CI is separate evidence. Workflow lint and a local `pnpm check` do not
 prove that GitHub accepted or executed the workflow. For every candidate release,
 query the exact head and require a successful `ci` run:
 
@@ -346,6 +381,8 @@ record the observed exit status and counts in
 `docs/PLANS.md`:
 
 ```text
+pnpm workflow:setup
+pnpm workflow:lint
 pnpm exec vitest run tests/integration/security-regressions.test.ts
 pnpm exec vitest run tests/integration/runtime-ceiling-cancellation.test.ts
 pnpm exec vitest run tests/unit/runtime-state-root.test.ts tests/unit/service-draft.test.ts

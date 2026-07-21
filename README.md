@@ -85,8 +85,14 @@ support and a locally present digest-pinned check image.
 
 ```text
 pnpm install --frozen-lockfile
+pnpm workflow:setup
 pnpm check
 ```
+
+`workflow:setup` is a one-time, checksum-verified bootstrap of the pinned
+actionlint release into ignored `.local/` state. The release gate then lints
+every GitHub Actions workflow and proves the validator rejects a known-invalid
+fixture before running the remaining checks.
 
 Start the local workspace with a dedicated state root:
 
