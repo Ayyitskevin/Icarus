@@ -231,6 +231,24 @@ export interface RunRecord {
   readonly updatedAt: string;
 }
 
+export interface WorkspaceRunSummary {
+  readonly id: string;
+  readonly projectId: string;
+  readonly task: string;
+  readonly target: string;
+  readonly state: RunState;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface WorkspaceRunPage {
+  readonly before: number;
+  readonly snapshot: number;
+  readonly nextBefore: number;
+  readonly hasMore: boolean;
+  readonly runs: readonly WorkspaceRunSummary[];
+}
+
 export interface EventRecord {
   readonly sequence: number;
   readonly runId: string;

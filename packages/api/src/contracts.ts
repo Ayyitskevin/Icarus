@@ -4,6 +4,7 @@ const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
 const DIGEST_IMAGE_PATTERN = /^[a-z0-9][a-z0-9._/-]*(?::[a-zA-Z0-9._-]+)?@sha256:[a-f0-9]{64}$/;
 const EVENT_CURSOR_PATTERN = /^(0|[1-9][0-9]*)$/;
 const POSITIVE_EVENT_CURSOR_PATTERN = /^[1-9][0-9]*$/;
+const SAFE_RUN_SNAPSHOT_MAX = Number.MAX_SAFE_INTEGER - 1;
 
 function invalid(message: string): never {
   throw new IcarusError("INVALID_REQUEST", message);
@@ -136,6 +137,44 @@ export function runDraftRequest(value: unknown): RunDraftRequest {
       baseUrl: stringValue(provider.baseUrl, "provider.baseUrl", { maxBytes: 2_048 }),
     },
   };
+}
+
+export type WorkspaceRunPageQuery =
+  | { readonly kind: "new" }
+  | { readonly kind: "continuation"; readonly before: number; readonly snapshot: number };
+
+export function workspaceRunPageQuery(searchParams: URLSearchParams): WorkspaceRunPageQuery {
+  const keys = Array.from(searchParams.keys());
+  if (keys.length === 0) return { kind: "new" };
+  const beforeValues = searchParams.getAll("before");
+  const snapshotValues = searchParams.getAll("snapshot");
+  if (
+    keys.length !== 2 ||
+    new Set(keys).size !== 2 ||
+    !keys.includes("before") ||
+    !keys.includes("snapshot") ||
+    beforeValues.length !== 1 ||
+    snapshotValues.length !== 1
+  ) {
+    invalid("Run page requests require exactly one before and snapshot query parameter");
+  }
+  const rawBefore = beforeValues[0] ?? "";
+  const rawSnapshot = snapshotValues[0] ?? "";
+  if (!POSITIVE_EVENT_CURSOR_PATTERN.test(rawBefore) || !EVENT_CURSOR_PATTERN.test(rawSnapshot)) {
+    invalid("before and snapshot must be canonical safe integers");
+  }
+  const before = Number(rawBefore);
+  const snapshot = Number(rawSnapshot);
+  if (
+    !Number.isSafeInteger(before) ||
+    before <= 0 ||
+    !Number.isSafeInteger(snapshot) ||
+    snapshot < 0 ||
+    snapshot > SAFE_RUN_SNAPSHOT_MAX
+  ) {
+    invalid("before and snapshot must be canonical safe integers");
+  }
+  return { kind: "continuation", before, snapshot };
 }
 
 export function runEventsQuery(searchParams: URLSearchParams): { readonly after: number } {

@@ -7,6 +7,22 @@ export type RunPhase =
   | "failed"
   | "cancelled";
 
+export type RunStateView =
+  | "preparing"
+  | "planned"
+  | "awaiting_egress_approval"
+  | "awaiting_approval"
+  | "running"
+  | "verifying"
+  | "awaiting_review"
+  | "completed"
+  | "rolling_back"
+  | "cancelling"
+  | "failed"
+  | "cancelled"
+  | "rolled_back"
+  | "restoring";
+
 export interface CapabilityView {
   readonly status: string;
   readonly reason: string | null;
@@ -213,6 +229,25 @@ export interface RunEventHistoryPageView {
   readonly events: readonly TimelineEntryView[];
 }
 
+export interface RunSummaryView {
+  readonly id: string;
+  readonly projectId: string;
+  readonly task: string;
+  readonly target: string;
+  readonly state: RunStateView;
+  readonly phase: RunPhase;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface RunPageView {
+  readonly before: number;
+  readonly snapshot: number;
+  readonly nextBefore: number;
+  readonly hasMore: boolean;
+  readonly runs: readonly RunSummaryView[];
+}
+
 export interface RunFilesView {
   readonly involved: readonly string[];
   readonly changed: readonly string[];
@@ -283,7 +318,12 @@ export interface RunView {
 export interface WorkspaceView {
   readonly capabilities: WorkspaceCapabilities;
   readonly projects: readonly ProjectView[];
-  readonly runs: readonly RunView[];
+  readonly runPage: RunPageView;
+}
+
+export interface RunPageCursor {
+  readonly before: number;
+  readonly snapshot: number;
 }
 
 export interface CreateProjectInput {
@@ -414,6 +454,13 @@ export function getRepositoryStatus(
 export function getRun(runId: string, signal?: AbortSignal): Promise<RunView> {
   return requestJson<RunView>(
     `/api/runs/${encodeURIComponent(runId)}`,
+    signal === undefined ? {} : { signal },
+  );
+}
+
+export function getRunPage(cursor: RunPageCursor, signal?: AbortSignal): Promise<unknown> {
+  return requestJson<unknown>(
+    `/api/runs?before=${encodeURIComponent(String(cursor.before))}&snapshot=${encodeURIComponent(String(cursor.snapshot))}`,
     signal === undefined ? {} : { signal },
   );
 }
