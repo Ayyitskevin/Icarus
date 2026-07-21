@@ -271,6 +271,74 @@ export interface CheckpointRecord {
   readonly createdAt: string;
 }
 
+interface ApprovalTransition {
+  readonly kind: ApprovalRecord["kind"];
+  readonly digest: string;
+  readonly actor: string;
+  readonly decision: ApprovalRecord["decision"];
+  readonly expectedState: RunState;
+  readonly to: RunState;
+  readonly expectedDigest: (run: RunRecord) => string | null;
+  readonly eventType: string;
+}
+
+function egressApprovalTransition(digest: string, actor: string): ApprovalTransition {
+  return {
+    kind: "egress",
+    digest,
+    actor,
+    decision: "approve",
+    expectedState: "awaiting_egress_approval",
+    to: "planned",
+    expectedDigest: (run) => run.contextSha256,
+    eventType: "egress.approved",
+  };
+}
+
+function planApprovalTransition(digest: string, actor: string): ApprovalTransition {
+  return {
+    kind: "plan",
+    digest,
+    actor,
+    decision: "approve",
+    expectedState: "awaiting_approval",
+    to: "running",
+    expectedDigest: (run) => run.planSha256,
+    eventType: "plan.approved",
+  };
+}
+
+function reviewApprovalTransition(
+  digest: string,
+  actor: string,
+  decision: "approve" | "reject",
+): ApprovalTransition {
+  return {
+    kind: "review",
+    digest,
+    actor,
+    decision,
+    expectedState: "awaiting_review",
+    to: decision === "approve" ? "completed" : "rolling_back",
+    expectedDigest: (current) => {
+      invariant(
+        current.verification !== null,
+        "MISSING_VERIFICATION",
+        "Run has no verification evidence",
+      );
+      if (decision === "approve") {
+        invariant(
+          current.verification.outcome === "passed",
+          "VERIFICATION_NOT_PASSED",
+          "Only a fully passing verification can be accepted",
+        );
+      }
+      return current.verification.diffSha256;
+    },
+    eventType: decision === "approve" ? "review.accepted" : "review.rejected",
+  };
+}
+
 export class IcarusStore {
   readonly #database: Database.Database;
   readonly #now: () => string;
@@ -734,30 +802,29 @@ export class IcarusStore {
     return this.getRun(runId);
   }
 
+  preflightEgressApproval(runId: string, digest: string, actor: string): RunRecord {
+    return this.#validateApprovalRequest(runId, egressApprovalTransition(digest, actor));
+  }
+
   approveEgress(runId: string, digest: string, actor: string): RunRecord {
-    return this.#approveAndTransition(runId, {
-      kind: "egress",
-      digest,
-      actor,
-      decision: "approve",
-      expectedState: "awaiting_egress_approval",
-      to: "planned",
-      expectedDigest: (run) => run.contextSha256,
-      eventType: "egress.approved",
-    });
+    return this.#approveAndTransition(runId, egressApprovalTransition(digest, actor));
+  }
+
+  preflightPlanApproval(runId: string, digest: string, actor: string): RunRecord {
+    return this.#validateApprovalRequest(runId, planApprovalTransition(digest, actor));
   }
 
   approvePlan(runId: string, digest: string, actor: string): RunRecord {
-    return this.#approveAndTransition(runId, {
-      kind: "plan",
-      digest,
-      actor,
-      decision: "approve",
-      expectedState: "awaiting_approval",
-      to: "running",
-      expectedDigest: (run) => run.planSha256,
-      eventType: "plan.approved",
-    });
+    return this.#approveAndTransition(runId, planApprovalTransition(digest, actor));
+  }
+
+  preflightReviewDecision(
+    runId: string,
+    digest: string,
+    actor: string,
+    decision: "approve" | "reject",
+  ): RunRecord {
+    return this.#validateApprovalRequest(runId, reviewApprovalTransition(digest, actor, decision));
   }
 
   decideReview(
@@ -766,30 +833,7 @@ export class IcarusStore {
     actor: string,
     decision: "approve" | "reject",
   ): RunRecord {
-    return this.#approveAndTransition(runId, {
-      kind: "review",
-      digest,
-      actor,
-      decision,
-      expectedState: "awaiting_review",
-      to: decision === "approve" ? "completed" : "rolling_back",
-      expectedDigest: (current) => {
-        invariant(
-          current.verification !== null,
-          "MISSING_VERIFICATION",
-          "Run has no verification evidence",
-        );
-        if (decision === "approve") {
-          invariant(
-            current.verification.outcome === "passed",
-            "VERIFICATION_NOT_PASSED",
-            "Only a fully passing verification can be accepted",
-          );
-        }
-        return current.verification.diffSha256;
-      },
-      eventType: decision === "approve" ? "review.accepted" : "review.rejected",
-    });
+    return this.#approveAndTransition(runId, reviewApprovalTransition(digest, actor, decision));
   }
 
   approveRollback(runId: string, digest: string, actor: string): RunRecord {
@@ -1789,49 +1833,11 @@ export class IcarusStore {
     );
   }
 
-  #approveAndTransition(
-    runId: string,
-    approval: {
-      kind: ApprovalRecord["kind"];
-      digest: string;
-      actor: string;
-      decision: ApprovalRecord["decision"];
-      expectedState: RunState;
-      to: RunState;
-      expectedDigest: (run: RunRecord) => string | null;
-      eventType: string;
-    },
-  ): RunRecord {
-    invariant(
-      /^[a-f0-9]{64}$/.test(approval.digest),
-      "INVALID_APPROVAL",
-      "Approval digest is invalid",
-    );
-    invariant(
-      approval.actor.trim().length > 0 &&
-        approval.actor.length <= 200 &&
-        !/[\r\n\0]/.test(approval.actor),
-      "INVALID_APPROVAL",
-      "Approval actor is invalid",
-    );
-    invariant(
-      !containsSecretShapedContent(Buffer.from(approval.actor, "utf8")),
-      "SECRET_INPUT_DETECTED",
-      "Approval actor contains recognizable credential material",
-    );
+  #approveAndTransition(runId: string, approval: ApprovalTransition): RunRecord {
+    this.#assertApprovalInput(approval);
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
-      invariant(
-        current.state === approval.expectedState,
-        "INVALID_STATE",
-        "Run is not at the requested approval gate",
-      );
-      invariant(
-        approval.expectedDigest(current) === approval.digest,
-        "STALE_APPROVAL",
-        "Approval digest does not match the persisted gate",
-      );
-      this.#assertNoOtherActiveRun(current.projectId, runId);
+      this.#assertApprovalGate(runId, current, approval);
       assertTransition(current.state, approval.to);
       const now = this.#now();
       this.#database
@@ -1868,6 +1874,47 @@ export class IcarusStore {
     });
     transaction();
     return this.getRun(runId);
+  }
+
+  #validateApprovalRequest(runId: string, approval: ApprovalTransition): RunRecord {
+    this.#assertApprovalInput(approval);
+    const current = this.getRun(runId);
+    this.#assertApprovalGate(runId, current, approval);
+    return current;
+  }
+
+  #assertApprovalInput(approval: ApprovalTransition): void {
+    invariant(
+      /^[a-f0-9]{64}$/.test(approval.digest),
+      "INVALID_APPROVAL",
+      "Approval digest is invalid",
+    );
+    invariant(
+      approval.actor.trim().length > 0 &&
+        approval.actor.length <= 200 &&
+        !/[\r\n\0]/.test(approval.actor),
+      "INVALID_APPROVAL",
+      "Approval actor is invalid",
+    );
+    invariant(
+      !containsSecretShapedContent(Buffer.from(approval.actor, "utf8")),
+      "SECRET_INPUT_DETECTED",
+      "Approval actor contains recognizable credential material",
+    );
+  }
+
+  #assertApprovalGate(runId: string, current: RunRecord, approval: ApprovalTransition): void {
+    invariant(
+      current.state === approval.expectedState,
+      "INVALID_STATE",
+      "Run is not at the requested approval gate",
+    );
+    invariant(
+      approval.expectedDigest(current) === approval.digest,
+      "STALE_APPROVAL",
+      "Approval digest does not match the persisted gate",
+    );
+    this.#assertNoOtherActiveRun(current.projectId, runId);
   }
 
   #finishInternalTransition(
