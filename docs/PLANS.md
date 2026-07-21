@@ -71,83 +71,109 @@ the reliability slice without claiming a broader milestone is complete.
       passed its real `quality` job at exact implementation head
       `f8fe03e399fb46f197bbcbc0df8f1edabbe2e0c9`
 
-## Current plan: fourth M3 bounded workspace run summaries
+## Most recently accepted M3 slice: fourth bounded workspace run summaries
 
-Status values are evidence claims. ADR 0017 is accepted on 2026-07-20; no
-implementation or acceptance is claimed until every item below has fresh
-evidence.
+Status values are evidence claims. ADR 0017, its implementation, fresh local
+acceptance, independent review, and exact published implementation-head hosted
+CI passed on 2026-07-21. This accepts the fourth bounded M3 slice; it does not
+claim that full M3 is complete.
 
 ### Metadata-only run page
 
-- [ ] Replace the unbounded full-run collection in `GET /api/workspace` with
+- [x] Replace the unbounded full-run collection in `GET /api/workspace` with
       one fixed 12-row summary page; add `GET /api/runs` for a new session or
       strict `before` plus `snapshot` continuation
-- [ ] Use the intrinsic SQLite rowid B-tree, coherent `MAX(rowid)` snapshot,
+- [x] Use the intrinsic SQLite rowid B-tree, coherent `MAX(rowid)` snapshot,
       descending `LIMIT 13`, and safe canonical decimal parsing without a
       schema migration or full-run N+1 hydration
-- [ ] Validate empty history, snapshot/cursor existence and relation, safe rowid
+- [x] Validate empty history, snapshot/cursor existence and relation, safe rowid
       bounds, run/project IDs, task/target byte limits, exact state, and canonical
       timestamps in one read transaction
-- [ ] Return only IDs, bounded task/target, state, host-derived phase, timestamps,
+- [x] Return only IDs, bounded task/target, state, host-derived phase, timestamps,
       and ephemeral page metadata; never select or decode heavier run columns,
       approvals, or events
 
 ### Explicit browser navigation
 
-- [ ] Replace rather than accumulate pages; retain one 12-row page plus at most
+- [x] Replace rather than accumulate pages; retain one 12-row page plus at most
       three newer cursors for a four-page session with older/newer controls and
       CLI guidance beyond it
-- [ ] Keep one page request current; abort on hidden/new-page/refresh/selection/
+- [x] Keep one page request current; abort on hidden/new-page/refresh/selection/
       unmount and reject late or mismatched responses by generation and exact
       `before`/`snapshot`
-- [ ] Preserve the last successful page on failure with truthful retry/busy
+- [x] Preserve the last successful page on failure with truthful retry/busy
       states; opening a summary lazily fetches the existing full selected-run
       view
-- [ ] Label sidebar counts as loaded rows and project matches as only the current
+- [x] Label sidebar counts as loaded rows and project matches as only the current
       workspace page; never claim a total or complete project history
-- [ ] Reset to a newest pinned session on run creation or explicit workspace
+- [x] Reset to a newest pinned session on run creation or explicit workspace
       refresh without coupling summary cursors to selected-run live/history
       cursors
 
 ### Scope and safety
 
-- [ ] Add no schema/migration, dependency, write, event append, run deletion,
+- [x] Add no schema/migration, dependency, write, event append, run deletion,
       database maintenance route, Git/source read, new data disclosure, stream,
       watcher, daemon, or browser action authority
-- [ ] Preserve loopback Host/Origin, same-origin/CSP, fixed presenter, React text,
+- [x] Preserve loopback Host/Origin, same-origin/CSP, fixed presenter, React text,
       source isolation, portability, guarded CLI, and ADR 0010 boundaries
-- [ ] Leave project/repository enumeration, selected-run approvals, file/status,
+- [x] Leave project/repository enumeration, selected-run approvals, file/status,
       richer diff or payload-bearing history, patch materialization, browser
       approval, and execution explicitly deferred
 
 ### Acceptance coverage and commands
 
-- [ ] Store/API tests cover more than 200 runs, fixed page boundaries, empty
+- [x] Store/API tests cover more than 200 runs, fixed page boundaries, empty
       history, rowid gaps, reopen behavior, concurrent insertion, invalid
       cursors/snapshots, query-plan use, corrupt/private heavy-column omission,
       malformed summary metadata, zero writes, and negative action routes
-- [ ] Pure client tests cover replacement, four-page depth, older/newer, exact
+- [x] Pure client tests cover replacement, four-page depth, older/newer, exact
       cursor/snapshot identity, stale responses, retained failure state, and
       summary-to-full-run separation; failed or stale lazy detail cannot discard
       the summary page or replace a newer selection
-- [ ] Real-browser acceptance covers bounded bootstrap, explicit run paging,
+- [x] Real-browser acceptance covers bounded bootstrap, explicit run paging,
       lazy older-run selection, truthful project-page labels, failure/retry,
-      single-flight contention, hidden/selection/unmount cancellation, and
+      replacement contention, hidden/selection/unmount cancellation,
+      reverse-order refresh guarding, delayed-response rejection, and
       source/SQLite nonmutation
-- [ ] `pnpm format:check`
-- [ ] `pnpm lint`
-- [ ] `pnpm typecheck`
-- [ ] `pnpm test`
-- [ ] `pnpm test:integration`
-- [ ] `pnpm security`
-- [ ] `pnpm build`
-- [ ] `pnpm check`
-- [ ] `pnpm smoke:workspace`
-- [ ] `ICARUS_CHROMIUM_EXECUTABLE=/absolute/path/to/chromium pnpm smoke:workspace:browser`
-- [ ] `pnpm audit --audit-level high`
-- [ ] `pnpm audit --prod --audit-level high`
-- [ ] `git diff --check`
-- [ ] Hosted `ci` succeeds at the exact published implementation head
+- [x] `pnpm workflow:setup` (pinned `actionlint` v1.7.12)
+- [x] `pnpm format:check`
+- [x] `pnpm lint`
+- [x] `pnpm typecheck`
+- [x] `pnpm test`
+- [x] `pnpm test:integration`
+- [x] `pnpm security`
+- [x] `pnpm build`
+- [x] `pnpm check`
+- [x] `pnpm smoke:workspace`
+- [x] `ICARUS_CHROMIUM_EXECUTABLE=/absolute/path/to/chromium pnpm smoke:workspace:browser`
+- [x] `pnpm audit --audit-level high`
+- [x] `pnpm audit --prod --audit-level high`
+- [x] `git diff --check`
+- [x] Hosted `ci` run
+      [29870599549](https://github.com/Ayyitskevin/Icarus/actions/runs/29870599549)
+      passed its real `quality` job at exact implementation head
+      `01d79b71d10f95e4be9657364057fc6c077ef4fb`
+
+### Acceptance evidence (2026-07-21)
+
+- `pnpm workflow:setup` confirmed pinned `actionlint` v1.7.12, and
+  `pnpm check` validated both workflows plus the known-invalid negative fixture,
+  formatted 84 files, ran 132 unit/provider tests in 16 files and 39 integration
+  tests in 8 files, evaluated 5 passed / 0 failed / 5 unsupported scenarios,
+  passed 109 security tests plus 25 static assertions, and built 20 UI modules.
+- The real Brave smoke pinned snapshot 50, retained 12 rows inside a four-page
+  window, issued 13 strict continuation requests, proved failure retention,
+  retries, predecessor replacement, reverse-order refresh guarding, visibility
+  and selection cancellation, and delayed page/detail rejection. The unmount
+  interception was invalidated by browser teardown while the generation guard
+  rejected its late state; private heavy columns remained absent and durable and
+  source state remained unchanged.
+- `pnpm smoke:workspace` completed with one provider request and an unchanged
+  source checkout. Full and production dependency audits reported no known
+  vulnerabilities; both working-tree and staged whitespace checks passed.
+- Independent backend, frontend, and scope/safety reviews found no remaining
+  blocker, high, or medium implementation finding.
 
 ## Most recently accepted plan: third M3 bounded older-activity navigation
 
@@ -605,7 +631,7 @@ Final adversarial candidate local evidence on 2026-07-20:
 
 The inherited ADR 0010 security hold remains separate from local feature work.
 ADR 0016 implements only bounded older event metadata for the third M3 slice.
-ADR 0017 selects only bounded workspace-wide run summaries for the fourth.
+ADR 0017 implements only bounded workspace-wide run summaries for the fourth.
 Project/repository enumeration, selected-run approval pagination, file/status
 views, richer diff or payload-bearing history, patch materialization, browser
 approval, and execution remain later, explicitly reviewed expansions. See

@@ -60,6 +60,16 @@ anchors. Full browser timelines retain only the 200 most recent metadata rows;
 the CLI history contract remains complete. This slice adds no streaming
 transport, schema, dependency, or browser authority.
 
+The third and fourth Milestone 3 slices bound older selected-run event metadata
+and workspace-wide run summaries. Historical activity retains one 64-row
+metadata page in a four-page cursor window; workspace bootstrap now returns one
+12-row metadata-only page, and full run evidence loads only after selection. The
+run-page membership snapshot is ephemeral, inserted runs do not shift the
+session, and the browser retains one page plus three newer cursors. Both paths
+replace rather than accumulate pages, preserve the last successful page on
+failure, cancel superseded or lifecycle requests, and add no schema, dependency,
+Git/source read, stream, watcher, or browser action authority.
+
 Not yet included: browser approval or execution, arbitrary agent tool use,
 model-written shell commands, semantic search, commits or pushes, application
 previews, richer file/status, diff, or history navigation, deployment, backend

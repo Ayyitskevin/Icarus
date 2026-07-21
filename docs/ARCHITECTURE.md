@@ -331,13 +331,13 @@ made bounded by ADR 0016.
 
 ## Fourth M3 workspace-run summary path
 
-ADR 0017 selects a planned replacement for the run portion of workspace
-bootstrap: a direct, metadata-only page. The first store transaction will pin
-`CAST(COALESCE(MAX(rowid), 0) AS TEXT)` as a session-only membership snapshot
-and read at most 13 rows through the intrinsic rowid B-tree. It will return 12
-summaries and a next exclusive cursor without a count or full-run decode.
-Continuations require the exact pinned snapshot and cursor. Empty history uses
-snapshot zero.
+ADR 0017 replaces the run portion of workspace bootstrap with a direct,
+metadata-only page. The first store transaction pins
+`CAST(COALESCE(MAX(rowid), 0) AS TEXT)` as a session-only membership snapshot and
+reads at most 13 rows through the intrinsic rowid B-tree. It returns 12 summaries
+and a next exclusive cursor without a count or full-run decode. Continuations
+require the exact pinned snapshot and cursor. Empty history uses snapshot zero.
+The implementation was accepted on 2026-07-21.
 
 Summary rows contain only IDs, bounded task/target text, state, host-derived
 phase, and timestamps. Provider configuration, context, plan, edit, diff,
