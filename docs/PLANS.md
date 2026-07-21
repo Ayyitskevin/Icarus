@@ -4,7 +4,8 @@
 
 Status values are evidence claims. The candidate implementation, full local
 gate, dependency audits, focused adversarial coverage, and independent review
-pass; exact published-head hosted CI remains pending.
+pass. Exact published implementation-head hosted CI also passes; this records
+the reliability slice without claiming a broader milestone is complete.
 
 ### Zero-job startup forensic conclusion
 
@@ -65,7 +66,10 @@ pass; exact published-head hosted CI remains pending.
 - [x] Full and production dependency audits: no known vulnerabilities
 - [x] `git diff --check`
 - [x] Independent final review: no blocker, high, or medium findings remain
-- [ ] Hosted `ci` success at the exact published implementation head
+- [x] Hosted `ci` run
+      [29863768917](https://github.com/Ayyitskevin/Icarus/actions/runs/29863768917)
+      passed its real `quality` job at exact implementation head
+      `f8fe03e399fb46f197bbcbc0df8f1edabbe2e0c9`
 
 ## Most recently accepted plan: third M3 bounded older-activity navigation
 
