@@ -1,5 +1,76 @@
 # Implementation plans
 
+## Current reliability plan: approval preflight and workflow startup diagnostics
+
+Status values are evidence claims. The candidate implementation, full local
+gate, dependency audits, focused adversarial coverage, and independent review
+pass. Exact published implementation-head hosted CI also passes; this records
+the reliability slice without claiming a broader milestone is complete.
+
+### Zero-job startup forensic conclusion
+
+- GitHub Actions runs
+  [29708956142](https://github.com/Ayyitskevin/Icarus/actions/runs/29708956142)
+  at `dd081a85d7649a155938b90474366ab6ffc01c13` and
+  [29708980883](https://github.com/Ayyitskevin/Icarus/actions/runs/29708980883)
+  at `2b0c14f3504aaadcc009043cec02434d0a30bd05` ended immediately as
+  `startup_failure` at 00:05:37Z and 00:06:32Z on 2026-07-20. Both expose
+  synthetic `BuildFailed` path/workflow metadata, zero jobs, zero check runs,
+  and no logs.
+- Both commits and the later successful run
+  [29712657768](https://github.com/Ayyitskevin/Icarus/actions/runs/29712657768)
+  at `39efbf41d3b6a387a3a55e00d26b68b7420ca17d` contain the exact same
+  `.github/workflows/ci.yml` Git blob,
+  `0cca976adde1f4ed694e9578f328f467dde512ac`. The successful run was
+  admitted as the real `ci` workflow and executed its `quality` job.
+- The failures fall inside GitHub's critical
+  [Incident with GitHub Actions](https://www.githubstatus.com/incidents/8vfyvq16hzh9),
+  open from 2026-07-19T23:34:03Z through 2026-07-20T04:44:03Z. GitHub warned
+  that new workflows could delay or fail to start; OpenAI
+  [independently reported failures and delays](https://status.openai.com/incidents/x65r5tj8)
+  for GitHub-dependent workflows during the same incident. As of 2026-07-21, no
+  detailed provider root-cause analysis is public.
+- The evidence therefore supports a transient GitHub control-plane failure, not
+  a repository YAML revision. It is not reproducible after recovery, so no
+  runtime or workflow behavior is changed to disguise it. Exact-head hosted
+  success remains mandatory evidence.
+
+### Repository-owned workflow validation and guarded execution
+
+- [x] Pin actionlint v1.7.12 by official release-archive and independently
+      recorded executable SHA-256 for x64/arm64 Linux, macOS, and Windows;
+      execute the Linux x64 path locally and keep other native acceptance explicit
+- [x] Make bootstrap explicit, local, ignored, time/size bounded, symlink-aware,
+      and fail-closed; never silently fall back to a mutable action or system binary
+- [x] Require `pnpm check` to lint every workflow with host-dependent external
+      linters disabled and prove the exact binary rejects a known-invalid fixture
+- [x] Preflight egress, plan, and review actor/digest/gate prerequisites under
+      the run lease before metered validation, while retaining the final
+      transactional recheck
+- [x] Prove stale egress/plan/review, malformed egress, and failed-verification
+      review inputs change no run state, usage, operation/event/approval history,
+      provider calls, source checkout, or private worktree
+- [x] Run a real failing registered check in the production Docker sandbox,
+      refuse review approval, preserve evidence, reject phantom approvals, and
+      roll the isolated worktree back to a clean baseline
+- [x] Leave the inherited OpenCode workflow and ADR 0010 security hold unchanged
+
+### Acceptance checklist
+
+- [x] Focused build plus store/OpenAI/CLI lifecycle suites
+- [x] Pinned workflow bootstrap, idempotence, valid-workflow pass, missing-tool
+      failure, and known-invalid negative self-test
+- [x] Full `pnpm check`: formatting 82 files; unit/provider 122 tests in 15
+      files; integration 38 tests in 8 files; evaluation 5 passed, 0 failed,
+      5 unsupported; security 109 tests plus 23 static assertions; build 19 modules
+- [x] Full and production dependency audits: no known vulnerabilities
+- [x] `git diff --check`
+- [x] Independent final review: no blocker, high, or medium findings remain
+- [x] Hosted `ci` run
+      [29863768917](https://github.com/Ayyitskevin/Icarus/actions/runs/29863768917)
+      passed its real `quality` job at exact implementation head
+      `f8fe03e399fb46f197bbcbc0df8f1edabbe2e0c9`
+
 ## Most recently accepted plan: third M3 bounded older-activity navigation
 
 Status values are evidence claims. The ADR 0016 implementation, fresh local

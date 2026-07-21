@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
@@ -10,6 +10,7 @@ import type { RunRecord } from "../../packages/core/src/types.js";
 import {
   createFixtureRepository,
   editResponse,
+  git,
   jsonOutput,
   PYTHON_IMAGE,
   planResponse,
@@ -28,14 +29,18 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
 });
 
-async function configureProject(repository: string, stateRoot: string): Promise<void> {
+async function configureProject(
+  repository: string,
+  stateRoot: string,
+  checkArgv: readonly string[] = ["python", "checks/verify.py"],
+): Promise<void> {
   expect(
     (await runCli(stateRoot, ["repo", "add", "--name", "fixture", "--path", repository])).exitCode,
   ).toBe(0);
   const check = JSON.stringify({
     id: "verify",
     name: "Verify greeting",
-    argv: ["python", "checks/verify.py"],
+    argv: checkArgv,
   });
   expect(
     (
@@ -88,6 +93,12 @@ describe("CLI lifecycle across process restarts", () => {
     );
     expect(planned.state).toBe("awaiting_approval");
     expect(planned.planSha256).toMatch(/^[a-f0-9]{64}$/);
+    const planGateStatus = jsonOutput<PublicRun>(
+      await runCli(fixture.stateRoot, ["run", "status", planned.id]),
+    );
+    const planGateHistory = jsonOutput<unknown>(
+      await runCli(fixture.stateRoot, ["run", "history", planned.id]),
+    );
 
     const wrongApproval = await runCli(fixture.stateRoot, [
       "run",
@@ -101,9 +112,15 @@ describe("CLI lifecycle across process restarts", () => {
     expect(wrongApproval.exitCode).toBe(1);
     expect(wrongApproval.stderr).toContain("STALE_APPROVAL");
     await expect(
-      readFile(path.join(fixture.stateRoot, "runs", planned.id, "worktree")),
-    ).rejects.toThrow();
+      lstat(path.join(fixture.stateRoot, "runs", planned.id, "worktree")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
     expect(provider.requests).toHaveLength(1);
+    expect(
+      jsonOutput<PublicRun>(await runCli(fixture.stateRoot, ["run", "status", planned.id])),
+    ).toEqual(planGateStatus);
+    expect(
+      jsonOutput<unknown>(await runCli(fixture.stateRoot, ["run", "history", planned.id])),
+    ).toEqual(planGateHistory);
 
     const reviewed = jsonOutput<PublicRun>(
       await runCli(fixture.stateRoot, [
@@ -133,6 +150,34 @@ describe("CLI lifecycle across process restarts", () => {
     expect(await readFile(path.join(fixture.repository, "src/greeting.txt"), "utf8")).toBe(
       preimage,
     );
+    const reviewGateStatus = jsonOutput<PublicRun>(
+      await runCli(fixture.stateRoot, ["run", "status", planned.id]),
+    );
+    const reviewGateHistory = jsonOutput<unknown>(
+      await runCli(fixture.stateRoot, ["run", "history", planned.id]),
+    );
+    const wrongReview = await runCli(fixture.stateRoot, [
+      "run",
+      "review",
+      planned.id,
+      "--decision",
+      "approve",
+      "--diff-sha",
+      "0".repeat(64),
+      "--actor",
+      "integration-test",
+    ]);
+    expect(wrongReview.exitCode).toBe(1);
+    expect(wrongReview.stderr).toContain("STALE_APPROVAL");
+    expect(
+      jsonOutput<PublicRun>(await runCli(fixture.stateRoot, ["run", "status", planned.id])),
+    ).toEqual(reviewGateStatus);
+    expect(
+      jsonOutput<unknown>(await runCli(fixture.stateRoot, ["run", "history", planned.id])),
+    ).toEqual(reviewGateHistory);
+    expect(await readFile(worktreeTarget, "utf8")).toBe("Hello, Icarus!\n");
+    expect(provider.requests).toHaveLength(2);
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
 
     const rolledBack = jsonOutput<PublicRun>(
       await runCli(fixture.stateRoot, [
@@ -384,6 +429,125 @@ describe("CLI lifecycle across process restarts", () => {
       apiRuntime.close();
     }
     expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+  }, 180_000);
+
+  test("refuses failed verification approval and rolls the private worktree back cleanly", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const preimage = "Hello, world!\n";
+    const preimageSha = createHash("sha256").update(preimage).digest("hex");
+    const provider = await startOllamaQueue([planResponse(), editResponse(preimageSha)]);
+    cleanups.push(provider.close);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
+    await configureProject(fixture.repository, fixture.stateRoot, [
+      "python",
+      "-c",
+      "print('guarded-check-ran'); raise SystemExit(7)",
+    ]);
+
+    const planned = jsonOutput<PublicRun>(
+      await runCli(fixture.stateRoot, [
+        "run",
+        "plan",
+        "--project",
+        "golden",
+        "--task",
+        "Replace the greeting and demonstrate a failed registered check.",
+        "--target",
+        "src/greeting.txt",
+        "--provider",
+        "ollama",
+        "--model",
+        "contract-model",
+        "--base-url",
+        provider.baseUrl,
+      ]),
+    );
+    const awaitingReview = jsonOutput<PublicRun>(
+      await runCli(fixture.stateRoot, [
+        "run",
+        "approve",
+        planned.id,
+        "--plan-sha",
+        planned.planSha256 ?? "",
+        "--actor",
+        "integration-test",
+      ]),
+    );
+
+    expect(awaitingReview.state).toBe("awaiting_review");
+    expect(awaitingReview.verification).toMatchObject({
+      outcome: "failed",
+      checks: [
+        {
+          checkId: "verify",
+          exitCode: 7,
+          outcome: "failed",
+          stdout: "guarded-check-ran\n",
+        },
+      ],
+      changedPaths: ["src/greeting.txt"],
+    });
+    expect(provider.requests).toHaveLength(2);
+    const worktree = path.join(fixture.stateRoot, "runs", planned.id, "worktree");
+    const worktreeTarget = path.join(worktree, "src/greeting.txt");
+    expect(await readFile(worktreeTarget, "utf8")).toBe("Hello, Icarus!\n");
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+
+    const failedGateStatus = jsonOutput<PublicRun>(
+      await runCli(fixture.stateRoot, ["run", "status", planned.id]),
+    );
+    const failedGateHistory = jsonOutput<unknown>(
+      await runCli(fixture.stateRoot, ["run", "history", planned.id]),
+    );
+    const refusedApproval = await runCli(fixture.stateRoot, [
+      "run",
+      "review",
+      planned.id,
+      "--decision",
+      "approve",
+      "--diff-sha",
+      awaitingReview.verification?.diffSha256 ?? "",
+      "--actor",
+      "integration-test",
+    ]);
+    expect(refusedApproval.exitCode).toBe(1);
+    expect(refusedApproval.stderr).toContain("VERIFICATION_NOT_PASSED");
+    expect(
+      jsonOutput<PublicRun>(await runCli(fixture.stateRoot, ["run", "status", planned.id])),
+    ).toEqual(failedGateStatus);
+    expect(
+      jsonOutput<unknown>(await runCli(fixture.stateRoot, ["run", "history", planned.id])),
+    ).toEqual(failedGateHistory);
+    expect(await readFile(worktreeTarget, "utf8")).toBe("Hello, Icarus!\n");
+    expect(provider.requests).toHaveLength(2);
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+
+    const rolledBack = jsonOutput<PublicRun>(
+      await runCli(fixture.stateRoot, [
+        "run",
+        "review",
+        planned.id,
+        "--decision",
+        "reject",
+        "--diff-sha",
+        awaitingReview.verification?.diffSha256 ?? "",
+        "--actor",
+        "integration-test",
+      ]),
+    );
+    expect(rolledBack.state).toBe("rolled_back");
+    expect(await readFile(worktreeTarget, "utf8")).toBe(preimage);
+    expect(await git(worktree, ["status", "--porcelain=v1", "--untracked-files=all"])).toBe("");
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+
+    const history = jsonOutput<{
+      readonly approvals: readonly { readonly kind: string; readonly decision: string }[];
+    }>(await runCli(fixture.stateRoot, ["run", "history", planned.id]));
+    expect(history.approvals.map(({ kind, decision }) => `${kind}:${decision}`)).toEqual([
+      "plan:approve",
+      "review:reject",
+    ]);
   }, 180_000);
 
   test("persists cancellation intent before restoring baseline bytes", async () => {

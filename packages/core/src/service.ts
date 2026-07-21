@@ -627,12 +627,7 @@ export class IcarusService {
     signal?: AbortSignal,
   ): Promise<RunRecord> {
     return this.#leases.withLease(runId, async () => {
-      const run = this.#store.getRun(runId);
-      invariant(
-        run.state === "awaiting_egress_approval",
-        "INVALID_STATE",
-        "Run is not awaiting egress approval",
-      );
+      const run = this.#store.preflightEgressApproval(runId, contextSha256, actor);
       const project = this.#store.getProject(run.projectId);
       try {
         await this.#runHostStage(
@@ -660,12 +655,7 @@ export class IcarusService {
     signal?: AbortSignal,
   ): Promise<RunRecord> {
     return this.#leases.withLease(runId, async () => {
-      const run = this.#store.getRun(runId);
-      invariant(
-        run.state === "awaiting_approval",
-        "INVALID_STATE",
-        "Run is not awaiting plan approval",
-      );
+      const run = this.#store.preflightPlanApproval(runId, planSha256, actor);
       const project = this.#store.getProject(run.projectId);
       try {
         await this.#runHostStage(
@@ -697,8 +687,7 @@ export class IcarusService {
     signal?: AbortSignal,
   ): Promise<RunRecord> {
     return this.#leases.withLease(runId, async () => {
-      const run = this.#store.getRun(runId);
-      invariant(run.state === "awaiting_review", "INVALID_STATE", "Run is not awaiting review");
+      const run = this.#store.preflightReviewDecision(runId, diffSha256, actor, decision);
       if (decision === "approve") {
         try {
           await this.#assertReviewWorktreeCurrent(run, signal);

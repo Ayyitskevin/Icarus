@@ -104,10 +104,15 @@ describe("OpenAI remote lifecycle", () => {
         "awaiting_egress_approval",
       );
       expect(requests).toHaveLength(0);
+      const egressGateHistory = runtime.service.history(awaitingEgress.id);
       await expect(
         runtime.service.approveEgress(awaitingEgress.id, "0".repeat(64), "integration-test"),
       ).rejects.toEqual(expect.objectContaining({ code: "STALE_APPROVAL" }));
+      await expect(
+        runtime.service.approveEgress(awaitingEgress.id, awaitingEgress.contextSha256, ""),
+      ).rejects.toEqual(expect.objectContaining({ code: "INVALID_APPROVAL" }));
       expect(requests).toHaveLength(0);
+      expect(runtime.service.history(awaitingEgress.id)).toEqual(egressGateHistory);
 
       const awaitingPlan = await runtime.service.approveEgress(
         awaitingEgress.id,
