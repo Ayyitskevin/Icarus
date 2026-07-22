@@ -194,6 +194,25 @@ export function runEventsQuery(searchParams: URLSearchParams): { readonly after:
   return { after };
 }
 
+export function runVerificationAttemptsQuery(searchParams: URLSearchParams): {
+  readonly snapshot: number;
+} {
+  const keys = Array.from(searchParams.keys());
+  const values = searchParams.getAll("snapshot");
+  if (keys.length !== 1 || keys[0] !== "snapshot" || values.length !== 1) {
+    invalid("Verification attempt requests require exactly one snapshot query parameter");
+  }
+  const raw = values[0] ?? "";
+  if (!POSITIVE_EVENT_CURSOR_PATTERN.test(raw)) {
+    invalid("snapshot must be a canonical positive safe integer");
+  }
+  const snapshot = Number(raw);
+  if (!Number.isSafeInteger(snapshot)) {
+    invalid("snapshot must be a canonical positive safe integer");
+  }
+  return { snapshot };
+}
+
 export function runEventHistoryQuery(searchParams: URLSearchParams): {
   readonly before: number;
   readonly snapshot: number;

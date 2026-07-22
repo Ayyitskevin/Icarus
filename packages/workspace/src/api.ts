@@ -229,6 +229,73 @@ export interface RunEventHistoryPageView {
   readonly events: readonly TimelineEntryView[];
 }
 
+export type VerificationAttemptStartProvenance =
+  | "observed_initial_edit"
+  | "observed_restore"
+  | "observed_resume"
+  | "outside_coverage";
+
+export type VerificationAttemptStatus =
+  | "passed"
+  | "failed"
+  | "unavailable"
+  | "cancelled"
+  | "incomplete_failed"
+  | "incomplete_at_snapshot";
+
+export type VerificationAttemptCheckpointProvenance =
+  | "recorded_digest_match"
+  | "run_checkpoint_available"
+  | "not_available";
+
+export interface VerificationAttemptView {
+  readonly identity: string;
+  readonly anchorSequence: number;
+  readonly startSequence: number | null;
+  readonly startedAt: string | null;
+  readonly startProvenance: VerificationAttemptStartProvenance;
+  readonly status: VerificationAttemptStatus;
+  readonly endSequence: number | null;
+  readonly endedAt: string | null;
+  readonly diffSha256: string | null;
+  readonly checkpointSha256: string | null;
+  readonly checkpointProvenance: VerificationAttemptCheckpointProvenance;
+  readonly laterAttemptObservedWithinCoverage: boolean;
+}
+
+export interface VerificationAttemptCoverageView {
+  readonly firstSequence: number;
+  readonly lastSequence: number;
+  readonly eventCount: number;
+  readonly eventLimit: 200;
+  readonly earlierEventsExcluded: boolean;
+}
+
+export type VerificationAttemptCheckpointView =
+  | { readonly status: "not_saved" }
+  | {
+      readonly status: "saved";
+      readonly sha256: string;
+      readonly createdAt: string;
+      readonly saveEvent:
+        | {
+            readonly status: "observed_in_coverage";
+            readonly sequence: number;
+            readonly timestamp: string;
+          }
+        | { readonly status: "not_observed_in_coverage" };
+    };
+
+export interface VerificationAttemptsView {
+  readonly runId: string;
+  readonly snapshot: number;
+  readonly coverage: VerificationAttemptCoverageView;
+  readonly attemptLimit: 8;
+  readonly attemptAnchorsTruncatedWithinCoverage: boolean;
+  readonly checkpoint: VerificationAttemptCheckpointView;
+  readonly attempts: readonly VerificationAttemptView[];
+}
+
 export interface RunSummaryView {
   readonly id: string;
   readonly projectId: string;
@@ -484,6 +551,17 @@ export function getRunEventHistory(
 ): Promise<unknown> {
   return requestJson<unknown>(
     `/api/runs/${encodeURIComponent(runId)}/events/history?before=${encodeURIComponent(String(before))}&snapshot=${encodeURIComponent(String(snapshot))}`,
+    signal === undefined ? {} : { signal },
+  );
+}
+
+export function getRunVerificationAttempts(
+  runId: string,
+  snapshot: number,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return requestJson<unknown>(
+    `/api/runs/${encodeURIComponent(runId)}/verification-attempts?snapshot=${encodeURIComponent(String(snapshot))}`,
     signal === undefined ? {} : { signal },
   );
 }

@@ -281,6 +281,71 @@ export interface RunEventHistoryPage {
   readonly events: readonly EventSummaryRecord[];
 }
 
+export type VerificationAttemptStartProvenance =
+  | "observed_initial_edit"
+  | "observed_restore"
+  | "observed_resume"
+  | "outside_coverage";
+
+export type VerificationAttemptStatus =
+  | "passed"
+  | "failed"
+  | "unavailable"
+  | "cancelled"
+  | "incomplete_failed"
+  | "incomplete_at_snapshot";
+
+export type VerificationAttemptCheckpointProvenance =
+  | "recorded_digest_match"
+  | "run_checkpoint_available"
+  | "not_available";
+
+export interface VerificationAttemptSummary {
+  readonly identity: string;
+  readonly anchorSequence: number;
+  readonly startSequence: number | null;
+  readonly startedAt: string | null;
+  readonly startProvenance: VerificationAttemptStartProvenance;
+  readonly status: VerificationAttemptStatus;
+  readonly endSequence: number | null;
+  readonly endedAt: string | null;
+  readonly diffSha256: string | null;
+  readonly checkpointSha256: string | null;
+  readonly checkpointProvenance: VerificationAttemptCheckpointProvenance;
+  readonly laterAttemptObservedWithinCoverage: boolean;
+}
+
+export type VerificationCheckpointSummary =
+  | { readonly status: "not_saved" }
+  | {
+      readonly status: "saved";
+      readonly sha256: string;
+      readonly createdAt: string;
+      readonly saveEvent:
+        | {
+            readonly status: "observed_in_coverage";
+            readonly sequence: number;
+            readonly timestamp: string;
+          }
+        | { readonly status: "not_observed_in_coverage" };
+    };
+
+export interface RunVerificationAttemptsSnapshot {
+  readonly runId: string;
+  readonly snapshot: number;
+  readonly coverage: {
+    readonly firstSequence: number;
+    readonly lastSequence: number;
+    readonly eventCount: number;
+    readonly eventLimit: 200;
+    readonly earlierEventsExcluded: boolean;
+  };
+  readonly attemptLimit: 8;
+  readonly attemptAnchorsTruncatedWithinCoverage: boolean;
+  readonly checkpoint: VerificationCheckpointSummary;
+  readonly attempts: readonly VerificationAttemptSummary[];
+}
+
 export interface ApprovalRecord {
   readonly runId: string;
   readonly kind: "egress" | "plan" | "review" | "rollback" | "restore";

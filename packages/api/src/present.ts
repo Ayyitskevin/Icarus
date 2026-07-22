@@ -10,6 +10,7 @@ import type {
   RunPresentationSnapshot,
   RunRecord,
   RunState,
+  RunVerificationAttemptsSnapshot,
   WorkspaceRunPage,
 } from "@icarus/core";
 
@@ -225,6 +226,55 @@ export function presentRunEventHistoryPage(page: RunEventHistoryPage): Record<st
       label: event.type.replaceAll(".", " "),
       evidenceSection: evidenceSection(event.type),
       timestamp: event.createdAt,
+    })),
+  };
+}
+
+export function presentRunVerificationAttempts(
+  snapshot: RunVerificationAttemptsSnapshot,
+): Record<string, unknown> {
+  const checkpoint =
+    snapshot.checkpoint.status === "not_saved"
+      ? { status: "not_saved" }
+      : {
+          status: "saved",
+          sha256: snapshot.checkpoint.sha256,
+          createdAt: snapshot.checkpoint.createdAt,
+          saveEvent:
+            snapshot.checkpoint.saveEvent.status === "observed_in_coverage"
+              ? {
+                  status: "observed_in_coverage",
+                  sequence: snapshot.checkpoint.saveEvent.sequence,
+                  timestamp: snapshot.checkpoint.saveEvent.timestamp,
+                }
+              : { status: "not_observed_in_coverage" },
+        };
+  return {
+    runId: snapshot.runId,
+    snapshot: snapshot.snapshot,
+    coverage: {
+      firstSequence: snapshot.coverage.firstSequence,
+      lastSequence: snapshot.coverage.lastSequence,
+      eventCount: snapshot.coverage.eventCount,
+      eventLimit: snapshot.coverage.eventLimit,
+      earlierEventsExcluded: snapshot.coverage.earlierEventsExcluded,
+    },
+    attemptLimit: snapshot.attemptLimit,
+    attemptAnchorsTruncatedWithinCoverage: snapshot.attemptAnchorsTruncatedWithinCoverage,
+    checkpoint,
+    attempts: snapshot.attempts.map((attempt) => ({
+      identity: attempt.identity,
+      anchorSequence: attempt.anchorSequence,
+      startSequence: attempt.startSequence,
+      startedAt: attempt.startedAt,
+      startProvenance: attempt.startProvenance,
+      status: attempt.status,
+      endSequence: attempt.endSequence,
+      endedAt: attempt.endedAt,
+      diffSha256: attempt.diffSha256,
+      checkpointSha256: attempt.checkpointSha256,
+      checkpointProvenance: attempt.checkpointProvenance,
+      laterAttemptObservedWithinCoverage: attempt.laterAttemptObservedWithinCoverage,
     })),
   };
 }

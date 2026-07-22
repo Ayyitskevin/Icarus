@@ -52,6 +52,7 @@ import type {
   RunPresentationSnapshot,
   RunRecord,
   RunState,
+  RunVerificationAttemptsSnapshot,
   SandboxProfile,
   SunCeiling,
   VerificationEvidence,
@@ -582,6 +583,10 @@ export class IcarusService {
 
   listRunEventHistory(runId: string, before: number, snapshot: number): RunEventHistoryPage {
     return this.#store.listEventHistoryPage(runId, before, snapshot);
+  }
+
+  getRunVerificationAttempts(runId: string, snapshot: number): RunVerificationAttemptsSnapshot {
+    return this.#store.getRunVerificationAttempts(runId, snapshot);
   }
 
   createRunDraft(input: PlanRunInput): RunRecord {

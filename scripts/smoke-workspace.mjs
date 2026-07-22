@@ -160,6 +160,21 @@ try {
   if (draft.state !== "preparing" || draft.phase !== "draft" || provider.requests() !== 0) {
     throw new Error("Draft was not persisted before provider work");
   }
+  const provenanceResponse = await fetch(
+    `${workspace.url}/api/runs/${draft.id}/verification-attempts?snapshot=${String(draft.eventCursor)}`,
+  );
+  const provenance = await provenanceResponse.json();
+  if (
+    !provenanceResponse.ok ||
+    provenance.runId !== draft.id ||
+    provenance.snapshot !== draft.eventCursor ||
+    provenance.coverage?.eventLimit !== 200 ||
+    provenance.attemptLimit !== 8 ||
+    provenance.checkpoint?.status !== "not_saved" ||
+    provenance.attempts?.length !== 0
+  ) {
+    throw new Error("Bounded verification provenance did not preserve the empty evidence state");
+  }
   await workspace.close();
   workspace = undefined;
   runtime.close();
