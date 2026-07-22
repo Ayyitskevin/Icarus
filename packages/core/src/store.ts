@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, lstatSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync } from "node:fs";
 import path from "node:path";
 
 import Database from "better-sqlite3";
@@ -51,7 +51,13 @@ export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
 export const RUN_EVENT_PAGE_LIMIT = 64;
 export const RUN_PRESENTATION_EVENT_LIMIT = 200;
+export const RUN_PRESENTATION_APPROVAL_LIMIT = 12;
 export const WORKSPACE_RUN_PAGE_LIMIT = 12;
+const APPROVAL_RUN_ID_MAX_BYTES = 64;
+const APPROVAL_KIND_MAX_BYTES = 16;
+const APPROVAL_DIGEST_MAX_BYTES = 64;
+const APPROVAL_ACTOR_MAX_BYTES = 200;
+const APPROVAL_DECISION_MAX_BYTES = 16;
 const EVENT_TYPE_MAX_BYTES = 128;
 const EVENT_TIMESTAMP_MAX_BYTES = 64;
 const RUN_SUMMARY_TASK_MAX_BYTES = 8 * 1024;
@@ -77,6 +83,14 @@ const RUN_STATES: ReadonlySet<string> = new Set<RunState>([
   "restoring",
 ]);
 const RUN_PRESENTATION_ACTION_EVENT_LIMIT = 2;
+const APPROVAL_KINDS: ReadonlySet<ApprovalRecord["kind"]> = new Set([
+  "egress",
+  "plan",
+  "review",
+  "rollback",
+  "restore",
+]);
+const APPROVAL_DECISIONS: ReadonlySet<ApprovalRecord["decision"]> = new Set(["approve", "reject"]);
 const RUN_PRESENTATION_ACTION_EVENT_TYPES = [
   "edit.materialized",
   "restore.completed",
@@ -201,6 +215,76 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 PRAGMA user_version = 1;
 `;
 
+const APPROVAL_INDEX_SCHEMA = `
+CREATE INDEX IF NOT EXISTS approvals_by_run
+ON approvals(run_id);
+`;
+
+type ApprovalIndexStatus = "not_applicable" | "missing" | "valid";
+
+function inspectApprovalIndex(databasePath: string): ApprovalIndexStatus {
+  if (!existsSync(databasePath)) return "not_applicable";
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const approvalTableExists =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'approvals'")
+        .get() !== undefined;
+    if (!approvalTableExists) return "not_applicable";
+
+    const indexEntry = database
+      .prepare(
+        "SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND name = 'approvals_by_run'",
+      )
+      .get();
+    if (indexEntry === undefined) return "missing";
+
+    const index = row(indexEntry, "approval index");
+    invariant(
+      text(index.name, "approval index.name") === "approvals_by_run" &&
+        text(index.tbl_name, "approval index.table") === "approvals",
+      "DATABASE_ERROR",
+      "Approval index metadata is invalid",
+    );
+
+    const indexList = database.prepare("PRAGMA index_list('approvals')").all() as unknown[];
+    const definition = indexList
+      .map((entry) => row(entry, "approval index definition"))
+      .find((entry) => entry.name === "approvals_by_run");
+    invariant(
+      definition !== undefined &&
+        definition.unique === 0 &&
+        definition.origin === "c" &&
+        definition.partial === 0,
+      "DATABASE_ERROR",
+      "Approval index definition is invalid",
+    );
+
+    const keyColumns = (
+      database.prepare("PRAGMA index_xinfo('approvals_by_run')").all() as unknown[]
+    )
+      .map((entry) => row(entry, "approval index column"))
+      .filter((entry) => entry.key === 1);
+    const expectedColumns = [{ name: "run_id", desc: 0 }] as const;
+    invariant(
+      keyColumns.length === expectedColumns.length &&
+        expectedColumns.every(
+          (expected, index) =>
+            keyColumns[index]?.seqno === index &&
+            keyColumns[index]?.name === expected.name &&
+            keyColumns[index]?.desc === expected.desc &&
+            keyColumns[index]?.coll === "BINARY",
+        ),
+      "DATABASE_ERROR",
+      "Approval index columns are invalid",
+    );
+    return "valid";
+  } finally {
+    database.close();
+  }
+}
+
 function row(value: unknown, name: string): Row {
   invariant(
     typeof value === "object" && value !== null,
@@ -259,6 +343,58 @@ function isCanonicalTimestamp(value: string): boolean {
     (value === canonicalTimestamp ||
       (canonicalTimestamp.endsWith(".000Z") && value === canonicalTimestamp.replace(".000Z", "Z")))
   );
+}
+
+function containsUnsafeActorCharacter(value: string): boolean {
+  return /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value);
+}
+
+function approvalRecordRow(entry: unknown, expectedRunId: string): ApprovalRecord {
+  const value = row(entry, "approval");
+  const runId = text(value.run_id, "approval.run_id");
+  const kind = text(value.kind, "approval.kind");
+  const digest = text(value.digest, "approval.digest");
+  const actor = text(value.actor, "approval.actor");
+  const decision = text(value.decision, "approval.decision");
+  const createdAt = text(value.created_at, "approval.created_at");
+  invariant(
+    runId === expectedRunId && RUN_ID_PATTERN.test(runId),
+    "DATABASE_ERROR",
+    "Approval identity is invalid",
+  );
+  invariant(
+    APPROVAL_KINDS.has(kind as ApprovalRecord["kind"]),
+    "DATABASE_ERROR",
+    "Approval kind is invalid",
+  );
+  invariant(/^[a-f0-9]{64}$/.test(digest), "DATABASE_ERROR", "Approval digest is invalid");
+  invariant(
+    actor.trim().length > 0 &&
+      Buffer.byteLength(actor, "utf8") <= APPROVAL_ACTOR_MAX_BYTES &&
+      !containsUnsafeActorCharacter(actor) &&
+      !containsSecretShapedContent(Buffer.from(actor, "utf8")),
+    "DATABASE_ERROR",
+    "Approval actor is invalid",
+  );
+  invariant(
+    APPROVAL_DECISIONS.has(decision as ApprovalRecord["decision"]),
+    "DATABASE_ERROR",
+    "Approval decision is invalid",
+  );
+  invariant(
+    decision === "approve" || kind === "review",
+    "DATABASE_ERROR",
+    "Approval kind and decision are inconsistent",
+  );
+  invariant(isCanonicalTimestamp(createdAt), "DATABASE_ERROR", "Approval timestamp is invalid");
+  return {
+    runId,
+    kind: kind as ApprovalRecord["kind"],
+    digest,
+    actor,
+    decision: decision as ApprovalRecord["decision"],
+    createdAt,
+  };
 }
 
 function sqliteRowid(value: unknown, name: string, allowZero: boolean): number {
@@ -444,7 +580,12 @@ export class IcarusStore {
 
   constructor(
     databasePath: string,
-    options: { now?: () => string; id?: () => string; busyTimeoutMs?: number } = {},
+    options: {
+      now?: () => string;
+      id?: () => string;
+      busyTimeoutMs?: number;
+      allowApprovalIndexMigration?: boolean;
+    } = {},
   ) {
     const parent = path.dirname(databasePath);
     const parentStat = lstatSync(parent);
@@ -459,6 +600,13 @@ export class IcarusStore {
       "INVALID_DATABASE_CONFIGURATION",
       "SQLite busy timeout is invalid",
     );
+    const approvalIndexStatus = inspectApprovalIndex(databasePath);
+    if (approvalIndexStatus === "missing" && options.allowApprovalIndexMigration !== true) {
+      throw new IcarusError(
+        "DATABASE_MIGRATION_REQUIRED",
+        "Approval index migration requires a state backup and explicit operator approval",
+      );
+    }
     this.#database = new Database(databasePath);
     chmodSync(databasePath, 0o600);
     this.#database.pragma(`busy_timeout = ${busyTimeoutMs}`);
@@ -466,6 +614,7 @@ export class IcarusStore {
     this.#database.pragma("journal_mode = WAL");
     this.#database.pragma("synchronous = FULL");
     this.#database.exec(SCHEMA);
+    this.#database.exec(APPROVAL_INDEX_SCHEMA);
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#id = options.id ?? randomUUID;
   }
@@ -1095,19 +1244,9 @@ export class IcarusStore {
   listApprovals(runId: string): ApprovalRecord[] {
     return (
       this.#database
-        .prepare("SELECT * FROM approvals WHERE run_id = ? ORDER BY created_at, id")
+        .prepare("SELECT * FROM approvals WHERE run_id = ? ORDER BY rowid")
         .all(runId) as unknown[]
-    ).map((entry) => {
-      const value = row(entry, "approval");
-      return {
-        runId: text(value.run_id, "approval.run_id"),
-        kind: text(value.kind, "approval.kind") as ApprovalRecord["kind"],
-        digest: text(value.digest, "approval.digest"),
-        actor: text(value.actor, "approval.actor"),
-        decision: text(value.decision, "approval.decision") as ApprovalRecord["decision"],
-        createdAt: text(value.created_at, "approval.created_at"),
-      };
-    });
+    ).map((entry) => approvalRecordRow(entry, runId));
   }
 
   recordWorkspace(
@@ -1786,7 +1925,39 @@ export class IcarusStore {
     };
     const transaction = this.#database.transaction((): RunPresentationSnapshot => {
       const run = this.getRun(runId);
-      const approvals = this.listApprovals(runId);
+      const approvalRows = this.#database
+        .prepare(
+          `SELECT
+             CASE WHEN typeof(run_id) = 'text'
+                    AND octet_length(run_id) <= ${APPROVAL_RUN_ID_MAX_BYTES}
+                  THEN run_id ELSE NULL END AS run_id,
+             CASE WHEN typeof(kind) = 'text'
+                    AND octet_length(kind) <= ${APPROVAL_KIND_MAX_BYTES}
+                  THEN kind ELSE NULL END AS kind,
+             CASE WHEN typeof(digest) = 'text'
+                    AND octet_length(digest) <= ${APPROVAL_DIGEST_MAX_BYTES}
+                  THEN digest ELSE NULL END AS digest,
+             CASE WHEN typeof(actor) = 'text'
+                    AND octet_length(actor) <= ${APPROVAL_ACTOR_MAX_BYTES}
+                  THEN actor ELSE NULL END AS actor,
+             CASE WHEN typeof(decision) = 'text'
+                    AND octet_length(decision) <= ${APPROVAL_DECISION_MAX_BYTES}
+                  THEN decision ELSE NULL END AS decision,
+             CASE WHEN typeof(created_at) = 'text'
+                    AND octet_length(created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
+                  THEN created_at ELSE NULL END AS created_at
+           FROM approvals WHERE run_id = ?
+           ORDER BY approvals.rowid DESC LIMIT ?`,
+        )
+        .all(runId, RUN_PRESENTATION_APPROVAL_LIMIT + 1) as unknown[];
+      const earlierApprovalsExcluded = approvalRows.length > RUN_PRESENTATION_APPROVAL_LIMIT;
+      const validatedApprovalRows = approvalRows.map((entry) => approvalRecordRow(entry, runId));
+      const approvals = validatedApprovalRows.slice(0, RUN_PRESENTATION_APPROVAL_LIMIT).reverse();
+      const approvalCoverage = {
+        limit: RUN_PRESENTATION_APPROVAL_LIMIT,
+        loaded: approvals.length,
+        earlierApprovalsExcluded,
+      } as const;
       const aggregate = row(
         this.#database
           .prepare(
@@ -1833,7 +2004,15 @@ export class IcarusStore {
           ),
         )
         .slice(-RUN_PRESENTATION_ACTION_EVENT_LIMIT);
-      return { run, approvals, events, eventCursor, eventCount, actionEvents };
+      return {
+        run,
+        approvals,
+        approvalCoverage,
+        events,
+        eventCursor,
+        eventCount,
+        actionEvents,
+      };
     });
     return transaction();
   }
@@ -2084,8 +2263,8 @@ export class IcarusStore {
     );
     invariant(
       approval.actor.trim().length > 0 &&
-        approval.actor.length <= 200 &&
-        !/[\r\n\0]/.test(approval.actor),
+        Buffer.byteLength(approval.actor, "utf8") <= APPROVAL_ACTOR_MAX_BYTES &&
+        !containsUnsafeActorCharacter(approval.actor),
       "INVALID_APPROVAL",
       "Approval actor is invalid",
     );

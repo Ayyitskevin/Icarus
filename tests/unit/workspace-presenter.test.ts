@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -17,7 +18,18 @@ import type {
   RunVerificationAttemptsSnapshot,
   WorkspaceRunPage,
 } from "../../packages/core/src/types.js";
+import { ApprovalProvenance } from "../../packages/workspace/src/App.js";
 import { UNIT_CEILING, UNIT_PROVIDER, UNIT_SANDBOX } from "../support/unit-fixtures.js";
+
+const workspaceRequire = createRequire(
+  new URL("../../packages/workspace/package.json", import.meta.url),
+);
+const { createElement } = workspaceRequire("react") as {
+  createElement(type: unknown, props: unknown): unknown;
+};
+const { renderToStaticMarkup } = workspaceRequire("react-dom/server") as {
+  renderToStaticMarkup(element: unknown): string;
+};
 
 const states: readonly [RunState, ReturnType<typeof workspaceRunPhase>][] = [
   ["preparing", "draft"],
@@ -52,9 +64,15 @@ function presentationSnapshot(history: RunHistory): RunPresentationSnapshot {
     createdAt: event.createdAt,
   }));
   const presentationEvents = events.slice(-200);
+  const approvals = history.approvals.slice(-12);
   return {
     run: history.run,
-    approvals: history.approvals,
+    approvals,
+    approvalCoverage: {
+      limit: 12,
+      loaded: approvals.length,
+      earlierApprovalsExcluded: history.approvals.length > approvals.length,
+    },
     events: presentationEvents,
     eventCursor: events.at(-1)?.sequence ?? 0,
     eventCount: events.length,
@@ -63,6 +81,31 @@ function presentationSnapshot(history: RunHistory): RunPresentationSnapshot {
 }
 
 describe("workspace run presentation", () => {
+  test("renders hostile approval actors only as inert text", () => {
+    const actor = '<img data-approval-injection="true"> Recorded digest:';
+    const markup = renderToStaticMarkup(
+      createElement(ApprovalProvenance, {
+        run: {
+          approvalCoverage: { limit: 12, loaded: 1, earlierApprovalsExcluded: false },
+          approvals: [
+            {
+              kind: "plan",
+              digest: "f".repeat(64),
+              actor,
+              decision: "approve",
+              createdAt: "2026-07-22T12:00:00.000Z",
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(markup).toContain("&lt;img");
+    expect(markup).not.toContain("<img");
+    expect(markup).not.toMatch(/<(?:a|button|form|input|textarea)\b/u);
+    expect(markup).toContain("Recorded digest:");
+  });
+
   test.each(states)("maps %s to the truthful workspace phase %s", (state, phase) => {
     expect(workspaceRunPhase(state)).toBe(phase);
   });
@@ -375,6 +418,11 @@ describe("workspace run presentation", () => {
       action: null,
       verification: { outcome: "not_run" },
       checks: [{ outcome: "not_run" }],
+      approvalCoverage: {
+        limit: 12,
+        loaded: 0,
+        earlierApprovalsExcluded: false,
+      },
       outputs: [],
       timestamps: {
         createdAt: "2026-07-20T12:00:00.000Z",

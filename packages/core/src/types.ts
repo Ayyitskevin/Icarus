@@ -355,6 +355,12 @@ export interface ApprovalRecord {
   readonly createdAt: string;
 }
 
+export interface ApprovalCoverage {
+  readonly limit: 12;
+  readonly loaded: number;
+  readonly earlierApprovalsExcluded: boolean;
+}
+
 export interface RunHistory {
   readonly run: RunRecord;
   readonly approvals: readonly ApprovalRecord[];
@@ -364,6 +370,7 @@ export interface RunHistory {
 export interface RunPresentationSnapshot {
   readonly run: RunRecord;
   readonly approvals: readonly ApprovalRecord[];
+  readonly approvalCoverage: ApprovalCoverage;
   readonly events: readonly EventSummaryRecord[];
   readonly eventCursor: number;
   readonly eventCount: number;

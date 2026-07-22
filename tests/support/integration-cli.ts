@@ -1,9 +1,9 @@
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
 
 export const PYTHON_IMAGE =
   "python:3.12-slim@sha256:c3d81d25b3154142b0b42eb1e61300024426268edeb5b5a26dd7ddf64d9daf28";
@@ -92,9 +92,13 @@ export async function runCli(
   args: readonly string[],
   extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<ProcessResult> {
+  const environment = { ...process.env, ...extraEnv, ICARUS_HOME: stateRoot };
+  for (const [name, value] of Object.entries(extraEnv)) {
+    if (value === undefined) delete environment[name];
+  }
   return run(process.execPath, [path.resolve("packages/cli/dist/main.js"), ...args], {
     cwd: path.resolve("."),
-    env: { ...process.env, ...extraEnv, ICARUS_HOME: stateRoot },
+    env: environment,
     timeoutMs: 180_000,
   });
 }

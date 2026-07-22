@@ -71,6 +71,58 @@ the reliability slice without claiming a broader milestone is complete.
       passed its real `quality` job at exact implementation head
       `f8fe03e399fb46f197bbcbc0df8f1edabbe2e0c9`
 
+## Sixth M3 candidate: bounded approval provenance
+
+Status values are evidence claims. ADR 0019 and its implementation are present
+as a local candidate on 2026-07-22. This records only the bounded ordinary
+approval projection; the full local gate, independent review, and exact
+published-head hosted CI remain required before acceptance.
+
+### Bounded projection and truthful browser copy
+
+- [x] Retain at most the newest 12 approval rows in the ordinary selected-run
+      response, ordered oldest to newest within that suffix, with an explicit
+      fixed limit, loaded count, and earlier-row exclusion flag
+- [x] Query only approval run ID, kind, digest, actor, decision, and timestamp;
+      preflight all six direct columns with SQLite storage/byte caps, validate at
+      most 13 returned rows, and fail closed on malformed storage class, enum,
+      digest, actor, credential-shaped content, or timestamp
+- [x] Add and prove the per-run `(run_id)` index plus reverse rowid seek so the
+      two-second selected-run poll never scans global approval history and
+      same-timestamp random UUIDs cannot reorder append history
+- [x] Reconstruct an exact presenter allowlist and omit approval IDs, rowids,
+      payloads, private paths, commands, provider material, and errors
+- [x] Label actors and digests as recorded provenance rather than current
+      authentication or byte-integrity proof; show truncation and complete-CLI
+      guidance without claiming a total
+- [x] Keep warnings and approval provenance on distinct stable evidence anchors,
+      semantic lists and times, focusable targets, and React text rendering
+
+### Scope and evidence
+
+- [x] Preserve complete CLI history and one coherent SQLite read transaction
+- [x] Add only one backwards-compatible approval index, with no table/column
+      migration, data write, event, Git/source read, provider call, browser
+      approval, execution, command, commit, push, or deployment
+- [x] Require backup and explicit operator approval before building the index
+      against existing non-test state
+- [x] Prove an indexed seek with no history-sized scan plus fixed
+      returned/decoded approval rows and response size
+- [x] Cover 0/1/12/13-row suffixes, all kinds and decisions, same-timestamp
+      append ordering with adversarial UUIDs, multibyte/control/format/line-
+      separator actor rejection, impossible kind/decision pairs, malformed
+      and oversized persisted fields, the exact query plan, API coverage,
+      omitted database IDs, client anchor routing, duplicate display identity,
+      inert hostile-actor rendering, the no-env/invalid/exact CLI migration
+      gate with byte-identical refused state, and static projection/presenter
+      guards
+- [x] Run the fresh full local gate: 89 files passed formatting; lint had no
+      errors; typecheck passed; 158 unit/provider tests and 41 integration tests
+      passed; evaluation reported 5 passed and 5 honestly unsupported; 109
+      security tests plus 37 static assertions passed; and Vite built 22 modules
+- [x] Complete independent final review with no blocker, high, or medium finding
+- [ ] Require exact published-head hosted CI before acceptance
+
 ## Fifth M3 slice: bounded verification-attempt provenance
 
 Status values are evidence claims. ADR 0018 and its implementation are complete,
@@ -730,7 +782,7 @@ Final adversarial candidate local evidence on 2026-07-20:
 The inherited ADR 0010 security hold remains separate from local feature work.
 ADR 0016 implements only bounded older event metadata for the third M3 slice.
 ADR 0017 implements only bounded workspace-wide run summaries for the fourth.
-Project/repository enumeration, selected-run approval pagination, file/status
-views, richer diff or payload-bearing history, patch materialization, browser
-approval, and execution remain later, explicitly reviewed expansions. See
-`docs/ROADMAP.md`.
+ADR 0019 bounds only the ordinary newest approval suffix. Project/repository
+enumeration, older approval pagination, file/status views, richer diff or
+payload-bearing history, patch materialization, browser approval, and execution
+remain later, explicitly reviewed expansions. See `docs/ROADMAP.md`.

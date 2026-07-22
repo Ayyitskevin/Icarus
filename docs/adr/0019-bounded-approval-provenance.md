@@ -11,10 +11,10 @@
 ## Context
 
 The selected-run response currently loads every approval row. A run may cycle
-through review, rollback, restore, and verification more than once, so response
-work and browser memory grow with durable history. The existing approval list
-also presents a digest and actor without stating whether the page is complete or
-which persisted revision it represents.
+through review, rollback, restore, and verification more than once, so decoded
+host data, response size, and browser memory grow with durable history. The
+existing approval list also presents a digest and actor without stating whether
+the page is complete or which persisted revision it represents.
 
 Approval rows are authoritative decisions, but they do not prove that approved
 bytes remain current or correct. Their timestamps do not establish ordering,
@@ -37,16 +37,27 @@ approvalCoverage: {
 ```
 
 One SQLite read transaction continues to own the run row, approval suffix,
-recent event suffix, and event high-water mark. Approval selection uses direct
-columns only, orders by SQLite rowid descending with `LIMIT 13`, retains 12,
-then reverses the suffix for presentation. The query does not decode event
-payloads or select private run, checkpoint, operation, or event columns.
+recent event suffix, and event high-water mark. Add the
+`approvals_by_run(run_id)` index. SQLite's per-index rowid ordering makes
+`ORDER BY approvals.rowid DESC LIMIT 13` an indexed reverse seek, so equal
+timestamps and random approval UUIDs cannot reorder append history. The query
+validates all 13 returned rows, retains 12, then reverses the suffix for
+presentation. It does not decode
+event payloads or select private run, checkpoint, operation, or event columns.
+`EXPLAIN QUERY PLAN` must prove the per-run index rather than a table scan.
+
+Every selected scalar first passes a direct-column SQLite `typeof = 'text'`
+and `octet_length` ceiling inside a `CASE` projection. Invalid or oversized
+storage becomes a bounded sentinel that host validation rejects; corrupt
+megabyte-scale values are never returned to JavaScript.
 
 Each retained row must have the selected run ID; a kind from `egress`, `plan`,
 `review`, `rollback`, or `restore`; a canonical lowercase SHA-256 digest; an
-actor between 1 and 200 UTF-8 bytes with no controls or recognizable credential
-material; a decision from `approve` or `reject`; and a bounded canonical UTC
-timestamp. Invalid persisted data fails closed with a host-controlled message.
+actor between 1 and 200 UTF-8 bytes with no Unicode control, format, line-
+separator, or paragraph-separator characters or recognizable credential
+material; a valid kind/decision pair (`reject` is review-only); and a bounded
+canonical UTC timestamp. Invalid persisted data fails closed with a
+host-controlled message.
 
 The presenter reconstructs the exact allowlist:
 
@@ -77,20 +88,27 @@ an identifier, a fragment, or an accessible-name replacement.
 ### Authority and response boundary
 
 The legacy full-history CLI API retains complete approvals. Only the workspace
-presentation snapshot is bounded. This slice adds no approval action, mutation,
-schema, migration, event append, Git/source read, provider call, check execution,
-stream, watcher, daemon, command, commit, push, deployment, account, or workflow
-authority. ADR 0010 and `.github/workflows/opencode.yml` remain separately held.
+presentation snapshot is bounded. This slice adds the one additive approval
+index but no table/column migration, approval action, data mutation, event
+append, Git/source read, provider call, check execution, stream, watcher, daemon,
+command, commit, push, deployment, account, or workflow authority. Building the
+index against existing non-test state requires a backup and explicit operator
+rollout approval. ADR 0010 and `.github/workflows/opencode.yml` remain
+separately held.
 
 ## Consequences
 
-The browser gains truthful, bounded approval provenance while the selected-run
-response stops growing with approval history. Operators use CLI history for
-older decisions and causal investigation.
+The browser gains truthful, bounded approval provenance while selected-run
+queries avoid a history-sized scan and materialize at most 13 approval rows
+after an indexed seek. Response size and decoded approval data no longer grow
+with approval history. Operators use CLI history for older decisions and causal
+investigation.
 
 Acceptance covers 0, 1, 12, and 13-plus rows; every kind and decision; stable
-suffix ordering; same-timestamp rows; malformed IDs, kinds, digests, actors,
-controls, credentials, decisions, timestamps, and storage classes; one coherent
-read snapshot under a concurrent approval append; fixed response shape and size;
-zero writes/events/Git reads; hostile actor text rendered only as text; visible
-truncation and CLI guidance; and unchanged browser authority.
+append ordering with adversarial UUIDs and same-timestamp rows; malformed IDs,
+kinds, digests, actors, controls, credentials, kind/decision pairs, timestamps,
+and storage classes; fixed response shape and size; zero writes/events/Git
+reads; hostile actor text rendered only as text; visible truncation and CLI
+guidance; and unchanged browser authority. Transactional snapshot coherence is
+an implementation invariant; this slice does not claim a separate WAL stress
+test for approval appends.

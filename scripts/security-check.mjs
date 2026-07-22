@@ -20,6 +20,7 @@ const sandboxSource = await readFile("packages/core/src/sandbox.ts", "utf8");
 const workspaceServerSource = await readFile("packages/api/src/server.ts", "utf8");
 const workspacePresenterSource = await readFile("packages/api/src/present.ts", "utf8");
 const workspaceApiSource = await readFile("packages/workspace/src/api.ts", "utf8");
+const cliSource = await readFile("packages/cli/src/main.ts", "utf8");
 const verificationAttemptsUiSource = await readFile(
   "packages/workspace/src/verification-attempts.ts",
   "utf8",
@@ -67,6 +68,27 @@ const workspaceRunPageEnd = storeSource.indexOf("\n  transition(", workspaceRunP
 const workspaceRunPageSource =
   workspaceRunPageStart >= 0 && workspaceRunPageEnd > workspaceRunPageStart
     ? storeSource.slice(workspaceRunPageStart, workspaceRunPageEnd)
+    : "";
+const approvalProjectionStart = storeSource.indexOf("  getRunPresentationSnapshot(");
+const approvalProjectionEnd = storeSource.indexOf("\n  listEventPage(", approvalProjectionStart);
+const approvalProjectionSource =
+  approvalProjectionStart >= 0 && approvalProjectionEnd > approvalProjectionStart
+    ? storeSource.slice(approvalProjectionStart, approvalProjectionEnd)
+    : "";
+const approvalRowStart = storeSource.indexOf("function approvalRecordRow(");
+const approvalRowEnd = storeSource.indexOf("\nfunction sqliteRowid(", approvalRowStart);
+const approvalRowSource =
+  approvalRowStart >= 0 && approvalRowEnd > approvalRowStart
+    ? storeSource.slice(approvalRowStart, approvalRowEnd)
+    : "";
+const approvalPresenterStart = workspacePresenterSource.indexOf("function approvals(");
+const approvalPresenterEnd = workspacePresenterSource.indexOf(
+  "\nexport function presentRun(",
+  approvalPresenterStart,
+);
+const approvalPresenterSource =
+  approvalPresenterStart >= 0 && approvalPresenterEnd > approvalPresenterStart
+    ? workspacePresenterSource.slice(approvalPresenterStart, approvalPresenterEnd)
     : "";
 const workspaceSnapshotStart = workspaceServerSource.indexOf("function workspaceSnapshot(");
 const workspaceSnapshotEnd = workspaceServerSource.indexOf(
@@ -277,6 +299,52 @@ const assertions = {
     ) &&
     !/(?:postJson|createProject|createRun|planRun|approve|execute|commit|push|deploy)\(/.test(
       verificationAttemptsPanelSource,
+    ),
+  workspaceApprovalProjectionBounded:
+    storeSource.includes("export const RUN_PRESENTATION_APPROVAL_LIMIT = 12") &&
+    storeSource.includes("CREATE INDEX IF NOT EXISTS approvals_by_run") &&
+    storeSource.includes("ON approvals(run_id)") &&
+    ["run_id", "kind", "digest", "actor", "decision", "created_at"].every((column) =>
+      approvalProjectionSource.includes(`typeof(${column}) = 'text'`),
+    ) &&
+    (approvalProjectionSource.match(/octet_length\(/g)?.length ?? 0) === 6 &&
+    approvalProjectionSource.includes("ORDER BY approvals.rowid DESC LIMIT ?") &&
+    approvalProjectionSource.includes("RUN_PRESENTATION_APPROVAL_LIMIT + 1") &&
+    approvalProjectionSource.includes(
+      "approvalRows.map((entry) => approvalRecordRow(entry, runId))",
+    ) &&
+    approvalProjectionSource.includes(".slice(0, RUN_PRESENTATION_APPROVAL_LIMIT)") &&
+    approvalProjectionSource.includes("earlierApprovalsExcluded") &&
+    !approvalProjectionSource.includes("this.listApprovals(") &&
+    !approvalProjectionSource.includes("SELECT *"),
+  workspaceApprovalIndexMigrationHumanGated:
+    storeSource.includes("allowApprovalIndexMigration") &&
+    storeSource.includes("new Database(databasePath, { readonly: true, fileMustExist: true })") &&
+    storeSource.includes("PRAGMA index_xinfo('approvals_by_run')") &&
+    storeSource.includes('"DATABASE_MIGRATION_REQUIRED"') &&
+    cliSource.includes("ICARUS_APPROVE_SCHEMA_MIGRATION") &&
+    cliSource.includes('"approval-index-v1"') &&
+    cliSource.includes("allowApprovalIndexMigration: approvalIndexMigrationApproved()"),
+  workspaceApprovalProjectionFailsClosed: [
+    "runId === expectedRunId",
+    "APPROVAL_KINDS.has",
+    "/^[a-f0-9]{64}$/.test(digest)",
+    'Buffer.byteLength(actor, "utf8") <= APPROVAL_ACTOR_MAX_BYTES',
+    "!containsUnsafeActorCharacter(actor)",
+    "!containsSecretShapedContent",
+    "APPROVAL_DECISIONS.has",
+    'decision === "approve" || kind === "review"',
+    "isCanonicalTimestamp(createdAt)",
+  ].every((guard) => approvalRowSource.includes(guard)),
+  workspaceApprovalPresenterAllowlists:
+    ["kind", "digest", "actor", "decision", "createdAt"].every((field) =>
+      approvalPresenterSource.includes(`${field}: approval.${field}`),
+    ) &&
+    !approvalPresenterSource.includes("...approval") &&
+    workspacePresenterSource.includes("limit: snapshot.approvalCoverage.limit") &&
+    workspacePresenterSource.includes("loaded: snapshot.approvalCoverage.loaded") &&
+    workspacePresenterSource.includes(
+      "earlierApprovalsExcluded: snapshot.approvalCoverage.earlierApprovalsExcluded",
     ),
   workspaceRunSummaryMetadataOnly:
     workspaceRunPageSource.includes("SELECT CAST(rowid AS TEXT) AS cursor") &&

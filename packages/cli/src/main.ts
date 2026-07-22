@@ -5,12 +5,12 @@ import path from "node:path";
 
 import {
   assertRegistrationStateSeparation,
+  type CheckProfile,
   createIcarusRuntime,
   createProviderConfig,
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
   IcarusError,
-  type CheckProfile,
   type IcarusRuntime,
   type RunRecord,
 } from "@icarus/core";
@@ -148,6 +148,18 @@ function stateRoot(): string {
       ? path.join(stateHome, "icarus")
       : path.join(os.homedir(), ".local", "state", "icarus"),
   );
+}
+
+function approvalIndexMigrationApproved(): boolean {
+  const approval = process.env.ICARUS_APPROVE_SCHEMA_MIGRATION;
+  if (approval === undefined) return false;
+  if (approval !== "approval-index-v1") {
+    fail(
+      "INVALID_DATABASE_CONFIGURATION",
+      "ICARUS_APPROVE_SCHEMA_MIGRATION must equal approval-index-v1",
+    );
+  }
+  return true;
 }
 
 function registrationPathForPreflight(args: readonly string[]): string | undefined {
@@ -450,7 +462,9 @@ async function main(): Promise<void> {
     if (registrationPath !== undefined) {
       await assertRegistrationStateSeparation(root, registrationPath);
     }
-    runtime = await createIcarusRuntime(root);
+    runtime = await createIcarusRuntime(root, {
+      allowApprovalIndexMigration: approvalIndexMigrationApproved(),
+    });
     await dispatch(runtime, args, controller.signal);
   } catch (error) {
     const code = error instanceof IcarusError ? error.code : "INTERNAL_ERROR";

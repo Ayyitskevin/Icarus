@@ -310,6 +310,11 @@ describe("loopback local workspace API", () => {
       files: { involved: expect.arrayContaining(["src/greeting.txt"]), changed: [] },
       verification: { outcome: "not_run" },
       approvals: [],
+      approvalCoverage: {
+        limit: 12,
+        loaded: 0,
+        earlierApprovalsExcluded: false,
+      },
       usage: {
         toolCalls: expect.any(Number),
         inputTokens: expect.any(Number),
@@ -332,6 +337,35 @@ describe("loopback local workspace API", () => {
     );
     expect(JSON.stringify(planned)).not.toContain(fixture.stateRoot);
     expect(JSON.stringify(planned)).not.toContain("contextArtifactPath");
+
+    const provenanceDatabase = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    const insertApproval = provenanceDatabase.prepare(
+      `INSERT INTO approvals (id, run_id, kind, digest, actor, decision, created_at)
+       VALUES (?, ?, 'plan', ?, ?, 'approve', ?)`,
+    );
+    for (let index = 1; index <= 13; index += 1) {
+      insertApproval.run(
+        `api-approval-${(14 - index).toString().padStart(2, "0")}`,
+        runId,
+        index.toString(16).padStart(64, "0"),
+        `api-operator-${index}`,
+        "2026-07-22T12:00:00.000Z",
+      );
+    }
+    provenanceDatabase.close();
+
+    const boundedProvenance = await responseJson(await fetch(`${server.url}/api/runs/${runId}`));
+    expect(boundedProvenance.approvalCoverage).toEqual({
+      limit: 12,
+      loaded: 12,
+      earlierApprovalsExcluded: true,
+    });
+    const retainedApprovals = boundedProvenance.approvals as Array<Record<string, unknown>>;
+    expect(retainedApprovals).toHaveLength(12);
+    expect(retainedApprovals.map((approval) => approval.actor)).toEqual(
+      Array.from({ length: 12 }, (_, index) => `api-operator-${index + 2}`),
+    );
+    expect(JSON.stringify(boundedProvenance)).not.toContain("api-approval-");
     expect(provider.requests).toHaveLength(1);
     const providerRequest = JSON.stringify(provider.requests[0]?.body);
     expect(providerRequest).toContain("src/greeting.txt");

@@ -20,6 +20,7 @@ export {
 } from "./runtime.js";
 export { IcarusService, type PlanRunInput } from "./service.js";
 export type {
+  ApprovalCoverage,
   ApprovalRecord,
   CheckEvidence,
   CheckProfile,

@@ -31,6 +31,7 @@ const RUN_SUMMARY_FIXTURE_COUNT = RUN_SUMMARY_PAGE_SIZE * RUN_SUMMARY_MAX_PAGES;
 const RUN_SUMMARY_PRIVATE_SENTINEL = "/private/browser-run-summary-heavy-sentinel";
 const VALID_ARCHIVED_RUN_TASK = "Archived browser run 020";
 const ALTERNATE_ARCHIVED_RUN_TASK = "Archived browser run 021";
+const APPROVAL_HTML_SENTINEL = '<img data-approval-injection="true"> Recorded digest:';
 
 const Database = createRequire(new URL("../packages/core/package.json", import.meta.url))(
   "better-sqlite3",
@@ -2248,7 +2249,7 @@ try {
   assert.equal(await page.verificationFact("Events examined"), "200 of 200 maximum");
   assert.equal(await page.verificationFact("Attempt intervals"), "0 of 8 maximum");
   assert.equal(verificationRequests().length, 1);
-  let verificationUrl = new URL(verificationRequests()[0].url);
+  const verificationUrl = new URL(verificationRequests()[0].url);
   assert.deepEqual([...verificationUrl.searchParams.keys()], ["snapshot"]);
   assert.equal(verificationUrl.searchParams.get("snapshot"), "500");
   body = await page.bodyText();
@@ -3465,6 +3466,24 @@ try {
   assert.equal(body.includes("Context egress approval"), false);
   assert.equal(body.includes("Plan approval"), true);
 
+  const approvalDatabase = new Database(path.join(stateRoot, "icarus.sqlite3"));
+  try {
+    approvalDatabase
+      .prepare(
+        `INSERT INTO approvals (id, run_id, kind, digest, actor, decision, created_at)
+         VALUES (?, ?, 'plan', ?, ?, 'approve', ?)`,
+      )
+      .run(
+        "b0000000-0000-4000-8000-000000000001",
+        browserRunId,
+        "f".repeat(64),
+        APPROVAL_HTML_SENTINEL,
+        "2026-07-22T12:00:00.000Z",
+      );
+  } finally {
+    approvalDatabase.close();
+  }
+
   const exactSelectedRunUrl = `${workspace.url}/api/runs/${encodeURIComponent(browserRunId)}`;
   const automaticEventResponseBaseline = networkResponses.length;
   const automaticRunReadBaseline = networkRequests.length;
@@ -3477,6 +3496,22 @@ try {
       ),
     ["resume requested"],
     "a newly appended event rendered by automatic refresh while the run stays selected",
+  );
+  await page.waitFor(
+    (actor) => document.querySelector("#run-approvals")?.textContent?.includes(actor) === true,
+    [APPROVAL_HTML_SENTINEL],
+    "hostile approval actor rendered as inert provenance text",
+  );
+  assert.deepEqual(
+    await page.call((actor) => {
+      const section = document.querySelector("#run-approvals");
+      return {
+        literalText: section?.textContent?.includes(actor) === true,
+        injectedElement: section?.querySelector('[data-approval-injection="true"]') !== null,
+        actionControls: section?.querySelectorAll("a, button, form, input, textarea").length ?? -1,
+      };
+    }, APPROVAL_HTML_SENTINEL),
+    { literalText: true, injectedElement: false, actionControls: 0 },
   );
   const automaticFullRunRead = networkRequests
     .slice(automaticRunReadBaseline)

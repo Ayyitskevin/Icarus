@@ -42,8 +42,10 @@ export function evidenceTarget(section: string | undefined): string {
       return "run-outputs";
     case "run-approvals":
     case "approvals":
-    case "warnings":
       return "run-approvals";
+    case "run-warnings":
+    case "warnings":
+      return "run-warnings";
     case "run-usage":
     case "usage":
       return "run-usage";

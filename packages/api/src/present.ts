@@ -499,6 +499,11 @@ export function presentRun(
     lastError: run.lastError,
     warnings,
     approvals: approvals(snapshot.approvals),
+    approvalCoverage: {
+      limit: snapshot.approvalCoverage.limit,
+      loaded: snapshot.approvalCoverage.loaded,
+      earlierApprovalsExcluded: snapshot.approvalCoverage.earlierApprovalsExcluded,
+    },
     eventCursor: snapshot.eventCursor,
     timelineTotal: snapshot.eventCount,
     timelineTruncated: snapshot.eventCount > snapshot.events.length,

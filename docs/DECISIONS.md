@@ -21,7 +21,8 @@ Decision records for the current milestone:
 | [0015](adr/0015-read-only-repository-status-and-event-cursors.md) | Read-only repository status and event cursors | Accepted |
 | [0016](adr/0016-bounded-older-event-navigation.md) | Bounded older event navigation | Accepted |
 | [0017](adr/0017-bounded-workspace-run-summaries.md) | Bounded workspace run summaries | Accepted |
-| [0018](adr/0018-bounded-verification-attempt-provenance.md) | Bounded verification-attempt provenance | Proposed |
+| [0018](adr/0018-bounded-verification-attempt-provenance.md) | Bounded verification-attempt provenance | Accepted |
+| [0019](adr/0019-bounded-approval-provenance.md) | Bounded approval provenance | Proposed |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.

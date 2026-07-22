@@ -132,13 +132,14 @@ ADR 0015 implements this bounded observation contract:
    service-owned maximum. Each item contains only sequence, type, a
    host-controlled label, timestamp, and a fixed host-generated evidence-section
    identifier; event payloads never cross the API.
-4. Build each full run response—run, approvals, and the 200 most recent timeline
-   metadata rows—from one coherent SQLite read snapshot and include the
-   append-only event sequence high-water mark in that response as its event
-   cursor and total. Event metadata pages remain separate requests; complete
-   payload-bearing history remains a CLI-only contract. If the retained suffix
-   cannot establish an action's earlier prerequisite, present `unknown` with CLI
-   guidance rather than inventing a status.
+4. Build each full run response—run, the newest 12 validated approval decisions,
+   and the 200 most recent timeline metadata rows—from one coherent SQLite read
+   snapshot. Include explicit approval coverage plus the append-only event
+   sequence high-water mark as the event cursor and total. Event metadata pages
+   remain separate requests; complete approvals and payload-bearing history
+   remain CLI-only contracts. If a retained suffix cannot establish an earlier
+   prerequisite, present truncation or `unknown` with CLI guidance rather than
+   inventing completeness.
 5. Short-poll only the selected run while the document is visible. Keep one
    current request, pause while hidden, abort on selection change or unmount,
    apply bounded failure backoff with success reset, and reject late responses

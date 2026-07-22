@@ -97,7 +97,8 @@ const EVIDENCE_LINKS = [
   ["run-action", "Action & files"],
   ["run-verification", "Verification"],
   ["run-outputs", "Outputs"],
-  ["run-approvals", "Warnings & approvals"],
+  ["run-warnings", "Warnings"],
+  ["run-approvals", "Approval provenance"],
   ["run-usage", "Usage"],
   ["run-activity", "Activity"],
 ] as const;
@@ -1035,6 +1036,59 @@ interface RunEvidenceProps {
   readonly registerAuxiliaryCancellation: (cancel: (() => void) | null) => void;
 }
 
+export function ApprovalProvenance({
+  run,
+}: {
+  readonly run: Pick<RunView, "approvalCoverage" | "approvals">;
+}) {
+  return (
+    <section
+      id="run-approvals"
+      className="evidence-block"
+      aria-labelledby="approvals-heading"
+      tabIndex={-1}
+    >
+      <div className="evidence-block__heading">
+        <h3 id="approvals-heading">Approval provenance</h3>
+        <span className="count">{run.approvalCoverage.loaded} loaded</span>
+      </div>
+      <p className="panel__intro">
+        Newest recorded decisions, bounded to {run.approvalCoverage.limit}. A recorded actor and
+        digest are provenance facts, not a fresh authentication or byte-integrity check.
+      </p>
+      {run.approvalCoverage.earlierApprovalsExcluded ? (
+        <p className="message message--warning" role="status">
+          Earlier approval decisions are outside this browser response. Use complete CLI history for
+          older decisions; no total is implied.
+        </p>
+      ) : null}
+      {run.approvals.length === 0 ? (
+        <p className="empty-state">No approval decision is present in this retained response.</p>
+      ) : (
+        <ol className="timeline">
+          {run.approvals.map((approval, index) => (
+            <li
+              // biome-ignore lint/suspicious/noArrayIndexKey: the API deliberately omits database identity; the retained ordinal distinguishes otherwise identical immutable display rows.
+              key={`${index}:${approval.kind}:${approval.digest}:${approval.decision}:${approval.createdAt}`}
+            >
+              <div>
+                <strong>
+                  Recorded {approval.kind} decision — {approval.decision}
+                </strong>
+                <time dateTime={approval.createdAt}>{formatTimestamp(approval.createdAt)}</time>
+              </div>
+              <p>
+                Recorded actor: {approval.actor} · Recorded digest:{" "}
+                <span className="digest">{approval.digest}</span>
+              </p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
 function RunEvidence({
   run,
   planningCapability,
@@ -1710,7 +1764,7 @@ function RunEvidence({
       </section>
 
       <section
-        id="run-approvals"
+        id="run-warnings"
         className="evidence-block"
         aria-labelledby="warnings-heading"
         tabIndex={-1}
@@ -1736,32 +1790,7 @@ function RunEvidence({
         )}
       </section>
 
-      <section className="evidence-block" aria-labelledby="approvals-heading">
-        <div className="evidence-block__heading">
-          <h3 id="approvals-heading">Approval history</h3>
-          <span className="count">{run.approvals.length}</span>
-        </div>
-        {run.approvals.length === 0 ? (
-          <p className="empty-state">No approval decisions are recorded.</p>
-        ) : (
-          <ol className="timeline">
-            {run.approvals.map((approval) => (
-              <li key={`${approval.kind}:${approval.digest}:${approval.createdAt}`}>
-                <div>
-                  <strong>
-                    {approval.kind} — {approval.decision}
-                  </strong>
-                  <time dateTime={approval.createdAt}>{formatTimestamp(approval.createdAt)}</time>
-                </div>
-                <p>
-                  Actor: {approval.actor} · Digest:{" "}
-                  <span className="digest">{approval.digest}</span>
-                </p>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+      <ApprovalProvenance run={run} />
 
       <section
         id="run-usage"

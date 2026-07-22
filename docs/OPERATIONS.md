@@ -146,15 +146,28 @@ Event pages advance strictly after an exclusive sequence cursor and use one
 fixed service-owned maximum. Operators see only sequence, type, a
 host-controlled label, timestamp, and a fixed host-generated `evidenceSection`;
 event payloads are unavailable through this route. Separately, each full run
-response reads its run row, approvals, and the 200 most recent timeline metadata
-rows from one coherent SQLite snapshot. The append-only sequence high-water mark
-is the event cursor and total; CLI history remains complete. When an action's
-prerequisite falls before the bounded tail and the retained suffix cannot
-re-establish it, the browser reports `unknown` and points the operator to CLI
-history instead of guessing. Live links target only fixed Icarus-generated
-evidence anchors, not repository, provider, event, or check text. Only event
-history has the fixed bound; existing approval lists and workspace-wide run
-enumeration remain unpaginated local reads.
+response reads its run row, the newest 12 validated approvals, and the 200 most
+recent timeline metadata rows from one coherent SQLite snapshot. Approval
+coverage and the append-only event high-water mark make both suffixes explicit;
+CLI history remains complete. When an earlier prerequisite falls outside a
+retained suffix, the browser reports truncation or `unknown` and points the
+operator to CLI history instead of guessing. Live links target only fixed
+Icarus-generated evidence anchors, not repository, provider, event, or check
+text. Approval response size is bounded, and a history-sized scan is forbidden:
+`approvals_by_run` must appear in
+`EXPLAIN QUERY PLAN`. Before the first candidate build opens an existing state
+database, take a timestamped backup and explicitly approve the additive index
+build; tests create it only in disposable state. Startup first opens existing
+state read-only, validates the exact index shape, and refuses a missing or
+misdefined index before WAL mode or schema setup can mutate the database.
+
+For an existing state root, stop every Icarus process, back up the SQLite
+database together with any `-wal` and `-shm` companions, and verify the backup
+before migration. Then run exactly one normal CLI invocation with
+`ICARUS_APPROVE_SCHEMA_MIGRATION=approval-index-v1`. Without that exact value,
+startup fails with `DATABASE_MIGRATION_REQUIRED`; any other value fails as
+`INVALID_DATABASE_CONFIGURATION`. Remove the variable immediately after the
+index exists. This is an operator gate, not a persistent configuration.
 
 The accepted ADR 0016 implementation adds an explicit selected-run
 older-activity panel pinned to the coherent run revision, backed by a direct

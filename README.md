@@ -77,6 +77,13 @@ validated states, sequences, timestamps, digests, coverage, and recorded
 checkpoint relations. Raw payloads, diffs, paths, checks, output, checkpoint
 bytes, complete history, and every guarded action remain CLI-only.
 
+The sixth candidate slice bounds ordinary selected-run approval provenance to
+the newest 12 validated recorded decisions, reports when earlier decisions were
+excluded, and keeps complete history in the CLI. Recorded actors and digests are
+provenance facts, not fresh authentication or byte-integrity checks. Existing
+state requires a verified backup and one explicitly approved
+`approval-index-v1` migration; see `docs/OPERATIONS.md`.
+
 Not yet included: browser approval or execution, arbitrary agent tool use,
 model-written shell commands, semantic search, commits or pushes, application
 previews, richer file/status, diff, or history navigation, deployment, backend

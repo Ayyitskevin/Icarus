@@ -334,6 +334,12 @@ export interface ApprovalView {
   readonly createdAt: string;
 }
 
+export interface ApprovalCoverageView {
+  readonly limit: 12;
+  readonly loaded: number;
+  readonly earlierApprovalsExcluded: boolean;
+}
+
 export interface UsageView {
   readonly toolCalls: number;
   readonly inputTokens: number;
@@ -376,6 +382,7 @@ export interface RunView {
   readonly outputs: readonly OutputView[];
   readonly warnings: readonly (string | WarningView)[];
   readonly approvals: readonly ApprovalView[];
+  readonly approvalCoverage: ApprovalCoverageView;
   readonly usage: UsageView;
   readonly lastError: RunErrorView | null;
   readonly timeline: readonly TimelineEntryView[];

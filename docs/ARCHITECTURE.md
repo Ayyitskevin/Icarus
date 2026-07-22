@@ -269,14 +269,15 @@ or runtime dependency.
    maximum. Each event exposes only sequence, type, a fixed host-controlled label,
    timestamp, and a fixed host-generated `evidenceSection`; `payload_json` is
    neither returned nor used as browser copy.
-4. The full run presenter reads its run row, approvals, and the 200 most recent
-   timeline metadata rows inside one SQLite read transaction/snapshot. It uses
-   the append-only sequence high-water mark as both `eventCursor` and timeline
-   total without decoding or scanning every event payload. Action presentation
-   is derived only from that bounded tail. Event metadata pages are separate
-   requests; their exclusive sequence cursor makes successive pages monotonic
-   and overlap-free. The CLI history path continues to read the complete event
-   history and payloads. If the bounded suffix omits the prerequisite for an
+4. The full run presenter reads its run row, newest 12 validated approvals, and
+   200 most recent timeline metadata rows inside one SQLite read transaction.
+   Approval coverage makes earlier decisions explicit. The append-only sequence
+   high-water mark is both `eventCursor` and timeline total without decoding or
+   scanning every event payload. Action presentation is derived only from that
+   bounded tail. Event metadata pages are separate requests; their exclusive
+   sequence cursor makes successive pages monotonic and overlap-free. CLI
+   history continues to expose complete approval and event history, including
+   event payloads. If the bounded suffix omits the prerequisite for an
    action transition, the browser reports the action status as `unknown` with
    CLI guidance instead of guessing `proposed`, `cancelled`, or `reverted`.
 5. React short-polls only the selected run while `document.visibilityState` is
@@ -296,9 +297,16 @@ file/status, diff, and payload-bearing history navigation remains deferred, and
 guarded actions must still revalidate authoritative repository state immediately
 before use.
 
-Only the event-history portion of a full run response is fixed-size. Approval
-lists and workspace-wide run enumeration retain their existing unpaginated local
-behavior and are not claimed to have constant work or response size.
+The ordinary full-run response retains at most the newest 12 approval decisions
+and the newest 200 event summaries, with independent truncation metadata.
+Complete approvals and events remain available through CLI history. The
+approval projection bounds selected columns, decoded rows, and response size,
+preflights storage/bytes before materialization, and uses the additive
+`approvals_by_run` index plus reverse rowid seek for fixed per-run work and true
+append ordering. A read-only startup preflight validates the exact index shape
+before opening existing state for mutation. Building that index against existing
+non-test state is a human-gated maintenance action. Workspace-
+wide run enumeration is already a fixed 12-row page.
 
 The helper-config preflight and the following Git subprocess are separate host
 operations. A same-user process can change repository or included config between
@@ -359,8 +367,9 @@ pagination would require a separately approved schema index.
 
 This path adds no write, migration, dependency, Git/source read, disclosure of a
 new run data class, stream, background work, or browser action route. Project and
-repository enumeration plus selected-run approvals remain unpaginated local
-reads and are not claimed bounded by ADR 0017.
+repository enumeration remain unpaginated local reads and are not claimed
+bounded by ADR 0017; ADR 0019 separately bounds ordinary selected-run approval
+responses.
 
 ## Fifth M3 verification-attempt provenance
 
