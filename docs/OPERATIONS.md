@@ -178,13 +178,16 @@ mutation, execution, command, commit, push, or deployment authority. File/status
 richer diff or payload-bearing history, and action controls remain deferred, and
 the ADR 0010 release hold remains in force.
 
-## Proposed fifth M3 verification-attempt behavior
+## Accepted fifth M3 verification-attempt design
 
-ADR 0018 proposes, but does not yet implement, an explicit “Recent attempt
-summaries” panel beneath the selected run's current verification snapshot. The
-operator would load at most eight completed-attempt summaries found in up to the
-latest 200 persisted events ending at that exact selected-run revision. Commands,
-diffs, paths, checkpoint bytes, and complete history would remain omitted.
+ADR 0018 accepts, but does not yet implement, an explicit “Verification &
+Recovery Evidence” panel beneath the selected run's current verification
+snapshot. The operator would load at most eight verification-state intervals
+derived from up to the latest 200 persisted events ending at that exact revision.
+Completed, cancelled, incomplete-failed, and open states would be distinguished
+only from explicit transitions. Missing starts, timeout detail, formal
+supersession, commands, diffs, paths, checkpoint bytes, and complete history
+would remain omitted or unknown.
 
 A stale request would fail if the run advanced before its read transaction.
 Conflict would preserve any last successful panel and direct the operator to
@@ -194,16 +197,17 @@ reconciliation would not cancel the panel. Instead, a loaded projection would
 remain pinned and become visibly stale when newer events arrive.
 
 The panel would display its revision, inspected sequence range, fixed 200/8
-limits, loaded-summary count, and independent truncation states. “Complete”
-would mean only complete through that pinned snapshot. Complete private evidence
-would continue through:
+limits, loaded-summary count, and independent truncation/unknown states. It
+would not claim complete invocation history. Complete private evidence would
+continue through:
 
 ```text
 icarus run history <run-id>
 ```
 
-Only a recorded checkpoint-digest match would be shown. The panel would not read
-or rehash baseline/approved bytes and would not claim checkpoint integrity.
+Completed intervals could show only a recorded checkpoint-digest match;
+incomplete intervals could show only run-checkpoint availability. The panel
+would not read or rehash baseline/approved bytes or claim checkpoint integrity.
 Attempt-panel Close and “Refresh persisted run” would abort only the attempt
 request and never an older-history request. Opening older activity would abort
 the attempt request before marking history open and launching its first request.
@@ -214,7 +218,7 @@ Close, and unmount cleanup. The last valid panel would survive a failed retry,
 and operator Close would use the verification section as a focus fallback when
 the launcher is disabled.
 
-This proposal adds no current route or runtime behavior. It must not alter the
+This accepted design adds no current route or runtime behavior. It must not alter the
 payload-free event APIs, schema, dependencies, source repository, browser action
 authority, guarded CLI, or ADR 0010 hold.
 

@@ -81,9 +81,10 @@ runs, append-only events, check evidence, provider usage, and checkpoints. It
 does not store credentials or environment snapshots.
 
 The run row retains the latest verification for efficient status reads. Every
-verification attempt also appends its complete bounded evidence and diff to the
-event stream, so restore/reverify does not erase the earlier attempt from
-history.
+completed verification also appends its complete bounded evidence and diff to
+the event stream, so restore/reverify does not erase earlier completed evidence.
+Interrupted verification intervals retain explicit state transitions, not a
+synthetic complete attempt record.
 
 Operator feedback lives in CLI output, allowlisted API views, the React workspace,
 and the same durable event/evidence records. Provider and command output is
@@ -361,35 +362,37 @@ new run data class, stream, background work, or browser action route. Project an
 repository enumeration plus selected-run approvals remain unpaginated local
 reads and are not claimed bounded by ADR 0017.
 
-## Proposed fifth M3 verification-attempt provenance path
+## Accepted fifth M3 verification-attempt provenance design
 
-ADR 0018 proposes a separate lazy selected-run read instead of extending the
+ADR 0018 defines a separate lazy selected-run read instead of extending the
 automatically refreshed full-run response. The browser supplies the exact
-coherent run event cursor. One transaction point-checks the run with an
-existence-only query, never the full-run loader, and requires that cursor to
-remain the current high-water mark before reading the fixed up-to-200-event
-metadata suffix. A stale race fails rather than joining that suffix to newer
-checkpoint state.
+coherent run event cursor. One transaction selects only safe run-state fields,
+never the full-run loader, and requires that cursor to remain the current
+high-water mark before reading the fixed up-to-200-event metadata suffix. A
+stale race fails rather than joining that suffix to newer checkpoint state.
 
-The store will identify completed verification sequences from metadata and
-retain the newest eight. Before scalar extraction, it verifies TEXT storage and
-byte length with direct-column `octet_length(payload_json)`: at most 8 MiB per
-retained verification event and 1 KiB for an observed checkpoint-save event.
-Strict RFC-8259 validity, exactly-once selected keys, scalar types, fixed transitions,
-outcome agreement, and digest agreement fail closed on JSON5, duplicates, or
-corrupt selected evidence. Existing recent and older event routes remain
+The store derives non-overlapping `verifying` intervals only from validated
+state transitions and retains the newest eight anchors. A terminal inside the
+window can have an unknown start; an open interval can start outside coverage.
+Completed, cancelled, incomplete-failed, and incomplete-at-snapshot states are
+distinct. Check timeout detail and formal supersession are not persisted and are
+never inferred. Before scalar extraction, the store verifies TEXT storage and
+direct-column byte length: 8 MiB per retained completion, 16 KiB per selected
+lifecycle transition, and 1 KiB for an observed checkpoint-save event. Strict
+RFC-8259 validity, exactly-once selected keys, fixed transitions, outcome
+agreement, and digest agreement fail closed. Existing event routes remain
 payload-free.
 
 Checkpoint provenance uses a dedicated query for only expected run ID, canonical
 digest, and bounded canonical timestamp. Baseline and approved bytes and all
-unrelated run fields are never selected. Attempt digests must match the recorded
-immutable-checkpoint digest, and an observed save event must precede every
-verification event in coverage. The host reports only
-`recorded_digest_match`; it does not rehash bytes or claim current integrity.
+unrelated run fields are never selected. Completed-attempt digests must match the
+recorded immutable-checkpoint digest. Incomplete/cancelled intervals can claim
+only run-checkpoint availability. The host does not rehash bytes or claim current
+integrity; restore starts do not establish rollback cause.
 
 The response separately reports events excluded before the 200-sequence window
-and attempts omitted by the eight-summary cap. The inline panel visibly pins its
-revision/range and may claim completeness only through that snapshot. Automatic
+and attempt-shaped anchors omitted by the eight-summary cap. The inline panel
+visibly pins its revision/range and never claims complete invocation history. Automatic
 live reconciliation marks the static panel stale without replacing it. Each
 explicit load/retry uses a fresh current run cursor; conflicts require an
 operator-triggered persisted-run refresh, never replay of the old request.
@@ -404,10 +407,9 @@ outcome/relation enums, single-flight lifecycle guards, retained failure state,
 honest copy, and a defined focus fallback.
 Complete private evidence remains in CLI run history.
 
-This proposed path adds no implementation claim, schema, dependency, write,
+This accepted design adds no implementation claim, schema, dependency, write,
 event append, Git/source read, raw evidence disclosure, browser mutation, or
-release authority. ADR 0017 must land and ADR 0018 must be accepted before code
-work begins; ADR 0010 remains independently unresolved.
+release authority. ADR 0010 remains independently unresolved.
 
 ## Provider contract
 

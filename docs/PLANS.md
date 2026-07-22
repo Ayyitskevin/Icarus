@@ -71,29 +71,29 @@ the reliability slice without claiming a broader milestone is complete.
       passed its real `quality` job at exact implementation head
       `f8fe03e399fb46f197bbcbc0df8f1edabbe2e0c9`
 
-## Proposed fifth M3 slice: bounded verification-attempt provenance
+## Fifth M3 slice: bounded verification-attempt provenance
 
-Status values are evidence claims. ADR 0018 is proposed design only. No runtime,
-API, browser, test, schema, dependency, workflow, or release behavior is claimed
-implemented. ADR 0017 must land first, and this ADR must be reviewed and accepted
-before implementation begins.
+Status values are evidence claims. ADR 0018 is accepted design only. No runtime,
+API, browser, test, schema, dependency, workflow, or release behavior is yet
+claimed implemented.
 
 ### Pinned scalar projection
 
 - [ ] Add one lazy GET route with exactly one canonical positive selected-run
       event snapshot and no caller-controlled limit, filter, sort, search, or
       pagination
-- [ ] Point-check the run with `SELECT 1`, never `getRun()` or another full-row
+- [ ] Select only safe run ID/state fields, never `getRun()` or another full-row
       loader; require the requested snapshot to equal the current high-water mark
       in one SQLite read transaction
 - [ ] Inspect up to the latest 200 sequences through the existing per-run
-      sequence index, validate a contiguous metadata suffix, retain the newest
-      eight completed attempts, and distinguish event-window truncation from the
-      eight-summary cap
+      sequence index, validate a contiguous metadata suffix, derive only explicit
+      verification-state intervals, retain the newest eight anchors, and
+      distinguish event-window truncation from the eight-summary cap
 - [ ] Preflight `typeof(payload_json) = 'text'` and direct-column
       `octet_length(payload_json)` before parsing: at most 8 MiB per retained
-      verification event and 1 KiB for the observed checkpoint-save event; do
-      not wrap the column in a cast, JSON function, or other expression
+      completion, 16 KiB per selected lifecycle transition, and 1 KiB for the
+      observed checkpoint-save event; do not wrap the column in a cast, JSON
+      function, or other expression
 - [ ] Require strict `json_valid(payload_json, 1)`, exactly-once root/nested
       selected keys, expected scalar types, fixed transitions, matching
       outer/nested outcomes and diff digests, and canonical SHA-256 values
@@ -102,9 +102,9 @@ before implementation begins.
 - [ ] Select only expected checkpoint run ID, canonical digest, and bounded
       canonical timestamp through a dedicated query; never materialize baseline,
       approved, or unrelated full-run fields
-- [ ] Require an observed save event to precede every completed verification in
-      coverage. Label linkage only as a recorded digest match and an absent save
-      event only as not observed in truncated coverage
+- [ ] Label completed linkage only as recorded digest agreement and
+      incomplete/cancelled linkage only as run-checkpoint availability. An absent
+      save event in truncated coverage remains not observed, never corrupt
 
 ### Explicit bounded browser panel
 
@@ -153,8 +153,8 @@ before implementation begins.
       TEXT-only storage, strict RFC-8259 acceptance, relevant JSON5 and duplicate
       selected-key rejection, wrong scalar types, unrelated private-payload
       immunity, and ASCII/multibyte exact-bound and over-bound cases at both the
-      8 MiB verification and 1 KiB checkpoint-event ceilings, plus fixed response
-      size
+      8 MiB completion, 16 KiB transition, and 1 KiB checkpoint-event ceilings,
+      plus fixed response size
 - [ ] Prove index plans, zero durable writes/events, unchanged source/Git, and
       SQL shape that never selects private checkpoint/full-run columns or returns
       raw event payloads; poisoned excluded columns must not affect the route
