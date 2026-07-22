@@ -84,10 +84,19 @@ provenance facts, not fresh authentication or byte-integrity checks. Existing
 state requires a verified backup and one explicitly approved
 `approval-index-v1` migration; see `docs/OPERATIONS.md`.
 
+The seventh candidate slice turns the already persisted one-file verification
+diff into explicit review evidence. At most 256 KiB of complete patch text is
+shown; displayed bytes are rehashed against the recorded digest, while a larger
+recorded diff becomes metadata-only with no partial preview or format validation
+by this projection. Exact persisted run state, verification outcome, path, size,
+patch statistics, and digest provenance
+appear together without another Git/source read or any browser action.
+
 Not yet included: browser approval or execution, arbitrary agent tool use,
 model-written shell commands, semantic search, commits or pushes, application
-previews, richer file/status, diff, or history navigation, deployment, backend
-platform primitives, multi-agent orchestration, and distributed workers.
+previews, current file/status or multi-file and payload-bearing diff/history
+navigation, deployment, backend platform primitives, multi-agent orchestration,
+and distributed workers.
 
 ## Requirements
 

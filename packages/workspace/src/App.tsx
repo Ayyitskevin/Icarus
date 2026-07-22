@@ -96,6 +96,7 @@ const EVIDENCE_LINKS = [
   ["run-plan", "Plan"],
   ["run-action", "Action & files"],
   ["run-verification", "Verification"],
+  ["run-diff", "Diff review"],
   ["run-outputs", "Outputs"],
   ["run-warnings", "Warnings"],
   ["run-approvals", "Approval provenance"],
@@ -1730,9 +1731,110 @@ function RunEvidence({
         )}
       </section>
 
-      <section className="evidence-block" aria-labelledby="diff-heading">
-        <h3 id="diff-heading">Diff</h3>
-        <pre>{run.diff === null || run.diff.length === 0 ? "No diff was produced." : run.diff}</pre>
+      <section
+        id="run-diff"
+        className="evidence-block"
+        aria-labelledby="diff-heading"
+        tabIndex={-1}
+      >
+        <div className="evidence-block__heading">
+          <h3 id="diff-heading">Persisted diff review</h3>
+          <span
+            className={
+              run.diffReview.status === "outside_browser_bound"
+                ? "status status--warning"
+                : statusClass(run.diffReview.status)
+            }
+          >
+            {run.diffReview.status === "available"
+              ? "exact persisted text"
+              : run.diffReview.status === "outside_browser_bound"
+                ? "metadata only"
+                : "not produced"}
+          </span>
+        </div>
+        <p className="panel__intro">
+          This is persisted verification evidence, not a fresh repository or worktree read. The
+          exact persisted run state and verification outcome remain separate facts.
+        </p>
+        <dl className="facts facts--compact">
+          <div>
+            <dt>Exact persisted run state</dt>
+            <dd>{run.state}</dd>
+          </div>
+          <div>
+            <dt>Verification outcome</dt>
+            <dd>{run.verification.outcome.replaceAll("_", " ")}</dd>
+          </div>
+          <div>
+            <dt>Recorded changed path</dt>
+            <dd>{run.diffReview.path ?? "Not recorded"}</dd>
+          </div>
+          <div>
+            <dt>Persisted diff bytes</dt>
+            <dd>{formatBytes(run.diffReview.byteCount)}</dd>
+          </div>
+          <div>
+            <dt>Patch lines</dt>
+            <dd>{run.diffReview.lineCount ?? "Not computed"}</dd>
+          </div>
+          <div>
+            <dt>Added lines</dt>
+            <dd>{run.diffReview.addedLines ?? "Not computed"}</dd>
+          </div>
+          <div>
+            <dt>Deleted lines</dt>
+            <dd>{run.diffReview.deletedLines ?? "Not computed"}</dd>
+          </div>
+          <div>
+            <dt>Hunks</dt>
+            <dd>{run.diffReview.hunkCount ?? "Not computed"}</dd>
+          </div>
+          <div>
+            <dt>Recorded diff digest</dt>
+            <dd className="digest">{run.diffReview.sha256 ?? "Not recorded"}</dd>
+          </div>
+          <div>
+            <dt>Digest relationship</dt>
+            <dd>{run.diffReview.digestProvenance.replaceAll("_", " ")}</dd>
+          </div>
+        </dl>
+        {run.diffReview.status === "not_produced" ? (
+          <p className="empty-state">
+            No verification diff exists. This does not imply that verification passed.
+          </p>
+        ) : run.diffReview.status === "outside_browser_bound" ? (
+          <p className="message message--warning" role="status">
+            The persisted diff is larger than the {formatBytes(run.diffReview.browserByteLimit)}
+            browser display bound. No partial patch is shown. Use{" "}
+            <code>icarus run status {run.id}</code>
+            for complete persisted evidence.
+          </p>
+        ) : run.diff === null ? (
+          <p className="message message--error" role="alert">
+            The persisted diff response was internally inconsistent.
+          </p>
+        ) : (
+          <div className="stack stack--small">
+            <p className="message message--info">
+              The displayed text was rehashed by the local API and matched the recorded verification
+              digest. This does not prove current repository bytes.
+            </p>
+            <details open={run.state === "awaiting_review"}>
+              <summary id="persisted-diff-patch-heading">Review the exact persisted patch</summary>
+              {/* biome-ignore-start lint/a11y: a pre preserves exact patch whitespace and must be keyboard-focusable so users can scroll the labelled overflow region. */}
+              <pre
+                className="diff-review__patch"
+                tabIndex={0}
+                role="region"
+                aria-labelledby="persisted-diff-patch-heading"
+              >
+                {run.diff}
+              </pre>
+              {/* biome-ignore-end lint/a11y: restore the standard accessibility rules after the intentionally focusable patch region. */}
+            </details>
+          </div>
+        )}
       </section>
 
       <section

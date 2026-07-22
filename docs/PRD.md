@@ -268,6 +268,30 @@ is to:
     rerun/restore/execution, command, commit, push, deployment, or workflow
     authority. Preserve ADR 0010.
 
+## Candidate sixth and seventh M3 selected-run presentation slices
+
+ADR 0019 bounds ordinary approval provenance to the newest 12 validated rows
+with explicit coverage and complete-history CLI guidance. ADR 0020 independently
+improves review of the already persisted one-file verification diff:
+
+1. Derive diff review only from the selected run's coherent persisted snapshot;
+   add no endpoint, query, Git/source read, provider call, or poller.
+2. Return exact absent, available, or outside-browser-bound metadata. Preserve
+   complete raw text only when it is at most 262,144 UTF-8 bytes; never return a
+   partial patch.
+3. Require paired diff/verification presence, project diff-ceiling compliance,
+   canonical digest, exactly one recorded target, exact displayed-text rehash,
+   one patch header, and at least one hunk/change before claiming statistics.
+4. Place exact persisted run state, latest verification outcome, path, bytes,
+   physical patch lines, additions, deletions, hunks, digest, and provenance in
+   one focusable browser section. State that no current repository read occurs.
+5. Render complete patch bytes in one bounded-height React text node. HTML-like
+   content stays text; oversized evidence receives metadata and CLI guidance,
+   not a truncated preview.
+6. Keep browser approval, review decisions, mutation, execution, commands,
+   commit, push, deployment, current file/status, multi-file diff, raw history,
+   and payload navigation outside this slice.
+
 ## Sun ceiling
 
 Every run records maximum active runtime, provider output tokens, total tokens,
@@ -327,9 +351,9 @@ exist in Milestone 1:
   task drafts, loopback planning, run state, and allowlisted evidence. The
   accepted second- and third-slice designs add only the bounded observation and
   metadata-only older-activity contracts above. Later M3 slices may add sessions,
-  richer file/status, diff, and payload-bearing history navigation, application
-  previews, approvals, checkpoints, prompt history, and token/cost telemetry
-  without placing provider keys in a browser.
+  current file/status plus multi-file and payload-bearing diff/history
+  navigation, application previews, approvals, checkpoints, prompt history, and
+  token/cost telemetry without placing provider keys in a browser.
 - Application-factory templates may add an application starter, API layer,
   database, authentication, storage, realtime events, jobs, vector search,
   environment references, local preview, and deployment configuration only as

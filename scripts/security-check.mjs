@@ -20,6 +20,8 @@ const sandboxSource = await readFile("packages/core/src/sandbox.ts", "utf8");
 const workspaceServerSource = await readFile("packages/api/src/server.ts", "utf8");
 const workspacePresenterSource = await readFile("packages/api/src/present.ts", "utf8");
 const workspaceApiSource = await readFile("packages/workspace/src/api.ts", "utf8");
+const workspaceAppSource = await readFile("packages/workspace/src/App.tsx", "utf8");
+const workspaceLivePollSource = await readFile("packages/workspace/src/live-poll.ts", "utf8");
 const cliSource = await readFile("packages/cli/src/main.ts", "utf8");
 const verificationAttemptsUiSource = await readFile(
   "packages/workspace/src/verification-attempts.ts",
@@ -89,6 +91,23 @@ const approvalPresenterEnd = workspacePresenterSource.indexOf(
 const approvalPresenterSource =
   approvalPresenterStart >= 0 && approvalPresenterEnd > approvalPresenterStart
     ? workspacePresenterSource.slice(approvalPresenterStart, approvalPresenterEnd)
+    : "";
+const diffPresenterStart = workspacePresenterSource.indexOf(
+  "export const WORKSPACE_DIFF_DISPLAY_MAX_BYTES",
+);
+const diffPresenterEnd = workspacePresenterSource.indexOf(
+  "\nexport function presentRun(",
+  diffPresenterStart,
+);
+const diffPresenterSource =
+  diffPresenterStart >= 0 && diffPresenterEnd > diffPresenterStart
+    ? workspacePresenterSource.slice(diffPresenterStart, diffPresenterEnd)
+    : "";
+const diffUiStart = workspaceAppSource.indexOf('id="run-diff"');
+const diffUiEnd = workspaceAppSource.indexOf('id="run-outputs"', diffUiStart);
+const diffUiSource =
+  diffUiStart >= 0 && diffUiEnd > diffUiStart
+    ? workspaceAppSource.slice(diffUiStart, diffUiEnd)
     : "";
 const workspaceSnapshotStart = workspaceServerSource.indexOf("function workspaceSnapshot(");
 const workspaceSnapshotEnd = workspaceServerSource.indexOf(
@@ -346,6 +365,65 @@ const assertions = {
     workspacePresenterSource.includes(
       "earlierApprovalsExcluded: snapshot.approvalCoverage.earlierApprovalsExcluded",
     ),
+  workspacePersistedDiffResponseBounded:
+    diffPresenterSource.includes("WORKSPACE_DIFF_DISPLAY_MAX_BYTES = 256 * 1024") &&
+    diffPresenterSource.includes("byteCount > WORKSPACE_DIFF_DISPLAY_MAX_BYTES") &&
+    diffPresenterSource.includes('status: "outside_browser_bound"') &&
+    diffPresenterSource.includes('digestProvenance: "recorded_only"') &&
+    diffPresenterSource.includes("text: null") &&
+    workspacePresenterSource.includes("diff: persistedDiff.text") &&
+    workspacePresenterSource.includes("diffReview: persistedDiff.review") &&
+    !workspacePresenterSource.includes("diff: run.diff") &&
+    !/(?:run\.diff|diff)\.(?:slice|substring|substr)\(/.test(diffPresenterSource),
+  workspacePersistedDiffFailsClosed: [
+    'throw new IcarusError("DATABASE_ERROR", "Persisted diff evidence is invalid")',
+    "run.verification !== null",
+    "run.diff.length === 0",
+    'run.diff.includes("\\0")',
+    "VERIFICATION_OUTCOMES.has(verification.outcome)",
+    "Array.isArray(verification.checks)",
+    "Array.isArray(verification.changedPaths)",
+    "SHA256_PATTERN.test(verification.diffSha256)",
+    "SHA256_PATTERN.test(verification.checkpointSha256)",
+    "verification.changedPaths.length !== 1",
+    "verification.changedPaths[0] !== run.target",
+    'Buffer.byteLength(run.diff, "utf8")',
+    "byteCount > project.ceiling.maxDiffBytes",
+    'createHash("sha256").update(run.diff, "utf8").digest("hex")',
+    "displayedSha256 !== verification.diffSha256",
+    "decodeGitPathToken",
+    'new TextDecoder("utf-8", { fatal: true })',
+    "assertDiffHeaderTarget(lines[0].slice(11), target)",
+    'assertFileHeaderTarget(lines[2] ?? "", "--- ", target)',
+    'assertFileHeaderTarget(lines[3] ?? "", "+++ ", target)',
+    `value === \`a/\${target} b/\${target}\``,
+    `value === \`\${expected}\\t\``,
+    "DIFF_INDEX_PATTERN.test(lines[1]",
+    "DIFF_HUNK_PATTERN.exec(lines[index]",
+    "oldLines > expectedOldLines",
+    "newLines > expectedNewLines",
+    "hunkCount === 0",
+  ].every((guard) => diffPresenterSource.includes(guard)),
+  workspacePersistedDiffHasNoNewReadAuthority:
+    !/(?:readFile|readFileSync|createReadStream|readdir|lstat|realpath|spawn|execFile|fetch\(|\.git\(|getRepositoryStatus|worktreePath|cachePath|baselineBase64|approvedBase64)/.test(
+      diffPresenterSource,
+    ),
+  workspacePersistedDiffUiTextOnly:
+    diffUiSource.includes('className="diff-review__patch"') &&
+    diffUiSource.includes("{run.diff}") &&
+    diffUiSource.includes("tabIndex={0}") &&
+    diffUiSource.includes('role="region"') &&
+    diffUiSource.includes('aria-labelledby="persisted-diff-patch-heading"') &&
+    diffUiSource.includes("Exact persisted run state") &&
+    diffUiSource.includes("This does not prove current repository bytes") &&
+    !/(?:dangerouslySetInnerHTML|innerHTML|window\.open|window\.location|href\s*=|<form\b|formAction|onSubmit|<button\b|onClick|postJson|approve|execute|commit|push|deploy)/.test(
+      diffUiSource,
+    ),
+  workspacePersistedDiffUsesFixedEvidenceAnchor:
+    workspacePresenterSource.includes('type === "verification.completed"') &&
+    workspacePresenterSource.includes('return "diff"') &&
+    workspaceLivePollSource.includes('case "run-diff"') &&
+    workspaceLivePollSource.includes('return "run-diff"'),
   workspaceRunSummaryMetadataOnly:
     workspaceRunPageSource.includes("SELECT CAST(rowid AS TEXT) AS cursor") &&
     workspaceRunPageSource.includes(

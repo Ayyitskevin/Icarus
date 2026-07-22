@@ -35,9 +35,9 @@ evals, context budget allocation, and retrieval-quality fixtures.
 ## M3 — Workspace UI
 
 Status: the first five bounded slices are merged after fresh local evidence and
-exact implementation-head hosted CI. A sixth bounded approval-provenance
-candidate is implemented locally and still requires the current local and hosted
-merge gates. Full M3 remains open.
+exact implementation-head hosted CI. Sixth approval-provenance and seventh
+persisted-diff-review candidates are implemented locally and still require their
+remaining merge gates. Full M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
@@ -82,11 +82,11 @@ re-establish its prerequisite is shown as `unknown`, never guessed from an
 incomplete suffix.
 
 The slice adds no SSE, WebSocket, watcher, schema migration, runtime dependency,
-or browser authority. Later M3 scope includes richer run timelines and
-file/status, diff, and payload-bearing history navigation, checkpoints, prompt
-history, a small task board, token/cost telemetry, server-held provider profiles,
-and deliberately designed approval/recovery controls. Patch materialization is
-not the next slice.
+or browser authority. Later M3 scope includes richer run timelines, current
+file/status, multi-file or payload-bearing diff/history navigation, checkpoints,
+prompt history, a small task board, token/cost telemetry, server-held provider
+profiles, and deliberately designed approval/recovery controls. Patch
+materialization is not the next slice.
 Any browser execution path needs a separate safety contract and evidence;
 provider keys remain server-side.
 
@@ -130,6 +130,16 @@ add action authority. A single additive `(run_id)` index plus reverse rowid seek
 makes the fixed `LIMIT 13` query avoid a history-sized scan while preserving
 append order across equal timestamps and random UUIDs. Building it against
 existing non-test state remains an explicit backup and operator rollout gate.
+
+ADR 0020 implements the seventh candidate slice without adding another route.
+The existing coherent selected-run snapshot now labels absent, exact, and
+browser-oversized persisted diffs explicitly. Complete patch text is capped at
+256 KiB, rehashed against its recorded verification digest, and accompanied by
+the exact persisted run state, verification outcome, changed path, size, and
+patch statistics. Larger recorded diffs receive metadata-only CLI guidance
+rather than a partial preview; this projection does not parse or rehash their
+hidden text. The browser does not re-read Git or source and gains no review
+action.
 
 ## M4 — Runtime and previews
 
@@ -181,7 +191,7 @@ Preserve the ADR 0010 security hold. Merge the fifth bounded slice only after it
 exact head passes hosted CI and all blocker, high, and medium review findings are
 resolved. Do not widen another M3 surface as part of that closure.
 
-Project/repository enumeration, older approval pagination, file/status views,
-richer diff or raw payload history, complete checkpoint inspection, patch
-materialization, browser approval, rerun/restore, and execution remain separate
-expansions until explicitly designed and evidenced.
+Project/repository enumeration, older approval pagination, current file/status
+views, multi-file or raw payload diff/history, complete checkpoint inspection,
+patch materialization, browser approval, rerun/restore, and execution remain
+separate expansions until explicitly designed and evidenced.

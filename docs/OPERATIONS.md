@@ -187,9 +187,9 @@ window.
 
 No migration, dependency install, daemon, watcher, Server-Sent Events, or
 WebSocket setup accompanies these read-only slices. They add no browser approval,
-mutation, execution, command, commit, push, or deployment authority. File/status,
-richer diff or payload-bearing history, and action controls remain deferred, and
-the ADR 0010 release hold remains in force.
+mutation, execution, command, commit, push, or deployment authority. Current
+file/status, multi-file or payload-bearing diff/history, and action controls
+remain deferred, and the ADR 0010 release hold remains in force.
 
 ## Fifth M3 verification-attempt view
 
@@ -231,6 +231,35 @@ uses the verification section as a focus fallback when the launcher is disabled.
 This implementation adds one GET-only read and inline presentation. It does not
 alter the payload-free event APIs, schema, dependencies, source repository,
 browser action authority, guarded CLI, or ADR 0010 hold.
+
+## Seventh M3 persisted diff review
+
+The selected-run page now groups the persisted run state, latest verification
+outcome, recorded changed path, diff size, physical patch lines, additions,
+deletions, hunks, digest, and digest provenance under “Persisted diff review.”
+This is stored evidence only; it is not current repository status.
+
+For an available patch, `displayed text rehash match` means the local API hashed
+the exact displayed string and it matched the recorded verification digest. It
+does not mean Icarus re-read or revalidated the imported checkout or private
+worktree. Review actions still perform their independent CLI revalidation.
+
+The browser shows complete patch text only at or below 256 KiB. If the status is
+`metadata only`, no patch prefix or suffix was returned. Inspect the complete
+persisted evidence with:
+
+```text
+icarus run status <run-id>
+```
+
+`not produced` means no persisted verification diff exists; it does not mean a
+check passed. A sanitized `DATABASE_ERROR` indicates inconsistent persisted
+diff/verification evidence and requires operator investigation rather than a
+browser workaround.
+
+This view reuses the ordinary selected-run read and adds no route, Git/source
+read, mutation, or action. `verification completed` activity navigates to the
+fixed diff section; `checkpoint saved` continues to navigate to verification.
 
 ## Preflight
 

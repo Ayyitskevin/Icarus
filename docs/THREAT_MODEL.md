@@ -131,6 +131,20 @@ ADR 0018's controls are implemented and locally evidenced while preserving the
 loopback/same-origin/CSP boundary and guarded CLI authority. Exact-head hosted CI
 is a merge gate; ADR 0010 remains an independent release hold.
 
+## Candidate seventh M3 persisted-diff review threats
+
+| Threat | Required control | Required evidence and limits |
+| --- | --- | --- |
+| A corrupt or mismatched persisted diff is presented as reviewable | require paired diff/verification presence, project ceiling, one exact changed target, canonical digest, displayed-byte rehash, one ordered target-bound patch, and internally consistent hunk bodies; fail with fixed copy | unit and API corruption matrices cover missing partners, wrong decoded header/target, malformed ordering or hunk counts, wrong digest/path, sanitized errors, and byte-identical read-side state |
+| A large diff amplifies the response/DOM or a partial preview is mistaken for complete approval evidence | return complete text only through a fixed 262,144-byte browser cap; above it return metadata and `recorded_only` provenance with no substring | exact over-bound response excludes a private tail; static assertions forbid partial-string operations; this bounds response/rendering, not the existing full-run SQLite hydration |
+| Persisted evidence is mistaken for current source or worktree status | display exact persisted run state and verification outcome; explicitly state there is no fresh repository read and that rehash agreement proves only displayed recorded bytes | presenter/API copy assertions and completed real-browser truth-copy/digest evidence; guarded CLI review continues to revalidate live state |
+| Patch text executes or creates attacker-sized per-line UI | render one complete React `<pre>` text node inside a labelled, keyboard-focusable bounded scroll region; no line-derived elements, HTML sink, path link, or action control | HTML-like patch survives API serialization as text; static no-sink/no-control assertions pass; cached Chromium 1228 proved inert rendering, Tab focus, PageDown scrolling, fixed-anchor navigation, zero external requests/browser errors, and unchanged durable/source state |
+| The review surface widens authority or timing | reuse the existing coherent selected-run response; add no route, query, Git/source read, request, poller, write, or action | unchanged SQLite and repository fingerprints plus static no-read-authority and fixed-anchor assertions |
+
+ADR 0020 remains Proposed until the full merge and exact-head hosted gates
+close. Browser and independent-review gates are complete. ADR 0010 remains an
+independent release hold.
+
 ## Inherited repository automation hold
 
 `.github/workflows/opencode.yml` came from the pre-existing remote root and was

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { createRequire } from "node:module";
@@ -475,6 +476,137 @@ describe("loopback local workspace API", () => {
     const index = await fetch(server.url);
     expect(index.status).toBe(200);
     expect(await index.text()).toContain('id="root"');
+  });
+
+  test("serves bounded rehashed persisted diff review without source or state mutation", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const projectResponse = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "diff-review-fixture", path: fixture.repository },
+      project: {
+        name: "diff-review-project",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    const projectId = String((await responseJson(projectResponse)).id);
+    const draftResponse = await postJson(`${server.url}/api/runs`, {
+      projectId,
+      task: "Review persisted diff evidence.",
+      target: "src/greeting.txt",
+      provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
+    });
+    const runId = String((await responseJson(draftResponse)).id);
+    const diff = [
+      "diff --git a/src/greeting.txt b/src/greeting.txt",
+      "index ce01362..63c704a 100644",
+      "--- a/src/greeting.txt",
+      "+++ b/src/greeting.txt",
+      "@@ -1 +1 @@",
+      "-Hello, world!",
+      "+Hello, <img src=x onerror=alert(1)>!",
+      "",
+    ].join("\n");
+    const diffSha256 = createHash("sha256").update(diff, "utf8").digest("hex");
+    const verification = {
+      outcome: "passed",
+      checks: [],
+      changedPaths: ["src/greeting.txt"],
+      diffSha256,
+      checkpointSha256: "c".repeat(64),
+    };
+    const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    database
+      .prepare(
+        `UPDATE runs
+         SET state = 'awaiting_review', diff = ?, verification_json = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(diff, JSON.stringify(verification), "2026-07-22T12:01:00.000Z", runId);
+    database
+      .prepare(
+        `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+         VALUES (?, 2, 'verification.completed', '{}', ?)`,
+      )
+      .run(runId, "2026-07-22T12:01:00.000Z");
+    const persistenceBefore = persistenceSnapshot(database);
+    database.close();
+
+    const response = await fetch(`${server.url}/api/runs/${runId}`);
+    expect(response.status).toBe(200);
+    const projection = await responseJson(response);
+    expect(projection).toMatchObject({
+      id: runId,
+      state: "awaiting_review",
+      verification: { outcome: "passed", diffSha256 },
+      diff,
+      diffReview: {
+        status: "available",
+        path: "src/greeting.txt",
+        sha256: diffSha256,
+        byteCount: Buffer.byteLength(diff, "utf8"),
+        lineCount: 7,
+        addedLines: 1,
+        deletedLines: 1,
+        hunkCount: 1,
+        browserByteLimit: 262_144,
+        digestProvenance: "displayed_text_rehash_match",
+      },
+      timeline: expect.arrayContaining([
+        expect.objectContaining({
+          type: "verification.completed",
+          evidenceSection: "diff",
+        }),
+      ]),
+    });
+    expect(Object.keys(projection.diffReview as Record<string, unknown>).sort()).toEqual(
+      [
+        "status",
+        "path",
+        "sha256",
+        "byteCount",
+        "lineCount",
+        "addedLines",
+        "deletedLines",
+        "hunkCount",
+        "browserByteLimit",
+        "digestProvenance",
+      ].sort(),
+    );
+    expect(JSON.stringify(projection)).toContain("<img src=x onerror=alert(1)>");
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+    const observer = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    expect(persistenceSnapshot(observer)).toEqual(persistenceBefore);
+    observer
+      .prepare("UPDATE runs SET diff = ? WHERE id = ?")
+      .run(`${diff}corrupt-response-sentinel`, runId);
+    const corruptPersistence = persistenceSnapshot(observer);
+    observer.close();
+
+    const corruptResponse = await fetch(`${server.url}/api/runs/${runId}`);
+    expect(corruptResponse.status).toBe(400);
+    const corruptError = await responseJson(corruptResponse);
+    expect(corruptError).toMatchObject({
+      error: { code: "DATABASE_ERROR", message: "Persisted diff evidence is invalid" },
+    });
+    expect(JSON.stringify(corruptError)).not.toContain("corrupt-response-sentinel");
+    const finalObserver = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    expect(persistenceSnapshot(finalObserver)).toEqual(corruptPersistence);
+    finalObserver.close();
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
   });
 
   test("serves strict pinned workspace run pages with fixed work and no full-run hydration", async () => {

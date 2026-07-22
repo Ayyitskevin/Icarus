@@ -35,8 +35,10 @@ export function evidenceTarget(section: string | undefined): string {
     case "run-verification":
     case "verification":
     case "checks":
-    case "diff":
       return "run-verification";
+    case "run-diff":
+    case "diff":
+      return "run-diff";
     case "run-outputs":
     case "outputs":
       return "run-outputs";

@@ -360,6 +360,44 @@ export interface RunTimestamps {
   readonly [name: string]: string;
 }
 
+export type PersistedDiffReviewView =
+  | {
+      readonly status: "not_produced";
+      readonly path: null;
+      readonly sha256: null;
+      readonly byteCount: 0;
+      readonly lineCount: 0;
+      readonly addedLines: 0;
+      readonly deletedLines: 0;
+      readonly hunkCount: 0;
+      readonly browserByteLimit: 262_144;
+      readonly digestProvenance: "not_available";
+    }
+  | {
+      readonly status: "available";
+      readonly path: string;
+      readonly sha256: string;
+      readonly byteCount: number;
+      readonly lineCount: number;
+      readonly addedLines: number;
+      readonly deletedLines: number;
+      readonly hunkCount: number;
+      readonly browserByteLimit: 262_144;
+      readonly digestProvenance: "displayed_text_rehash_match";
+    }
+  | {
+      readonly status: "outside_browser_bound";
+      readonly path: string;
+      readonly sha256: string;
+      readonly byteCount: number;
+      readonly lineCount: null;
+      readonly addedLines: null;
+      readonly deletedLines: null;
+      readonly hunkCount: null;
+      readonly browserByteLimit: 262_144;
+      readonly digestProvenance: "recorded_only";
+    };
+
 export interface RunView {
   readonly id: string;
   readonly eventCursor: number;
@@ -379,6 +417,7 @@ export interface RunView {
   readonly checks: readonly CheckEvidenceView[];
   readonly verification: VerificationView;
   readonly diff: string | null;
+  readonly diffReview: PersistedDiffReviewView;
   readonly outputs: readonly OutputView[];
   readonly warnings: readonly (string | WarningView)[];
   readonly approvals: readonly ApprovalView[];

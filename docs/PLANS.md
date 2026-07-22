@@ -71,6 +71,51 @@ the reliability slice without claiming a broader milestone is complete.
       passed its real `quality` job at exact implementation head
       `f8fe03e399fb46f197bbcbc0df8f1edabbe2e0c9`
 
+## Seventh M3 candidate: bounded persisted diff and run-status review
+
+ADR 0020 and its implementation are a local candidate on 2026-07-22. This
+records only review of the already persisted one-file diff. Local real-browser
+acceptance and independent review are complete; exact published-head hosted CI
+remains open.
+
+### Bounded presentation and truthful status
+
+- [x] Preserve the normal `diff: string | null` contract while adding an exact
+      absent/available/outside-browser-bound metadata union
+- [x] Show no more than 262,144 complete UTF-8 diff bytes and never return a
+      prefix, suffix, or other partial patch
+- [x] Require paired diff/verification presence, project-ceiling compliance,
+      one exact changed target, canonical digest, exact displayed-byte rehash,
+      one patch header, and at least one hunk/change before claiming statistics
+- [x] Put exact persisted run state, verification outcome, path, bytes, physical
+      patch lines, additions, deletions, hunks, digest, and provenance together
+- [x] Render the patch in one bounded-height React text node, keep hostile HTML
+      inert, use a focusable fixed anchor, and expose no action control
+- [x] Map `verification.completed` to `#run-diff` while preserving
+      `checkpoint.saved` at verification and the distinct warning/approval
+      anchors from ADR 0019
+
+### Scope and evidence
+
+- [x] Add no route, schema, store/service change, database query, Git/source
+      read, provider call, poller, browser mutation, command, commit, push, or
+      deployment authority
+- [x] Unit and API coverage prove exact shapes, patch statistics, no-partial
+      oversized handling, inert HTML-like text, sanitized corruption failures,
+      and unchanged SQLite/repository fingerprints
+- [x] Security tests pass with static response-cap, fail-closed validation,
+      no-read-authority, text-only UI, and fixed-anchor assertions
+- [x] Complete real-browser acceptance with explicit cached Chromium 1228: the
+      compiled workspace rendered hostile patch text inertly, moved focus by
+      Tab to the labelled patch region, scrolled it with PageDown, followed the
+      fixed evidence anchor, cancelled held requests, made zero external
+      requests, reported zero browser errors, and preserved SQLite/source state
+- [x] Run the full local `pnpm check`: workflow validation, formatting, lint,
+      typecheck, unit/provider/integration/evaluation/security suites, and the
+      Vite production build all completed successfully
+- [x] Complete independent review with no blocker, high, or medium findings
+- [ ] Complete exact published-head hosted CI before accepting ADR 0020
+
 ## Sixth M3 candidate: bounded approval provenance
 
 Status values are evidence claims. ADR 0019 and its implementation are present
@@ -782,7 +827,8 @@ Final adversarial candidate local evidence on 2026-07-20:
 The inherited ADR 0010 security hold remains separate from local feature work.
 ADR 0016 implements only bounded older event metadata for the third M3 slice.
 ADR 0017 implements only bounded workspace-wide run summaries for the fourth.
-ADR 0019 bounds only the ordinary newest approval suffix. Project/repository
-enumeration, older approval pagination, file/status views, richer diff or
-payload-bearing history, patch materialization, browser approval, and execution
-remain later, explicitly reviewed expansions. See `docs/ROADMAP.md`.
+ADR 0019 bounds only the ordinary newest approval suffix. ADR 0020 presents only
+the already persisted one-file diff. Project/repository enumeration, older
+approval pagination, current file/status views, multi-file or payload-bearing
+diff/history, patch materialization, browser approval, and execution remain
+later, explicitly reviewed expansions. See `docs/ROADMAP.md`.

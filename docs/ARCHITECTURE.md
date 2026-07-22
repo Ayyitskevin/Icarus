@@ -292,10 +292,10 @@ or runtime dependency.
 
 This path is observation-only. It adds no Server-Sent Events, WebSocket,
 filesystem watcher, background process, approval, edit, check execution,
-arbitrary command, commit, push, deployment, or other browser authority. Richer
-file/status, diff, and payload-bearing history navigation remains deferred, and
-guarded actions must still revalidate authoritative repository state immediately
-before use.
+arbitrary command, commit, push, deployment, or other browser authority. Current
+file/status and multi-file or payload-bearing diff/history navigation remain
+deferred, and guarded actions must still revalidate authoritative repository
+state immediately before use.
 
 The ordinary full-run response retains at most the newest 12 approval decisions
 and the newest 200 event summaries, with independent truncation metadata.
@@ -419,6 +419,35 @@ Complete private evidence remains in CLI run history.
 This implementation adds no schema, dependency, write, event append, Git/source
 read, raw evidence disclosure, browser mutation, or release authority. ADR 0010
 remains independently unresolved.
+
+## Sixth and seventh M3 selected-run presentation bounds
+
+ADR 0019 caps the approval suffix inside the existing coherent full-run read.
+ADR 0020 adds no read at all: the API presenter derives `diffReview` from that
+same run record, its verification evidence, the selected target, and the
+registered project ceiling.
+
+The presenter returns complete diff text only at or below a fixed 262,144-byte
+browser cap. It validates paired presence, the project ceiling, one exact target,
+canonical recorded digest, exact displayed-byte rehash, one ordered single-file
+Git patch bound to that target, and internally consistent hunk counts. The
+resulting metadata distinguishes absent, available/rehashed, and larger
+recorded-only evidence. A larger recorded diff is not parsed, rehashed, or
+sliced by this projection; only metadata and CLI guidance cross the response
+boundary.
+
+The React page places persisted run state, verification outcome, path, byte and
+patch-line counts, additions, deletions, hunks, digest, provenance, and the exact
+patch together at fixed `#run-diff`. One keyboard-focusable, labelled `<pre>`
+text node sits inside a bounded scroll region; no line-derived nodes, HTML sink,
+link, or action control is created.
+`verification.completed` targets this section, while `checkpoint.saved` remains
+at verification.
+
+The 256 KiB cap bounds response/rendered patch bytes, not the pre-existing full-
+run SQLite hydration. A dedicated scalar projection for every full-run field is
+separate future work. This slice adds no route, query, Git/source read, timing
+source, browser action, or release authority.
 
 ## Provider contract
 

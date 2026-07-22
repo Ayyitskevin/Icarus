@@ -32,6 +32,7 @@ const RUN_SUMMARY_PRIVATE_SENTINEL = "/private/browser-run-summary-heavy-sentine
 const VALID_ARCHIVED_RUN_TASK = "Archived browser run 020";
 const ALTERNATE_ARCHIVED_RUN_TASK = "Archived browser run 021";
 const APPROVAL_HTML_SENTINEL = '<img data-approval-injection="true"> Recorded digest:';
+const DIFF_HTML_SENTINEL = '<img data-diff-injection="true" src=x onerror=alert(1)>';
 
 const Database = createRequire(new URL("../packages/core/package.json", import.meta.url))(
   "better-sqlite3",
@@ -206,6 +207,65 @@ function insertRunSummaryFixtures(stateRoot, browserRunId) {
   } finally {
     database.close();
   }
+}
+
+function installPersistedDiffReviewFixture(stateRoot, runId) {
+  const database = new Database(path.join(stateRoot, "icarus.sqlite3"));
+  const addedLines = Array.from({ length: 80 }, (_, index) =>
+    index === 40 ? DIFF_HTML_SENTINEL : `bounded persisted diff line ${String(index + 1)}`,
+  );
+  const diff = [
+    `diff --git a/${TARGET} b/${TARGET}`,
+    "index ce01362..63c704a 100644",
+    `--- a/${TARGET}`,
+    `+++ b/${TARGET}`,
+    "@@ -1 +1,80 @@",
+    `-${TARGET_CONTENT.trimEnd()}`,
+    ...addedLines.map((line) => `+${line}`),
+    "",
+  ].join("\n");
+  const diffSha256 = createHash("sha256").update(diff, "utf8").digest("hex");
+  const verification = {
+    outcome: "passed",
+    checks: [],
+    changedPaths: [TARGET],
+    diffSha256,
+    checkpointSha256: "d".repeat(64),
+  };
+  try {
+    const secondaryProject = database
+      .prepare("SELECT id FROM projects WHERE name = ?")
+      .get("browser-project-two");
+    assert.equal(
+      typeof secondaryProject?.id,
+      "string",
+      "the persisted diff fixture requires the inactive secondary project",
+    );
+    const updated = database
+      .prepare(
+        `UPDATE runs
+         SET project_id = ?, state = 'awaiting_review', diff = ?, verification_json = ?, updated_at = ?
+         WHERE id = ? AND target = ?`,
+      )
+      .run(
+        secondaryProject.id,
+        diff,
+        JSON.stringify(verification),
+        "2026-07-22T12:30:00.000Z",
+        runId,
+        TARGET,
+      );
+    assert.equal(updated.changes, 1, "the persisted diff browser fixture must update one run");
+    database
+      .prepare(
+        `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+         VALUES (?, 1, 'verification.completed', '{}', ?)`,
+      )
+      .run(runId, "2026-07-22T12:30:00.000Z");
+  } finally {
+    database.close();
+  }
+  return { diff, diffSha256 };
 }
 
 function workspaceStateSnapshot(databasePath) {
@@ -614,6 +674,17 @@ class BrowserPage {
       return true;
     }, text);
     assert.equal(clicked, true, `Could not contend enabled button ${text}`);
+  }
+
+  async pressKey(key, code, virtualKeyCode) {
+    const event = {
+      key,
+      code,
+      windowsVirtualKeyCode: virtualKeyCode,
+      nativeVirtualKeyCode: virtualKeyCode,
+    };
+    await this.cdp.send("Input.dispatchKeyEvent", { type: "keyDown", ...event }, this.sessionId);
+    await this.cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...event }, this.sessionId);
   }
 
   async clickRecentRun(task) {
@@ -1771,6 +1842,10 @@ try {
   }
 
   const runSummaryFixture = insertRunSummaryFixtures(stateRoot, browserRunId);
+  const diffReviewFixture = installPersistedDiffReviewFixture(
+    stateRoot,
+    runSummaryFixture.validArchivedRunId,
+  );
 
   const runSummaryFirstResponse = await fetch(`${workspace.url}/api/runs`);
   assert.equal(runSummaryFirstResponse.status, 200);
@@ -2013,6 +2088,108 @@ try {
     "the project after the selected-run generation guard",
   );
 
+  await page.clickRecentRun(VALID_ARCHIVED_RUN_TASK);
+  await page.waitFor(
+    (runId) =>
+      Array.from(document.querySelectorAll(".run-evidence dt")).some(
+        (term) =>
+          term.textContent?.trim() === "Run ID" &&
+          term.parentElement?.querySelector("dd")?.textContent?.trim() === runId,
+      ),
+    [runSummaryFixture.validArchivedRunId],
+    "the bounded persisted diff review fixture",
+  );
+  const diffReviewBrowserEvidence = await page.call((expectedDiff) => {
+    const root = document.querySelector("#run-diff");
+    const fact = (label) => {
+      const term = Array.from(root?.querySelectorAll("dt") ?? []).find(
+        (candidate) => candidate.textContent?.trim() === label,
+      );
+      return term?.parentElement?.querySelector("dd")?.textContent?.trim() ?? null;
+    };
+    return {
+      heading: root?.querySelector("h3")?.textContent?.trim() ?? null,
+      status: root?.querySelector(".status")?.textContent?.trim() ?? null,
+      runState: fact("Exact persisted run state"),
+      verification: fact("Verification outcome"),
+      path: fact("Recorded changed path"),
+      digest: fact("Recorded diff digest"),
+      digestRelationship: fact("Digest relationship"),
+      detailsOpen: root?.querySelector("details")?.open ?? null,
+      exactPatch: root?.querySelector("pre")?.textContent === expectedDiff,
+      injectedElement: root?.querySelector('[data-diff-injection="true"]') !== null,
+      buttonCount: root?.querySelectorAll("button").length ?? -1,
+      tabIndex: root?.getAttribute("tabindex") ?? null,
+      patchTabIndex: root?.querySelector("pre")?.getAttribute("tabindex") ?? null,
+      patchRole: root?.querySelector("pre")?.getAttribute("role") ?? null,
+      patchLabelledBy: root?.querySelector("pre")?.getAttribute("aria-labelledby") ?? null,
+      truthCopy:
+        root?.textContent?.includes("This does not prove current repository bytes.") ?? false,
+    };
+  }, diffReviewFixture.diff);
+  assert.deepEqual(diffReviewBrowserEvidence, {
+    heading: "Persisted diff review",
+    status: "exact persisted text",
+    runState: "awaiting_review",
+    verification: "passed",
+    path: TARGET,
+    digest: diffReviewFixture.diffSha256,
+    digestRelationship: "displayed text rehash match",
+    detailsOpen: true,
+    exactPatch: true,
+    injectedElement: false,
+    buttonCount: 0,
+    tabIndex: "-1",
+    patchTabIndex: "0",
+    patchRole: "region",
+    patchLabelledBy: "persisted-diff-patch-heading",
+    truthCopy: true,
+  });
+  const keyboardStart = await page.call(() => {
+    const summary = document.querySelector("#persisted-diff-patch-heading");
+    const patch = document.querySelector(".diff-review__patch");
+    if (!(summary instanceof HTMLElement) || !(patch instanceof HTMLElement)) return null;
+    summary.focus();
+    return {
+      summaryFocused: document.activeElement === summary,
+      overflow: patch.scrollHeight > patch.clientHeight,
+      scrollTop: patch.scrollTop,
+    };
+  });
+  assert.deepEqual(keyboardStart, { summaryFocused: true, overflow: true, scrollTop: 0 });
+  await page.pressKey("Tab", "Tab", 9);
+  await page.waitFor(
+    () => document.activeElement?.classList.contains("diff-review__patch") === true,
+    [],
+    "keyboard focus on the persisted diff scroll region",
+  );
+  await page.pressKey("PageDown", "PageDown", 34);
+  await page.waitFor(
+    () => (document.querySelector(".diff-review__patch")?.scrollTop ?? 0) > 0,
+    [],
+    "keyboard scrolling in the persisted diff region",
+  );
+  assert.equal((await page.bodyText()).includes(DIFF_HTML_SENTINEL), true);
+  const diffEvidenceHref = await page.clickTimelineEvidence("verification completed");
+  assert.equal(diffEvidenceHref, "#run-diff");
+  await page.waitFor(
+    () => window.location.hash === "#run-diff" && document.querySelector("#run-diff") !== null,
+    [],
+    "timeline-to-diff evidence anchor navigation",
+  );
+  await page.clickButton("← Back to project");
+  await page.waitFor(
+    () => document.querySelector("#project-detail-heading")?.textContent === "browser-project-two",
+    [],
+    "the persisted diff fixture project after bounded diff review",
+  );
+  await page.clickProject("browser-project");
+  await page.waitFor(
+    () => document.querySelector("#project-detail-heading")?.textContent === "browser-project",
+    [],
+    "the project after bounded diff review",
+  );
+
   const unmountedRunPageRequest = browserPage.holdNextRunPage();
   finishHeldBrowserRunPageRequest = unmountedRunPageRequest.finish;
   await page.clickButton("Older runs");
@@ -2174,6 +2351,7 @@ try {
     refreshNavigationBlocked,
     lateDetailRejected: lateRunDetailRejected,
     privateHeavyColumns: "not rendered",
+    persistedDiffReview: diffReviewBrowserEvidence,
     durableStateUnchanged: true,
     sourceUnchanged: true,
   };
@@ -3462,7 +3640,10 @@ try {
   body = await page.bodyText();
   assert.equal(body.includes("No action was proposed or allowed."), true);
   assert.equal(body.includes("not run"), true);
-  assert.equal(body.includes("No diff was produced."), true);
+  assert.equal(
+    body.includes("No verification diff exists. This does not imply that verification passed."),
+    true,
+  );
   assert.equal(body.includes("Context egress approval"), false);
   assert.equal(body.includes("Plan approval"), true);
 
@@ -3621,6 +3802,7 @@ try {
   }
   const selectedRunEventPaths = new Set([
     `/api/runs/${encodeURIComponent(browserRunId)}/events`,
+    `/api/runs/${encodeURIComponent(runSummaryFixture.validArchivedRunId)}/events`,
     `/api/runs/${encodeURIComponent(runSummaryFixture.alternateArchivedRunId)}/events`,
   ]);
   let sawArchivedRunPoll = false;
