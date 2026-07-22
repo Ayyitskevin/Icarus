@@ -70,7 +70,7 @@ jobs:
         run: pnpm typecheck
 
       - name: Run portable native, provider, and unit boundaries
-        run: pnpm exec vitest run tests/native tests/provider tests/unit/context-preview.test.ts tests/unit/policy.test.ts tests/unit/state-machine.test.ts tests/unit/store.test.ts tests/unit/verification-provenance.test.ts tests/unit/workspace-history-nav.test.ts tests/unit/workspace-live-poll.test.ts tests/unit/workspace-presenter.test.ts tests/unit/workspace-run-page-nav.test.ts tests/unit/workspace-verification-attempts.test.ts --reporter=dot
+        run: pnpm exec vitest run tests/native tests/provider tests/unit/api-response.test.ts tests/unit/context-preview.test.ts tests/unit/policy.test.ts tests/unit/state-machine.test.ts tests/unit/store.test.ts tests/unit/verification-provenance.test.ts tests/unit/workspace-history-nav.test.ts tests/unit/workspace-live-poll.test.ts tests/unit/workspace-presenter.test.ts tests/unit/workspace-project-page-nav.test.ts tests/unit/workspace-run-page-nav.test.ts tests/unit/workspace-verification-attempts.test.ts --reporter=dot
 
       - name: Run portable draft-planning admission cases
         run: pnpm exec vitest run tests/unit/service-draft.test.ts --testNamePattern="on (darwin|win32)" --reporter=dot

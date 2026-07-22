@@ -1,4 +1,4 @@
-# ADR 0021: Explicit native macOS and Windows acceptance
+# ADR 0022: Explicit native macOS and Windows acceptance
 
 - Status: Proposed
 - Date: 2026-07-22
@@ -64,8 +64,9 @@ root beneath the current user's profile.
 
 The selected unit list covers deterministic context preview, provider HTTP
 contracts, policy/state transitions, persisted drafts and portable operation
-admission, SQLite state, verification provenance, and workspace presentation and
-request lifecycle. The draft suite runs only its explicit Darwin and Win32
+admission, SQLite state, bounded JSON responses and project-page navigation,
+verification provenance, and workspace presentation and request lifecycle. The
+draft suite runs only its explicit Darwin and Win32
 admission cases; its mocked Linux kernel-lease case stays in the Linux gate. The
 native lane deliberately excludes integration/eval suites, POSIX
 symlink/mode tests, kernel leases, Git mutation, Docker checks, approval,
