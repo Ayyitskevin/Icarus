@@ -70,6 +70,42 @@ const RUN_SUMMARY_TARGET_MAX_BYTES = 1_024;
 const PROJECT_NAME_MAX_BYTES = 100;
 const PROJECT_BASE_REF_MAX_BYTES = 256;
 const REPOSITORY_PATH_MAX_BYTES = 4_096;
+const BOUNDED_PROJECT_COLUMNS = `
+  CASE WHEN typeof(p.id) = 'text' AND octet_length(p.id) <= 64
+       THEN p.id END AS project_id,
+  CASE WHEN typeof(p.name) = 'text' AND octet_length(p.name) <= ${PROJECT_NAME_MAX_BYTES}
+       THEN p.name END AS project_name,
+  CASE WHEN typeof(p.repository_id) = 'text' AND octet_length(p.repository_id) <= 64
+       THEN p.repository_id END AS repository_id,
+  CASE WHEN typeof(p.base_ref) = 'text' AND octet_length(p.base_ref) <= ${PROJECT_BASE_REF_MAX_BYTES}
+       THEN p.base_ref END AS base_ref,
+  CASE WHEN typeof(p.checks_json) = 'text'
+         AND octet_length(p.checks_json) <= ${WORKSPACE_PROJECT_CHECKS_MAX_BYTES}
+         AND json_valid(p.checks_json, 1)
+       THEN p.checks_json END AS checks_json,
+  CASE WHEN typeof(p.sandbox_json) = 'text'
+         AND octet_length(p.sandbox_json) <= ${WORKSPACE_PROJECT_PROFILE_MAX_BYTES}
+         AND json_valid(p.sandbox_json, 1)
+       THEN p.sandbox_json END AS sandbox_json,
+  CASE WHEN typeof(p.ceiling_json) = 'text'
+         AND octet_length(p.ceiling_json) <= ${WORKSPACE_PROJECT_PROFILE_MAX_BYTES}
+         AND json_valid(p.ceiling_json, 1)
+       THEN p.ceiling_json END AS ceiling_json,
+  CASE WHEN typeof(p.created_at) = 'text'
+         AND octet_length(p.created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
+       THEN p.created_at END AS project_created_at`;
+const BOUNDED_REPOSITORY_COLUMNS = `
+  CASE WHEN typeof(r.id) = 'text' AND octet_length(r.id) <= 64
+       THEN r.id END AS repository_record_id,
+  CASE WHEN typeof(r.name) = 'text' AND octet_length(r.name) <= ${PROJECT_NAME_MAX_BYTES}
+       THEN r.name END AS repository_name,
+  CASE WHEN typeof(r.path) = 'text' AND octet_length(r.path) <= ${REPOSITORY_PATH_MAX_BYTES}
+       THEN r.path END AS repository_path,
+  CASE WHEN typeof(r.device) = 'integer' THEN r.device END AS repository_device,
+  CASE WHEN typeof(r.inode) = 'integer' THEN r.inode END AS repository_inode,
+  CASE WHEN typeof(r.created_at) = 'text'
+         AND octet_length(r.created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
+       THEN r.created_at END AS repository_created_at`;
 const RUN_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SAFE_WORKSPACE_SNAPSHOT_MAX = Number.MAX_SAFE_INTEGER - 1;
 const PROJECT_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
@@ -444,7 +480,15 @@ function exactRecord(
   return record;
 }
 
-function workspaceCheckProfiles(value: unknown): readonly CheckProfile[] {
+function workspaceCheckProfiles(
+  value: unknown,
+  preservePolicyErrorCodes = false,
+): readonly CheckProfile[] {
+  if (preservePolicyErrorCodes) {
+    const checks = value as readonly CheckProfile[];
+    assertCheckProfiles(checks);
+    return checks;
+  }
   invariant(
     Array.isArray(value) && value.length > 0,
     "DATABASE_ERROR",
@@ -483,7 +527,12 @@ function workspaceCheckProfiles(value: unknown): readonly CheckProfile[] {
   return checks;
 }
 
-function workspaceSandboxProfile(value: unknown): SandboxProfile {
+function workspaceSandboxProfile(value: unknown, preservePolicyErrorCodes = false): SandboxProfile {
+  if (preservePolicyErrorCodes) {
+    const sandbox = value as SandboxProfile;
+    assertSandboxProfile(sandbox);
+    return sandbox;
+  }
   const profile = exactRecord(
     value,
     ["image", "cpus", "memoryMb", "pids", "tmpfsMb"],
@@ -529,7 +578,12 @@ const SUN_CEILING_KEYS = [
   "commandTimeoutMs",
 ] as const satisfies readonly (keyof SunCeiling)[];
 
-function workspaceSunCeiling(value: unknown): SunCeiling {
+function workspaceSunCeiling(value: unknown, preservePolicyErrorCodes = false): SunCeiling {
+  if (preservePolicyErrorCodes) {
+    const ceiling = value as SunCeiling;
+    assertSunCeiling(ceiling);
+    return ceiling;
+  }
   const record = exactRecord(value, SUN_CEILING_KEYS, "project.ceiling");
   invariant(
     SUN_CEILING_KEYS.every((key) => typeof record[key] === "number"),
@@ -547,33 +601,18 @@ function workspaceSunCeiling(value: unknown): SunCeiling {
   return ceiling;
 }
 
-function workspaceProjectEntryRow(
-  entry: unknown,
-  before: number,
-  snapshot: number,
-): { readonly cursor: number; readonly entry: WorkspaceProjectEntry } {
-  const value = row(entry, "workspace project");
-  const cursor = sqliteRowid(value.cursor, "project cursor", false);
-  const projectId = text(value.project_id, "project.id");
-  const projectName = text(value.project_name, "project.name");
-  const repositoryId = text(value.repository_id, "repository.id");
+function boundedRepositoryRow(value: Row): RepositoryRecord {
+  const repositoryId = text(value.repository_record_id, "repository.id");
   const repositoryName = text(value.repository_name, "repository.name");
   const repositoryPath = text(value.repository_path, "repository.path");
-  const baseRef = text(value.base_ref, "project.base_ref");
-  const projectCreatedAt = text(value.project_created_at, "project.created_at");
   const repositoryCreatedAt = text(value.repository_created_at, "repository.created_at");
   const repositoryDevice = numberValue(value.repository_device, "repository.device");
   const repositoryInode = numberValue(value.repository_inode, "repository.inode");
-  invariant(cursor < before && cursor <= snapshot, "DATABASE_ERROR", "Project cursor is invalid");
+  invariant(RUN_ID_PATTERN.test(repositoryId), "DATABASE_ERROR", "Repository identity is invalid");
   invariant(
-    RUN_ID_PATTERN.test(projectId) && RUN_ID_PATTERN.test(repositoryId),
+    PROJECT_NAME_PATTERN.test(repositoryName),
     "DATABASE_ERROR",
-    "Project identity is invalid",
-  );
-  invariant(
-    PROJECT_NAME_PATTERN.test(projectName) && PROJECT_NAME_PATTERN.test(repositoryName),
-    "DATABASE_ERROR",
-    "Project name metadata is invalid",
+    "Repository name metadata is invalid",
   );
   invariant(
     repositoryPath.trim().length > 0 &&
@@ -581,14 +620,6 @@ function workspaceProjectEntryRow(
       Buffer.byteLength(repositoryPath, "utf8") <= REPOSITORY_PATH_MAX_BYTES,
     "DATABASE_ERROR",
     "Repository path is invalid",
-  );
-  invariant(
-    baseRef.length > 0 &&
-      !baseRef.startsWith("-") &&
-      !/[\r\n\0]/.test(baseRef) &&
-      Buffer.byteLength(baseRef, "utf8") <= PROJECT_BASE_REF_MAX_BYTES,
-    "DATABASE_ERROR",
-    "Project base ref is invalid",
   );
   invariant(
     Number.isSafeInteger(repositoryDevice) &&
@@ -599,42 +630,89 @@ function workspaceProjectEntryRow(
     "Repository identity metadata is invalid",
   );
   invariant(
-    isCanonicalTimestamp(projectCreatedAt) && isCanonicalTimestamp(repositoryCreatedAt),
+    isCanonicalTimestamp(repositoryCreatedAt),
     "DATABASE_ERROR",
-    "Project timestamp metadata is invalid",
+    "Repository timestamp metadata is invalid",
+  );
+  return {
+    id: repositoryId,
+    name: repositoryName,
+    path: repositoryPath,
+    device: repositoryDevice,
+    inode: repositoryInode,
+    createdAt: repositoryCreatedAt,
+  };
+}
+
+function boundedProjectRow(value: Row, preservePolicyErrorCodes = false): ProjectRecord {
+  const projectId = text(value.project_id, "project.id");
+  const projectName = text(value.project_name, "project.name");
+  const repositoryId = text(value.repository_id, "repository.id");
+  const baseRef = text(value.base_ref, "project.base_ref");
+  const projectCreatedAt = text(value.project_created_at, "project.created_at");
+  invariant(
+    RUN_ID_PATTERN.test(projectId) && RUN_ID_PATTERN.test(repositoryId),
+    "DATABASE_ERROR",
+    "Project identity is invalid",
+  );
+  invariant(
+    PROJECT_NAME_PATTERN.test(projectName),
+    "DATABASE_ERROR",
+    "Project name metadata is invalid",
+  );
+  invariant(
+    baseRef.length > 0 &&
+      !baseRef.startsWith("-") &&
+      !/[\r\n\0]/.test(baseRef) &&
+      Buffer.byteLength(baseRef, "utf8") <= PROJECT_BASE_REF_MAX_BYTES,
+    "DATABASE_ERROR",
+    "Project base ref is invalid",
+  );
+  invariant(
+    isCanonicalTimestamp(projectCreatedAt),
+    "DATABASE_ERROR",
+    "Project timestamp is invalid",
   );
   const checks = workspaceCheckProfiles(
     parseJson<unknown>(value.checks_json, "project.checks_json"),
+    preservePolicyErrorCodes,
   );
   const sandbox = workspaceSandboxProfile(
     parseJson<unknown>(value.sandbox_json, "project.sandbox_json"),
+    preservePolicyErrorCodes,
   );
   const ceiling = workspaceSunCeiling(
     parseJson<unknown>(value.ceiling_json, "project.ceiling_json"),
+    preservePolicyErrorCodes,
   );
   return {
-    cursor,
-    entry: {
-      project: {
-        id: projectId,
-        name: projectName,
-        repositoryId,
-        baseRef,
-        checks,
-        sandbox,
-        ceiling,
-        createdAt: projectCreatedAt,
-      },
-      repository: {
-        id: repositoryId,
-        name: repositoryName,
-        path: repositoryPath,
-        device: repositoryDevice,
-        inode: repositoryInode,
-        createdAt: repositoryCreatedAt,
-      },
-    },
+    id: projectId,
+    name: projectName,
+    repositoryId,
+    baseRef,
+    checks,
+    sandbox,
+    ceiling,
+    createdAt: projectCreatedAt,
   };
+}
+
+function workspaceProjectEntryRow(
+  entry: unknown,
+  before: number,
+  snapshot: number,
+): { readonly cursor: number; readonly entry: WorkspaceProjectEntry } {
+  const value = row(entry, "workspace project");
+  const cursor = sqliteRowid(value.cursor, "project cursor", false);
+  invariant(cursor < before && cursor <= snapshot, "DATABASE_ERROR", "Project cursor is invalid");
+  const project = boundedProjectRow(value);
+  const repository = boundedRepositoryRow(value);
+  invariant(
+    project.repositoryId === repository.id,
+    "DATABASE_ERROR",
+    "Project repository identity is inconsistent",
+  );
+  return { cursor, entry: { project, repository } };
 }
 
 function workspaceRunSummaryRow(
@@ -868,24 +946,20 @@ export class IcarusStore {
   }
 
   getRepository(id: string): RepositoryRecord {
-    const value = row(
-      this.#database.prepare("SELECT * FROM repositories WHERE id = ?").get(id),
-      "repository",
-    );
-    return {
-      id: text(value.id, "repository.id"),
-      name: text(value.name, "repository.name"),
-      path: text(value.path, "repository.path"),
-      device: numberValue(value.device, "repository.device"),
-      inode: numberValue(value.inode, "repository.inode"),
-      createdAt: text(value.created_at, "repository.created_at"),
-    };
+    const result = this.#database
+      .prepare(`SELECT ${BOUNDED_REPOSITORY_COLUMNS} FROM repositories AS r WHERE r.id = ?`)
+      .get(id);
+    invariant(result !== undefined, "NOT_FOUND", "Repository was not found");
+    return boundedRepositoryRow(row(result, "repository"));
   }
 
   listRepositories(): RepositoryRecord[] {
     return (
       this.#database
-        .prepare("SELECT id FROM repositories ORDER BY created_at, id")
+        .prepare(
+          `SELECT CASE WHEN typeof(id) = 'text' AND octet_length(id) <= 64 THEN id END AS id
+           FROM repositories ORDER BY created_at, id`,
+        )
         .all() as unknown[]
     ).map((value) => this.getRepository(text(row(value, "repository list").id, "repository.id")));
   }
@@ -897,7 +971,12 @@ export class IcarusStore {
   }
 
   findRepositoryByName(name: string): RepositoryRecord | null {
-    const value = this.#database.prepare("SELECT id FROM repositories WHERE name = ?").get(name);
+    const value = this.#database
+      .prepare(
+        `SELECT CASE WHEN typeof(id) = 'text' AND octet_length(id) <= 64 THEN id END AS id
+         FROM repositories WHERE name = ?`,
+      )
+      .get(name);
     return value === undefined
       ? null
       : this.getRepository(text(row(value, "repository").id, "repository.id"));
@@ -984,30 +1063,21 @@ export class IcarusStore {
   }
 
   getProject(id: string): ProjectRecord {
-    const result = this.#database.prepare("SELECT * FROM projects WHERE id = ?").get(id);
+    const result = this.#database
+      .prepare(`SELECT ${BOUNDED_PROJECT_COLUMNS} FROM projects AS p WHERE p.id = ?`)
+      .get(id);
     invariant(result !== undefined, "NOT_FOUND", "Project was not found");
-    const value = row(result, "project");
-    const checks = parseJson<CheckProfile[]>(value.checks_json, "project.checks_json");
-    const sandbox = parseJson<SandboxProfile>(value.sandbox_json, "project.sandbox_json");
-    const ceiling = parseJson<SunCeiling>(value.ceiling_json, "project.ceiling_json");
-    assertCheckProfiles(checks);
-    assertSandboxProfile(sandbox);
-    assertSunCeiling(ceiling);
-    return {
-      id: text(value.id, "project.id"),
-      name: text(value.name, "project.name"),
-      repositoryId: text(value.repository_id, "project.repository_id"),
-      baseRef: text(value.base_ref, "project.base_ref"),
-      checks,
-      sandbox,
-      ceiling,
-      createdAt: text(value.created_at, "project.created_at"),
-    };
+    return boundedProjectRow(row(result, "project"), true);
   }
 
   listProjects(): ProjectRecord[] {
     return (
-      this.#database.prepare("SELECT id FROM projects ORDER BY created_at, id").all() as unknown[]
+      this.#database
+        .prepare(
+          `SELECT CASE WHEN typeof(id) = 'text' AND octet_length(id) <= 64 THEN id END AS id
+           FROM projects ORDER BY created_at, id`,
+        )
+        .all() as unknown[]
     ).map((value) => this.getProject(text(row(value, "project list").id, "project.id")));
   }
 
@@ -1018,7 +1088,12 @@ export class IcarusStore {
   }
 
   findProjectByName(name: string): ProjectRecord | null {
-    const value = this.#database.prepare("SELECT id FROM projects WHERE name = ?").get(name);
+    const value = this.#database
+      .prepare(
+        `SELECT CASE WHEN typeof(id) = 'text' AND octet_length(id) <= 64 THEN id END AS id
+         FROM projects WHERE name = ?`,
+      )
+      .get(name);
     return value === undefined
       ? null
       : this.getProject(text(row(value, "project").id, "project.id"));
@@ -1095,36 +1170,8 @@ export class IcarusStore {
       const rows = this.#database
         .prepare(
           `SELECT CAST(p.rowid AS TEXT) AS cursor,
-                  CASE WHEN typeof(p.id) = 'text' AND octet_length(p.id) <= 64
-                       THEN p.id END AS project_id,
-                  CASE WHEN typeof(p.name) = 'text' AND octet_length(p.name) <= ${PROJECT_NAME_MAX_BYTES}
-                       THEN p.name END AS project_name,
-                  CASE WHEN typeof(p.repository_id) = 'text' AND octet_length(p.repository_id) <= 64
-                       THEN p.repository_id END AS repository_id,
-                  CASE WHEN typeof(p.base_ref) = 'text' AND octet_length(p.base_ref) <= ${PROJECT_BASE_REF_MAX_BYTES}
-                       THEN p.base_ref END AS base_ref,
-                  CASE WHEN typeof(p.checks_json) = 'text'
-                         AND octet_length(p.checks_json) <= ${WORKSPACE_PROJECT_CHECKS_MAX_BYTES}
-                         AND json_valid(p.checks_json, 1)
-                       THEN p.checks_json END AS checks_json,
-                  CASE WHEN typeof(p.sandbox_json) = 'text'
-                         AND octet_length(p.sandbox_json) <= ${WORKSPACE_PROJECT_PROFILE_MAX_BYTES}
-                         AND json_valid(p.sandbox_json, 1)
-                       THEN p.sandbox_json END AS sandbox_json,
-                  CASE WHEN typeof(p.ceiling_json) = 'text'
-                         AND octet_length(p.ceiling_json) <= ${WORKSPACE_PROJECT_PROFILE_MAX_BYTES}
-                         AND json_valid(p.ceiling_json, 1)
-                       THEN p.ceiling_json END AS ceiling_json,
-                  CASE WHEN typeof(p.created_at) = 'text' AND octet_length(p.created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
-                       THEN p.created_at END AS project_created_at,
-                  CASE WHEN typeof(r.name) = 'text' AND octet_length(r.name) <= ${PROJECT_NAME_MAX_BYTES}
-                       THEN r.name END AS repository_name,
-                  CASE WHEN typeof(r.path) = 'text' AND octet_length(r.path) <= ${REPOSITORY_PATH_MAX_BYTES}
-                       THEN r.path END AS repository_path,
-                  CASE WHEN typeof(r.device) = 'integer' THEN r.device END AS repository_device,
-                  CASE WHEN typeof(r.inode) = 'integer' THEN r.inode END AS repository_inode,
-                  CASE WHEN typeof(r.created_at) = 'text' AND octet_length(r.created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
-                       THEN r.created_at END AS repository_created_at
+                  ${BOUNDED_PROJECT_COLUMNS},
+                  ${BOUNDED_REPOSITORY_COLUMNS}
            FROM projects AS p
            LEFT JOIN repositories AS r ON r.id = p.repository_id
            WHERE p.rowid < ? AND p.rowid <= ?

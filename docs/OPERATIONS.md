@@ -269,6 +269,12 @@ include projects created after the page session opened; Refresh workspace or a
 successful project registration opens a new newest session. Use
 `icarus project list` when complete catalog output is required.
 
+Direct project and repository lookups use the same storage-class and byte
+projections as catalog pages; they do not decode an unrestricted persisted
+configuration first. While a run is visible, paging or refreshing resolves only
+that run's owning project. An unrelated project is never marked active merely
+because it appears on the newly loaded page.
+
 `INVALID_PROJECT_CURSOR` means the pinned session is stale, malformed, or was
 invalidated by unsupported external SQLite deletion/replacement/`VACUUM`; open
 a fresh page rather than editing cursor values. `DATABASE_ERROR` while loading
@@ -280,7 +286,14 @@ Every API JSON body is serialized before headers and may be at most 8 MiB,
 including its newline. `RESPONSE_TOO_LARGE` is a fixed HTTP 500 safety response,
 not permission to raise the limit or return partial evidence. Use the narrower
 CLI listing/status command and investigate which persisted presentation
-exceeded its intended field bound. Static assets are not part of this JSON cap.
+exceeded its intended field bound. Trusted error text is capped at 4 KiB and an
+oversized or unserializable failure uses a fixed pre-serialized internal-error
+response, so the response fail-safe cannot recursively exceed its own bound.
+Static assets are not part of this JSON cap.
+
+The first keyboard focus in the workspace is a skip link. Press Enter to move
+focus to the main workspace landmark; selected project and run controls expose
+their current/pressed state without changing browser authority.
 
 ## Preflight
 

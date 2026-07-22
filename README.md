@@ -95,10 +95,12 @@ appear together without another Git/source read or any browser action.
 The eighth candidate slice replaces the workspace's unbounded project catalog
 with one pinned, newest-first page of at most 12 joined project/repository
 records. The browser replaces pages inside a four-position cursor window,
-preserves an independently selected project, and keeps complete listing in the
-CLI. Persisted project JSON is storage- and byte-gated before strict decoding,
-creation uses exact indexed lookups, and every HTTP JSON response is completely
-serialized under an 8 MiB UTF-8 ceiling before success headers are sent.
+preserves an independently selected project or the exact owner of a visible
+run, and keeps complete listing in the CLI. Catalog and direct hydration both
+storage- and byte-gate persisted project JSON before strict decoding; creation
+uses exact indexed lookups. Every HTTP JSON response is completely serialized
+under an 8 MiB UTF-8 ceiling before success headers are sent, with bounded error
+copy and a fixed non-recursive fallback.
 
 Not yet included: browser approval or execution, arbitrary agent tool use,
 model-written shell commands, semantic search, commits or pushes, application

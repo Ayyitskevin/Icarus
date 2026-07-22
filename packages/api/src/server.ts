@@ -35,7 +35,10 @@ import {
 
 const MAX_BODY_BYTES = 64 * 1024;
 export const MAX_JSON_RESPONSE_BYTES = 8 * 1024 * 1024;
+const MAX_ERROR_MESSAGE_BYTES = 4 * 1024;
 const API_PREFIX = "/api/";
+const INTERNAL_ERROR_RESPONSE =
+  '{"error":{"code":"INTERNAL_ERROR","message":"The local workspace request failed."}}\n';
 
 export interface WorkspaceServerOptions {
   readonly runtime: IcarusRuntime;
@@ -78,6 +81,11 @@ function json(response: ServerResponse, status: number, value: unknown): void {
   const body = serializeJsonResponse(value);
   response.writeHead(status, headers("application/json; charset=utf-8"));
   response.end(body);
+}
+
+function internalError(response: ServerResponse): void {
+  response.writeHead(500, headers("application/json; charset=utf-8"));
+  response.end(INTERNAL_ERROR_RESPONSE);
 }
 
 function errorStatus(error: IcarusError): number {
@@ -141,12 +149,16 @@ function safeError(error: unknown): { readonly status: number; readonly body: un
     /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(runId)
       ? runId
       : undefined;
+  const message =
+    Buffer.byteLength(trusted.message, "utf8") <= MAX_ERROR_MESSAGE_BYTES
+      ? trusted.message
+      : "The local workspace request failed with an oversized error message.";
   return {
     status: errorStatus(trusted),
     body: {
       error: {
         code: trusted.code,
-        message: trusted.message,
+        message,
         ...(safeRunId === undefined ? {} : { runId: safeRunId }),
       },
     },
@@ -555,7 +567,11 @@ export function createWorkspaceServer(options: WorkspaceServerOptions): Server {
         return;
       }
       const safe = safeError(error);
-      json(response, safe.status, safe.body);
+      try {
+        json(response, safe.status, safe.body);
+      } catch {
+        if (!response.headersSent) internalError(response);
+      }
     }
   });
 }

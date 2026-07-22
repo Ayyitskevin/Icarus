@@ -77,8 +77,10 @@ corruption is not decoded.
 Indexed direct lookups replace collection scans. Project-name conflict checks
 use the unique project-name index, repository reuse uses the unique repository-
 name index, and browser run creation supplies the validated project ID directly
-to the store's existing exact project lookup. CLI list commands retain their
-explicit complete-list behavior.
+to the store's exact project lookup. Those direct repository/project hydrators
+reuse the same bounded SQL projections and strict reconstruction as the catalog,
+so indexed lookup does not bypass the pre-decode storage and byte checks. CLI
+list commands retain their explicit complete-list behavior.
 
 The browser validates exact project/page shapes and policy relationships before
 acceptance. It replaces rather than accumulates pages, retaining one 12-project
@@ -89,7 +91,9 @@ guard plus exact cursor/snapshot validation rejects late or mismatched success.
 Failure preserves the last successful page and exact retry request. A selected
 project object remains usable while navigating another catalog page. Creating a
 project selects the returned record and refreshes into a new newest-page
-session. Beyond four pages, the UI points to `icarus project list`.
+session. While a full run is visible, page navigation and refresh may retain or
+resolve only that run's project; they never substitute an unrelated page-first
+project. Beyond four pages, the UI points to `icarus project list`.
 
 Every API JSON response now serializes completely before headers and includes
 its trailing newline in one fixed 8 MiB UTF-8 ceiling. The limit covers health,
@@ -99,8 +103,9 @@ current project pages and selected-run responses under their existing context,
 diff, and persisted command-output limits while providing a final composition
 backstop. A larger serialized result throws `RESPONSE_TOO_LARGE`; the outer
 boundary returns a fixed HTTP 500 JSON error without leaking rejected content.
-The safe error itself is subject to the same serializer and is far below the
-ceiling.
+Trusted error messages are capped at 4 KiB and replaced with fixed copy above
+that limit. The safe error normally passes through the same serializer; a fixed
+pre-serialized internal-error body remains as a final non-recursive fallback.
 
 This slice adds no table, index, migration, dependency, project deletion,
 database maintenance, Git/source read, provider call, stream, watcher, daemon,
@@ -128,7 +133,11 @@ membership during insertion, intrinsic-rowid and repository-index plans, one
 joined data query, exact query validation, malformed/BLOB/oversized/extra-key
 selected fields, unread older corruption, zero read-side writes, no create/run
 collection scans, exact presenter fields, four-page replacement, retry and stale
-rejection, hidden/selection/unmount cancellation, new-project selection and
+rejection, hidden/selection cancellation, new-project selection and
 refresh, exact/over 8 MiB serialization, pre-header safe overflow handling,
 unchanged source state, static security assertions, the full local gate, and
-exact-head hosted CI. Until those merge gates close, this ADR remains Proposed.
+exact-head hosted CI. Local cached Chromium acceptance now covers 50 projects,
+failure/retry, contention, hidden/selection cancellation, delayed-success
+rejection, the four-page cap, off-page run ownership, keyboard skip navigation,
+zero external requests/browser errors, and unchanged source/durable state.
+Until the remaining merge and hosted gates close, this ADR remains Proposed.

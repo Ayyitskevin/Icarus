@@ -1029,6 +1029,77 @@ describe("SQLite run persistence", () => {
     fixture.store.close();
   });
 
+  it("bounds direct project and repository hydration before parsing persisted fields", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    const { projectId, repositoryId } = seedUnitProject(fixture.store);
+    const privateSentinel = "private-direct-hydration-overflow-sentinel";
+    const database = new Database(fixture.databasePath);
+    const original = database
+      .prepare("SELECT checks_json, sandbox_json, ceiling_json FROM projects WHERE id = ?")
+      .get(projectId) as {
+      checks_json: string;
+      sandbox_json: string;
+      ceiling_json: string;
+    };
+
+    database.prepare("UPDATE projects SET checks_json = '[]' WHERE id = ?").run(projectId);
+    expectIcarusCode(() => fixture.store.getProject(projectId), "CHECKS_REQUIRED");
+    database
+      .prepare("UPDATE projects SET checks_json = ? WHERE id = ?")
+      .run(original.checks_json, projectId);
+
+    const incompleteSandbox = Object.fromEntries(
+      Object.entries(UNIT_SANDBOX).filter(([key]) => key !== "tmpfsMb"),
+    );
+    database
+      .prepare("UPDATE projects SET sandbox_json = ? WHERE id = ?")
+      .run(JSON.stringify(incompleteSandbox), projectId);
+    expectIcarusCode(() => fixture.store.getProject(projectId), "INVALID_SANDBOX");
+    database
+      .prepare("UPDATE projects SET sandbox_json = ? WHERE id = ?")
+      .run(original.sandbox_json, projectId);
+
+    const incompleteCeiling = Object.fromEntries(
+      Object.entries(UNIT_CEILING).filter(([key]) => key !== "maxToolCalls"),
+    );
+    database
+      .prepare("UPDATE projects SET ceiling_json = ? WHERE id = ?")
+      .run(JSON.stringify(incompleteCeiling), projectId);
+    expectIcarusCode(() => fixture.store.getProject(projectId), "INVALID_CEILING");
+    database
+      .prepare("UPDATE projects SET ceiling_json = ? WHERE id = ?")
+      .run(original.ceiling_json, projectId);
+
+    database
+      .prepare("UPDATE projects SET checks_json = ? WHERE id = ?")
+      .run(`"${privateSentinel.padEnd(WORKSPACE_PROJECT_CHECKS_MAX_BYTES, "x")}"`, projectId);
+
+    expectIcarusCode(() => fixture.store.getProject(projectId), "DATABASE_ERROR");
+    expectIcarusCode(() => fixture.store.findProjectByName("unit-project"), "DATABASE_ERROR");
+    expectIcarusCode(
+      () =>
+        fixture.store.createRun({
+          id: "30000000-0000-4000-8000-000000000001",
+          projectId,
+          task: "Reject oversized persisted configuration before creating a run",
+          target: UNIT_PLAN.target,
+          provider: UNIT_PROVIDER,
+        }),
+      "DATABASE_ERROR",
+    );
+    expect(database.prepare("SELECT COUNT(*) AS count FROM runs").get()).toEqual({ count: 0 });
+
+    database
+      .prepare("UPDATE repositories SET path = ? WHERE id = ?")
+      .run(privateSentinel.padEnd(4_097, "x"), repositoryId);
+    expectIcarusCode(() => fixture.store.getRepository(repositoryId), "DATABASE_ERROR");
+    expectIcarusCode(() => fixture.store.findRepositoryByName("unit-repository"), "DATABASE_ERROR");
+
+    database.close();
+    fixture.store.close();
+  });
+
   it("pages more than 200 joined projects through a pinned intrinsic-rowid snapshot", () => {
     const fixture = createUnitStore();
     cleanupRoots.push(fixture.root);

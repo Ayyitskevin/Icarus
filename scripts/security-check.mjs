@@ -21,6 +21,8 @@ const workspaceServerSource = await readFile("packages/api/src/server.ts", "utf8
 const workspacePresenterSource = await readFile("packages/api/src/present.ts", "utf8");
 const workspaceApiSource = await readFile("packages/workspace/src/api.ts", "utf8");
 const workspaceAppSource = await readFile("packages/workspace/src/App.tsx", "utf8");
+const workspaceStyleSource = await readFile("packages/workspace/src/styles.css", "utf8");
+const browserSmokeSource = await readFile("scripts/smoke-workspace-browser.mjs", "utf8");
 const workspaceLivePollSource = await readFile("packages/workspace/src/live-poll.ts", "utf8");
 const workspaceProjectPageNavSource = await readFile(
   "packages/workspace/src/project-page-nav.ts",
@@ -80,6 +82,24 @@ const workspaceProjectPageEnd = storeSource.indexOf("\n  createRun(", workspaceP
 const workspaceProjectPageSource =
   workspaceProjectPageStart >= 0 && workspaceProjectPageEnd > workspaceProjectPageStart
     ? storeSource.slice(workspaceProjectPageStart, workspaceProjectPageEnd)
+    : "";
+const boundedProjectColumnsStart = storeSource.indexOf("const BOUNDED_PROJECT_COLUMNS =");
+const boundedProjectColumnsEnd = storeSource.indexOf(
+  "\nconst RUN_ID_PATTERN",
+  boundedProjectColumnsStart,
+);
+const boundedProjectColumnsSource =
+  boundedProjectColumnsStart >= 0 && boundedProjectColumnsEnd > boundedProjectColumnsStart
+    ? storeSource.slice(boundedProjectColumnsStart, boundedProjectColumnsEnd)
+    : "";
+const directHydrationStart = storeSource.indexOf("  getRepository(");
+const directHydrationEnd = storeSource.indexOf(
+  "\n  openWorkspaceProjectPage(",
+  directHydrationStart,
+);
+const directHydrationSource =
+  directHydrationStart >= 0 && directHydrationEnd > directHydrationStart
+    ? storeSource.slice(directHydrationStart, directHydrationEnd)
     : "";
 const jsonSerializerStart = workspaceServerSource.indexOf("export function serializeJsonResponse(");
 const jsonSerializerEnd = workspaceServerSource.indexOf("\nfunction json(", jsonSerializerStart);
@@ -465,12 +485,22 @@ const assertions = {
     workspaceProjectPageSource.includes("WHERE p.rowid < ? AND p.rowid <= ?") &&
     workspaceProjectPageSource.includes("ORDER BY p.rowid DESC") &&
     workspaceProjectPageSource.includes("LIMIT 13") &&
-    workspaceProjectPageSource.includes("octet_length(p.checks_json)") &&
-    workspaceProjectPageSource.includes("octet_length(p.sandbox_json)") &&
-    workspaceProjectPageSource.includes("octet_length(p.ceiling_json)") &&
-    workspaceProjectPageSource.includes("json_valid(p.checks_json, 1)") &&
+    workspaceProjectPageSource.includes("$" + "{BOUNDED_PROJECT_COLUMNS}") &&
+    workspaceProjectPageSource.includes("$" + "{BOUNDED_REPOSITORY_COLUMNS}") &&
+    boundedProjectColumnsSource.includes("octet_length(p.checks_json)") &&
+    boundedProjectColumnsSource.includes("octet_length(p.sandbox_json)") &&
+    boundedProjectColumnsSource.includes("octet_length(p.ceiling_json)") &&
+    boundedProjectColumnsSource.includes("octet_length(r.path)") &&
+    boundedProjectColumnsSource.includes("json_valid(p.checks_json, 1)") &&
     !workspaceProjectPageSource.includes("getProject(") &&
     !workspaceProjectPageSource.includes("getRepository("),
+  workspaceDirectProjectHydrationIsPreflightBounded:
+    directHydrationSource.includes("SELECT $" + "{BOUNDED_REPOSITORY_COLUMNS}") &&
+    directHydrationSource.includes("SELECT $" + "{BOUNDED_PROJECT_COLUMNS}") &&
+    directHydrationSource.includes("return boundedRepositoryRow(") &&
+    directHydrationSource.includes("return boundedProjectRow(") &&
+    !directHydrationSource.includes("SELECT * FROM repositories") &&
+    !directHydrationSource.includes("SELECT * FROM projects"),
   workspaceBootstrapUsesBoundedProjectPage:
     workspaceSnapshotSource.includes("openWorkspaceProjectPage()") &&
     workspaceSnapshotSource.includes("presentWorkspaceProjectPage") &&
@@ -491,6 +521,9 @@ const assertions = {
     workspaceServerSource.indexOf("const body = serializeJsonResponse(value)") <
       workspaceServerSource.indexOf("response.writeHead(status") &&
     workspaceServerSource.includes('error.code === "RESPONSE_TOO_LARGE"') &&
+    workspaceServerSource.includes("MAX_ERROR_MESSAGE_BYTES = 4 * 1024") &&
+    workspaceServerSource.includes("INTERNAL_ERROR_RESPONSE") &&
+    workspaceServerSource.includes("internalError(response)") &&
     !jsonSerializerSource.includes("response.writeHead"),
   workspaceProjectNavigationIsBoundedAndStaleSafe:
     workspaceProjectPageNavSource.includes("PROJECT_PAGE_MAX_PAGES = 4") &&
@@ -500,7 +533,20 @@ const assertions = {
     workspaceProjectPageNavSource.includes("expected.before !== request.before") &&
     workspaceAppSource.includes("projectPageGenerationRef.current !== generation") &&
     workspaceAppSource.includes("abortProjectPageRequest()") &&
-    workspaceAppSource.includes("pauseProjectPageRequest("),
+    workspaceAppSource.includes("pauseProjectPageRequest(") &&
+    browserSmokeSource.includes("PROJECT_PAGE_FIXTURE_COUNT") &&
+    browserSmokeSource.includes("holdNextProjectPage") &&
+    browserSmokeSource.includes("lateProjectPageSuccessRejected") &&
+    browserSmokeSource.includes("offPageRunSelectionPreserved"),
+  workspaceKeyboardNavigationIsExplicit:
+    workspaceAppSource.includes('className="skip-link"') &&
+    workspaceAppSource.includes('href="#workspace-main"') &&
+    workspaceAppSource.includes('id="workspace-main"') &&
+    workspaceAppSource.includes("tabIndex={-1}") &&
+    workspaceAppSource.includes("aria-current=") &&
+    workspaceStyleSource.includes("a:focus-visible") &&
+    workspaceStyleSource.includes(".skip-link:focus") &&
+    browserSmokeSource.includes("skipLinkKeyboardAccepted"),
   workspaceNoRawHtml: workspaceUiSources.every(
     (source) => !source.includes("dangerouslySetInnerHTML") && !source.includes("innerHTML"),
   ),

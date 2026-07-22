@@ -2225,6 +2225,7 @@ function WorkspaceProjectPage({
                 type="button"
                 className={selectedProjectId === project.id ? "is-selected" : undefined}
                 aria-pressed={selectedProjectId === project.id}
+                aria-current={selectedProjectId === project.id ? "true" : undefined}
                 onClick={() => onSelectProject(project)}
               >
                 <span>
@@ -2334,6 +2335,7 @@ function WorkspaceRunPage({
                 type="button"
                 className={selectedRunId === run.id ? "is-selected" : undefined}
                 aria-pressed={selectedRunId === run.id}
+                aria-current={selectedRunId === run.id ? "true" : undefined}
                 aria-label={`Open full evidence for ${run.task}`}
                 onClick={() => void onSelectRun(run.id)}
               >
@@ -2418,6 +2420,11 @@ export function App() {
   const selectionRequestRef = useRef<AbortController | null>(null);
   const selectionGenerationRef = useRef(0);
   const auxiliaryCancellationRef = useRef<(() => void) | null>(null);
+  const selectedRunRef = useRef<RunView | null>(null);
+
+  useEffect(() => {
+    selectedRunRef.current = selectedRun;
+  }, [selectedRun]);
 
   const registerAuxiliaryCancellation = useCallback((cancel: (() => void) | null): void => {
     auxiliaryCancellationRef.current = cancel;
@@ -2515,6 +2522,13 @@ export function App() {
         storeRunPageSession(nextRunPageSession);
         if (selectionGenerationRef.current === selectionGeneration) {
           setSelectedProject((current) => {
+            const runProjectId = selectedRunRef.current?.projectId;
+            if (runProjectId !== undefined) {
+              return (
+                next.projectPage.projects.find((project) => project.id === runProjectId) ??
+                (current?.id === runProjectId ? current : null)
+              );
+            }
             if (current === null) return next.projectPage.projects.at(0) ?? null;
             return (
               next.projectPage.projects.find((project) => project.id === current.id) ?? current
@@ -2565,6 +2579,13 @@ export function App() {
         storeProjectPageSession(next);
         setWorkspace((value) => (value === null ? value : { ...value, projectPage: next.page }));
         setSelectedProject((project) => {
+          const runProjectId = selectedRunRef.current?.projectId;
+          if (runProjectId !== undefined) {
+            return (
+              next.page.projects.find((entry) => entry.id === runProjectId) ??
+              (project?.id === runProjectId ? project : null)
+            );
+          }
           if (project === null) return next.page.projects.at(0) ?? null;
           return next.page.projects.find((entry) => entry.id === project.id) ?? project;
         });
@@ -2687,16 +2708,25 @@ export function App() {
     [cancelPendingRunSelection],
   );
 
-  const selectedProjectId = selectedProject?.id ?? selectedRun?.projectId ?? null;
+  const selectedProjectId = selectedRun?.projectId ?? selectedProject?.id ?? null;
   const projectRuns =
     runPageSession?.page.runs.filter((run) => run.projectId === selectedProject?.id) ?? [];
 
   const mergeRun = useCallback(async (run: RunView): Promise<void> => {
-    setSelectedRun((current) => (current?.id === run.id ? newestRun(current, run) : current));
+    setSelectedRun((current) => {
+      const next = current?.id === run.id ? newestRun(current, run) : current;
+      selectedRunRef.current = next;
+      return next;
+    });
   }, []);
 
   const openRun = useCallback(async (run: RunView): Promise<void> => {
-    setSelectedRun((current) => (current?.id === run.id ? newestRun(current, run) : run));
+    selectedRunRef.current = run;
+    setSelectedRun((current) => {
+      const next = current?.id === run.id ? newestRun(current, run) : run;
+      selectedRunRef.current = next;
+      return next;
+    });
     setSelectedProject((current) => {
       const loaded = projectPageSessionRef.current?.page.projects.find(
         (project) => project.id === run.projectId,
@@ -2765,6 +2795,7 @@ export function App() {
       );
       cancelPendingRunSelection();
       setSelectedProject(project);
+      selectedRunRef.current = null;
       setSelectedRun(null);
     },
     [cancelPendingRunSelection, pauseProjectPageRequest, pauseRunPageRequest],
@@ -2779,6 +2810,7 @@ export function App() {
       "Run-page navigation was cancelled when the selected run changed. Retry to continue.",
     );
     cancelPendingRunSelection();
+    selectedRunRef.current = null;
     setSelectedRun(null);
   }, [cancelPendingRunSelection, pauseProjectPageRequest, pauseRunPageRequest]);
 
@@ -2790,12 +2822,16 @@ export function App() {
   const projectCreated = async (project: ProjectView): Promise<void> => {
     cancelPendingRunSelection();
     setSelectedProject(project);
+    selectedRunRef.current = null;
     setSelectedRun(null);
     await loadWorkspace();
   };
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#workspace-main">
+        Skip to workspace content
+      </a>
       <header className="app-header">
         <div>
           <p className="eyebrow">Loopback-only control surface</p>
@@ -2826,17 +2862,17 @@ export function App() {
       )}
 
       {loading ? (
-        <main className="loading-state" aria-live="polite">
+        <main id="workspace-main" className="loading-state" aria-live="polite" tabIndex={-1}>
           <div className="spinner" aria-hidden="true" />
           <p>Loading persisted local state…</p>
         </main>
       ) : workspace === null ? (
-        <main className="loading-state">
+        <main id="workspace-main" className="loading-state" tabIndex={-1}>
           <h2>Workspace unavailable</h2>
           <p>Start the local API on 127.0.0.1:8787, then retry.</p>
         </main>
       ) : (
-        <main className="workspace-layout">
+        <main id="workspace-main" className="workspace-layout" tabIndex={-1}>
           <aside className="sidebar">
             <section aria-labelledby="capabilities-heading">
               <h2 id="capabilities-heading">Capabilities</h2>

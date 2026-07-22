@@ -94,21 +94,28 @@ accept the ADR, widen browser authority, or close the inherited ADR 0010 hold.
       stale responses, abort superseded/lifecycle reads, retain the last success
       for retry, and preserve an independently selected project
 - [x] Use exact indexed repository/project-name and project-ID lookups for
-      creation and draft planning instead of complete collection scans
+      creation and draft planning instead of complete collection scans, while
+      retaining the same SQL storage/byte preflight on direct hydration
 
 ### Aggregate response safety and scope
 
 - [x] Serialize every JSON body, including its trailing newline, before sending
       headers; reject more than 8 MiB with fixed `RESPONSE_TOO_LARGE` copy and
-      never write a partial success body
+      never write a partial success body; cap trusted error messages and retain
+      a fixed pre-serialized non-recursive internal-error fallback
 - [x] Add no schema/migration, dependency, data deletion, Git/source read,
       provider call, browser approval/execution, command, commit, push,
       deployment, or release authority
 - [x] Pass 50 focused store/client/response/service/API tests, the API smoke with
       unchanged source, and fresh full `pnpm check`: workflow validation;
-      formatting 92 files; lint/typecheck; 168 unit/provider and 44 integration
+      formatting 92 files; lint/typecheck; 169 unit/provider and 44 integration
       tests; evaluation 5 passed, 0 failed, 5 unsupported; 109 security tests
-      plus 47 static assertions; and a 23-module production build
+      plus 49 static assertions; and a 23-module production build
+- [x] Complete cached-Chromium acceptance over 50 projects: 12-row pages,
+      failure/retry, request contention, hidden/selection cancellation,
+      delayed-success rejection, four retained pages, an off-page run/project
+      ownership refresh, keyboard skip navigation, zero browser errors/external
+      requests, and unchanged SQLite/source state
 - [ ] Complete independent final review and exact published-head hosted CI
       before accepting ADR 0021
 

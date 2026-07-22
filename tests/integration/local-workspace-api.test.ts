@@ -1011,6 +1011,23 @@ describe("loopback local workspace API", () => {
     expect(JSON.stringify(body)).not.toContain(privateSentinel);
     expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
     expect((await fetch(`${server.url}/api/health`)).status).toBe(200);
+
+    Object.defineProperty(runtime.service, "openWorkspaceProjectPage", {
+      configurable: true,
+      value: () => {
+        throw new IcarusError("DATABASE_ERROR", privateSentinel.padEnd(9 * 1024 * 1024, "x"));
+      },
+    });
+    const oversizedError = await fetch(`${server.url}/api/workspace`);
+    expect(oversizedError.status).toBe(400);
+    expect(await responseJson(oversizedError)).toEqual({
+      error: {
+        code: "DATABASE_ERROR",
+        message: "The local workspace request failed with an oversized error message.",
+      },
+    });
+    expect(oversizedError.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect((await fetch(`${server.url}/api/health`)).status).toBe(200);
   });
 
   test("serves bounded coherent run snapshots without decoding private event payloads", async () => {
