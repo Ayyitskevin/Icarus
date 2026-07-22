@@ -23,7 +23,7 @@ describe("native acceptance workflow policy", () => {
       "pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271",
       "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
     ]);
-    expect(result.commands).toBe(11);
+    expect(result.commands).toBe(12);
   });
 
   it("rejects a mutable action reference before hosted execution", async () => {

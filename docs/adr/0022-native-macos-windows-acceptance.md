@@ -58,9 +58,13 @@ Each host validates the workflow policy and its own platform/architecture,
 bootstraps and executes the checksum-pinned native actionlint binary, validates
 every workflow plus actionlint's known-invalid negative fixture, installs locked
 dependencies, and runs formatting, lint, type checking, the portable native,
-provider, and selected unit boundaries, static security assertions, and the full
-package build. The native smoke creates and reopens a real marked SQLite state
-root beneath the current user's profile.
+provider, and selected unit boundaries, one portable workspace composition
+smoke, static security assertions, and the full package build. The native state
+smoke creates and reopens a real marked SQLite state root beneath the current
+user's profile. The composition smoke uses a real temporary Git repository,
+loopback HTTP server and deterministic Ollama fixture to register a project,
+preview committed-tree context, persist and reopen a draft, plan it, verify
+bounded evidence, and prove the source checkout is unchanged.
 
 The selected unit list covers deterministic context preview, provider HTTP
 contracts, policy/state transitions, persisted drafts and portable operation
@@ -68,7 +72,7 @@ admission, SQLite state, bounded JSON responses and project-page navigation,
 verification provenance, and workspace presentation and request lifecycle. The
 draft suite runs only its explicit Darwin and Win32
 admission cases; its mocked Linux kernel-lease case stays in the Linux gate. The
-native lane deliberately excludes integration/eval suites, POSIX
+native lane deliberately excludes the remaining integration and eval suites, POSIX
 symlink/mode tests, kernel leases, Git mutation, Docker checks, approval,
 execution, audit-network calls, and the aggregate `pnpm check`. Those remain the
 Linux release gate and this workflow cannot replace it.

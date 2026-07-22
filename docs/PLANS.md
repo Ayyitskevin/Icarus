@@ -71,6 +71,43 @@ the reliability slice without claiming a broader milestone is complete.
       passed its real `quality` job at exact implementation head
       `f8fe03e399fb46f197bbcbc0df8f1edabbe2e0c9`
 
+## Native-host acceptance candidate
+
+ADR 0022 and its manual workflow are a local candidate on 2026-07-22. This
+records a read-only portability gate; it does not claim native acceptance until
+both hosted jobs pass at the exact published implementation commit.
+
+### Portable boundary and authority
+
+- [x] Use explicit `macos-15` arm64 and `windows-2025` x64 jobs, exact Node
+      and pnpm versions, immutable action commits, frozen dependencies,
+      `contents: read`, exact-SHA checkout, no secrets or shared cache, and
+      manual dispatch only
+- [x] Fail closed on workflow-byte, action, command, host, toolchain, permission,
+      trigger, or cache drift through the repository-owned native policy
+- [x] Exercise portable policy/provider/unit boundaries and a real native state
+      root beneath the user profile
+- [x] Exercise the portable composition path through a temporary Git repository,
+      loopback HTTP and Ollama fixtures, project import, committed-tree context
+      preview, persisted draft restart, planning, bounded evidence, and unchanged
+      source state
+- [x] Add no product schema/runtime change, approval, execution, arbitrary
+      command, repository mutation, credential, push, deployment, or public
+      endpoint authority
+
+### Local evidence and remaining host gate
+
+- [x] Fresh combined `pnpm check`: three workflows validated; formatting 95
+      files; 169 unit/provider and 44 integration tests; evaluation 5 passed,
+      0 failed, 5 unsupported; 118 security tests plus 49 static assertions; and
+      a 23-module production build
+- [x] Native workflow policy/security tests and the selected portable composition
+      smoke pass locally on Linux without claiming native-host execution
+- [x] Combined cached-Chromium acceptance passes with zero browser errors,
+      external requests, or source-state changes
+- [ ] Publish the exact implementation head, manually dispatch both native jobs,
+      and record each run URL, runner image version, commit, and conclusion
+
 ## Eighth M3 candidate: bounded project catalog and JSON transport
 
 ADR 0021 and its implementation are a local candidate on 2026-07-22. This

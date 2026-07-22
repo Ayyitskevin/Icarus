@@ -75,6 +75,9 @@ jobs:
       - name: Run portable draft-planning admission cases
         run: pnpm exec vitest run tests/unit/service-draft.test.ts --testNamePattern="on (darwin|win32)" --reporter=dot
 
+      - name: Run portable workspace composition smoke
+        run: pnpm exec vitest run tests/integration/local-workspace-api.test.ts --testNamePattern="persists project, context preview, draft, plan, and evidence without touching source" --reporter=dot
+
       - name: Run static security assertions
         run: node scripts/security-check.mjs
 
