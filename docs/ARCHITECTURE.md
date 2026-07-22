@@ -361,6 +361,54 @@ new run data class, stream, background work, or browser action route. Project an
 repository enumeration plus selected-run approvals remain unpaginated local
 reads and are not claimed bounded by ADR 0017.
 
+## Proposed fifth M3 verification-attempt provenance path
+
+ADR 0018 proposes a separate lazy selected-run read instead of extending the
+automatically refreshed full-run response. The browser supplies the exact
+coherent run event cursor. One transaction point-checks the run with an
+existence-only query, never the full-run loader, and requires that cursor to
+remain the current high-water mark before reading the fixed up-to-200-event
+metadata suffix. A stale race fails rather than joining that suffix to newer
+checkpoint state.
+
+The store will identify completed verification sequences from metadata and
+retain the newest eight. Before scalar extraction, it verifies TEXT storage and
+byte length with direct-column `octet_length(payload_json)`: at most 8 MiB per
+retained verification event and 1 KiB for an observed checkpoint-save event.
+Strict RFC-8259 validity, exactly-once selected keys, scalar types, fixed transitions,
+outcome agreement, and digest agreement fail closed on JSON5, duplicates, or
+corrupt selected evidence. Existing recent and older event routes remain
+payload-free.
+
+Checkpoint provenance uses a dedicated query for only expected run ID, canonical
+digest, and bounded canonical timestamp. Baseline and approved bytes and all
+unrelated run fields are never selected. Attempt digests must match the recorded
+immutable-checkpoint digest, and an observed save event must precede every
+verification event in coverage. The host reports only
+`recorded_digest_match`; it does not rehash bytes or claim current integrity.
+
+The response separately reports events excluded before the 200-sequence window
+and attempts omitted by the eight-summary cap. The inline panel visibly pins its
+revision/range and may claim completeness only through that snapshot. Automatic
+live reconciliation marks the static panel stale without replacing it. Each
+explicit load/retry uses a fresh current run cursor; conflicts require an
+operator-triggered persisted-run refresh, never replay of the old request.
+
+One aggregate parent cancellation callback is reserved for selected-run/project
+changes and Back, where it invalidates both auxiliary request kinds.
+Attempt-panel Close and run refresh never abort history, and older-activity
+opening invalidates an attempt before launching history. Each request kind keeps
+its own visibility, panel-Close, and unmount cleanup.
+Exact-key and relational validation enforces fixed coverage/collection bounds,
+outcome/relation enums, single-flight lifecycle guards, retained failure state,
+honest copy, and a defined focus fallback.
+Complete private evidence remains in CLI run history.
+
+This proposed path adds no implementation claim, schema, dependency, write,
+event append, Git/source read, raw evidence disclosure, browser mutation, or
+release authority. ADR 0017 must land and ADR 0018 must be accepted before code
+work begins; ADR 0010 remains independently unresolved.
+
 ## Provider contract
 
 The provider-neutral port accepts model identity, capability metadata, a typed

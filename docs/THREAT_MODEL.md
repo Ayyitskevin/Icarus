@@ -112,6 +112,23 @@ approval/event disclosure, stream, daemon, or browser action route. Project and
 repository enumeration and selected-run approval lists remain unpaginated. ADR
 0010 remains an independent release hold.
 
+## Proposed fifth M3 verification-attempt threats
+
+| Threat | Required control | Required evidence and limits |
+| --- | --- | --- |
+| Optional attempt reads materialize unrelated private run/checkpoint fields or raw event JSON | existence-only run lookup; checkpoint query selects only run ID/digest/time; SQL returns only payload storage class, byte length, counts, and allowlisted scalars; existing event routes stay payload-free | poisoned private run/checkpoint columns still succeed; SQL-shape/query-trace assertions forbid `SELECT *`, private checkpoint columns, and raw payload return; sentinels stay absent from API, DOM, logs, and errors |
+| SQLite accepts a payload the CLI rejects, or selected JSON work is not byte-bounded | require TEXT storage, direct-column `octet_length(payload_json)` before JSON work, 8 MiB verification and 1 KiB checkpoint-event ceilings, strict `json_valid(..., 1)`, exactly-once selected keys, and scalar types | BLOB/number, strict RFC-8259, JSON5, duplicate-selected-key, wrong-type, and ASCII/multibyte exact-bound and over-bound tests at both ceilings; unrelated corrupt payloads remain unread |
+| A sparse type query makes one optional read proportional to complete history | identify types only inside the exact contiguous suffix of up to 200 sequences and use the per-run sequence index; retain eight with no history count | more-than-200-event, 0/1/8/9-attempt, response-size, and query-plan tests; no full-history scan |
+| Event and checkpoint data come from different moments or reverse causality | exact-current client snapshot in one transaction; safe checkpoint columns in the same snapshot; observed save sequence precedes every verification sequence in coverage | concurrent append before the transaction conflicts; append after yields a coherent pinned response; missing, duplicate, mismatched, post-attempt, and save-order checkpoint regressions fail |
+| “Checkpoint provenance” is mistaken for fresh byte integrity | never select baseline/approved Base64; require attempt digest to equal the recorded checkpoint row; label only `recorded_digest_match`; an unobserved save event is not called older, missing, or corrupt | private-byte sentinels and poisoned excluded-column tests; no rehash or restore call |
+| Truncated summaries are presented as complete current history | independent `earlierEventsExcluded` and `attemptsTruncatedWithinCoverage`; completeness only through the visible pinned snapshot; fixed-limit copy and CLI guidance | empty/complete, coverage-only, attempt-only, and dual-truncation presenter/browser tests |
+| A stale or late auxiliary response loops, replaces another run, or escapes cancellation | fresh current seed per explicit action; conflicts require operator run refresh; automatic live reconciliation only marks stale; parent-only aggregate cancellation plus request-local ordering; exact bounds, enums, and relational validation | live-versus-manual refresh, attempt-Close/history independence, abort-before-history-open, hidden/selection/Back/unmount, stale retry, focus fallback, and cancellation-ignoring real-browser races |
+| The view widens browser authority | GET-only route and text-only inline region; no approval, rerun, restore, command, Git, or mutation path | method negatives, zero SQLite logical writes/events, unchanged source/Git fingerprints, and static route/raw-HTML/workflow assertions |
+
+ADR 0018 is proposed only. It preserves the loopback/same-origin/CSP boundary,
+guarded CLI authority, and independent ADR 0010 release hold. Implementation and
+acceptance evidence remain open.
+
 ## Inherited repository automation hold
 
 `.github/workflows/opencode.yml` came from the pre-existing remote root and was

@@ -178,6 +178,46 @@ mutation, execution, command, commit, push, or deployment authority. File/status
 richer diff or payload-bearing history, and action controls remain deferred, and
 the ADR 0010 release hold remains in force.
 
+## Proposed fifth M3 verification-attempt behavior
+
+ADR 0018 proposes, but does not yet implement, an explicit “Recent attempt
+summaries” panel beneath the selected run's current verification snapshot. The
+operator would load at most eight completed-attempt summaries found in up to the
+latest 200 persisted events ending at that exact selected-run revision. Commands,
+diffs, paths, checkpoint bytes, and complete history would remain omitted.
+
+A stale request would fail if the run advanced before its read transaction.
+Conflict would preserve any last successful panel and direct the operator to
+“Refresh persisted run.” A later explicit Load/Refresh/Retry would capture the
+new current cursor; it would never replay the conflicted request. Automatic live
+reconciliation would not cancel the panel. Instead, a loaded projection would
+remain pinned and become visibly stale when newer events arrive.
+
+The panel would display its revision, inspected sequence range, fixed 200/8
+limits, loaded-summary count, and independent truncation states. “Complete”
+would mean only complete through that pinned snapshot. Complete private evidence
+would continue through:
+
+```text
+icarus run history <run-id>
+```
+
+Only a recorded checkpoint-digest match would be shown. The panel would not read
+or rehash baseline/approved bytes and would not claim checkpoint integrity.
+Attempt-panel Close and “Refresh persisted run” would abort only the attempt
+request and never an older-history request. Opening older activity would abort
+the attempt request before marking history open and launching its first request.
+The aggregate selected-run auxiliary cancellation callback would be reserved for
+parent-owned selected-run/project changes and Back, where it would invalidate
+both request kinds. Each request would retain its own hidden-document, panel
+Close, and unmount cleanup. The last valid panel would survive a failed retry,
+and operator Close would use the verification section as a focus fallback when
+the launcher is disabled.
+
+This proposal adds no current route or runtime behavior. It must not alter the
+payload-free event APIs, schema, dependencies, source repository, browser action
+authority, guarded CLI, or ADR 0010 hold.
+
 ## Preflight
 
 Approval and execution require util-linux `flock` at `/usr/bin/flock` and a

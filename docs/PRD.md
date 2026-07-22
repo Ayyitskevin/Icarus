@@ -214,6 +214,56 @@ ADR 0017 defines this summary-only navigation contract:
    browser approval, execution, command, commit, push, or deployment authority.
    Preserve the unresolved ADR 0010 hold.
 
+## Proposed fifth M3 bounded verification-attempt slice
+
+ADR 0018 is proposed design, not implemented product behavior. If accepted after
+ADR 0017 lands, the slice must:
+
+1. Add one lazy selected-run GET route requiring exactly one canonical positive
+   event snapshot and no caller-selected limit, filter, sort, search, or
+   pagination.
+2. Point-check existence without loading the run row. In one read transaction,
+   require the snapshot to equal the current event revision and inspect only the
+   latest contiguous suffix of up to 200 event sequences.
+3. Identify all completed verification events in that window, retain the newest
+   eight, return them chronologically, and report event-window exclusion and
+   within-window attempt overflow as independent facts.
+4. Before SQLite scalar extraction, require TEXT storage and byte-measure payload
+   values with direct-column `octet_length(payload_json)`: at most 8 MiB per
+   retained verification event and 1 KiB for an observed checkpoint-save event.
+   Require strict RFC-8259 JSON, exactly-once selected keys, expected scalar
+   types, fixed transitions, outcome
+   agreement, and digest agreement; leave unrelated payloads unread.
+5. Select only expected checkpoint run ID, canonical digest, and bounded
+   canonical timestamp. Never select either private byte snapshot. Require an
+   observed save event to precede every completed verification in coverage and
+   report only a recorded digest match, never a fresh byte-integrity claim.
+6. Return only run/snapshot/coverage constants, host-validated outcomes, SHA-256
+   digests, event sequences, canonical timestamps, fixed relation statuses, and
+   truncation flags. Exclude raw JSON, diff, checks, argv, output, paths, errors,
+   approvals, actors, usage, and totals.
+7. Keep current verification visible above an explicit inline panel showing its
+   pinned revision, inspected sequence range, limits, summary count, and both
+   truncation states. Empty and partial states must not imply passing or
+   current-run completeness.
+8. Keep the loaded panel pinned while automatic live reconciliation continues;
+   mark it stale after the run advances. Each explicit load/refresh/retry captures
+   the current run cursor. A conflict requires operator-triggered persisted-run
+   refresh and never replays the failed snapshot.
+9. Allow one attempt request and abort/invalidate it on hidden document,
+   attempt-panel Close, operator refresh, older-activity opening, or unmount;
+   selected-run/project changes and Back use one aggregate parent callback.
+   Attempt Close/refresh must not cancel history, and older activity must abort
+   the attempt before launching its request. Require exact-key and relational
+   validation with coverage/event counts bounded by 200, at most eight attempts,
+   fixed outcome/relation enums, retained last success, late-response rejection,
+   and an enabled focus fallback when older activity disables launch.
+10. Add no schema/migration, dependency, write, event append, checkpoint
+    creation/rehash, Git/source read, private content disclosure, total count,
+    older-attempt navigation, stream, watcher, daemon, browser approval,
+    rerun/restore/execution, command, commit, push, deployment, or workflow
+    authority. Preserve ADR 0010.
+
 ## Sun ceiling
 
 Every run records maximum active runtime, provider output tokens, total tokens,

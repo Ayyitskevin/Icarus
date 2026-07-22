@@ -107,6 +107,21 @@ replaces pages inside a four-page cursor window and labels project matches as
 only the loaded workspace page. Project/repository enumeration and selected-run
 approval lists remain separate unpaginated debt.
 
+ADR 0018 is proposed as the fifth bounded slice. It would add a separate,
+explicit selected-run projection over up to the latest 200 events ending at the
+selected run's current revision, retain at most eight completed verification
+summaries, and expose only validated outcomes, digests, sequences, timestamps,
+coverage flags, and a recorded checkpoint-digest relation. SQLite would
+scalar-project only selected payload fields behind fixed payload ceilings;
+existing event routes would remain payload-free. The browser panel would be a
+static pinned read, marked stale rather than automatically reloaded as live
+events advance.
+
+This is design only. It adds no accepted runtime behavior, and implementation
+must wait for ADR 0017 to land and ADR 0018 to receive review. Raw evidence,
+checkpoint bytes, complete attempt history, and all guarded actions remain CLI
+concerns.
+
 ## M4 — Runtime and previews
 
 Status: planned.
@@ -153,12 +168,13 @@ remain human-gated and outside automatic dogfood.
 
 ## Next recommended slice
 
-Preserve the ADR 0010 security hold. Design a separate bounded selected-run
-verification-attempt and checkpoint-provenance view as the next candidate: use a
-fixed 200-event coverage window, expose at most eight attempt summaries, and
-limit fields to host-derived status, digests, and timestamps. A new ADR must
-define truncation and provenance semantics before implementation.
+Preserve the ADR 0010 security hold. Review the proposed ADR 0018 after ADR 0017
+lands. If accepted, implement only its separate bounded verification-attempt and
+checkpoint-digest projection, fixed payload ceilings, exact snapshot conflict,
+honest dual truncation, and lifecycle-guarded inline panel before widening any
+other M3 surface. Do not implement against an unreviewed dependency.
+
 Project/repository enumeration, selected-run approval pagination, file/status
-views, richer diff or payload-bearing history, patch materialization, browser
-approval, and execution remain separate expansions until explicitly designed
-and evidenced.
+views, richer diff or raw payload history, complete checkpoint inspection,
+patch materialization, browser approval, rerun/restore, and execution remain
+separate expansions until explicitly designed and evidenced.
