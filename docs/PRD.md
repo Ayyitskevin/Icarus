@@ -132,13 +132,14 @@ ADR 0015 implements this bounded observation contract:
    service-owned maximum. Each item contains only sequence, type, a
    host-controlled label, timestamp, and a fixed host-generated evidence-section
    identifier; event payloads never cross the API.
-4. Build each full run response—run, approvals, and the 200 most recent timeline
-   metadata rows—from one coherent SQLite read snapshot and include the
-   append-only event sequence high-water mark in that response as its event
-   cursor and total. Event metadata pages remain separate requests; complete
-   payload-bearing history remains a CLI-only contract. If the retained suffix
-   cannot establish an action's earlier prerequisite, present `unknown` with CLI
-   guidance rather than inventing a status.
+4. Build each full run response—run, the newest 12 validated approval decisions,
+   and the 200 most recent timeline metadata rows—from one coherent SQLite read
+   snapshot. Include explicit approval coverage plus the append-only event
+   sequence high-water mark as the event cursor and total. Event metadata pages
+   remain separate requests; complete approvals and payload-bearing history
+   remain CLI-only contracts. If a retained suffix cannot establish an earlier
+   prerequisite, present truncation or `unknown` with CLI guidance rather than
+   inventing completeness.
 5. Short-poll only the selected run while the document is visible. Keep one
    current request, pause while hidden, abort on selection change or unmount,
    apply bounded failure backoff with success reset, and reject late responses
@@ -267,6 +268,58 @@ is to:
     rerun/restore/execution, command, commit, push, deployment, or workflow
     authority. Preserve ADR 0010.
 
+## Candidate sixth and seventh M3 selected-run presentation slices
+
+ADR 0019 bounds ordinary approval provenance to the newest 12 validated rows
+with explicit coverage and complete-history CLI guidance. ADR 0020 independently
+improves review of the already persisted one-file verification diff:
+
+1. Derive diff review only from the selected run's coherent persisted snapshot;
+   add no endpoint, query, Git/source read, provider call, or poller.
+2. Return exact absent, available, or outside-browser-bound metadata. Preserve
+   complete raw text only when it is at most 262,144 UTF-8 bytes; never return a
+   partial patch.
+3. Require paired diff/verification presence, project diff-ceiling compliance,
+   canonical digest, exactly one recorded target, exact displayed-text rehash,
+   one patch header, and at least one hunk/change before claiming statistics.
+4. Place exact persisted run state, latest verification outcome, path, bytes,
+   physical patch lines, additions, deletions, hunks, digest, and provenance in
+   one focusable browser section. State that no current repository read occurs.
+5. Render complete patch bytes in one bounded-height React text node. HTML-like
+   content stays text; oversized evidence receives metadata and CLI guidance,
+   not a truncated preview.
+6. Keep browser approval, review decisions, mutation, execution, commands,
+   commit, push, deployment, current file/status, multi-file diff, raw history,
+   and payload navigation outside this slice.
+
+## Candidate eighth M3 bounded project-catalog and transport slice
+
+ADR 0021 closes the remaining unbounded workspace catalog/transport path:
+
+1. Replace workspace `projects` with a newest-first `projectPage` of at most 12
+   joined project/repository presentations and add strict pinned continuation
+   reads at `GET /api/projects?before=&snapshot=`.
+2. Use one `LIMIT 13` intrinsic-rowid range query joined through the repository
+   primary key. Decode no per-project or per-repository follow-up query.
+3. Gate selected persisted text and strict JSON by storage class and bytes in
+   SQL before parsing: 1 MiB checks, 16 KiB sandbox/ceiling, and smaller fixed
+   identity/path/ref/timestamp limits. Enforce the JSON bounds on new writes.
+4. Replace project pages in the browser, retain at most four page positions,
+   validate exact nested shapes, reject stale responses, preserve the last
+   success/retry, and abort on refresh, hiding, selection, or unmount.
+5. Preserve selected/new-project behavior: a selected record can remain visible
+   outside the current page, and successful creation selects it before opening
+   a fresh newest-page session. Complete listing remains available through
+   `icarus project list`.
+6. Replace project-name, repository-name, and run-project collection scans with
+   exact indexed lookups.
+7. Serialize every API JSON response before headers and reject more than 8 MiB
+   UTF-8, including the trailing newline, with a fixed safe
+   `RESPONSE_TOO_LARGE` error. Never return partial JSON or rejected content.
+8. Add no schema/migration, dependency, deletion, Git/source read, provider
+   call, browser approval/execution, command, commit, push, deployment, or
+   release authority. Preserve ADR 0010.
+
 ## Sun ceiling
 
 Every run records maximum active runtime, provider output tokens, total tokens,
@@ -326,9 +379,9 @@ exist in Milestone 1:
   task drafts, loopback planning, run state, and allowlisted evidence. The
   accepted second- and third-slice designs add only the bounded observation and
   metadata-only older-activity contracts above. Later M3 slices may add sessions,
-  richer file/status, diff, and payload-bearing history navigation, application
-  previews, approvals, checkpoints, prompt history, and token/cost telemetry
-  without placing provider keys in a browser.
+  current file/status plus multi-file and payload-bearing diff/history
+  navigation, application previews, approvals, checkpoints, prompt history, and
+  token/cost telemetry without placing provider keys in a browser.
 - Application-factory templates may add an application starter, API layer,
   database, authentication, storage, realtime events, jobs, vector search,
   environment references, local preview, and deployment configuration only as

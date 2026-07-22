@@ -55,11 +55,34 @@ button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 summary:focus-visible,
-.evidence-nav a:focus-visible,
-.timeline__evidence-link:focus-visible,
+a:focus-visible,
+.diff-review__patch:focus-visible,
 .evidence-block:focus-visible {
   outline: 3px solid rgb(118 183 255 / 55%);
   outline-offset: 2px;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 100;
+  top: 0.5rem;
+  left: 0.5rem;
+  border: 2px solid var(--info);
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.85rem;
+  color: var(--text);
+  background: var(--surface-raised);
+  transform: translateY(calc(-100% - 1rem));
+  transition: transform 120ms ease-out;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+#workspace-main:focus {
+  outline: 3px solid rgb(118 183 255 / 55%);
+  outline-offset: -3px;
 }
 
 button:disabled {
@@ -468,6 +491,12 @@ pre {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.diff-review__patch {
+  max-height: min(60vh, 40rem);
+  white-space: pre;
+  word-break: normal;
 }
 
 .evidence-block {

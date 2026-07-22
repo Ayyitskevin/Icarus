@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, lstatSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync } from "node:fs";
 import path from "node:path";
 
 import Database from "better-sqlite3";
@@ -38,6 +38,8 @@ import type {
   SandboxProfile,
   SunCeiling,
   VerificationEvidence,
+  WorkspaceProjectEntry,
+  WorkspaceProjectPage,
   WorkspaceRunPage,
   WorkspaceRunSummary,
 } from "./types.js";
@@ -51,13 +53,62 @@ export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
 export const RUN_EVENT_PAGE_LIMIT = 64;
 export const RUN_PRESENTATION_EVENT_LIMIT = 200;
+export const RUN_PRESENTATION_APPROVAL_LIMIT = 12;
 export const WORKSPACE_RUN_PAGE_LIMIT = 12;
+export const WORKSPACE_PROJECT_PAGE_LIMIT = 12;
+export const WORKSPACE_PROJECT_CHECKS_MAX_BYTES = 1024 * 1024;
+export const WORKSPACE_PROJECT_PROFILE_MAX_BYTES = 16 * 1024;
+const APPROVAL_RUN_ID_MAX_BYTES = 64;
+const APPROVAL_KIND_MAX_BYTES = 16;
+const APPROVAL_DIGEST_MAX_BYTES = 64;
+const APPROVAL_ACTOR_MAX_BYTES = 200;
+const APPROVAL_DECISION_MAX_BYTES = 16;
 const EVENT_TYPE_MAX_BYTES = 128;
 const EVENT_TIMESTAMP_MAX_BYTES = 64;
 const RUN_SUMMARY_TASK_MAX_BYTES = 8 * 1024;
 const RUN_SUMMARY_TARGET_MAX_BYTES = 1_024;
+const PROJECT_NAME_MAX_BYTES = 100;
+const PROJECT_BASE_REF_MAX_BYTES = 256;
+const REPOSITORY_PATH_MAX_BYTES = 4_096;
+const BOUNDED_PROJECT_COLUMNS = `
+  CASE WHEN typeof(p.id) = 'text' AND octet_length(p.id) <= 64
+       THEN p.id END AS project_id,
+  CASE WHEN typeof(p.name) = 'text' AND octet_length(p.name) <= ${PROJECT_NAME_MAX_BYTES}
+       THEN p.name END AS project_name,
+  CASE WHEN typeof(p.repository_id) = 'text' AND octet_length(p.repository_id) <= 64
+       THEN p.repository_id END AS repository_id,
+  CASE WHEN typeof(p.base_ref) = 'text' AND octet_length(p.base_ref) <= ${PROJECT_BASE_REF_MAX_BYTES}
+       THEN p.base_ref END AS base_ref,
+  CASE WHEN typeof(p.checks_json) = 'text'
+         AND octet_length(p.checks_json) <= ${WORKSPACE_PROJECT_CHECKS_MAX_BYTES}
+         AND json_valid(p.checks_json, 1)
+       THEN p.checks_json END AS checks_json,
+  CASE WHEN typeof(p.sandbox_json) = 'text'
+         AND octet_length(p.sandbox_json) <= ${WORKSPACE_PROJECT_PROFILE_MAX_BYTES}
+         AND json_valid(p.sandbox_json, 1)
+       THEN p.sandbox_json END AS sandbox_json,
+  CASE WHEN typeof(p.ceiling_json) = 'text'
+         AND octet_length(p.ceiling_json) <= ${WORKSPACE_PROJECT_PROFILE_MAX_BYTES}
+         AND json_valid(p.ceiling_json, 1)
+       THEN p.ceiling_json END AS ceiling_json,
+  CASE WHEN typeof(p.created_at) = 'text'
+         AND octet_length(p.created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
+       THEN p.created_at END AS project_created_at`;
+const BOUNDED_REPOSITORY_COLUMNS = `
+  CASE WHEN typeof(r.id) = 'text' AND octet_length(r.id) <= 64
+       THEN r.id END AS repository_record_id,
+  CASE WHEN typeof(r.name) = 'text' AND octet_length(r.name) <= ${PROJECT_NAME_MAX_BYTES}
+       THEN r.name END AS repository_name,
+  CASE WHEN typeof(r.path) = 'text' AND octet_length(r.path) <= ${REPOSITORY_PATH_MAX_BYTES}
+       THEN r.path END AS repository_path,
+  CASE WHEN typeof(r.device) = 'integer' THEN r.device END AS repository_device,
+  CASE WHEN typeof(r.inode) = 'integer' THEN r.inode END AS repository_inode,
+  CASE WHEN typeof(r.created_at) = 'text'
+         AND octet_length(r.created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
+       THEN r.created_at END AS repository_created_at`;
 const RUN_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const SAFE_RUN_SNAPSHOT_MAX = Number.MAX_SAFE_INTEGER - 1;
+const SAFE_WORKSPACE_SNAPSHOT_MAX = Number.MAX_SAFE_INTEGER - 1;
+const PROJECT_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
 const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 const EVENT_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const RUN_STATES: ReadonlySet<string> = new Set<RunState>([
@@ -77,6 +128,14 @@ const RUN_STATES: ReadonlySet<string> = new Set<RunState>([
   "restoring",
 ]);
 const RUN_PRESENTATION_ACTION_EVENT_LIMIT = 2;
+const APPROVAL_KINDS: ReadonlySet<ApprovalRecord["kind"]> = new Set([
+  "egress",
+  "plan",
+  "review",
+  "rollback",
+  "restore",
+]);
+const APPROVAL_DECISIONS: ReadonlySet<ApprovalRecord["decision"]> = new Set(["approve", "reject"]);
 const RUN_PRESENTATION_ACTION_EVENT_TYPES = [
   "edit.materialized",
   "restore.completed",
@@ -201,6 +260,76 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 PRAGMA user_version = 1;
 `;
 
+const APPROVAL_INDEX_SCHEMA = `
+CREATE INDEX IF NOT EXISTS approvals_by_run
+ON approvals(run_id);
+`;
+
+type ApprovalIndexStatus = "not_applicable" | "missing" | "valid";
+
+function inspectApprovalIndex(databasePath: string): ApprovalIndexStatus {
+  if (!existsSync(databasePath)) return "not_applicable";
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const approvalTableExists =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'approvals'")
+        .get() !== undefined;
+    if (!approvalTableExists) return "not_applicable";
+
+    const indexEntry = database
+      .prepare(
+        "SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND name = 'approvals_by_run'",
+      )
+      .get();
+    if (indexEntry === undefined) return "missing";
+
+    const index = row(indexEntry, "approval index");
+    invariant(
+      text(index.name, "approval index.name") === "approvals_by_run" &&
+        text(index.tbl_name, "approval index.table") === "approvals",
+      "DATABASE_ERROR",
+      "Approval index metadata is invalid",
+    );
+
+    const indexList = database.prepare("PRAGMA index_list('approvals')").all() as unknown[];
+    const definition = indexList
+      .map((entry) => row(entry, "approval index definition"))
+      .find((entry) => entry.name === "approvals_by_run");
+    invariant(
+      definition !== undefined &&
+        definition.unique === 0 &&
+        definition.origin === "c" &&
+        definition.partial === 0,
+      "DATABASE_ERROR",
+      "Approval index definition is invalid",
+    );
+
+    const keyColumns = (
+      database.prepare("PRAGMA index_xinfo('approvals_by_run')").all() as unknown[]
+    )
+      .map((entry) => row(entry, "approval index column"))
+      .filter((entry) => entry.key === 1);
+    const expectedColumns = [{ name: "run_id", desc: 0 }] as const;
+    invariant(
+      keyColumns.length === expectedColumns.length &&
+        expectedColumns.every(
+          (expected, index) =>
+            keyColumns[index]?.seqno === index &&
+            keyColumns[index]?.name === expected.name &&
+            keyColumns[index]?.desc === expected.desc &&
+            keyColumns[index]?.coll === "BINARY",
+        ),
+      "DATABASE_ERROR",
+      "Approval index columns are invalid",
+    );
+    return "valid";
+  } finally {
+    database.close();
+  }
+}
+
 function row(value: unknown, name: string): Row {
   invariant(
     typeof value === "object" && value !== null,
@@ -261,6 +390,58 @@ function isCanonicalTimestamp(value: string): boolean {
   );
 }
 
+function containsUnsafeActorCharacter(value: string): boolean {
+  return /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value);
+}
+
+function approvalRecordRow(entry: unknown, expectedRunId: string): ApprovalRecord {
+  const value = row(entry, "approval");
+  const runId = text(value.run_id, "approval.run_id");
+  const kind = text(value.kind, "approval.kind");
+  const digest = text(value.digest, "approval.digest");
+  const actor = text(value.actor, "approval.actor");
+  const decision = text(value.decision, "approval.decision");
+  const createdAt = text(value.created_at, "approval.created_at");
+  invariant(
+    runId === expectedRunId && RUN_ID_PATTERN.test(runId),
+    "DATABASE_ERROR",
+    "Approval identity is invalid",
+  );
+  invariant(
+    APPROVAL_KINDS.has(kind as ApprovalRecord["kind"]),
+    "DATABASE_ERROR",
+    "Approval kind is invalid",
+  );
+  invariant(/^[a-f0-9]{64}$/.test(digest), "DATABASE_ERROR", "Approval digest is invalid");
+  invariant(
+    actor.trim().length > 0 &&
+      Buffer.byteLength(actor, "utf8") <= APPROVAL_ACTOR_MAX_BYTES &&
+      !containsUnsafeActorCharacter(actor) &&
+      !containsSecretShapedContent(Buffer.from(actor, "utf8")),
+    "DATABASE_ERROR",
+    "Approval actor is invalid",
+  );
+  invariant(
+    APPROVAL_DECISIONS.has(decision as ApprovalRecord["decision"]),
+    "DATABASE_ERROR",
+    "Approval decision is invalid",
+  );
+  invariant(
+    decision === "approve" || kind === "review",
+    "DATABASE_ERROR",
+    "Approval kind and decision are inconsistent",
+  );
+  invariant(isCanonicalTimestamp(createdAt), "DATABASE_ERROR", "Approval timestamp is invalid");
+  return {
+    runId,
+    kind: kind as ApprovalRecord["kind"],
+    digest,
+    actor,
+    decision: decision as ApprovalRecord["decision"],
+    createdAt,
+  };
+}
+
 function sqliteRowid(value: unknown, name: string, allowZero: boolean): number {
   const raw = text(value, name);
   invariant(
@@ -273,10 +454,265 @@ function sqliteRowid(value: unknown, name: string, allowZero: boolean): number {
   return Number(parsed);
 }
 
-function sqliteMaximumRowid(value: unknown): bigint {
-  const raw = text(value, "run snapshot");
-  invariant(/^(0|[1-9][0-9]*)$/.test(raw), "DATABASE_ERROR", "Run snapshot is invalid");
+function sqliteMaximumRowid(value: unknown, name: string): bigint {
+  const raw = text(value, name);
+  invariant(/^(0|[1-9][0-9]*)$/.test(raw), "DATABASE_ERROR", `${name} is invalid`);
   return BigInt(raw);
+}
+
+function exactRecord(
+  value: unknown,
+  keys: readonly string[],
+  name: string,
+): Record<string, unknown> {
+  invariant(
+    typeof value === "object" && value !== null && !Array.isArray(value),
+    "DATABASE_ERROR",
+    `${name} is not an object`,
+  );
+  const record = value as Record<string, unknown>;
+  const actual = Object.keys(record);
+  invariant(
+    actual.length === keys.length && keys.every((key) => actual.includes(key)),
+    "DATABASE_ERROR",
+    `${name} has invalid fields`,
+  );
+  return record;
+}
+
+function workspaceCheckProfiles(
+  value: unknown,
+  preservePolicyErrorCodes = false,
+): readonly CheckProfile[] {
+  if (preservePolicyErrorCodes) {
+    const checks = value as readonly CheckProfile[];
+    assertCheckProfiles(checks);
+    return checks;
+  }
+  invariant(
+    Array.isArray(value) && value.length > 0,
+    "DATABASE_ERROR",
+    "Project checks are invalid",
+  );
+  const checks = value.map((entry, index): CheckProfile => {
+    const check = exactRecord(entry, ["id", "name", "argv"], `project.checks[${index}]`);
+    invariant(
+      typeof check.id === "string" &&
+        check.id.length > 0 &&
+        typeof check.name === "string" &&
+        check.name.length > 0 &&
+        Array.isArray(check.argv) &&
+        check.argv.length > 0 &&
+        check.argv.every(
+          (part) =>
+            typeof part === "string" &&
+            part.length > 0 &&
+            !part.includes("\0") &&
+            !/[\r\n]/.test(part),
+        ),
+      "DATABASE_ERROR",
+      "Project checks are invalid",
+    );
+    return {
+      id: check.id,
+      name: check.name,
+      argv: check.argv as string[],
+    };
+  });
+  try {
+    assertCheckProfiles(checks);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Project checks are invalid");
+  }
+  return checks;
+}
+
+function workspaceSandboxProfile(value: unknown, preservePolicyErrorCodes = false): SandboxProfile {
+  if (preservePolicyErrorCodes) {
+    const sandbox = value as SandboxProfile;
+    assertSandboxProfile(sandbox);
+    return sandbox;
+  }
+  const profile = exactRecord(
+    value,
+    ["image", "cpus", "memoryMb", "pids", "tmpfsMb"],
+    "project.sandbox",
+  );
+  invariant(
+    typeof profile.image === "string" &&
+      typeof profile.cpus === "number" &&
+      typeof profile.memoryMb === "number" &&
+      typeof profile.pids === "number" &&
+      typeof profile.tmpfsMb === "number",
+    "DATABASE_ERROR",
+    "Project sandbox is invalid",
+  );
+  const sandbox: SandboxProfile = {
+    image: profile.image,
+    cpus: profile.cpus,
+    memoryMb: profile.memoryMb,
+    pids: profile.pids,
+    tmpfsMb: profile.tmpfsMb,
+  };
+  try {
+    assertSandboxProfile(sandbox);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Project sandbox is invalid");
+  }
+  return sandbox;
+}
+
+const SUN_CEILING_KEYS = [
+  "maxToolCalls",
+  "maxActiveRuntimeMs",
+  "maxContextBytes",
+  "maxOutputTokensPerCall",
+  "maxTotalTokens",
+  "maxCostUsd",
+  "maxFilesChanged",
+  "maxFileBytes",
+  "maxDiffBytes",
+  "maxCommandOutputBytes",
+  "maxRawCommandOutputBytes",
+  "providerTimeoutMs",
+  "commandTimeoutMs",
+] as const satisfies readonly (keyof SunCeiling)[];
+
+function workspaceSunCeiling(value: unknown, preservePolicyErrorCodes = false): SunCeiling {
+  if (preservePolicyErrorCodes) {
+    const ceiling = value as SunCeiling;
+    assertSunCeiling(ceiling);
+    return ceiling;
+  }
+  const record = exactRecord(value, SUN_CEILING_KEYS, "project.ceiling");
+  invariant(
+    SUN_CEILING_KEYS.every((key) => typeof record[key] === "number"),
+    "DATABASE_ERROR",
+    "Project ceiling is invalid",
+  );
+  const ceiling = Object.fromEntries(
+    SUN_CEILING_KEYS.map((key) => [key, record[key]]),
+  ) as unknown as SunCeiling;
+  try {
+    assertSunCeiling(ceiling);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Project ceiling is invalid");
+  }
+  return ceiling;
+}
+
+function boundedRepositoryRow(value: Row): RepositoryRecord {
+  const repositoryId = text(value.repository_record_id, "repository.id");
+  const repositoryName = text(value.repository_name, "repository.name");
+  const repositoryPath = text(value.repository_path, "repository.path");
+  const repositoryCreatedAt = text(value.repository_created_at, "repository.created_at");
+  const repositoryDevice = numberValue(value.repository_device, "repository.device");
+  const repositoryInode = numberValue(value.repository_inode, "repository.inode");
+  invariant(RUN_ID_PATTERN.test(repositoryId), "DATABASE_ERROR", "Repository identity is invalid");
+  invariant(
+    PROJECT_NAME_PATTERN.test(repositoryName),
+    "DATABASE_ERROR",
+    "Repository name metadata is invalid",
+  );
+  invariant(
+    repositoryPath.trim().length > 0 &&
+      !repositoryPath.includes("\0") &&
+      Buffer.byteLength(repositoryPath, "utf8") <= REPOSITORY_PATH_MAX_BYTES,
+    "DATABASE_ERROR",
+    "Repository path is invalid",
+  );
+  invariant(
+    Number.isSafeInteger(repositoryDevice) &&
+      repositoryDevice >= 0 &&
+      Number.isSafeInteger(repositoryInode) &&
+      repositoryInode >= 0,
+    "DATABASE_ERROR",
+    "Repository identity metadata is invalid",
+  );
+  invariant(
+    isCanonicalTimestamp(repositoryCreatedAt),
+    "DATABASE_ERROR",
+    "Repository timestamp metadata is invalid",
+  );
+  return {
+    id: repositoryId,
+    name: repositoryName,
+    path: repositoryPath,
+    device: repositoryDevice,
+    inode: repositoryInode,
+    createdAt: repositoryCreatedAt,
+  };
+}
+
+function boundedProjectRow(value: Row, preservePolicyErrorCodes = false): ProjectRecord {
+  const projectId = text(value.project_id, "project.id");
+  const projectName = text(value.project_name, "project.name");
+  const repositoryId = text(value.repository_id, "repository.id");
+  const baseRef = text(value.base_ref, "project.base_ref");
+  const projectCreatedAt = text(value.project_created_at, "project.created_at");
+  invariant(
+    RUN_ID_PATTERN.test(projectId) && RUN_ID_PATTERN.test(repositoryId),
+    "DATABASE_ERROR",
+    "Project identity is invalid",
+  );
+  invariant(
+    PROJECT_NAME_PATTERN.test(projectName),
+    "DATABASE_ERROR",
+    "Project name metadata is invalid",
+  );
+  invariant(
+    baseRef.length > 0 &&
+      !baseRef.startsWith("-") &&
+      !/[\r\n\0]/.test(baseRef) &&
+      Buffer.byteLength(baseRef, "utf8") <= PROJECT_BASE_REF_MAX_BYTES,
+    "DATABASE_ERROR",
+    "Project base ref is invalid",
+  );
+  invariant(
+    isCanonicalTimestamp(projectCreatedAt),
+    "DATABASE_ERROR",
+    "Project timestamp is invalid",
+  );
+  const checks = workspaceCheckProfiles(
+    parseJson<unknown>(value.checks_json, "project.checks_json"),
+    preservePolicyErrorCodes,
+  );
+  const sandbox = workspaceSandboxProfile(
+    parseJson<unknown>(value.sandbox_json, "project.sandbox_json"),
+    preservePolicyErrorCodes,
+  );
+  const ceiling = workspaceSunCeiling(
+    parseJson<unknown>(value.ceiling_json, "project.ceiling_json"),
+    preservePolicyErrorCodes,
+  );
+  return {
+    id: projectId,
+    name: projectName,
+    repositoryId,
+    baseRef,
+    checks,
+    sandbox,
+    ceiling,
+    createdAt: projectCreatedAt,
+  };
+}
+
+function workspaceProjectEntryRow(
+  entry: unknown,
+  before: number,
+  snapshot: number,
+): { readonly cursor: number; readonly entry: WorkspaceProjectEntry } {
+  const value = row(entry, "workspace project");
+  const cursor = sqliteRowid(value.cursor, "project cursor", false);
+  invariant(cursor < before && cursor <= snapshot, "DATABASE_ERROR", "Project cursor is invalid");
+  const project = boundedProjectRow(value);
+  const repository = boundedRepositoryRow(value);
+  invariant(
+    project.repositoryId === repository.id,
+    "DATABASE_ERROR",
+    "Project repository identity is inconsistent",
+  );
+  return { cursor, entry: { project, repository } };
 }
 
 function workspaceRunSummaryRow(
@@ -444,7 +880,12 @@ export class IcarusStore {
 
   constructor(
     databasePath: string,
-    options: { now?: () => string; id?: () => string; busyTimeoutMs?: number } = {},
+    options: {
+      now?: () => string;
+      id?: () => string;
+      busyTimeoutMs?: number;
+      allowApprovalIndexMigration?: boolean;
+    } = {},
   ) {
     const parent = path.dirname(databasePath);
     const parentStat = lstatSync(parent);
@@ -459,6 +900,13 @@ export class IcarusStore {
       "INVALID_DATABASE_CONFIGURATION",
       "SQLite busy timeout is invalid",
     );
+    const approvalIndexStatus = inspectApprovalIndex(databasePath);
+    if (approvalIndexStatus === "missing" && options.allowApprovalIndexMigration !== true) {
+      throw new IcarusError(
+        "DATABASE_MIGRATION_REQUIRED",
+        "Approval index migration requires a state backup and explicit operator approval",
+      );
+    }
     this.#database = new Database(databasePath);
     chmodSync(databasePath, 0o600);
     this.#database.pragma(`busy_timeout = ${busyTimeoutMs}`);
@@ -466,6 +914,7 @@ export class IcarusStore {
     this.#database.pragma("journal_mode = WAL");
     this.#database.pragma("synchronous = FULL");
     this.#database.exec(SCHEMA);
+    this.#database.exec(APPROVAL_INDEX_SCHEMA);
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#id = options.id ?? randomUUID;
   }
@@ -497,34 +946,40 @@ export class IcarusStore {
   }
 
   getRepository(id: string): RepositoryRecord {
-    const value = row(
-      this.#database.prepare("SELECT * FROM repositories WHERE id = ?").get(id),
-      "repository",
-    );
-    return {
-      id: text(value.id, "repository.id"),
-      name: text(value.name, "repository.name"),
-      path: text(value.path, "repository.path"),
-      device: numberValue(value.device, "repository.device"),
-      inode: numberValue(value.inode, "repository.inode"),
-      createdAt: text(value.created_at, "repository.created_at"),
-    };
+    const result = this.#database
+      .prepare(`SELECT ${BOUNDED_REPOSITORY_COLUMNS} FROM repositories AS r WHERE r.id = ?`)
+      .get(id);
+    invariant(result !== undefined, "NOT_FOUND", "Repository was not found");
+    return boundedRepositoryRow(row(result, "repository"));
   }
 
   listRepositories(): RepositoryRecord[] {
     return (
       this.#database
-        .prepare("SELECT id FROM repositories ORDER BY created_at, id")
+        .prepare(
+          `SELECT CASE WHEN typeof(id) = 'text' AND octet_length(id) <= 64 THEN id END AS id
+           FROM repositories ORDER BY created_at, id`,
+        )
         .all() as unknown[]
     ).map((value) => this.getRepository(text(row(value, "repository list").id, "repository.id")));
   }
 
   getRepositoryByName(name: string): RepositoryRecord {
-    const value = row(
-      this.#database.prepare("SELECT id FROM repositories WHERE name = ?").get(name),
-      "repository",
-    );
-    return this.getRepository(text(value.id, "repository.id"));
+    const repository = this.findRepositoryByName(name);
+    invariant(repository !== null, "NOT_FOUND", "Repository was not found");
+    return repository;
+  }
+
+  findRepositoryByName(name: string): RepositoryRecord | null {
+    const value = this.#database
+      .prepare(
+        `SELECT CASE WHEN typeof(id) = 'text' AND octet_length(id) <= 64 THEN id END AS id
+         FROM repositories WHERE name = ?`,
+      )
+      .get(name);
+    return value === undefined
+      ? null
+      : this.getRepository(text(row(value, "repository").id, "repository.id"));
   }
 
   addProject(input: {
@@ -538,6 +993,16 @@ export class IcarusStore {
     assertCheckProfiles(input.checks);
     assertSandboxProfile(input.sandbox);
     assertSunCeiling(input.ceiling);
+    const checksJson = json(input.checks);
+    const sandboxJson = json(input.sandbox);
+    const ceilingJson = json(input.ceiling);
+    invariant(
+      Buffer.byteLength(checksJson, "utf8") <= WORKSPACE_PROJECT_CHECKS_MAX_BYTES &&
+        Buffer.byteLength(sandboxJson, "utf8") <= WORKSPACE_PROJECT_PROFILE_MAX_BYTES &&
+        Buffer.byteLength(ceilingJson, "utf8") <= WORKSPACE_PROJECT_PROFILE_MAX_BYTES,
+      "PROJECT_CONFIGURATION_TOO_LARGE",
+      "Project configuration exceeds the persisted workspace byte limits",
+    );
     this.getRepository(input.repositoryId);
     const record: ProjectRecord = {
       id: this.#id(),
@@ -560,9 +1025,9 @@ export class IcarusStore {
         record.name,
         record.repositoryId,
         record.baseRef,
-        json(record.checks),
-        json(record.sandbox),
-        json(record.ceiling),
+        checksJson,
+        sandboxJson,
+        ceilingJson,
         record.createdAt,
       );
     return record;
@@ -598,39 +1063,134 @@ export class IcarusStore {
   }
 
   getProject(id: string): ProjectRecord {
-    const result = this.#database.prepare("SELECT * FROM projects WHERE id = ?").get(id);
+    const result = this.#database
+      .prepare(`SELECT ${BOUNDED_PROJECT_COLUMNS} FROM projects AS p WHERE p.id = ?`)
+      .get(id);
     invariant(result !== undefined, "NOT_FOUND", "Project was not found");
-    const value = row(result, "project");
-    const checks = parseJson<CheckProfile[]>(value.checks_json, "project.checks_json");
-    const sandbox = parseJson<SandboxProfile>(value.sandbox_json, "project.sandbox_json");
-    const ceiling = parseJson<SunCeiling>(value.ceiling_json, "project.ceiling_json");
-    assertCheckProfiles(checks);
-    assertSandboxProfile(sandbox);
-    assertSunCeiling(ceiling);
-    return {
-      id: text(value.id, "project.id"),
-      name: text(value.name, "project.name"),
-      repositoryId: text(value.repository_id, "project.repository_id"),
-      baseRef: text(value.base_ref, "project.base_ref"),
-      checks,
-      sandbox,
-      ceiling,
-      createdAt: text(value.created_at, "project.created_at"),
-    };
+    return boundedProjectRow(row(result, "project"), true);
   }
 
   listProjects(): ProjectRecord[] {
     return (
-      this.#database.prepare("SELECT id FROM projects ORDER BY created_at, id").all() as unknown[]
+      this.#database
+        .prepare(
+          `SELECT CASE WHEN typeof(id) = 'text' AND octet_length(id) <= 64 THEN id END AS id
+           FROM projects ORDER BY created_at, id`,
+        )
+        .all() as unknown[]
     ).map((value) => this.getProject(text(row(value, "project list").id, "project.id")));
   }
 
   getProjectByName(name: string): ProjectRecord {
-    const value = row(
-      this.#database.prepare("SELECT id FROM projects WHERE name = ?").get(name),
-      "project",
+    const project = this.findProjectByName(name);
+    invariant(project !== null, "NOT_FOUND", "Project was not found");
+    return project;
+  }
+
+  findProjectByName(name: string): ProjectRecord | null {
+    const value = this.#database
+      .prepare(
+        `SELECT CASE WHEN typeof(id) = 'text' AND octet_length(id) <= 64 THEN id END AS id
+         FROM projects WHERE name = ?`,
+      )
+      .get(name);
+    return value === undefined
+      ? null
+      : this.getProject(text(row(value, "project").id, "project.id"));
+  }
+
+  openWorkspaceProjectPage(): WorkspaceProjectPage {
+    return this.#workspaceProjectPage(null);
+  }
+
+  listWorkspaceProjectPage(before: number, snapshot: number): WorkspaceProjectPage {
+    invariant(
+      Number.isSafeInteger(before) && before > 0,
+      "INVALID_PROJECT_CURSOR",
+      "Workspace project cursor must be a positive safe integer",
     );
-    return this.getProject(text(value.id, "project.id"));
+    invariant(
+      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_WORKSPACE_SNAPSHOT_MAX,
+      "INVALID_PROJECT_CURSOR",
+      "Workspace project snapshot must be a nonnegative safe integer",
+    );
+    return this.#workspaceProjectPage({ before, snapshot });
+  }
+
+  #workspaceProjectPage(
+    requested: { readonly before: number; readonly snapshot: number } | null,
+  ): WorkspaceProjectPage {
+    const transaction = this.#database.transaction((): WorkspaceProjectPage => {
+      const maximum = sqliteMaximumRowid(
+        row(
+          this.#database
+            .prepare("SELECT CAST(COALESCE(MAX(rowid), 0) AS TEXT) AS snapshot FROM projects")
+            .get(),
+          "project snapshot",
+        ).snapshot,
+        "project snapshot",
+      );
+      let before: number;
+      let snapshot: number;
+      if (requested === null) {
+        invariant(
+          maximum <= BigInt(SAFE_WORKSPACE_SNAPSHOT_MAX),
+          "DATABASE_ERROR",
+          "Workspace project snapshot is unsafe",
+        );
+        snapshot = Number(maximum);
+        before = snapshot + 1;
+      } else {
+        before = requested.before;
+        snapshot = requested.snapshot;
+        invariant(
+          BigInt(snapshot) <= maximum,
+          "INVALID_PROJECT_CURSOR",
+          "Workspace project snapshot is ahead of persisted history",
+        );
+        if (snapshot > 0) {
+          invariant(
+            this.#database.prepare("SELECT 1 FROM projects WHERE rowid = ?").get(snapshot) !==
+              undefined,
+            "INVALID_PROJECT_CURSOR",
+            "Workspace project snapshot anchor is missing",
+          );
+        }
+        const pageOneBefore = snapshot + 1;
+        if (before !== pageOneBefore) {
+          invariant(
+            before <= snapshot &&
+              this.#database.prepare("SELECT 1 FROM projects WHERE rowid = ?").get(before) !==
+                undefined,
+            "INVALID_PROJECT_CURSOR",
+            "Workspace project cursor anchor is missing",
+          );
+        }
+      }
+      const rows = this.#database
+        .prepare(
+          `SELECT CAST(p.rowid AS TEXT) AS cursor,
+                  ${BOUNDED_PROJECT_COLUMNS},
+                  ${BOUNDED_REPOSITORY_COLUMNS}
+           FROM projects AS p
+           LEFT JOIN repositories AS r ON r.id = p.repository_id
+           WHERE p.rowid < ? AND p.rowid <= ?
+           ORDER BY p.rowid DESC
+           LIMIT 13`,
+        )
+        .all(before, snapshot) as unknown[];
+      const entries = rows.map((entry) => workspaceProjectEntryRow(entry, before, snapshot));
+      const hasMore = entries.length > WORKSPACE_PROJECT_PAGE_LIMIT;
+      const retained = entries.slice(0, WORKSPACE_PROJECT_PAGE_LIMIT);
+      return {
+        before,
+        snapshot,
+        nextBefore: retained.at(-1)?.cursor ?? before,
+        hasMore,
+        projects: retained.map((entry) => entry.entry),
+      };
+    });
+    return transaction();
   }
 
   createRun(input: NewRunInput): RunRecord {
@@ -835,7 +1395,7 @@ export class IcarusStore {
       "Workspace run cursor must be a positive safe integer",
     );
     invariant(
-      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_RUN_SNAPSHOT_MAX,
+      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_WORKSPACE_SNAPSHOT_MAX,
       "INVALID_RUN_CURSOR",
       "Workspace run snapshot must be a nonnegative safe integer",
     );
@@ -853,12 +1413,13 @@ export class IcarusStore {
             .get(),
           "run snapshot",
         ).snapshot,
+        "run snapshot",
       );
       let before: number;
       let snapshot: number;
       if (requested === null) {
         invariant(
-          maximum <= BigInt(SAFE_RUN_SNAPSHOT_MAX),
+          maximum <= BigInt(SAFE_WORKSPACE_SNAPSHOT_MAX),
           "DATABASE_ERROR",
           "Workspace run snapshot is unsafe",
         );
@@ -1095,19 +1656,9 @@ export class IcarusStore {
   listApprovals(runId: string): ApprovalRecord[] {
     return (
       this.#database
-        .prepare("SELECT * FROM approvals WHERE run_id = ? ORDER BY created_at, id")
+        .prepare("SELECT * FROM approvals WHERE run_id = ? ORDER BY rowid")
         .all(runId) as unknown[]
-    ).map((entry) => {
-      const value = row(entry, "approval");
-      return {
-        runId: text(value.run_id, "approval.run_id"),
-        kind: text(value.kind, "approval.kind") as ApprovalRecord["kind"],
-        digest: text(value.digest, "approval.digest"),
-        actor: text(value.actor, "approval.actor"),
-        decision: text(value.decision, "approval.decision") as ApprovalRecord["decision"],
-        createdAt: text(value.created_at, "approval.created_at"),
-      };
-    });
+    ).map((entry) => approvalRecordRow(entry, runId));
   }
 
   recordWorkspace(
@@ -1786,7 +2337,39 @@ export class IcarusStore {
     };
     const transaction = this.#database.transaction((): RunPresentationSnapshot => {
       const run = this.getRun(runId);
-      const approvals = this.listApprovals(runId);
+      const approvalRows = this.#database
+        .prepare(
+          `SELECT
+             CASE WHEN typeof(run_id) = 'text'
+                    AND octet_length(run_id) <= ${APPROVAL_RUN_ID_MAX_BYTES}
+                  THEN run_id ELSE NULL END AS run_id,
+             CASE WHEN typeof(kind) = 'text'
+                    AND octet_length(kind) <= ${APPROVAL_KIND_MAX_BYTES}
+                  THEN kind ELSE NULL END AS kind,
+             CASE WHEN typeof(digest) = 'text'
+                    AND octet_length(digest) <= ${APPROVAL_DIGEST_MAX_BYTES}
+                  THEN digest ELSE NULL END AS digest,
+             CASE WHEN typeof(actor) = 'text'
+                    AND octet_length(actor) <= ${APPROVAL_ACTOR_MAX_BYTES}
+                  THEN actor ELSE NULL END AS actor,
+             CASE WHEN typeof(decision) = 'text'
+                    AND octet_length(decision) <= ${APPROVAL_DECISION_MAX_BYTES}
+                  THEN decision ELSE NULL END AS decision,
+             CASE WHEN typeof(created_at) = 'text'
+                    AND octet_length(created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
+                  THEN created_at ELSE NULL END AS created_at
+           FROM approvals WHERE run_id = ?
+           ORDER BY approvals.rowid DESC LIMIT ?`,
+        )
+        .all(runId, RUN_PRESENTATION_APPROVAL_LIMIT + 1) as unknown[];
+      const earlierApprovalsExcluded = approvalRows.length > RUN_PRESENTATION_APPROVAL_LIMIT;
+      const validatedApprovalRows = approvalRows.map((entry) => approvalRecordRow(entry, runId));
+      const approvals = validatedApprovalRows.slice(0, RUN_PRESENTATION_APPROVAL_LIMIT).reverse();
+      const approvalCoverage = {
+        limit: RUN_PRESENTATION_APPROVAL_LIMIT,
+        loaded: approvals.length,
+        earlierApprovalsExcluded,
+      } as const;
       const aggregate = row(
         this.#database
           .prepare(
@@ -1833,7 +2416,15 @@ export class IcarusStore {
           ),
         )
         .slice(-RUN_PRESENTATION_ACTION_EVENT_LIMIT);
-      return { run, approvals, events, eventCursor, eventCount, actionEvents };
+      return {
+        run,
+        approvals,
+        approvalCoverage,
+        events,
+        eventCursor,
+        eventCount,
+        actionEvents,
+      };
     });
     return transaction();
   }
@@ -2084,8 +2675,8 @@ export class IcarusStore {
     );
     invariant(
       approval.actor.trim().length > 0 &&
-        approval.actor.length <= 200 &&
-        !/[\r\n\0]/.test(approval.actor),
+        Buffer.byteLength(approval.actor, "utf8") <= APPROVAL_ACTOR_MAX_BYTES &&
+        !containsUnsafeActorCharacter(approval.actor),
       "INVALID_APPROVAL",
       "Approval actor is invalid",
     );

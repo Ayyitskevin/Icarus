@@ -41,9 +41,33 @@ export interface CheckConfiguration {
 }
 
 export interface RepositoryView {
-  readonly id?: string;
+  readonly id: string;
   readonly name: string;
   readonly path: string;
+}
+
+export interface ProjectSandboxView {
+  readonly image: string;
+  readonly cpus: number;
+  readonly memoryMb: number;
+  readonly pids: number;
+  readonly tmpfsMb: number;
+}
+
+export interface ProjectCeilingView {
+  readonly maxToolCalls: number;
+  readonly maxActiveRuntimeMs: number;
+  readonly maxContextBytes: number;
+  readonly maxOutputTokensPerCall: number;
+  readonly maxTotalTokens: number;
+  readonly maxCostUsd: number;
+  readonly maxFilesChanged: 1;
+  readonly maxFileBytes: number;
+  readonly maxDiffBytes: number;
+  readonly maxCommandOutputBytes: number;
+  readonly maxRawCommandOutputBytes: number;
+  readonly providerTimeoutMs: number;
+  readonly commandTimeoutMs: number;
 }
 
 export type RepositoryAvailability = "available" | "missing" | "identity_changed" | "unavailable";
@@ -68,10 +92,9 @@ export interface ProjectView {
   readonly baseRef: string;
   readonly repository: RepositoryView;
   readonly checks: readonly CheckConfiguration[];
-  readonly sandboxImage?: string;
-  readonly sandbox?: { readonly image: string };
-  readonly createdAt?: string;
-  readonly updatedAt?: string;
+  readonly sandbox: ProjectSandboxView;
+  readonly ceiling: ProjectCeilingView;
+  readonly createdAt: string;
 }
 
 export interface ContextEntryView {
@@ -334,6 +357,12 @@ export interface ApprovalView {
   readonly createdAt: string;
 }
 
+export interface ApprovalCoverageView {
+  readonly limit: 12;
+  readonly loaded: number;
+  readonly earlierApprovalsExcluded: boolean;
+}
+
 export interface UsageView {
   readonly toolCalls: number;
   readonly inputTokens: number;
@@ -354,6 +383,44 @@ export interface RunTimestamps {
   readonly [name: string]: string;
 }
 
+export type PersistedDiffReviewView =
+  | {
+      readonly status: "not_produced";
+      readonly path: null;
+      readonly sha256: null;
+      readonly byteCount: 0;
+      readonly lineCount: 0;
+      readonly addedLines: 0;
+      readonly deletedLines: 0;
+      readonly hunkCount: 0;
+      readonly browserByteLimit: 262_144;
+      readonly digestProvenance: "not_available";
+    }
+  | {
+      readonly status: "available";
+      readonly path: string;
+      readonly sha256: string;
+      readonly byteCount: number;
+      readonly lineCount: number;
+      readonly addedLines: number;
+      readonly deletedLines: number;
+      readonly hunkCount: number;
+      readonly browserByteLimit: 262_144;
+      readonly digestProvenance: "displayed_text_rehash_match";
+    }
+  | {
+      readonly status: "outside_browser_bound";
+      readonly path: string;
+      readonly sha256: string;
+      readonly byteCount: number;
+      readonly lineCount: null;
+      readonly addedLines: null;
+      readonly deletedLines: null;
+      readonly hunkCount: null;
+      readonly browserByteLimit: 262_144;
+      readonly digestProvenance: "recorded_only";
+    };
+
 export interface RunView {
   readonly id: string;
   readonly eventCursor: number;
@@ -373,9 +440,11 @@ export interface RunView {
   readonly checks: readonly CheckEvidenceView[];
   readonly verification: VerificationView;
   readonly diff: string | null;
+  readonly diffReview: PersistedDiffReviewView;
   readonly outputs: readonly OutputView[];
   readonly warnings: readonly (string | WarningView)[];
   readonly approvals: readonly ApprovalView[];
+  readonly approvalCoverage: ApprovalCoverageView;
   readonly usage: UsageView;
   readonly lastError: RunErrorView | null;
   readonly timeline: readonly TimelineEntryView[];
@@ -384,8 +453,21 @@ export interface RunView {
 
 export interface WorkspaceView {
   readonly capabilities: WorkspaceCapabilities;
-  readonly projects: readonly ProjectView[];
+  readonly projectPage: ProjectPageView;
   readonly runPage: RunPageView;
+}
+
+export interface ProjectPageView {
+  readonly before: number;
+  readonly snapshot: number;
+  readonly nextBefore: number;
+  readonly hasMore: boolean;
+  readonly projects: readonly ProjectView[];
+}
+
+export interface ProjectPageCursor {
+  readonly before: number;
+  readonly snapshot: number;
 }
 
 export interface RunPageCursor {
@@ -488,6 +570,13 @@ export function getWorkspace(signal?: AbortSignal): Promise<WorkspaceView> {
 
 export function createProject(input: CreateProjectInput): Promise<ProjectView> {
   return postJson<ProjectView>("/api/projects", input);
+}
+
+export function getProjectPage(cursor: ProjectPageCursor, signal?: AbortSignal): Promise<unknown> {
+  return requestJson<unknown>(
+    `/api/projects?before=${encodeURIComponent(String(cursor.before))}&snapshot=${encodeURIComponent(String(cursor.snapshot))}`,
+    signal === undefined ? {} : { signal },
+  );
 }
 
 export function previewProjectContext(

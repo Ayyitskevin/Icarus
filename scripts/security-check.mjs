@@ -20,6 +20,15 @@ const sandboxSource = await readFile("packages/core/src/sandbox.ts", "utf8");
 const workspaceServerSource = await readFile("packages/api/src/server.ts", "utf8");
 const workspacePresenterSource = await readFile("packages/api/src/present.ts", "utf8");
 const workspaceApiSource = await readFile("packages/workspace/src/api.ts", "utf8");
+const workspaceAppSource = await readFile("packages/workspace/src/App.tsx", "utf8");
+const workspaceStyleSource = await readFile("packages/workspace/src/styles.css", "utf8");
+const browserSmokeSource = await readFile("scripts/smoke-workspace-browser.mjs", "utf8");
+const workspaceLivePollSource = await readFile("packages/workspace/src/live-poll.ts", "utf8");
+const workspaceProjectPageNavSource = await readFile(
+  "packages/workspace/src/project-page-nav.ts",
+  "utf8",
+);
+const cliSource = await readFile("packages/cli/src/main.ts", "utf8");
 const verificationAttemptsUiSource = await readFile(
   "packages/workspace/src/verification-attempts.ts",
   "utf8",
@@ -67,6 +76,74 @@ const workspaceRunPageEnd = storeSource.indexOf("\n  transition(", workspaceRunP
 const workspaceRunPageSource =
   workspaceRunPageStart >= 0 && workspaceRunPageEnd > workspaceRunPageStart
     ? storeSource.slice(workspaceRunPageStart, workspaceRunPageEnd)
+    : "";
+const workspaceProjectPageStart = storeSource.indexOf("  #workspaceProjectPage(");
+const workspaceProjectPageEnd = storeSource.indexOf("\n  createRun(", workspaceProjectPageStart);
+const workspaceProjectPageSource =
+  workspaceProjectPageStart >= 0 && workspaceProjectPageEnd > workspaceProjectPageStart
+    ? storeSource.slice(workspaceProjectPageStart, workspaceProjectPageEnd)
+    : "";
+const boundedProjectColumnsStart = storeSource.indexOf("const BOUNDED_PROJECT_COLUMNS =");
+const boundedProjectColumnsEnd = storeSource.indexOf(
+  "\nconst RUN_ID_PATTERN",
+  boundedProjectColumnsStart,
+);
+const boundedProjectColumnsSource =
+  boundedProjectColumnsStart >= 0 && boundedProjectColumnsEnd > boundedProjectColumnsStart
+    ? storeSource.slice(boundedProjectColumnsStart, boundedProjectColumnsEnd)
+    : "";
+const directHydrationStart = storeSource.indexOf("  getRepository(");
+const directHydrationEnd = storeSource.indexOf(
+  "\n  openWorkspaceProjectPage(",
+  directHydrationStart,
+);
+const directHydrationSource =
+  directHydrationStart >= 0 && directHydrationEnd > directHydrationStart
+    ? storeSource.slice(directHydrationStart, directHydrationEnd)
+    : "";
+const jsonSerializerStart = workspaceServerSource.indexOf("export function serializeJsonResponse(");
+const jsonSerializerEnd = workspaceServerSource.indexOf("\nfunction json(", jsonSerializerStart);
+const jsonSerializerSource =
+  jsonSerializerStart >= 0 && jsonSerializerEnd > jsonSerializerStart
+    ? workspaceServerSource.slice(jsonSerializerStart, jsonSerializerEnd)
+    : "";
+const approvalProjectionStart = storeSource.indexOf("  getRunPresentationSnapshot(");
+const approvalProjectionEnd = storeSource.indexOf("\n  listEventPage(", approvalProjectionStart);
+const approvalProjectionSource =
+  approvalProjectionStart >= 0 && approvalProjectionEnd > approvalProjectionStart
+    ? storeSource.slice(approvalProjectionStart, approvalProjectionEnd)
+    : "";
+const approvalRowStart = storeSource.indexOf("function approvalRecordRow(");
+const approvalRowEnd = storeSource.indexOf("\nfunction sqliteRowid(", approvalRowStart);
+const approvalRowSource =
+  approvalRowStart >= 0 && approvalRowEnd > approvalRowStart
+    ? storeSource.slice(approvalRowStart, approvalRowEnd)
+    : "";
+const approvalPresenterStart = workspacePresenterSource.indexOf("function approvals(");
+const approvalPresenterEnd = workspacePresenterSource.indexOf(
+  "\nexport function presentRun(",
+  approvalPresenterStart,
+);
+const approvalPresenterSource =
+  approvalPresenterStart >= 0 && approvalPresenterEnd > approvalPresenterStart
+    ? workspacePresenterSource.slice(approvalPresenterStart, approvalPresenterEnd)
+    : "";
+const diffPresenterStart = workspacePresenterSource.indexOf(
+  "export const WORKSPACE_DIFF_DISPLAY_MAX_BYTES",
+);
+const diffPresenterEnd = workspacePresenterSource.indexOf(
+  "\nexport function presentRun(",
+  diffPresenterStart,
+);
+const diffPresenterSource =
+  diffPresenterStart >= 0 && diffPresenterEnd > diffPresenterStart
+    ? workspacePresenterSource.slice(diffPresenterStart, diffPresenterEnd)
+    : "";
+const diffUiStart = workspaceAppSource.indexOf('id="run-diff"');
+const diffUiEnd = workspaceAppSource.indexOf('id="run-outputs"', diffUiStart);
+const diffUiSource =
+  diffUiStart >= 0 && diffUiEnd > diffUiStart
+    ? workspaceAppSource.slice(diffUiStart, diffUiEnd)
     : "";
 const workspaceSnapshotStart = workspaceServerSource.indexOf("function workspaceSnapshot(");
 const workspaceSnapshotEnd = workspaceServerSource.indexOf(
@@ -278,6 +355,111 @@ const assertions = {
     !/(?:postJson|createProject|createRun|planRun|approve|execute|commit|push|deploy)\(/.test(
       verificationAttemptsPanelSource,
     ),
+  workspaceApprovalProjectionBounded:
+    storeSource.includes("export const RUN_PRESENTATION_APPROVAL_LIMIT = 12") &&
+    storeSource.includes("CREATE INDEX IF NOT EXISTS approvals_by_run") &&
+    storeSource.includes("ON approvals(run_id)") &&
+    ["run_id", "kind", "digest", "actor", "decision", "created_at"].every((column) =>
+      approvalProjectionSource.includes(`typeof(${column}) = 'text'`),
+    ) &&
+    (approvalProjectionSource.match(/octet_length\(/g)?.length ?? 0) === 6 &&
+    approvalProjectionSource.includes("ORDER BY approvals.rowid DESC LIMIT ?") &&
+    approvalProjectionSource.includes("RUN_PRESENTATION_APPROVAL_LIMIT + 1") &&
+    approvalProjectionSource.includes(
+      "approvalRows.map((entry) => approvalRecordRow(entry, runId))",
+    ) &&
+    approvalProjectionSource.includes(".slice(0, RUN_PRESENTATION_APPROVAL_LIMIT)") &&
+    approvalProjectionSource.includes("earlierApprovalsExcluded") &&
+    !approvalProjectionSource.includes("this.listApprovals(") &&
+    !approvalProjectionSource.includes("SELECT *"),
+  workspaceApprovalIndexMigrationHumanGated:
+    storeSource.includes("allowApprovalIndexMigration") &&
+    storeSource.includes("new Database(databasePath, { readonly: true, fileMustExist: true })") &&
+    storeSource.includes("PRAGMA index_xinfo('approvals_by_run')") &&
+    storeSource.includes('"DATABASE_MIGRATION_REQUIRED"') &&
+    cliSource.includes("ICARUS_APPROVE_SCHEMA_MIGRATION") &&
+    cliSource.includes('"approval-index-v1"') &&
+    cliSource.includes("allowApprovalIndexMigration: approvalIndexMigrationApproved()"),
+  workspaceApprovalProjectionFailsClosed: [
+    "runId === expectedRunId",
+    "APPROVAL_KINDS.has",
+    "/^[a-f0-9]{64}$/.test(digest)",
+    'Buffer.byteLength(actor, "utf8") <= APPROVAL_ACTOR_MAX_BYTES',
+    "!containsUnsafeActorCharacter(actor)",
+    "!containsSecretShapedContent",
+    "APPROVAL_DECISIONS.has",
+    'decision === "approve" || kind === "review"',
+    "isCanonicalTimestamp(createdAt)",
+  ].every((guard) => approvalRowSource.includes(guard)),
+  workspaceApprovalPresenterAllowlists:
+    ["kind", "digest", "actor", "decision", "createdAt"].every((field) =>
+      approvalPresenterSource.includes(`${field}: approval.${field}`),
+    ) &&
+    !approvalPresenterSource.includes("...approval") &&
+    workspacePresenterSource.includes("limit: snapshot.approvalCoverage.limit") &&
+    workspacePresenterSource.includes("loaded: snapshot.approvalCoverage.loaded") &&
+    workspacePresenterSource.includes(
+      "earlierApprovalsExcluded: snapshot.approvalCoverage.earlierApprovalsExcluded",
+    ),
+  workspacePersistedDiffResponseBounded:
+    diffPresenterSource.includes("WORKSPACE_DIFF_DISPLAY_MAX_BYTES = 256 * 1024") &&
+    diffPresenterSource.includes("byteCount > WORKSPACE_DIFF_DISPLAY_MAX_BYTES") &&
+    diffPresenterSource.includes('status: "outside_browser_bound"') &&
+    diffPresenterSource.includes('digestProvenance: "recorded_only"') &&
+    diffPresenterSource.includes("text: null") &&
+    workspacePresenterSource.includes("diff: persistedDiff.text") &&
+    workspacePresenterSource.includes("diffReview: persistedDiff.review") &&
+    !workspacePresenterSource.includes("diff: run.diff") &&
+    !/(?:run\.diff|diff)\.(?:slice|substring|substr)\(/.test(diffPresenterSource),
+  workspacePersistedDiffFailsClosed: [
+    'throw new IcarusError("DATABASE_ERROR", "Persisted diff evidence is invalid")',
+    "run.verification !== null",
+    "run.diff.length === 0",
+    'run.diff.includes("\\0")',
+    "VERIFICATION_OUTCOMES.has(verification.outcome)",
+    "Array.isArray(verification.checks)",
+    "Array.isArray(verification.changedPaths)",
+    "SHA256_PATTERN.test(verification.diffSha256)",
+    "SHA256_PATTERN.test(verification.checkpointSha256)",
+    "verification.changedPaths.length !== 1",
+    "verification.changedPaths[0] !== run.target",
+    'Buffer.byteLength(run.diff, "utf8")',
+    "byteCount > project.ceiling.maxDiffBytes",
+    'createHash("sha256").update(run.diff, "utf8").digest("hex")',
+    "displayedSha256 !== verification.diffSha256",
+    "decodeGitPathToken",
+    'new TextDecoder("utf-8", { fatal: true })',
+    "assertDiffHeaderTarget(lines[0].slice(11), target)",
+    'assertFileHeaderTarget(lines[2] ?? "", "--- ", target)',
+    'assertFileHeaderTarget(lines[3] ?? "", "+++ ", target)',
+    `value === \`a/\${target} b/\${target}\``,
+    `value === \`\${expected}\\t\``,
+    "DIFF_INDEX_PATTERN.test(lines[1]",
+    "DIFF_HUNK_PATTERN.exec(lines[index]",
+    "oldLines > expectedOldLines",
+    "newLines > expectedNewLines",
+    "hunkCount === 0",
+  ].every((guard) => diffPresenterSource.includes(guard)),
+  workspacePersistedDiffHasNoNewReadAuthority:
+    !/(?:readFile|readFileSync|createReadStream|readdir|lstat|realpath|spawn|execFile|fetch\(|\.git\(|getRepositoryStatus|worktreePath|cachePath|baselineBase64|approvedBase64)/.test(
+      diffPresenterSource,
+    ),
+  workspacePersistedDiffUiTextOnly:
+    diffUiSource.includes('className="diff-review__patch"') &&
+    diffUiSource.includes("{run.diff}") &&
+    diffUiSource.includes("tabIndex={0}") &&
+    diffUiSource.includes('role="region"') &&
+    diffUiSource.includes('aria-labelledby="persisted-diff-patch-heading"') &&
+    diffUiSource.includes("Exact persisted run state") &&
+    diffUiSource.includes("This does not prove current repository bytes") &&
+    !/(?:dangerouslySetInnerHTML|innerHTML|window\.open|window\.location|href\s*=|<form\b|formAction|onSubmit|<button\b|onClick|postJson|approve|execute|commit|push|deploy)/.test(
+      diffUiSource,
+    ),
+  workspacePersistedDiffUsesFixedEvidenceAnchor:
+    workspacePresenterSource.includes('type === "verification.completed"') &&
+    workspacePresenterSource.includes('return "diff"') &&
+    workspaceLivePollSource.includes('case "run-diff"') &&
+    workspaceLivePollSource.includes('return "run-diff"'),
   workspaceRunSummaryMetadataOnly:
     workspaceRunPageSource.includes("SELECT CAST(rowid AS TEXT) AS cursor") &&
     workspaceRunPageSource.includes(
@@ -296,6 +478,75 @@ const assertions = {
     !workspaceSnapshotSource.includes("listRuns(") &&
     !workspaceSnapshotSource.includes("presentationSnapshot(") &&
     !workspaceSnapshotSource.includes("presentRun("),
+  workspaceProjectCatalogIsJoinedAndBounded:
+    workspaceProjectPageSource.includes("SELECT CAST(p.rowid AS TEXT) AS cursor") &&
+    workspaceProjectPageSource.includes("FROM projects AS p") &&
+    workspaceProjectPageSource.includes("JOIN repositories AS r ON r.id = p.repository_id") &&
+    workspaceProjectPageSource.includes("WHERE p.rowid < ? AND p.rowid <= ?") &&
+    workspaceProjectPageSource.includes("ORDER BY p.rowid DESC") &&
+    workspaceProjectPageSource.includes("LIMIT 13") &&
+    workspaceProjectPageSource.includes("$" + "{BOUNDED_PROJECT_COLUMNS}") &&
+    workspaceProjectPageSource.includes("$" + "{BOUNDED_REPOSITORY_COLUMNS}") &&
+    boundedProjectColumnsSource.includes("octet_length(p.checks_json)") &&
+    boundedProjectColumnsSource.includes("octet_length(p.sandbox_json)") &&
+    boundedProjectColumnsSource.includes("octet_length(p.ceiling_json)") &&
+    boundedProjectColumnsSource.includes("octet_length(r.path)") &&
+    boundedProjectColumnsSource.includes("json_valid(p.checks_json, 1)") &&
+    !workspaceProjectPageSource.includes("getProject(") &&
+    !workspaceProjectPageSource.includes("getRepository("),
+  workspaceDirectProjectHydrationIsPreflightBounded:
+    directHydrationSource.includes("SELECT $" + "{BOUNDED_REPOSITORY_COLUMNS}") &&
+    directHydrationSource.includes("SELECT $" + "{BOUNDED_PROJECT_COLUMNS}") &&
+    directHydrationSource.includes("return boundedRepositoryRow(") &&
+    directHydrationSource.includes("return boundedProjectRow(") &&
+    !directHydrationSource.includes("SELECT * FROM repositories") &&
+    !directHydrationSource.includes("SELECT * FROM projects"),
+  workspaceBootstrapUsesBoundedProjectPage:
+    workspaceSnapshotSource.includes("openWorkspaceProjectPage()") &&
+    workspaceSnapshotSource.includes("presentWorkspaceProjectPage") &&
+    workspaceSnapshotSource.includes("projectPage:") &&
+    !workspaceSnapshotSource.includes("listProjects(") &&
+    !workspaceSnapshotSource.includes("listRepositories(") &&
+    !workspaceSnapshotSource.includes("projects:"),
+  workspaceCreatePathsAvoidCollectionScans:
+    !workspaceServerSource.includes(".listProjects()") &&
+    !workspaceServerSource.includes(".listRepositories()") &&
+    workspaceServerSource.includes("findProjectByName(input.project.name)") &&
+    workspaceServerSource.includes("findRepositoryByName(input.repository.name)") &&
+    workspaceServerSource.includes("projectId: input.projectId"),
+  workspaceJsonResponsesArePreflightBounded:
+    workspaceServerSource.includes("MAX_JSON_RESPONSE_BYTES = 8 * 1024 * 1024") &&
+    jsonSerializerSource.includes('Buffer.byteLength(body, "utf8")') &&
+    jsonSerializerSource.includes('"RESPONSE_TOO_LARGE"') &&
+    workspaceServerSource.indexOf("const body = serializeJsonResponse(value)") <
+      workspaceServerSource.indexOf("response.writeHead(status") &&
+    workspaceServerSource.includes('error.code === "RESPONSE_TOO_LARGE"') &&
+    workspaceServerSource.includes("MAX_ERROR_MESSAGE_BYTES = 4 * 1024") &&
+    workspaceServerSource.includes("INTERNAL_ERROR_RESPONSE") &&
+    workspaceServerSource.includes("internalError(response)") &&
+    !jsonSerializerSource.includes("response.writeHead"),
+  workspaceProjectNavigationIsBoundedAndStaleSafe:
+    workspaceProjectPageNavSource.includes("PROJECT_PAGE_MAX_PAGES = 4") &&
+    workspaceProjectPageNavSource.includes("PROJECT_PAGE_SIZE = 12") &&
+    workspaceProjectPageNavSource.includes("validateProjectPage(page, request)") &&
+    workspaceProjectPageNavSource.includes("request.snapshot !== session.snapshot") &&
+    workspaceProjectPageNavSource.includes("expected.before !== request.before") &&
+    workspaceAppSource.includes("projectPageGenerationRef.current !== generation") &&
+    workspaceAppSource.includes("abortProjectPageRequest()") &&
+    workspaceAppSource.includes("pauseProjectPageRequest(") &&
+    browserSmokeSource.includes("PROJECT_PAGE_FIXTURE_COUNT") &&
+    browserSmokeSource.includes("holdNextProjectPage") &&
+    browserSmokeSource.includes("lateProjectPageSuccessRejected") &&
+    browserSmokeSource.includes("offPageRunSelectionPreserved"),
+  workspaceKeyboardNavigationIsExplicit:
+    workspaceAppSource.includes('className="skip-link"') &&
+    workspaceAppSource.includes('href="#workspace-main"') &&
+    workspaceAppSource.includes('id="workspace-main"') &&
+    workspaceAppSource.includes("tabIndex={-1}") &&
+    workspaceAppSource.includes("aria-current=") &&
+    workspaceStyleSource.includes("a:focus-visible") &&
+    workspaceStyleSource.includes(".skip-link:focus") &&
+    browserSmokeSource.includes("skipLinkKeyboardAccepted"),
   workspaceNoRawHtml: workspaceUiSources.every(
     (source) => !source.includes("dangerouslySetInnerHTML") && !source.includes("innerHTML"),
   ),

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { createRequire } from "node:module";
@@ -8,6 +9,8 @@ import { afterEach, describe, expect, test } from "vitest";
 import { startWorkspaceServer } from "../../packages/api/src/server.js";
 import {
   createIcarusRuntime,
+  DEFAULT_CEILING,
+  DEFAULT_SANDBOX_LIMITS,
   IcarusError,
   type IcarusRuntime,
 } from "../../packages/core/src/index.js";
@@ -70,6 +73,27 @@ function persistenceSnapshot(database: TestDatabase): Record<string, readonly un
 
 function workspaceRunId(index: number): string {
   return `10000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+}
+
+function workspaceProjectId(index: number): string {
+  return `20000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+}
+
+function insertWorkspaceProject(database: TestDatabase, repositoryId: string, index: number): void {
+  database
+    .prepare(
+      `INSERT INTO projects
+        (id, name, repository_id, base_ref, checks_json, sandbox_json, ceiling_json, created_at)
+       VALUES (?, ?, ?, 'main', ?, ?, ?, '2026-07-22T12:00:00.000Z')`,
+    )
+    .run(
+      workspaceProjectId(index),
+      `api-project-${index}`,
+      repositoryId,
+      JSON.stringify([{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }]),
+      JSON.stringify({ image: PYTHON_IMAGE, ...DEFAULT_SANDBOX_LIMITS }),
+      JSON.stringify(DEFAULT_CEILING),
+    );
 }
 
 function insertWorkspaceRun(database: TestDatabase, projectId: string, index: number): void {
@@ -179,7 +203,7 @@ describe("loopback local workspace API", () => {
         planning: { status: "available" },
         execution: { status: "unconfigured" },
       },
-      projects: [],
+      projectPage: { before: 1, snapshot: 0, nextBefore: 1, hasMore: false, projects: [] },
       runPage: { before: 1, snapshot: 0, nextBefore: 1, hasMore: false, runs: [] },
     });
 
@@ -310,6 +334,11 @@ describe("loopback local workspace API", () => {
       files: { involved: expect.arrayContaining(["src/greeting.txt"]), changed: [] },
       verification: { outcome: "not_run" },
       approvals: [],
+      approvalCoverage: {
+        limit: 12,
+        loaded: 0,
+        earlierApprovalsExcluded: false,
+      },
       usage: {
         toolCalls: expect.any(Number),
         inputTokens: expect.any(Number),
@@ -332,6 +361,35 @@ describe("loopback local workspace API", () => {
     );
     expect(JSON.stringify(planned)).not.toContain(fixture.stateRoot);
     expect(JSON.stringify(planned)).not.toContain("contextArtifactPath");
+
+    const provenanceDatabase = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    const insertApproval = provenanceDatabase.prepare(
+      `INSERT INTO approvals (id, run_id, kind, digest, actor, decision, created_at)
+       VALUES (?, ?, 'plan', ?, ?, 'approve', ?)`,
+    );
+    for (let index = 1; index <= 13; index += 1) {
+      insertApproval.run(
+        `api-approval-${(14 - index).toString().padStart(2, "0")}`,
+        runId,
+        index.toString(16).padStart(64, "0"),
+        `api-operator-${index}`,
+        "2026-07-22T12:00:00.000Z",
+      );
+    }
+    provenanceDatabase.close();
+
+    const boundedProvenance = await responseJson(await fetch(`${server.url}/api/runs/${runId}`));
+    expect(boundedProvenance.approvalCoverage).toEqual({
+      limit: 12,
+      loaded: 12,
+      earlierApprovalsExcluded: true,
+    });
+    const retainedApprovals = boundedProvenance.approvals as Array<Record<string, unknown>>;
+    expect(retainedApprovals).toHaveLength(12);
+    expect(retainedApprovals.map((approval) => approval.actor)).toEqual(
+      Array.from({ length: 12 }, (_, index) => `api-operator-${index + 2}`),
+    );
+    expect(JSON.stringify(boundedProvenance)).not.toContain("api-approval-");
     expect(provider.requests).toHaveLength(1);
     const providerRequest = JSON.stringify(provider.requests[0]?.body);
     expect(providerRequest).toContain("src/greeting.txt");
@@ -443,6 +501,137 @@ describe("loopback local workspace API", () => {
     expect(await index.text()).toContain('id="root"');
   });
 
+  test("serves bounded rehashed persisted diff review without source or state mutation", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const projectResponse = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "diff-review-fixture", path: fixture.repository },
+      project: {
+        name: "diff-review-project",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    const projectId = String((await responseJson(projectResponse)).id);
+    const draftResponse = await postJson(`${server.url}/api/runs`, {
+      projectId,
+      task: "Review persisted diff evidence.",
+      target: "src/greeting.txt",
+      provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
+    });
+    const runId = String((await responseJson(draftResponse)).id);
+    const diff = [
+      "diff --git a/src/greeting.txt b/src/greeting.txt",
+      "index ce01362..63c704a 100644",
+      "--- a/src/greeting.txt",
+      "+++ b/src/greeting.txt",
+      "@@ -1 +1 @@",
+      "-Hello, world!",
+      "+Hello, <img src=x onerror=alert(1)>!",
+      "",
+    ].join("\n");
+    const diffSha256 = createHash("sha256").update(diff, "utf8").digest("hex");
+    const verification = {
+      outcome: "passed",
+      checks: [],
+      changedPaths: ["src/greeting.txt"],
+      diffSha256,
+      checkpointSha256: "c".repeat(64),
+    };
+    const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    database
+      .prepare(
+        `UPDATE runs
+         SET state = 'awaiting_review', diff = ?, verification_json = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(diff, JSON.stringify(verification), "2026-07-22T12:01:00.000Z", runId);
+    database
+      .prepare(
+        `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+         VALUES (?, 2, 'verification.completed', '{}', ?)`,
+      )
+      .run(runId, "2026-07-22T12:01:00.000Z");
+    const persistenceBefore = persistenceSnapshot(database);
+    database.close();
+
+    const response = await fetch(`${server.url}/api/runs/${runId}`);
+    expect(response.status).toBe(200);
+    const projection = await responseJson(response);
+    expect(projection).toMatchObject({
+      id: runId,
+      state: "awaiting_review",
+      verification: { outcome: "passed", diffSha256 },
+      diff,
+      diffReview: {
+        status: "available",
+        path: "src/greeting.txt",
+        sha256: diffSha256,
+        byteCount: Buffer.byteLength(diff, "utf8"),
+        lineCount: 7,
+        addedLines: 1,
+        deletedLines: 1,
+        hunkCount: 1,
+        browserByteLimit: 262_144,
+        digestProvenance: "displayed_text_rehash_match",
+      },
+      timeline: expect.arrayContaining([
+        expect.objectContaining({
+          type: "verification.completed",
+          evidenceSection: "diff",
+        }),
+      ]),
+    });
+    expect(Object.keys(projection.diffReview as Record<string, unknown>).sort()).toEqual(
+      [
+        "status",
+        "path",
+        "sha256",
+        "byteCount",
+        "lineCount",
+        "addedLines",
+        "deletedLines",
+        "hunkCount",
+        "browserByteLimit",
+        "digestProvenance",
+      ].sort(),
+    );
+    expect(JSON.stringify(projection)).toContain("<img src=x onerror=alert(1)>");
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+    const observer = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    expect(persistenceSnapshot(observer)).toEqual(persistenceBefore);
+    observer
+      .prepare("UPDATE runs SET diff = ? WHERE id = ?")
+      .run(`${diff}corrupt-response-sentinel`, runId);
+    const corruptPersistence = persistenceSnapshot(observer);
+    observer.close();
+
+    const corruptResponse = await fetch(`${server.url}/api/runs/${runId}`);
+    expect(corruptResponse.status).toBe(400);
+    const corruptError = await responseJson(corruptResponse);
+    expect(corruptError).toMatchObject({
+      error: { code: "DATABASE_ERROR", message: "Persisted diff evidence is invalid" },
+    });
+    expect(JSON.stringify(corruptError)).not.toContain("corrupt-response-sentinel");
+    const finalObserver = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    expect(persistenceSnapshot(finalObserver)).toEqual(corruptPersistence);
+    finalObserver.close();
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+  });
+
   test("serves strict pinned workspace run pages with fixed work and no full-run hydration", async () => {
     const fixture = await createFixtureRepository();
     cleanups.push(fixture.cleanup);
@@ -526,7 +715,9 @@ describe("loopback local workspace API", () => {
     });
 
     const workspace = await responseJson(await fetch(`${server.url}/api/workspace`));
-    expect(Object.keys(workspace).sort()).toEqual(["capabilities", "projects", "runPage"].sort());
+    expect(Object.keys(workspace).sort()).toEqual(
+      ["capabilities", "projectPage", "runPage"].sort(),
+    );
     expect(workspace).not.toHaveProperty("runs");
     expect(workspace.runPage).toEqual(first);
 
@@ -588,6 +779,255 @@ describe("loopback local workspace API", () => {
     expect(persistenceSnapshot(finalObserver)).toEqual(afterCreation);
     finalObserver.close();
     expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+  });
+
+  test("serves strict pinned joined project pages without collection scans", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const initialResponse = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "project-page-fixture", path: fixture.repository },
+      project: {
+        name: "api-project-1",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    expect(initialResponse.status).toBe(201);
+    const initial = await responseJson(initialResponse);
+    const repository = initial.repository as Record<string, unknown>;
+    const repositoryId = String(repository.id);
+
+    const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    for (let index = 2; index <= 205; index += 1) {
+      insertWorkspaceProject(database, repositoryId, index);
+    }
+    database.prepare("DELETE FROM projects WHERE rowid = 100").run();
+    const persistenceBefore = persistenceSnapshot(database);
+    database.close();
+
+    Object.defineProperties(runtime.service, {
+      listProjects: {
+        value: () => {
+          throw new Error("Unbounded project scan was invoked");
+        },
+      },
+      listRepositories: {
+        value: () => {
+          throw new Error("Unbounded repository scan was invoked");
+        },
+      },
+    });
+
+    const firstResponse = await fetch(`${server.url}/api/projects`);
+    expect(firstResponse.status).toBe(200);
+    const first = await responseJson(firstResponse);
+    expect(Object.keys(first).sort()).toEqual(
+      ["before", "snapshot", "nextBefore", "hasMore", "projects"].sort(),
+    );
+    expect(first).toMatchObject({ before: 206, snapshot: 205, nextBefore: 194, hasMore: true });
+    const firstProjects = first.projects as Array<Record<string, unknown>>;
+    expect(firstProjects).toHaveLength(12);
+    expect(firstProjects.map((project) => project.id)).toEqual(
+      Array.from({ length: 12 }, (_, index) => workspaceProjectId(205 - index)),
+    );
+    expect(Object.keys(firstProjects[0] ?? {}).sort()).toEqual(
+      ["id", "name", "repository", "baseRef", "checks", "sandbox", "ceiling", "createdAt"].sort(),
+    );
+    expect(
+      Object.keys((firstProjects[0]?.repository ?? {}) as Record<string, unknown>).sort(),
+    ).toEqual(["id", "name", "path"].sort());
+    expect(JSON.stringify(first)).not.toMatch(/device|inode|repositoryId|private/);
+
+    const second = await responseJson(
+      await fetch(`${server.url}/api/projects?before=${String(first.nextBefore)}&snapshot=205`),
+    );
+    expect(second).toMatchObject({ before: 194, snapshot: 205, nextBefore: 182, hasMore: true });
+    expect(
+      (second.projects as Array<Record<string, unknown>>).map((project) => project.id),
+    ).toEqual(Array.from({ length: 12 }, (_, index) => workspaceProjectId(193 - index)));
+    const acrossGap = await responseJson(
+      await fetch(`${server.url}/api/projects?before=105&snapshot=205`),
+    );
+    expect(
+      (acrossGap.projects as Array<Record<string, unknown>>).map((project) => project.id),
+    ).toEqual([104, 103, 102, 101, 99, 98, 97, 96, 95, 94, 93, 92].map(workspaceProjectId));
+
+    const workspace = await responseJson(await fetch(`${server.url}/api/workspace`));
+    expect(workspace.projectPage).toEqual(first);
+    expect(workspace).not.toHaveProperty("projects");
+
+    for (const query of [
+      "?before=206",
+      "?snapshot=205",
+      "?before=&snapshot=205",
+      "?before=0&snapshot=205",
+      "?before=-1&snapshot=205",
+      "?before=0.5&snapshot=205",
+      "?before=0206&snapshot=205",
+      "?before=2e2&snapshot=205",
+      "?before=9007199254740992&snapshot=205",
+      "?before=206&snapshot=9007199254740991",
+      "?before=206&before=206&snapshot=205",
+      "?before=206&snapshot=205&snapshot=205",
+      "?before=206&snapshot=205&extra=1",
+      "?before=207&snapshot=205",
+      "?before=100&snapshot=205",
+      "?before=208&snapshot=207",
+    ]) {
+      const invalidPage = await fetch(`${server.url}/api/projects${query}`);
+      expect(invalidPage.status).toBe(422);
+      expect(await responseJson(invalidPage)).toMatchObject({
+        error: { code: expect.any(String) },
+      });
+    }
+
+    const afterReads = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    expect(persistenceSnapshot(afterReads)).toEqual(persistenceBefore);
+    afterReads.close();
+
+    const createdResponse = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "project-page-fixture", path: fixture.repository },
+      project: {
+        name: "api-project-206",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    expect(createdResponse.status).toBe(201);
+    const created = await responseJson(createdResponse);
+    expect(
+      await responseJson(await fetch(`${server.url}/api/projects?before=206&snapshot=205`)),
+    ).toEqual(first);
+    const newest = await responseJson(await fetch(`${server.url}/api/projects`));
+    expect(newest).toMatchObject({ before: 207, snapshot: 206, hasMore: true });
+    expect((newest.projects as Array<Record<string, unknown>>)[0]).toMatchObject({
+      id: created.id,
+    });
+
+    const corruptor = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    corruptor
+      .prepare("UPDATE projects SET checks_json = ? WHERE id = ?")
+      .run(`"${"private-project-overflow-sentinel".padEnd(1024 * 1024, "x")}"`, created.id);
+    corruptor.close();
+    const corrupt = await fetch(`${server.url}/api/projects`);
+    expect(corrupt.status).toBe(400);
+    const corruptBody = await responseJson(corrupt);
+    expect(corruptBody).toMatchObject({ error: { code: "DATABASE_ERROR" } });
+    expect(JSON.stringify(corruptBody)).not.toContain("private-project-overflow-sentinel");
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+  });
+
+  test("returns a safe error before headers when a JSON response exceeds 8 MiB", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const projectResponse = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "response-ceiling", path: fixture.repository },
+      project: {
+        name: "response-ceiling",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    const projectId = String((await responseJson(projectResponse)).id);
+    const draftResponse = await postJson(`${server.url}/api/runs`, {
+      projectId,
+      task: "Exercise the response ceiling.",
+      target: "src/greeting.txt",
+      provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
+    });
+    const runId = String((await responseJson(draftResponse)).id);
+    const privateSentinel = "private-response-overflow-sentinel";
+    const diff = [
+      "diff --git a/src/greeting.txt b/src/greeting.txt",
+      "index 1111111..2222222 100644",
+      "--- a/src/greeting.txt",
+      "+++ b/src/greeting.txt",
+      "@@ -1 +1 @@",
+      "-Hello",
+      "+Hello, Icarus",
+      "",
+    ].join("\n");
+    const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    database.prepare("UPDATE runs SET diff = ?, verification_json = ? WHERE id = ?").run(
+      diff,
+      JSON.stringify({
+        outcome: "passed",
+        checks: [
+          {
+            checkId: "verify",
+            argv: ["python", "checks/verify.py"],
+            exitCode: 0,
+            signal: null,
+            durationMs: 1,
+            stdout: privateSentinel.padEnd(4_300_000, "x"),
+            stderr: "",
+            truncated: false,
+            outcome: "passed",
+          },
+        ],
+        changedPaths: ["src/greeting.txt"],
+        diffSha256: createHash("sha256").update(diff, "utf8").digest("hex"),
+        checkpointSha256: "b".repeat(64),
+      }),
+      runId,
+    );
+    database.close();
+
+    const response = await fetch(`${server.url}/api/runs/${runId}`);
+    expect(response.status).toBe(500);
+    const body = await responseJson(response);
+    expect(body).toEqual({
+      error: {
+        code: "RESPONSE_TOO_LARGE",
+        message: "The local workspace response exceeds the 8 MiB JSON limit",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain(privateSentinel);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect((await fetch(`${server.url}/api/health`)).status).toBe(200);
+
+    Object.defineProperty(runtime.service, "openWorkspaceProjectPage", {
+      configurable: true,
+      value: () => {
+        throw new IcarusError("DATABASE_ERROR", privateSentinel.padEnd(9 * 1024 * 1024, "x"));
+      },
+    });
+    const oversizedError = await fetch(`${server.url}/api/workspace`);
+    expect(oversizedError.status).toBe(400);
+    expect(await responseJson(oversizedError)).toEqual({
+      error: {
+        code: "DATABASE_ERROR",
+        message: "The local workspace request failed with an oversized error message.",
+      },
+    });
+    expect(oversizedError.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect((await fetch(`${server.url}/api/health`)).status).toBe(200);
   });
 
   test("serves bounded coherent run snapshots without decoding private event payloads", async () => {

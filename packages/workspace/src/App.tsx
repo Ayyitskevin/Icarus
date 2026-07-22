@@ -16,6 +16,7 @@ import {
   createProject,
   createRun,
   errorMessage,
+  getProjectPage,
   getRepositoryStatus,
   getRun,
   getRunEventHistory,
@@ -43,6 +44,20 @@ import {
   liveEventAnnouncement,
   snapshotIncludesObservedRevision,
 } from "./live-poll.js";
+import type {
+  ProjectPageDirection,
+  ProjectPageRequest,
+  ProjectPageSession,
+} from "./project-page-nav.js";
+import {
+  acceptProjectPage,
+  canNavigateToNewerProjects,
+  canNavigateToOlderProjects,
+  createProjectPageSession,
+  PROJECT_PAGE_MAX_PAGES,
+  projectPageDepth,
+  projectPageRequest,
+} from "./project-page-nav.js";
 import type { RunPageDirection, RunPageRequest, RunPageSession } from "./run-page-nav.js";
 import {
   acceptRunPage,
@@ -96,8 +111,10 @@ const EVIDENCE_LINKS = [
   ["run-plan", "Plan"],
   ["run-action", "Action & files"],
   ["run-verification", "Verification"],
+  ["run-diff", "Diff review"],
   ["run-outputs", "Outputs"],
-  ["run-approvals", "Warnings & approvals"],
+  ["run-warnings", "Warnings"],
+  ["run-approvals", "Approval provenance"],
   ["run-usage", "Usage"],
   ["run-activity", "Activity"],
 ] as const;
@@ -773,9 +790,7 @@ function ProjectDetail({
           </div>
           <div>
             <dt>Sandbox image</dt>
-            <dd className="digest">
-              {project.sandboxImage ?? project.sandbox?.image ?? "Missing"}
-            </dd>
+            <dd className="digest">{project.sandbox.image}</dd>
           </div>
         </dl>
         <RepositoryStatusPanel project={project} />
@@ -1033,6 +1048,59 @@ interface RunEvidenceProps {
   readonly onRunChanged: (run: RunView) => Promise<void>;
   readonly onRefresh: (runId: string) => Promise<void>;
   readonly registerAuxiliaryCancellation: (cancel: (() => void) | null) => void;
+}
+
+export function ApprovalProvenance({
+  run,
+}: {
+  readonly run: Pick<RunView, "approvalCoverage" | "approvals">;
+}) {
+  return (
+    <section
+      id="run-approvals"
+      className="evidence-block"
+      aria-labelledby="approvals-heading"
+      tabIndex={-1}
+    >
+      <div className="evidence-block__heading">
+        <h3 id="approvals-heading">Approval provenance</h3>
+        <span className="count">{run.approvalCoverage.loaded} loaded</span>
+      </div>
+      <p className="panel__intro">
+        Newest recorded decisions, bounded to {run.approvalCoverage.limit}. A recorded actor and
+        digest are provenance facts, not a fresh authentication or byte-integrity check.
+      </p>
+      {run.approvalCoverage.earlierApprovalsExcluded ? (
+        <p className="message message--warning" role="status">
+          Earlier approval decisions are outside this browser response. Use complete CLI history for
+          older decisions; no total is implied.
+        </p>
+      ) : null}
+      {run.approvals.length === 0 ? (
+        <p className="empty-state">No approval decision is present in this retained response.</p>
+      ) : (
+        <ol className="timeline">
+          {run.approvals.map((approval, index) => (
+            <li
+              // biome-ignore lint/suspicious/noArrayIndexKey: the API deliberately omits database identity; the retained ordinal distinguishes otherwise identical immutable display rows.
+              key={`${index}:${approval.kind}:${approval.digest}:${approval.decision}:${approval.createdAt}`}
+            >
+              <div>
+                <strong>
+                  Recorded {approval.kind} decision — {approval.decision}
+                </strong>
+                <time dateTime={approval.createdAt}>{formatTimestamp(approval.createdAt)}</time>
+              </div>
+              <p>
+                Recorded actor: {approval.actor} · Recorded digest:{" "}
+                <span className="digest">{approval.digest}</span>
+              </p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
 }
 
 function RunEvidence({
@@ -1676,9 +1744,110 @@ function RunEvidence({
         )}
       </section>
 
-      <section className="evidence-block" aria-labelledby="diff-heading">
-        <h3 id="diff-heading">Diff</h3>
-        <pre>{run.diff === null || run.diff.length === 0 ? "No diff was produced." : run.diff}</pre>
+      <section
+        id="run-diff"
+        className="evidence-block"
+        aria-labelledby="diff-heading"
+        tabIndex={-1}
+      >
+        <div className="evidence-block__heading">
+          <h3 id="diff-heading">Persisted diff review</h3>
+          <span
+            className={
+              run.diffReview.status === "outside_browser_bound"
+                ? "status status--warning"
+                : statusClass(run.diffReview.status)
+            }
+          >
+            {run.diffReview.status === "available"
+              ? "exact persisted text"
+              : run.diffReview.status === "outside_browser_bound"
+                ? "metadata only"
+                : "not produced"}
+          </span>
+        </div>
+        <p className="panel__intro">
+          This is persisted verification evidence, not a fresh repository or worktree read. The
+          exact persisted run state and verification outcome remain separate facts.
+        </p>
+        <dl className="facts facts--compact">
+          <div>
+            <dt>Exact persisted run state</dt>
+            <dd>{run.state}</dd>
+          </div>
+          <div>
+            <dt>Verification outcome</dt>
+            <dd>{run.verification.outcome.replaceAll("_", " ")}</dd>
+          </div>
+          <div>
+            <dt>Recorded changed path</dt>
+            <dd>{run.diffReview.path ?? "Not recorded"}</dd>
+          </div>
+          <div>
+            <dt>Persisted diff bytes</dt>
+            <dd>{formatBytes(run.diffReview.byteCount)}</dd>
+          </div>
+          <div>
+            <dt>Patch lines</dt>
+            <dd>{run.diffReview.lineCount ?? "Not computed"}</dd>
+          </div>
+          <div>
+            <dt>Added lines</dt>
+            <dd>{run.diffReview.addedLines ?? "Not computed"}</dd>
+          </div>
+          <div>
+            <dt>Deleted lines</dt>
+            <dd>{run.diffReview.deletedLines ?? "Not computed"}</dd>
+          </div>
+          <div>
+            <dt>Hunks</dt>
+            <dd>{run.diffReview.hunkCount ?? "Not computed"}</dd>
+          </div>
+          <div>
+            <dt>Recorded diff digest</dt>
+            <dd className="digest">{run.diffReview.sha256 ?? "Not recorded"}</dd>
+          </div>
+          <div>
+            <dt>Digest relationship</dt>
+            <dd>{run.diffReview.digestProvenance.replaceAll("_", " ")}</dd>
+          </div>
+        </dl>
+        {run.diffReview.status === "not_produced" ? (
+          <p className="empty-state">
+            No verification diff exists. This does not imply that verification passed.
+          </p>
+        ) : run.diffReview.status === "outside_browser_bound" ? (
+          <p className="message message--warning" role="status">
+            The persisted diff is larger than the {formatBytes(run.diffReview.browserByteLimit)}
+            browser display bound. No partial patch is shown. Use{" "}
+            <code>icarus run status {run.id}</code>
+            for complete persisted evidence.
+          </p>
+        ) : run.diff === null ? (
+          <p className="message message--error" role="alert">
+            The persisted diff response was internally inconsistent.
+          </p>
+        ) : (
+          <div className="stack stack--small">
+            <p className="message message--info">
+              The displayed text was rehashed by the local API and matched the recorded verification
+              digest. This does not prove current repository bytes.
+            </p>
+            <details open={run.state === "awaiting_review"}>
+              <summary id="persisted-diff-patch-heading">Review the exact persisted patch</summary>
+              {/* biome-ignore-start lint/a11y: a pre preserves exact patch whitespace and must be keyboard-focusable so users can scroll the labelled overflow region. */}
+              <pre
+                className="diff-review__patch"
+                tabIndex={0}
+                role="region"
+                aria-labelledby="persisted-diff-patch-heading"
+              >
+                {run.diff}
+              </pre>
+              {/* biome-ignore-end lint/a11y: restore the standard accessibility rules after the intentionally focusable patch region. */}
+            </details>
+          </div>
+        )}
       </section>
 
       <section
@@ -1710,7 +1879,7 @@ function RunEvidence({
       </section>
 
       <section
-        id="run-approvals"
+        id="run-warnings"
         className="evidence-block"
         aria-labelledby="warnings-heading"
         tabIndex={-1}
@@ -1736,32 +1905,7 @@ function RunEvidence({
         )}
       </section>
 
-      <section className="evidence-block" aria-labelledby="approvals-heading">
-        <div className="evidence-block__heading">
-          <h3 id="approvals-heading">Approval history</h3>
-          <span className="count">{run.approvals.length}</span>
-        </div>
-        {run.approvals.length === 0 ? (
-          <p className="empty-state">No approval decisions are recorded.</p>
-        ) : (
-          <ol className="timeline">
-            {run.approvals.map((approval) => (
-              <li key={`${approval.kind}:${approval.digest}:${approval.createdAt}`}>
-                <div>
-                  <strong>
-                    {approval.kind} — {approval.decision}
-                  </strong>
-                  <time dateTime={approval.createdAt}>{formatTimestamp(approval.createdAt)}</time>
-                </div>
-                <p>
-                  Actor: {approval.actor} · Digest:{" "}
-                  <span className="digest">{approval.digest}</span>
-                </p>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+      <ApprovalProvenance run={run} />
 
       <section
         id="run-usage"
@@ -2019,6 +2163,113 @@ function RunEvidence({
   );
 }
 
+interface WorkspaceProjectPageProps {
+  readonly session: ProjectPageSession;
+  readonly busy: boolean;
+  readonly error: string | null;
+  readonly retryRequest: ProjectPageRequest | null;
+  readonly selectedProjectId: string | null;
+  readonly onNavigate: (direction: ProjectPageDirection) => void;
+  readonly onRetry: () => void;
+  readonly onSelectProject: (project: ProjectView) => void;
+}
+
+function WorkspaceProjectPage({
+  session,
+  busy,
+  error,
+  retryRequest,
+  selectedProjectId,
+  onNavigate,
+  onRetry,
+  onSelectProject,
+}: WorkspaceProjectPageProps) {
+  const page = session.page;
+  const depth = projectPageDepth(session);
+  const canLoadOlder = canNavigateToOlderProjects(session);
+  const canLoadNewer = canNavigateToNewerProjects(session);
+  const depthCapped = page.hasMore && depth === PROJECT_PAGE_MAX_PAGES;
+
+  return (
+    <section id="workspace-project-page" aria-labelledby="projects-heading" aria-busy={busy}>
+      <div className="sidebar__heading">
+        <div>
+          <h2 id="projects-heading">Loaded project page</h2>
+          <small>Newest-first insertion order</small>
+        </div>
+        <span className="count">{page.projects.length} loaded</span>
+      </div>
+      <p className="run-page__status" role="status">
+        Page {depth} in a pinned session window of at most {PROJECT_PAGE_MAX_PAGES}.
+      </p>
+      {error === null ? null : (
+        <div className="message message--error run-page__error" role="alert">
+          <span>{error}</span>
+          <button
+            type="button"
+            className="button--secondary"
+            disabled={busy || retryRequest === null}
+            onClick={onRetry}
+          >
+            Retry project page
+          </button>
+        </div>
+      )}
+      {page.projects.length === 0 ? (
+        <p className="empty-state">No projects are registered.</p>
+      ) : (
+        <ul className="selection-list">
+          {page.projects.map((project) => (
+            <li key={project.id}>
+              <button
+                type="button"
+                className={selectedProjectId === project.id ? "is-selected" : undefined}
+                aria-pressed={selectedProjectId === project.id}
+                aria-current={selectedProjectId === project.id ? "true" : undefined}
+                onClick={() => onSelectProject(project)}
+              >
+                <span>
+                  <strong>{project.name}</strong>
+                  <small>{project.repository.path}</small>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <nav className="run-page__navigation" aria-label="Loaded project page navigation">
+        <button
+          type="button"
+          className="button--secondary"
+          disabled={busy || !canLoadNewer}
+          onClick={() => onNavigate("newer")}
+        >
+          Newer projects
+        </button>
+        <button
+          type="button"
+          className="button--secondary"
+          disabled={busy || !canLoadOlder}
+          onClick={() => onNavigate("older")}
+        >
+          Older projects
+        </button>
+      </nav>
+      {depthCapped ? (
+        <p className="run-page__guidance">
+          This browser session keeps four project pages. Use <code>icarus project list</code> for
+          the complete catalog beyond this window.
+        </p>
+      ) : page.hasMore ? null : (
+        <p className="run-page__guidance">
+          No older projects remain in this pinned session. Use <code>icarus project list</code> for
+          the complete catalog.
+        </p>
+      )}
+    </section>
+  );
+}
+
 interface WorkspaceRunPageProps {
   readonly session: RunPageSession;
   readonly busy: boolean;
@@ -2084,6 +2335,7 @@ function WorkspaceRunPage({
                 type="button"
                 className={selectedRunId === run.id ? "is-selected" : undefined}
                 aria-pressed={selectedRunId === run.id}
+                aria-current={selectedRunId === run.id ? "true" : undefined}
                 aria-label={`Open full evidence for ${run.task}`}
                 onClick={() => void onSelectRun(run.id)}
               >
@@ -2135,11 +2387,17 @@ function WorkspaceRunPage({
 
 export function App() {
   const [workspace, setWorkspace] = useState<WorkspaceView | null>(null);
+  const [projectPageSession, setProjectPageSession] = useState<ProjectPageSession | null>(null);
+  const [projectPageBusy, setProjectPageBusy] = useState(false);
+  const [projectPageError, setProjectPageError] = useState<string | null>(null);
+  const [projectPageRetryRequest, setProjectPageRetryRequest] = useState<ProjectPageRequest | null>(
+    null,
+  );
   const [runPageSession, setRunPageSession] = useState<RunPageSession | null>(null);
   const [runPageBusy, setRunPageBusy] = useState(false);
   const [runPageError, setRunPageError] = useState<string | null>(null);
   const [runPageRetryRequest, setRunPageRetryRequest] = useState<RunPageRequest | null>(null);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedProject, setSelectedProject] = useState<ProjectView | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunView | null>(null);
   const [selectingRunId, setSelectingRunId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2147,6 +2405,12 @@ export function App() {
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const workspaceRequestRef = useRef<AbortController | null>(null);
   const workspaceGenerationRef = useRef(0);
+  const projectPageSessionRef = useRef<ProjectPageSession | null>(null);
+  const projectPageRequestRef = useRef<{
+    readonly controller: AbortController;
+    readonly request: ProjectPageRequest;
+  } | null>(null);
+  const projectPageGenerationRef = useRef(0);
   const runPageSessionRef = useRef<RunPageSession | null>(null);
   const runPageRequestRef = useRef<{
     readonly controller: AbortController;
@@ -2156,10 +2420,46 @@ export function App() {
   const selectionRequestRef = useRef<AbortController | null>(null);
   const selectionGenerationRef = useRef(0);
   const auxiliaryCancellationRef = useRef<(() => void) | null>(null);
+  const selectedRunRef = useRef<RunView | null>(null);
+
+  useEffect(() => {
+    selectedRunRef.current = selectedRun;
+  }, [selectedRun]);
 
   const registerAuxiliaryCancellation = useCallback((cancel: (() => void) | null): void => {
     auxiliaryCancellationRef.current = cancel;
   }, []);
+
+  const storeProjectPageSession = useCallback((session: ProjectPageSession): void => {
+    projectPageSessionRef.current = session;
+    setProjectPageSession(session);
+  }, []);
+
+  const abortProjectPageRequest = useCallback((): ProjectPageRequest | null => {
+    projectPageGenerationRef.current += 1;
+    const pending = projectPageRequestRef.current;
+    projectPageRequestRef.current = null;
+    pending?.controller.abort();
+    return pending?.request ?? null;
+  }, []);
+
+  const resetProjectPageRequest = useCallback((): void => {
+    abortProjectPageRequest();
+    setProjectPageBusy(false);
+    setProjectPageError(null);
+    setProjectPageRetryRequest(null);
+  }, [abortProjectPageRequest]);
+
+  const pauseProjectPageRequest = useCallback(
+    (message: string): void => {
+      const request = abortProjectPageRequest();
+      if (request === null) return;
+      setProjectPageBusy(false);
+      setProjectPageError(message);
+      setProjectPageRetryRequest(request);
+    },
+    [abortProjectPageRequest],
+  );
 
   const storeRunPageSession = useCallback((session: RunPageSession): void => {
     runPageSessionRef.current = session;
@@ -2201,6 +2501,7 @@ export function App() {
 
   const loadWorkspace = useCallback(
     async (initial = false): Promise<WorkspaceView | null> => {
+      resetProjectPageRequest();
       resetRunPageRequest();
       workspaceRequestRef.current?.abort();
       const controller = new AbortController();
@@ -2213,16 +2514,25 @@ export function App() {
       setWorkspaceError(null);
       try {
         const next = await getWorkspace(controller.signal);
+        const nextProjectPageSession = createProjectPageSession(next.projectPage);
         const nextRunPageSession = createRunPageSession(next.runPage);
         if (controller.signal.aborted || workspaceGenerationRef.current !== generation) return null;
         setWorkspace(next);
+        storeProjectPageSession(nextProjectPageSession);
         storeRunPageSession(nextRunPageSession);
         if (selectionGenerationRef.current === selectionGeneration) {
-          setSelectedProjectId((current) => {
-            if (current !== null && next.projects.some((project) => project.id === current)) {
-              return current;
+          setSelectedProject((current) => {
+            const runProjectId = selectedRunRef.current?.projectId;
+            if (runProjectId !== undefined) {
+              return (
+                next.projectPage.projects.find((project) => project.id === runProjectId) ??
+                (current?.id === runProjectId ? current : null)
+              );
             }
-            return next.projects.at(0)?.id ?? null;
+            if (current === null) return next.projectPage.projects.at(0) ?? null;
+            return (
+              next.projectPage.projects.find((project) => project.id === current.id) ?? current
+            );
           });
         }
         return next;
@@ -2243,8 +2553,74 @@ export function App() {
         }
       }
     },
-    [resetRunPageRequest, storeRunPageSession],
+    [resetProjectPageRequest, resetRunPageRequest, storeProjectPageSession, storeRunPageSession],
   );
+
+  const requestProjectPage = useCallback(
+    async (request: ProjectPageRequest): Promise<void> => {
+      if (workspaceRequestRef.current !== null) return;
+      if (projectPageRequestRef.current !== null) abortProjectPageRequest();
+      const controller = new AbortController();
+      const generation = projectPageGenerationRef.current + 1;
+      projectPageGenerationRef.current = generation;
+      projectPageRequestRef.current = { controller, request };
+      setProjectPageBusy(true);
+      setProjectPageError(null);
+      setProjectPageRetryRequest(null);
+      try {
+        const response = await getProjectPage(request, controller.signal);
+        if (controller.signal.aborted || projectPageGenerationRef.current !== generation) return;
+        const current = projectPageSessionRef.current;
+        if (current === null) {
+          throw new Error("The workspace project page session is unavailable.");
+        }
+        const next = acceptProjectPage(current, request, response);
+        if (controller.signal.aborted || projectPageGenerationRef.current !== generation) return;
+        storeProjectPageSession(next);
+        setWorkspace((value) => (value === null ? value : { ...value, projectPage: next.page }));
+        setSelectedProject((project) => {
+          const runProjectId = selectedRunRef.current?.projectId;
+          if (runProjectId !== undefined) {
+            return (
+              next.page.projects.find((entry) => entry.id === runProjectId) ??
+              (project?.id === runProjectId ? project : null)
+            );
+          }
+          if (project === null) return next.page.projects.at(0) ?? null;
+          return next.page.projects.find((entry) => entry.id === project.id) ?? project;
+        });
+      } catch (error) {
+        if (!controller.signal.aborted && projectPageGenerationRef.current === generation) {
+          setProjectPageError(errorMessage(error));
+          setProjectPageRetryRequest(request);
+        }
+      } finally {
+        if (projectPageRequestRef.current?.controller === controller) {
+          projectPageRequestRef.current = null;
+        }
+        if (projectPageGenerationRef.current === generation) setProjectPageBusy(false);
+      }
+    },
+    [abortProjectPageRequest, storeProjectPageSession],
+  );
+
+  const navigateProjectPage = useCallback(
+    (direction: ProjectPageDirection): void => {
+      const current = projectPageSessionRef.current;
+      if (current === null) return;
+      try {
+        void requestProjectPage(projectPageRequest(current, direction));
+      } catch (error) {
+        setProjectPageError(errorMessage(error));
+        setProjectPageRetryRequest(null);
+      }
+    },
+    [requestProjectPage],
+  );
+
+  const retryProjectPage = useCallback((): void => {
+    if (projectPageRetryRequest !== null) void requestProjectPage(projectPageRetryRequest);
+  }, [projectPageRetryRequest, requestProjectPage]);
 
   const requestRunPage = useCallback(
     async (request: RunPageRequest): Promise<void> => {
@@ -2302,16 +2678,20 @@ export function App() {
   useEffect(() => {
     void loadWorkspace(true);
     return () => {
+      abortProjectPageRequest();
       abortRunPageRequest();
       workspaceGenerationRef.current += 1;
       workspaceRequestRef.current?.abort();
       workspaceRequestRef.current = null;
     };
-  }, [abortRunPageRequest, loadWorkspace]);
+  }, [abortProjectPageRequest, abortRunPageRequest, loadWorkspace]);
 
   useEffect(() => {
     const handleVisibility = (): void => {
       if (!pageIsVisible()) {
+        pauseProjectPageRequest(
+          "Project-page navigation paused while this document is hidden. Retry when it is visible.",
+        );
         pauseRunPageRequest(
           "Run-page navigation paused while this document is hidden. Retry when it is visible.",
         );
@@ -2319,7 +2699,7 @@ export function App() {
     };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [pauseRunPageRequest]);
+  }, [pauseProjectPageRequest, pauseRunPageRequest]);
 
   useEffect(
     () => () => {
@@ -2328,18 +2708,31 @@ export function App() {
     [cancelPendingRunSelection],
   );
 
-  const selectedProject =
-    workspace?.projects.find((project) => project.id === selectedProjectId) ?? null;
+  const selectedProjectId = selectedRun?.projectId ?? selectedProject?.id ?? null;
   const projectRuns =
-    runPageSession?.page.runs.filter((run) => run.projectId === selectedProjectId) ?? [];
+    runPageSession?.page.runs.filter((run) => run.projectId === selectedProject?.id) ?? [];
 
   const mergeRun = useCallback(async (run: RunView): Promise<void> => {
-    setSelectedRun((current) => (current?.id === run.id ? newestRun(current, run) : current));
+    setSelectedRun((current) => {
+      const next = current?.id === run.id ? newestRun(current, run) : current;
+      selectedRunRef.current = next;
+      return next;
+    });
   }, []);
 
   const openRun = useCallback(async (run: RunView): Promise<void> => {
-    setSelectedRun((current) => (current?.id === run.id ? newestRun(current, run) : run));
-    setSelectedProjectId(run.projectId);
+    selectedRunRef.current = run;
+    setSelectedRun((current) => {
+      const next = current?.id === run.id ? newestRun(current, run) : run;
+      selectedRunRef.current = next;
+      return next;
+    });
+    setSelectedProject((current) => {
+      const loaded = projectPageSessionRef.current?.page.projects.find(
+        (project) => project.id === run.projectId,
+      );
+      return loaded ?? (current?.id === run.projectId ? current : null);
+    });
   }, []);
 
   const openCreatedRun = useCallback(
@@ -2361,6 +2754,9 @@ export function App() {
   const selectRun = useCallback(
     async (runId: string): Promise<void> => {
       if (selectedRun?.id !== runId) auxiliaryCancellationRef.current?.();
+      pauseProjectPageRequest(
+        "Project-page navigation was cancelled when the selected run changed. Retry to continue.",
+      );
       pauseRunPageRequest(
         "Run-page navigation was cancelled when the selected run changed. Retry to continue.",
       );
@@ -2385,30 +2781,38 @@ export function App() {
         if (selectionGenerationRef.current === generation) setSelectingRunId(null);
       }
     },
-    [openRun, pauseRunPageRequest, selectedRun?.id],
+    [openRun, pauseProjectPageRequest, pauseRunPageRequest, selectedRun?.id],
   );
 
   const selectProject = useCallback(
-    (projectId: string): void => {
+    (project: ProjectView): void => {
       auxiliaryCancellationRef.current?.();
+      pauseProjectPageRequest(
+        "Project-page navigation was cancelled when the selected project changed. Retry to continue.",
+      );
       pauseRunPageRequest(
         "Run-page navigation was cancelled when the selected project changed. Retry to continue.",
       );
       cancelPendingRunSelection();
-      setSelectedProjectId(projectId);
+      setSelectedProject(project);
+      selectedRunRef.current = null;
       setSelectedRun(null);
     },
-    [cancelPendingRunSelection, pauseRunPageRequest],
+    [cancelPendingRunSelection, pauseProjectPageRequest, pauseRunPageRequest],
   );
 
   const closeRun = useCallback((): void => {
     auxiliaryCancellationRef.current?.();
+    pauseProjectPageRequest(
+      "Project-page navigation was cancelled when the selected run changed. Retry to continue.",
+    );
     pauseRunPageRequest(
       "Run-page navigation was cancelled when the selected run changed. Retry to continue.",
     );
     cancelPendingRunSelection();
+    selectedRunRef.current = null;
     setSelectedRun(null);
-  }, [cancelPendingRunSelection, pauseRunPageRequest]);
+  }, [cancelPendingRunSelection, pauseProjectPageRequest, pauseRunPageRequest]);
 
   const refreshWorkspace = useCallback(async (): Promise<void> => {
     cancelPendingRunSelection();
@@ -2417,24 +2821,17 @@ export function App() {
 
   const projectCreated = async (project: ProjectView): Promise<void> => {
     cancelPendingRunSelection();
-    setWorkspace((current) =>
-      current === null
-        ? current
-        : {
-            ...current,
-            projects: [
-              ...current.projects.filter((candidate) => candidate.id !== project.id),
-              project,
-            ],
-          },
-    );
-    setSelectedProjectId(project.id);
+    setSelectedProject(project);
+    selectedRunRef.current = null;
     setSelectedRun(null);
     await loadWorkspace();
   };
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#workspace-main">
+        Skip to workspace content
+      </a>
       <header className="app-header">
         <div>
           <p className="eyebrow">Loopback-only control surface</p>
@@ -2465,17 +2862,17 @@ export function App() {
       )}
 
       {loading ? (
-        <main className="loading-state" aria-live="polite">
+        <main id="workspace-main" className="loading-state" aria-live="polite" tabIndex={-1}>
           <div className="spinner" aria-hidden="true" />
           <p>Loading persisted local state…</p>
         </main>
       ) : workspace === null ? (
-        <main className="loading-state">
+        <main id="workspace-main" className="loading-state" tabIndex={-1}>
           <h2>Workspace unavailable</h2>
           <p>Start the local API on 127.0.0.1:8787, then retry.</p>
         </main>
       ) : (
-        <main className="workspace-layout">
+        <main id="workspace-main" className="workspace-layout" tabIndex={-1}>
           <aside className="sidebar">
             <section aria-labelledby="capabilities-heading">
               <h2 id="capabilities-heading">Capabilities</h2>
@@ -2486,33 +2883,23 @@ export function App() {
               </div>
             </section>
 
-            <section aria-labelledby="projects-heading">
-              <div className="sidebar__heading">
-                <h2 id="projects-heading">Projects</h2>
-                <span className="count">{workspace.projects.length}</span>
-              </div>
-              {workspace.projects.length === 0 ? (
-                <p className="empty-state">No projects are registered.</p>
-              ) : (
-                <ul className="selection-list">
-                  {workspace.projects.map((project) => (
-                    <li key={project.id}>
-                      <button
-                        type="button"
-                        className={selectedProjectId === project.id ? "is-selected" : undefined}
-                        aria-pressed={selectedProjectId === project.id}
-                        onClick={() => selectProject(project.id)}
-                      >
-                        <span>
-                          <strong>{project.name}</strong>
-                          <small>{project.repository.path}</small>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+            {projectPageSession === null ? (
+              <section id="workspace-project-page" aria-labelledby="projects-heading">
+                <h2 id="projects-heading">Loaded project page</h2>
+                <p className="empty-state">The bounded project page is unavailable.</p>
+              </section>
+            ) : (
+              <WorkspaceProjectPage
+                session={projectPageSession}
+                busy={projectPageBusy || refreshing}
+                error={projectPageError}
+                retryRequest={projectPageRetryRequest}
+                selectedProjectId={selectedProjectId}
+                onNavigate={navigateProjectPage}
+                onRetry={retryProjectPage}
+                onSelectProject={selectProject}
+              />
+            )}
 
             {runPageSession === null ? (
               <section id="workspace-run-page" aria-labelledby="all-runs-heading">

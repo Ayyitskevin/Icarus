@@ -9,9 +9,7 @@ import {
   DEFAULT_SANDBOX_LIMITS,
   IcarusError,
   type IcarusRuntime,
-  type ProjectRecord,
   parseProviderBaseUrl,
-  type RepositoryRecord,
 } from "@icarus/core";
 
 import {
@@ -21,6 +19,7 @@ import {
   runEventHistoryQuery,
   runEventsQuery,
   runVerificationAttemptsQuery,
+  workspaceProjectPageQuery,
   workspaceRunPageQuery,
 } from "./contracts.js";
 import {
@@ -30,11 +29,16 @@ import {
   presentRunEventHistoryPage,
   presentRunEventPage,
   presentRunVerificationAttempts,
+  presentWorkspaceProjectPage,
   presentWorkspaceRunPage,
 } from "./present.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
+export const MAX_JSON_RESPONSE_BYTES = 8 * 1024 * 1024;
+const MAX_ERROR_MESSAGE_BYTES = 4 * 1024;
 const API_PREFIX = "/api/";
+const INTERNAL_ERROR_RESPONSE =
+  '{"error":{"code":"INTERNAL_ERROR","message":"The local workspace request failed."}}\n';
 
 export interface WorkspaceServerOptions {
   readonly runtime: IcarusRuntime;
@@ -62,14 +66,32 @@ function headers(contentType: string): Record<string, string> {
   };
 }
 
+export function serializeJsonResponse(value: unknown): string {
+  const body = `${JSON.stringify(value)}\n`;
+  if (Buffer.byteLength(body, "utf8") > MAX_JSON_RESPONSE_BYTES) {
+    throw new IcarusError(
+      "RESPONSE_TOO_LARGE",
+      "The local workspace response exceeds the 8 MiB JSON limit",
+    );
+  }
+  return body;
+}
+
 function json(response: ServerResponse, status: number, value: unknown): void {
+  const body = serializeJsonResponse(value);
   response.writeHead(status, headers("application/json; charset=utf-8"));
-  response.end(`${JSON.stringify(value)}\n`);
+  response.end(body);
+}
+
+function internalError(response: ServerResponse): void {
+  response.writeHead(500, headers("application/json; charset=utf-8"));
+  response.end(INTERNAL_ERROR_RESPONSE);
 }
 
 function errorStatus(error: IcarusError): number {
   if (error.code === "NOT_FOUND") return 404;
   if (error.code === "REQUEST_TOO_LARGE") return 413;
+  if (error.code === "RESPONSE_TOO_LARGE") return 500;
   if (error.code === "UNSUPPORTED_MEDIA_TYPE") return 415;
   if (
     error.code.includes("CONFLICT") ||
@@ -127,12 +149,16 @@ function safeError(error: unknown): { readonly status: number; readonly body: un
     /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(runId)
       ? runId
       : undefined;
+  const message =
+    Buffer.byteLength(trusted.message, "utf8") <= MAX_ERROR_MESSAGE_BYTES
+      ? trusted.message
+      : "The local workspace request failed with an oversized error message.";
   return {
     status: errorStatus(trusted),
     body: {
       error: {
         code: trusted.code,
-        message: trusted.message,
+        message,
         ...(safeRunId === undefined ? {} : { runId: safeRunId }),
       },
     },
@@ -270,21 +296,6 @@ function disconnectSignal(
   };
 }
 
-function findProject(projects: readonly ProjectRecord[], projectId: string): ProjectRecord {
-  const project = projects.find((candidate) => candidate.id === projectId);
-  if (project === undefined) throw new IcarusError("NOT_FOUND", "Project was not found");
-  return project;
-}
-
-function findRepository(
-  repositories: readonly RepositoryRecord[],
-  repositoryId: string,
-): RepositoryRecord {
-  const repository = repositories.find((candidate) => candidate.id === repositoryId);
-  if (repository === undefined) throw new IcarusError("NOT_FOUND", "Repository was not found");
-  return repository;
-}
-
 function presentRunById(options: WorkspaceServerOptions, runId: string): Record<string, unknown> {
   const snapshot = options.runtime.service.presentationSnapshot(runId);
   const project = options.runtime.service.getProject(snapshot.run.projectId);
@@ -292,8 +303,6 @@ function presentRunById(options: WorkspaceServerOptions, runId: string): Record<
 }
 
 function workspaceSnapshot(options: WorkspaceServerOptions): Record<string, unknown> {
-  const repositories = options.runtime.service.listRepositories();
-  const projects = options.runtime.service.listProjects();
   return {
     capabilities: {
       server: { status: "available", binding: "loopback" },
@@ -313,9 +322,7 @@ function workspaceSnapshot(options: WorkspaceServerOptions): Record<string, unkn
         inheritedRuntimePlatform: process.platform === "linux" ? "linux_supported" : "unsupported",
       },
     },
-    projects: projects.map((project) =>
-      presentProject(project, findRepository(repositories, project.repositoryId)),
-    ),
+    projectPage: presentWorkspaceProjectPage(options.runtime.service.openWorkspaceProjectPage()),
     runPage: presentWorkspaceRunPage(options.runtime.service.openWorkspaceRunPage()),
   };
 }
@@ -336,11 +343,18 @@ async function routeApi(
     json(response, 200, workspaceSnapshot(options));
     return true;
   }
+  if (method === "GET" && pathname === "/api/projects") {
+    const query = workspaceProjectPageQuery(searchParams);
+    const page =
+      query.kind === "new"
+        ? options.runtime.service.openWorkspaceProjectPage()
+        : options.runtime.service.listWorkspaceProjectPage(query.before, query.snapshot);
+    json(response, 200, presentWorkspaceProjectPage(page));
+    return true;
+  }
   if (method === "POST" && pathname === "/api/projects") {
     const input = projectRequest(await readJson(request));
-    if (
-      options.runtime.service.listProjects().some((project) => project.name === input.project.name)
-    ) {
+    if (options.runtime.service.findProjectByName(input.project.name) !== null) {
       throw new IcarusError("PROJECT_NAME_CONFLICT", "The project name is already registered");
     }
     const projectDefinition = {
@@ -350,10 +364,8 @@ async function routeApi(
       sandbox: { image: input.project.sandboxImage, ...DEFAULT_SANDBOX_LIMITS },
       ceiling: DEFAULT_CEILING,
     };
-    const existingRepository = options.runtime.service
-      .listRepositories()
-      .find((repository) => repository.name === input.repository.name);
-    if (existingRepository === undefined) {
+    const existingRepository = options.runtime.service.findRepositoryByName(input.repository.name);
+    if (existingRepository === null) {
       await assertRegistrationStateSeparation(options.stateRoot, input.repository.path);
       const created = await options.runtime.service.registerRepositoryProject({
         repository: input.repository,
@@ -411,7 +423,6 @@ async function routeApi(
   }
   if (method === "POST" && pathname === "/api/runs") {
     const input = runDraftRequest(await readJson(request));
-    const project = findProject(options.runtime.service.listProjects(), input.projectId);
     const providerEndpoint = parseProviderBaseUrl(input.provider.baseUrl);
     if (providerEndpoint.locality !== "loopback") {
       throw new IcarusError(
@@ -425,7 +436,7 @@ async function routeApi(
       baseUrl: input.provider.baseUrl,
     });
     const run = options.runtime.service.createRunDraft({
-      projectName: project.name,
+      projectId: input.projectId,
       task: input.task,
       target: input.target,
       provider,
@@ -556,7 +567,11 @@ export function createWorkspaceServer(options: WorkspaceServerOptions): Server {
         return;
       }
       const safe = safeError(error);
-      json(response, safe.status, safe.body);
+      try {
+        json(response, safe.status, safe.body);
+      } catch {
+        if (!response.headersSent) internalError(response);
+      }
     }
   });
 }

@@ -71,6 +71,188 @@ the reliability slice without claiming a broader milestone is complete.
       passed its real `quality` job at exact implementation head
       `f8fe03e399fb46f197bbcbc0df8f1edabbe2e0c9`
 
+## Native-host acceptance candidate
+
+ADR 0022 and its manual workflow are a local candidate on 2026-07-22. This
+records a read-only portability gate; it does not claim native acceptance until
+both hosted jobs pass at the exact published implementation commit.
+
+### Portable boundary and authority
+
+- [x] Use explicit `macos-15` arm64 and `windows-2025` x64 jobs, exact Node
+      and pnpm versions, immutable action commits, frozen dependencies,
+      `contents: read`, exact-SHA checkout, no secrets or shared cache, and
+      manual dispatch only
+- [x] Fail closed on workflow-byte, action, command, host, toolchain, permission,
+      trigger, or cache drift through the repository-owned native policy
+- [x] Exercise portable policy/provider/unit boundaries and a real native state
+      root beneath the user profile
+- [x] Exercise the portable composition path through a temporary Git repository,
+      loopback HTTP and Ollama fixtures, project import, committed-tree context
+      preview, persisted draft restart, planning, bounded evidence, and unchanged
+      source state
+- [x] Add no product schema/runtime change, approval, execution, arbitrary
+      command, repository mutation, credential, push, deployment, or public
+      endpoint authority
+
+### Local evidence and remaining host gate
+
+- [x] Fresh combined `pnpm check`: three workflows validated; formatting 95
+      files; 169 unit/provider and 44 integration tests; evaluation 5 passed,
+      0 failed, 5 unsupported; 118 security tests plus 49 static assertions; and
+      a 23-module production build
+- [x] Native workflow policy/security tests and the selected portable composition
+      smoke pass locally on Linux without claiming native-host execution
+- [x] Combined cached-Chromium acceptance passes with zero browser errors,
+      external requests, or source-state changes
+- [ ] Publish the exact implementation head, manually dispatch both native jobs,
+      and record each run URL, runner image version, commit, and conclusion
+
+## Eighth M3 candidate: bounded project catalog and JSON transport
+
+ADR 0021 and its implementation are a local candidate on 2026-07-22. This
+records one bounded read projection and a shared response fail-safe; it does not
+accept the ADR, widen browser authority, or close the inherited ADR 0010 hold.
+
+### Pinned joined project pages
+
+- [x] Replace the workspace's complete project collection with one newest-first
+      page of at most 12 joined project/repository records and strict
+      `before` plus `snapshot` continuation
+- [x] Use one intrinsic-project-rowid `LIMIT 13` range query and one repository
+      primary-key join, with no project/repository N+1 hydration or complete-list
+      scan
+- [x] Gate persisted storage classes, text bytes, and strict JSON before parsing;
+      cap checks at 1 MiB and sandbox/ceiling profiles at 16 KiB, validate exact
+      nested keys and policy, and enforce the JSON caps on supported writes
+- [x] Present only allowlisted project/repository fields and omit repository
+      device/inode identity even though the joined store record validates it
+- [x] Replace project pages in a four-position browser cursor window; reject
+      stale responses, abort superseded/lifecycle reads, retain the last success
+      for retry, and preserve an independently selected project
+- [x] Use exact indexed repository/project-name and project-ID lookups for
+      creation and draft planning instead of complete collection scans, while
+      retaining the same SQL storage/byte preflight on direct hydration
+
+### Aggregate response safety and scope
+
+- [x] Serialize every JSON body, including its trailing newline, before sending
+      headers; reject more than 8 MiB with fixed `RESPONSE_TOO_LARGE` copy and
+      never write a partial success body; cap trusted error messages and retain
+      a fixed pre-serialized non-recursive internal-error fallback
+- [x] Add no schema/migration, dependency, data deletion, Git/source read,
+      provider call, browser approval/execution, command, commit, push,
+      deployment, or release authority
+- [x] Pass 50 focused store/client/response/service/API tests, the API smoke with
+      unchanged source, and fresh full `pnpm check`: workflow validation;
+      formatting 92 files; lint/typecheck; 169 unit/provider and 44 integration
+      tests; evaluation 5 passed, 0 failed, 5 unsupported; 109 security tests
+      plus 49 static assertions; and a 23-module production build
+- [x] Complete cached-Chromium acceptance over 50 projects: 12-row pages,
+      failure/retry, request contention, hidden/selection cancellation,
+      delayed-success rejection, four retained pages, an off-page run/project
+      ownership refresh, keyboard skip navigation, zero browser errors/external
+      requests, and unchanged SQLite/source state
+- [ ] Complete independent final review and exact published-head hosted CI
+      before accepting ADR 0021
+
+## Seventh M3 candidate: bounded persisted diff and run-status review
+
+ADR 0020 and its implementation are a local candidate on 2026-07-22. This
+records only review of the already persisted one-file diff. Local real-browser
+acceptance and independent review are complete; exact published-head hosted CI
+remains open.
+
+### Bounded presentation and truthful status
+
+- [x] Preserve the normal `diff: string | null` contract while adding an exact
+      absent/available/outside-browser-bound metadata union
+- [x] Show no more than 262,144 complete UTF-8 diff bytes and never return a
+      prefix, suffix, or other partial patch
+- [x] Require paired diff/verification presence, project-ceiling compliance,
+      one exact changed target, canonical digest, exact displayed-byte rehash,
+      one patch header, and at least one hunk/change before claiming statistics
+- [x] Put exact persisted run state, verification outcome, path, bytes, physical
+      patch lines, additions, deletions, hunks, digest, and provenance together
+- [x] Render the patch in one bounded-height React text node, keep hostile HTML
+      inert, use a focusable fixed anchor, and expose no action control
+- [x] Map `verification.completed` to `#run-diff` while preserving
+      `checkpoint.saved` at verification and the distinct warning/approval
+      anchors from ADR 0019
+
+### Scope and evidence
+
+- [x] Add no route, schema, store/service change, database query, Git/source
+      read, provider call, poller, browser mutation, command, commit, push, or
+      deployment authority
+- [x] Unit and API coverage prove exact shapes, patch statistics, no-partial
+      oversized handling, inert HTML-like text, sanitized corruption failures,
+      and unchanged SQLite/repository fingerprints
+- [x] Security tests pass with static response-cap, fail-closed validation,
+      no-read-authority, text-only UI, and fixed-anchor assertions
+- [x] Complete real-browser acceptance with explicit cached Chromium 1228: the
+      compiled workspace rendered hostile patch text inertly, moved focus by
+      Tab to the labelled patch region, scrolled it with PageDown, followed the
+      fixed evidence anchor, cancelled held requests, made zero external
+      requests, reported zero browser errors, and preserved SQLite/source state
+- [x] Run the full local `pnpm check`: workflow validation, formatting, lint,
+      typecheck, unit/provider/integration/evaluation/security suites, and the
+      Vite production build all completed successfully
+- [x] Complete independent review with no blocker, high, or medium findings
+- [ ] Complete exact published-head hosted CI before accepting ADR 0020
+
+## Sixth M3 candidate: bounded approval provenance
+
+Status values are evidence claims. ADR 0019 and its implementation are present
+as a local candidate on 2026-07-22. This records only the bounded ordinary
+approval projection; the full local gate, independent review, and exact
+published-head hosted CI remain required before acceptance.
+
+### Bounded projection and truthful browser copy
+
+- [x] Retain at most the newest 12 approval rows in the ordinary selected-run
+      response, ordered oldest to newest within that suffix, with an explicit
+      fixed limit, loaded count, and earlier-row exclusion flag
+- [x] Query only approval run ID, kind, digest, actor, decision, and timestamp;
+      preflight all six direct columns with SQLite storage/byte caps, validate at
+      most 13 returned rows, and fail closed on malformed storage class, enum,
+      digest, actor, credential-shaped content, or timestamp
+- [x] Add and prove the per-run `(run_id)` index plus reverse rowid seek so the
+      two-second selected-run poll never scans global approval history and
+      same-timestamp random UUIDs cannot reorder append history
+- [x] Reconstruct an exact presenter allowlist and omit approval IDs, rowids,
+      payloads, private paths, commands, provider material, and errors
+- [x] Label actors and digests as recorded provenance rather than current
+      authentication or byte-integrity proof; show truncation and complete-CLI
+      guidance without claiming a total
+- [x] Keep warnings and approval provenance on distinct stable evidence anchors,
+      semantic lists and times, focusable targets, and React text rendering
+
+### Scope and evidence
+
+- [x] Preserve complete CLI history and one coherent SQLite read transaction
+- [x] Add only one backwards-compatible approval index, with no table/column
+      migration, data write, event, Git/source read, provider call, browser
+      approval, execution, command, commit, push, or deployment
+- [x] Require backup and explicit operator approval before building the index
+      against existing non-test state
+- [x] Prove an indexed seek with no history-sized scan plus fixed
+      returned/decoded approval rows and response size
+- [x] Cover 0/1/12/13-row suffixes, all kinds and decisions, same-timestamp
+      append ordering with adversarial UUIDs, multibyte/control/format/line-
+      separator actor rejection, impossible kind/decision pairs, malformed
+      and oversized persisted fields, the exact query plan, API coverage,
+      omitted database IDs, client anchor routing, duplicate display identity,
+      inert hostile-actor rendering, the no-env/invalid/exact CLI migration
+      gate with byte-identical refused state, and static projection/presenter
+      guards
+- [x] Run the fresh full local gate: 89 files passed formatting; lint had no
+      errors; typecheck passed; 158 unit/provider tests and 41 integration tests
+      passed; evaluation reported 5 passed and 5 honestly unsupported; 109
+      security tests plus 37 static assertions passed; and Vite built 22 modules
+- [x] Complete independent final review with no blocker, high, or medium finding
+- [ ] Require exact published-head hosted CI before acceptance
+
 ## Fifth M3 slice: bounded verification-attempt provenance
 
 Status values are evidence claims. ADR 0018 and its implementation are complete,
@@ -730,7 +912,9 @@ Final adversarial candidate local evidence on 2026-07-20:
 The inherited ADR 0010 security hold remains separate from local feature work.
 ADR 0016 implements only bounded older event metadata for the third M3 slice.
 ADR 0017 implements only bounded workspace-wide run summaries for the fourth.
-Project/repository enumeration, selected-run approval pagination, file/status
-views, richer diff or payload-bearing history, patch materialization, browser
-approval, and execution remain later, explicitly reviewed expansions. See
-`docs/ROADMAP.md`.
+ADR 0019 bounds only the ordinary newest approval suffix. ADR 0020 presents only
+the already persisted one-file diff. ADR 0021 bounds the project/repository
+catalog and aggregate JSON transport. Older approval pagination, current
+file/status views, multi-file or payload-bearing diff/history, patch
+materialization, browser approval, and execution remain
+later, explicitly reviewed expansions. See `docs/ROADMAP.md`.

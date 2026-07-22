@@ -1,0 +1,85 @@
+name: native-acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-acceptance-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS 15 arm64
+            os: macos-15
+            platform: darwin
+            architecture: arm64
+          - label: Windows Server 2025 x64
+            os: windows-2025
+            platform: win32
+            architecture: x64
+    env:
+      ICARUS_NATIVE_EXPECTED_PLATFORM: ${{ matrix.platform }}
+      ICARUS_NATIVE_EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
+    steps:
+      - name: Check out the exact dispatched commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Install pnpm from packageManager
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          run_install: false
+
+      - name: Install exact Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22.23.0
+
+      - name: Validate the native acceptance policy and host
+        run: pnpm exec node scripts/native-acceptance-policy.mjs --host
+
+      - name: Install pinned workflow validator
+        run: pnpm workflow:setup
+
+      - name: Validate every workflow definition
+        run: pnpm workflow:lint
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Lint source
+        run: pnpm lint
+
+      - name: Type-check portable packages
+        run: pnpm typecheck
+
+      - name: Run portable native, provider, and unit boundaries
+        run: pnpm exec vitest run tests/native tests/provider tests/unit/api-response.test.ts tests/unit/context-preview.test.ts tests/unit/policy.test.ts tests/unit/state-machine.test.ts tests/unit/store.test.ts tests/unit/verification-provenance.test.ts tests/unit/workspace-history-nav.test.ts tests/unit/workspace-live-poll.test.ts tests/unit/workspace-presenter.test.ts tests/unit/workspace-project-page-nav.test.ts tests/unit/workspace-run-page-nav.test.ts tests/unit/workspace-verification-attempts.test.ts --reporter=dot
+
+      - name: Run portable draft-planning admission cases
+        run: pnpm exec vitest run tests/unit/service-draft.test.ts --testNamePattern="on (darwin|win32)" --reporter=dot
+
+      - name: Run portable workspace composition smoke
+        run: pnpm exec vitest run tests/integration/local-workspace-api.test.ts --testNamePattern="persists project, context preview, draft, plan, and evidence without touching source" --reporter=dot
+
+      - name: Run static security assertions
+        run: node scripts/security-check.mjs
+
+      - name: Build all packages
+        run: pnpm build

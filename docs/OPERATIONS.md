@@ -146,15 +146,28 @@ Event pages advance strictly after an exclusive sequence cursor and use one
 fixed service-owned maximum. Operators see only sequence, type, a
 host-controlled label, timestamp, and a fixed host-generated `evidenceSection`;
 event payloads are unavailable through this route. Separately, each full run
-response reads its run row, approvals, and the 200 most recent timeline metadata
-rows from one coherent SQLite snapshot. The append-only sequence high-water mark
-is the event cursor and total; CLI history remains complete. When an action's
-prerequisite falls before the bounded tail and the retained suffix cannot
-re-establish it, the browser reports `unknown` and points the operator to CLI
-history instead of guessing. Live links target only fixed Icarus-generated
-evidence anchors, not repository, provider, event, or check text. Only event
-history has the fixed bound; existing approval lists and workspace-wide run
-enumeration remain unpaginated local reads.
+response reads its run row, the newest 12 validated approvals, and the 200 most
+recent timeline metadata rows from one coherent SQLite snapshot. Approval
+coverage and the append-only event high-water mark make both suffixes explicit;
+CLI history remains complete. When an earlier prerequisite falls outside a
+retained suffix, the browser reports truncation or `unknown` and points the
+operator to CLI history instead of guessing. Live links target only fixed
+Icarus-generated evidence anchors, not repository, provider, event, or check
+text. Approval response size is bounded, and a history-sized scan is forbidden:
+`approvals_by_run` must appear in
+`EXPLAIN QUERY PLAN`. Before the first candidate build opens an existing state
+database, take a timestamped backup and explicitly approve the additive index
+build; tests create it only in disposable state. Startup first opens existing
+state read-only, validates the exact index shape, and refuses a missing or
+misdefined index before WAL mode or schema setup can mutate the database.
+
+For an existing state root, stop every Icarus process, back up the SQLite
+database together with any `-wal` and `-shm` companions, and verify the backup
+before migration. Then run exactly one normal CLI invocation with
+`ICARUS_APPROVE_SCHEMA_MIGRATION=approval-index-v1`. Without that exact value,
+startup fails with `DATABASE_MIGRATION_REQUIRED`; any other value fails as
+`INVALID_DATABASE_CONFIGURATION`. Remove the variable immediately after the
+index exists. This is an operator gate, not a persistent configuration.
 
 The accepted ADR 0016 implementation adds an explicit selected-run
 older-activity panel pinned to the coherent run revision, backed by a direct
@@ -174,9 +187,9 @@ window.
 
 No migration, dependency install, daemon, watcher, Server-Sent Events, or
 WebSocket setup accompanies these read-only slices. They add no browser approval,
-mutation, execution, command, commit, push, or deployment authority. File/status,
-richer diff or payload-bearing history, and action controls remain deferred, and
-the ADR 0010 release hold remains in force.
+mutation, execution, command, commit, push, or deployment authority. Current
+file/status, multi-file or payload-bearing diff/history, and action controls
+remain deferred, and the ADR 0010 release hold remains in force.
 
 ## Fifth M3 verification-attempt view
 
@@ -218,6 +231,69 @@ uses the verification section as a focus fallback when the launcher is disabled.
 This implementation adds one GET-only read and inline presentation. It does not
 alter the payload-free event APIs, schema, dependencies, source repository,
 browser action authority, guarded CLI, or ADR 0010 hold.
+
+## Seventh M3 persisted diff review
+
+The selected-run page now groups the persisted run state, latest verification
+outcome, recorded changed path, diff size, physical patch lines, additions,
+deletions, hunks, digest, and digest provenance under “Persisted diff review.”
+This is stored evidence only; it is not current repository status.
+
+For an available patch, `displayed text rehash match` means the local API hashed
+the exact displayed string and it matched the recorded verification digest. It
+does not mean Icarus re-read or revalidated the imported checkout or private
+worktree. Review actions still perform their independent CLI revalidation.
+
+The browser shows complete patch text only at or below 256 KiB. If the status is
+`metadata only`, no patch prefix or suffix was returned. Inspect the complete
+persisted evidence with:
+
+```text
+icarus run status <run-id>
+```
+
+`not produced` means no persisted verification diff exists; it does not mean a
+check passed. A sanitized `DATABASE_ERROR` indicates inconsistent persisted
+diff/verification evidence and requires operator investigation rather than a
+browser workaround.
+
+This view reuses the ordinary selected-run read and adds no route, Git/source
+read, mutation, or action. `verification completed` activity navigates to the
+fixed diff section; `checkpoint saved` continues to navigate to verification.
+
+## Bounded project catalog and JSON transport
+
+The workspace loads at most 12 newest projects. Use the explicit Newer/Older
+buttons within the four-page browser window. The membership snapshot does not
+include projects created after the page session opened; Refresh workspace or a
+successful project registration opens a new newest session. Use
+`icarus project list` when complete catalog output is required.
+
+Direct project and repository lookups use the same storage-class and byte
+projections as catalog pages; they do not decode an unrestricted persisted
+configuration first. While a run is visible, paging or refreshing resolves only
+that run's owning project. An unrelated project is never marked active merely
+because it appears on the newly loaded page.
+
+`INVALID_PROJECT_CURSOR` means the pinned session is stale, malformed, or was
+invalidated by unsupported external SQLite deletion/replacement/`VACUUM`; open
+a fresh page rather than editing cursor values. `DATABASE_ERROR` while loading
+a project page means selected persisted identity/configuration failed its
+storage, byte, JSON, or policy checks. Preserve and back up state for operator
+inspection; do not patch the database in place.
+
+Every API JSON body is serialized before headers and may be at most 8 MiB,
+including its newline. `RESPONSE_TOO_LARGE` is a fixed HTTP 500 safety response,
+not permission to raise the limit or return partial evidence. Use the narrower
+CLI listing/status command and investigate which persisted presentation
+exceeded its intended field bound. Trusted error text is capped at 4 KiB and an
+oversized or unserializable failure uses a fixed pre-serialized internal-error
+response, so the response fail-safe cannot recursively exceed its own bound.
+Static assets are not part of this JSON cap.
+
+The first keyboard focus in the workspace is a skip link. Press Enter to move
+focus to the main workspace landmark; selected project and run controls expose
+their current/pressed state without changing browser authority.
 
 ## Preflight
 

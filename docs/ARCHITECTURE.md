@@ -269,14 +269,15 @@ or runtime dependency.
    maximum. Each event exposes only sequence, type, a fixed host-controlled label,
    timestamp, and a fixed host-generated `evidenceSection`; `payload_json` is
    neither returned nor used as browser copy.
-4. The full run presenter reads its run row, approvals, and the 200 most recent
-   timeline metadata rows inside one SQLite read transaction/snapshot. It uses
-   the append-only sequence high-water mark as both `eventCursor` and timeline
-   total without decoding or scanning every event payload. Action presentation
-   is derived only from that bounded tail. Event metadata pages are separate
-   requests; their exclusive sequence cursor makes successive pages monotonic
-   and overlap-free. The CLI history path continues to read the complete event
-   history and payloads. If the bounded suffix omits the prerequisite for an
+4. The full run presenter reads its run row, newest 12 validated approvals, and
+   200 most recent timeline metadata rows inside one SQLite read transaction.
+   Approval coverage makes earlier decisions explicit. The append-only sequence
+   high-water mark is both `eventCursor` and timeline total without decoding or
+   scanning every event payload. Action presentation is derived only from that
+   bounded tail. Event metadata pages are separate requests; their exclusive
+   sequence cursor makes successive pages monotonic and overlap-free. CLI
+   history continues to expose complete approval and event history, including
+   event payloads. If the bounded suffix omits the prerequisite for an
    action transition, the browser reports the action status as `unknown` with
    CLI guidance instead of guessing `proposed`, `cancelled`, or `reverted`.
 5. React short-polls only the selected run while `document.visibilityState` is
@@ -291,14 +292,21 @@ or runtime dependency.
 
 This path is observation-only. It adds no Server-Sent Events, WebSocket,
 filesystem watcher, background process, approval, edit, check execution,
-arbitrary command, commit, push, deployment, or other browser authority. Richer
-file/status, diff, and payload-bearing history navigation remains deferred, and
-guarded actions must still revalidate authoritative repository state immediately
-before use.
+arbitrary command, commit, push, deployment, or other browser authority. Current
+file/status and multi-file or payload-bearing diff/history navigation remain
+deferred, and guarded actions must still revalidate authoritative repository
+state immediately before use.
 
-Only the event-history portion of a full run response is fixed-size. Approval
-lists and workspace-wide run enumeration retain their existing unpaginated local
-behavior and are not claimed to have constant work or response size.
+The ordinary full-run response retains at most the newest 12 approval decisions
+and the newest 200 event summaries, with independent truncation metadata.
+Complete approvals and events remain available through CLI history. The
+approval projection bounds selected columns, decoded rows, and response size,
+preflights storage/bytes before materialization, and uses the additive
+`approvals_by_run` index plus reverse rowid seek for fixed per-run work and true
+append ordering. A read-only startup preflight validates the exact index shape
+before opening existing state for mutation. Building that index against existing
+non-test state is a human-gated maintenance action. Workspace-
+wide run enumeration is already a fixed 12-row page.
 
 The helper-config preflight and the following Git subprocess are separate host
 operations. A same-user process can change repository or included config between
@@ -359,8 +367,9 @@ pagination would require a separately approved schema index.
 
 This path adds no write, migration, dependency, Git/source read, disclosure of a
 new run data class, stream, background work, or browser action route. Project and
-repository enumeration plus selected-run approvals remain unpaginated local
-reads and are not claimed bounded by ADR 0017.
+repository enumeration remain unpaginated local reads and are not claimed
+bounded by ADR 0017; ADR 0019 separately bounds ordinary selected-run approval
+responses.
 
 ## Fifth M3 verification-attempt provenance
 
@@ -410,6 +419,70 @@ Complete private evidence remains in CLI run history.
 This implementation adds no schema, dependency, write, event append, Git/source
 read, raw evidence disclosure, browser mutation, or release authority. ADR 0010
 remains independently unresolved.
+
+## Sixth and seventh M3 selected-run presentation bounds
+
+ADR 0019 caps the approval suffix inside the existing coherent full-run read.
+ADR 0020 adds no read at all: the API presenter derives `diffReview` from that
+same run record, its verification evidence, the selected target, and the
+registered project ceiling.
+
+The presenter returns complete diff text only at or below a fixed 262,144-byte
+browser cap. It validates paired presence, the project ceiling, one exact target,
+canonical recorded digest, exact displayed-byte rehash, one ordered single-file
+Git patch bound to that target, and internally consistent hunk counts. The
+resulting metadata distinguishes absent, available/rehashed, and larger
+recorded-only evidence. A larger recorded diff is not parsed, rehashed, or
+sliced by this projection; only metadata and CLI guidance cross the response
+boundary.
+
+The React page places persisted run state, verification outcome, path, byte and
+patch-line counts, additions, deletions, hunks, digest, provenance, and the exact
+patch together at fixed `#run-diff`. One keyboard-focusable, labelled `<pre>`
+text node sits inside a bounded scroll region; no line-derived nodes, HTML sink,
+link, or action control is created.
+`verification.completed` targets this section, while `checkpoint.saved` remains
+at verification.
+
+The 256 KiB cap bounds response/rendered patch bytes, not the pre-existing full-
+run SQLite hydration. A dedicated scalar projection for every full-run field is
+separate future work. This slice adds no route, query, Git/source read, timing
+source, browser action, or release authority.
+
+## Eighth M3 project-catalog and response bounds
+
+`GET /api/workspace` opens independent project and run insertion snapshots.
+The project half is one newest-first page, not a catalog total. Its data query
+seeks the projects rowid B-tree, joins the repository primary-key index, visits
+13 rows, retains 12, and validates every selected column before presentation.
+Continuation requests carry only the pinned `snapshot` and exclusive `before`;
+external database maintenance invalidates the session rather than being hidden.
+
+Project checks cross the store boundary only as strict TEXT JSON at or below
+1 MiB; sandbox and ceiling profiles are at most 16 KiB. Direct SQL `CASE`,
+`typeof`, `octet_length`, and `json_valid(..., 1)` gates precede JavaScript
+parsing. Exact nested-key and policy validation reconstructs the domain records.
+The same projected gates are used by direct ID/name hydration before create-run
+or selected-run work; indexed lookup never becomes an unbounded decode path.
+The same JSON byte caps apply on supported project writes. API presentation
+omits repository device/inode metadata even though the joined record validates
+it. Indexed exact-name and project-ID paths replace complete-list scans in
+creation.
+
+The React project session mirrors the bounded run session: one current page,
+three newer cursors, one request generation, exact response validation, and
+abort/retry behavior. Project selection is an independent retained object, so
+catalog navigation does not silently erase the detail being inspected. If a
+full run's owner is outside the current page, navigation and refresh retain or
+resolve only that owner and never substitute the first unrelated project.
+
+All API JSON goes through one final serializer. Serialization and the 8 MiB
+UTF-8 check complete before `writeHead`; only then are status and safe headers
+sent. An overflow reaches the ordinary top-level error boundary as
+`RESPONSE_TOO_LARGE`, allowing a small fixed HTTP 500 response instead of a
+partial success. Trusted error messages above 4 KiB are replaced with fixed
+copy, and a pre-serialized internal-error body prevents recursive serializer
+failure. Static assets retain their existing file-serving path.
 
 ## Provider contract
 

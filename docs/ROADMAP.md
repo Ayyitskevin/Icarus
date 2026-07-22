@@ -34,10 +34,12 @@ evals, context budget allocation, and retrieval-quality fixtures.
 
 ## M3 — Workspace UI
 
-Status: the first four bounded slices are accepted with fresh local evidence and
-exact implementation-head hosted CI. The fifth bounded verification-provenance
-slice is implemented with fresh local evidence and uses exact-head hosted CI as
-its merge gate. Full M3 remains open.
+Status: the first five bounded slices are merged after fresh local evidence and
+exact implementation-head hosted CI. Sixth approval-provenance and seventh
+persisted-diff-review candidates remain under their merge gates. The eighth
+bounded-project-catalog and JSON-transport candidate is implemented locally and
+still requires its local, independent-review, and exact-head hosted gates. Full
+M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
@@ -82,11 +84,11 @@ re-establish its prerequisite is shown as `unknown`, never guessed from an
 incomplete suffix.
 
 The slice adds no SSE, WebSocket, watcher, schema migration, runtime dependency,
-or browser authority. Later M3 scope includes richer run timelines and
-file/status, diff, and payload-bearing history navigation, checkpoints, prompt
-history, a small task board, token/cost telemetry, server-held provider profiles,
-and deliberately designed approval/recovery controls. Patch materialization is
-not the next slice.
+or browser authority. Later M3 scope includes richer run timelines, current
+file/status, multi-file or payload-bearing diff/history navigation, checkpoints,
+prompt history, a small task board, token/cost telemetry, server-held provider
+profiles, and deliberately designed approval/recovery controls. Patch
+materialization is not the next slice.
 Any browser execution path needs a separate safety contract and evidence;
 provider keys remain server-side.
 
@@ -96,15 +98,17 @@ revision, uses a fixed reverse sequence cursor, selects metadata rather than
 payloads, pauses live polling while the bounded historical panel is open, and
 keeps only one 64-row page plus a four-page cursor window in the browser. It adds
 no Git/source read or action authority. It left workspace-wide run enumeration
-and selected-run approval lists as separate follow-up debt.
+and selected-run approval lists as separate follow-up debt at that stage; ADR
+0017 and ADR 0019 address those two bounds respectively.
 
 ADR 0017 implements the next outer chronological layer: replace the workspace's
 unbounded full-run hydration with a fixed 12-row metadata page and lazily fetch
 full evidence only for a selected run. A session-only pinned SQLite insertion
 cursor provides indexed `LIMIT 13` work without a schema migration. The browser
 replaces pages inside a four-page cursor window and labels project matches as
-only the loaded workspace page. Project/repository enumeration and selected-run
-approval lists remain separate unpaginated debt.
+only the loaded workspace page. Project/repository enumeration remained separate
+debt at that stage; ADR 0019 later bounded the ordinary selected-run approval
+response and ADR 0021 addresses that catalog debt.
 
 ADR 0018 implements the fifth bounded slice as a separate,
 explicit selected-run projection over the latest suffix of at most 200 events,
@@ -118,6 +122,38 @@ byte and strict-JSON gates; existing activity routes remain payload-free.
 
 The implementation does not expose raw evidence, checkpoint bytes, complete
 invocation history, or guarded actions; those remain CLI concerns.
+
+ADR 0019 implements the sixth candidate slice. The ordinary selected-run
+response retains the newest 12 validated approval decisions and explicit
+coverage metadata while complete approval history remains available through the
+CLI. The page distinguishes recorded provenance from current authentication or
+byte-integrity proof, renders actors only as text, and exposes no approval
+action. The fixed result bounds response size and host decoding; it does not
+add action authority. A single additive `(run_id)` index plus reverse rowid seek
+makes the fixed `LIMIT 13` query avoid a history-sized scan while preserving
+append order across equal timestamps and random UUIDs. Building it against
+existing non-test state remains an explicit backup and operator rollout gate.
+
+ADR 0020 implements the seventh candidate slice without adding another route.
+The existing coherent selected-run snapshot now labels absent, exact, and
+browser-oversized persisted diffs explicitly. Complete patch text is capped at
+256 KiB, rehashed against its recorded verification digest, and accompanied by
+the exact persisted run state, verification outcome, changed path, size, and
+patch statistics. Larger recorded diffs receive metadata-only CLI guidance
+rather than a partial preview; this projection does not parse or rehash their
+hidden text. The browser does not re-read Git or source and gains no review
+action.
+
+ADR 0021 implements the eighth candidate slice. Workspace bootstrap returns one
+pinned newest-first page of at most 12 projects joined to their repositories;
+strict `before` and `snapshot` continuation uses an intrinsic-rowid
+`LIMIT 13` seek without per-record hydration. Persisted project JSON is
+storage- and byte-gated before exact decoding, and supported writes enforce the
+same caps. The browser replaces pages inside four retained positions while
+preserving independent project selection. Indexed exact lookups replace
+creation-path collection scans. A shared pre-header serializer also places an
+8 MiB UTF-8 ceiling on every JSON response and emits only fixed safe overflow
+copy. The slice adds no schema, source read, provider call, or browser action.
 
 ## M4 — Runtime and previews
 
@@ -165,11 +201,13 @@ remain human-gated and outside automatic dogfood.
 
 ## Current merge gate
 
-Preserve the ADR 0010 security hold. Merge the fifth bounded slice only after its
-exact head passes hosted CI and all blocker, high, and medium review findings are
-resolved. Do not widen another M3 surface as part of that closure.
+Preserve the ADR 0010 security hold. Do not accept ADR 0021 until its fresh full
+local gate, independent review, and exact published-head hosted CI pass with all
+blocker, high, and medium findings resolved. Keep the sixth and seventh
+candidate gates independent rather than treating this slice as evidence for
+them.
 
-Project/repository enumeration, selected-run approval pagination, file/status
-views, richer diff or raw payload history, complete checkpoint inspection,
-patch materialization, browser approval, rerun/restore, and execution remain
-separate expansions until explicitly designed and evidenced.
+Older approval pagination, current file/status views, multi-file or raw payload
+diff/history, complete checkpoint inspection, patch materialization, browser
+approval, rerun/restore, and execution remain separate expansions until
+explicitly designed and evidenced.

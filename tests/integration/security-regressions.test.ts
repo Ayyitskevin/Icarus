@@ -24,7 +24,11 @@ import {
 } from "../support/integration-cli.js";
 
 interface TestDatabase {
-  prepare(sql: string): { run(...parameters: unknown[]): unknown };
+  exec(sql: string): void;
+  prepare(sql: string): {
+    run(...parameters: unknown[]): unknown;
+    get(...parameters: unknown[]): unknown;
+  };
   close(): void;
 }
 
@@ -94,6 +98,89 @@ function credentialVariants(secret: string): readonly Buffer[] {
 }
 
 describe("release security regressions", () => {
+  test("requires the exact one-shot CLI approval before migrating legacy approval state", async () => {
+    const fixture = await createFixtureRepository();
+    try {
+      expect(
+        (
+          await runCli(fixture.stateRoot, [
+            "repo",
+            "add",
+            "--name",
+            "fixture",
+            "--path",
+            fixture.repository,
+          ])
+        ).exitCode,
+      ).toBe(0);
+      const databasePath = path.join(fixture.stateRoot, "icarus.sqlite3");
+      const legacy = new Database(databasePath);
+      legacy.exec("DROP INDEX approvals_by_run");
+      const repositoryCount = legacy.prepare("SELECT COUNT(*) AS count FROM repositories").get();
+      legacy.close();
+      const digestBeforeRefusal = createHash("sha256")
+        .update(await readFile(databasePath))
+        .digest("hex");
+
+      const missing = await runCli(fixture.stateRoot, ["run", "list"], {
+        ICARUS_APPROVE_SCHEMA_MIGRATION: undefined,
+      });
+      expect(missing.exitCode).toBe(1);
+      expect(missing.stderr).toContain("DATABASE_MIGRATION_REQUIRED");
+      expect(
+        createHash("sha256")
+          .update(await readFile(databasePath))
+          .digest("hex"),
+      ).toBe(digestBeforeRefusal);
+
+      const invalid = await runCli(fixture.stateRoot, ["run", "list"], {
+        ICARUS_APPROVE_SCHEMA_MIGRATION: "approve",
+      });
+      expect(invalid.exitCode).toBe(2);
+      expect(invalid.stderr).toContain("INVALID_DATABASE_CONFIGURATION");
+      expect(
+        createHash("sha256")
+          .update(await readFile(databasePath))
+          .digest("hex"),
+      ).toBe(digestBeforeRefusal);
+
+      const beforeMigration = new Database(databasePath);
+      expect(
+        beforeMigration
+          .prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'approvals_by_run'")
+          .get(),
+      ).toBeUndefined();
+      expect(beforeMigration.prepare("SELECT COUNT(*) AS count FROM repositories").get()).toEqual(
+        repositoryCount,
+      );
+      beforeMigration.close();
+
+      const approved = await runCli(fixture.stateRoot, ["run", "list"], {
+        ICARUS_APPROVE_SCHEMA_MIGRATION: "approval-index-v1",
+      });
+      expect(approved.exitCode).toBe(0);
+      const migrated = new Database(databasePath);
+      expect(
+        migrated
+          .prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'approvals_by_run'")
+          .get(),
+      ).toBeDefined();
+      expect(migrated.prepare("SELECT COUNT(*) AS count FROM repositories").get()).toEqual(
+        repositoryCount,
+      );
+      migrated.close();
+      expect(
+        (
+          await runCli(fixture.stateRoot, ["run", "list"], {
+            ICARUS_APPROVE_SCHEMA_MIGRATION: undefined,
+          })
+        ).exitCode,
+      ).toBe(0);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   test("rejects a state root hidden in a clean ignored descendant named ..state", async () => {
     const fixture = await createFixtureRepository();
     try {
