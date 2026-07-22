@@ -34,6 +34,7 @@ import type {
   RunPresentationSnapshot,
   RunRecord,
   RunState,
+  RunVerificationAttemptsSnapshot,
   SandboxProfile,
   SunCeiling,
   VerificationEvidence,
@@ -41,6 +42,7 @@ import type {
   WorkspaceRunSummary,
 } from "./types.js";
 import { CONTEXT_AUDIT_POLICY_VERSION } from "./types.js";
+import { readRunVerificationAttempts } from "./verification-provenance.js";
 
 type Row = Record<string, unknown>;
 
@@ -1901,6 +1903,10 @@ export class IcarusStore {
       };
     });
     return transaction();
+  }
+
+  getRunVerificationAttempts(runId: string, snapshot: number): RunVerificationAttemptsSnapshot {
+    return readRunVerificationAttempts(this.#database, runId, snapshot);
   }
 
   listEventHistoryPage(runId: string, before: number, snapshot: number): RunEventHistoryPage {

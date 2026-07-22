@@ -70,6 +70,13 @@ replace rather than accumulate pages, preserve the last successful page on
 failure, cancel superseded or lifecycle requests, and add no schema, dependency,
 Git/source read, stream, watcher, or browser action authority.
 
+The fifth Milestone 3 slice adds an explicit, lazy selected-run verification and
+checkpoint provenance view. It examines only the latest 200 event sequences,
+returns at most eight evidence-backed verification intervals, and exposes only
+validated states, sequences, timestamps, digests, coverage, and recorded
+checkpoint relations. Raw payloads, diffs, paths, checks, output, checkpoint
+bytes, complete history, and every guarded action remain CLI-only.
+
 Not yet included: browser approval or execution, arbitrary agent tool use,
 model-written shell commands, semantic search, commits or pushes, application
 previews, richer file/status, diff, or history navigation, deployment, backend

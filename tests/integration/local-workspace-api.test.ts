@@ -812,6 +812,253 @@ describe("loopback local workspace API", () => {
     );
   });
 
+  test("serves exact bounded verification provenance without read-side mutation", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    let runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    let server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const projectResponse = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "provenance-fixture", path: fixture.repository },
+      project: {
+        name: "provenance-project",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    const projectId = String((await responseJson(projectResponse)).id);
+    const draftResponse = await postJson(`${server.url}/api/runs`, {
+      projectId,
+      task: "Inspect scalar verification provenance.",
+      target: "src/greeting.txt",
+      provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
+    });
+    const runId = String((await responseJson(draftResponse)).id);
+    const checkpointSha256 = "c".repeat(64);
+    const diffSha256 = "d".repeat(64);
+    const privateSentinel = "/private/runtime/provenance-<img-onerror-sentinel>";
+    const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    database
+      .prepare(
+        `UPDATE runs
+         SET state = 'awaiting_review', provider_json = ?, context_json = ?, diff = ?,
+             error_message = ?
+         WHERE id = ?`,
+      )
+      .run("not-json-provider", "not-json-context", privateSentinel, privateSentinel, runId);
+    const insert = database.prepare(
+      `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    insert.run(
+      runId,
+      2,
+      "edit.materialized",
+      JSON.stringify({
+        from: "running",
+        to: "verifying",
+        detail: { target: privateSentinel, approvedSha256: "a".repeat(64) },
+      }),
+      "2026-07-22T12:00:02.000Z",
+    );
+    insert.run(
+      runId,
+      3,
+      "checkpoint.saved",
+      JSON.stringify({ checkpointSha256 }),
+      "2026-07-22T12:00:03.000Z",
+    );
+    const completedPayload = JSON.stringify({
+      from: "verifying",
+      to: "awaiting_review",
+      outcome: "passed",
+      diffSha256,
+      diff: privateSentinel,
+      verification: {
+        outcome: "passed",
+        checks: [{ argv: [privateSentinel], stdout: privateSentinel }],
+        changedPaths: [privateSentinel],
+        diffSha256,
+        checkpointSha256,
+      },
+    });
+    insert.run(runId, 4, "verification.completed", completedPayload, "2026-07-22T12:00:04.000Z");
+    database
+      .prepare(
+        `INSERT INTO checkpoints
+           (run_id, baseline_base64, approved_base64, checkpoint_sha256, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(runId, privateSentinel, privateSentinel, checkpointSha256, "2026-07-22T12:00:03.000Z");
+    const persistenceBefore = persistenceSnapshot(database);
+    database.close();
+
+    const response = await fetch(
+      `${server.url}/api/runs/${runId}/verification-attempts?snapshot=4`,
+    );
+    expect(response.status).toBe(200);
+    const projection = await responseJson(response);
+    expect(Object.keys(projection).sort()).toEqual(
+      [
+        "runId",
+        "snapshot",
+        "coverage",
+        "attemptLimit",
+        "attemptAnchorsTruncatedWithinCoverage",
+        "checkpoint",
+        "attempts",
+      ].sort(),
+    );
+    expect(projection).toMatchObject({
+      runId,
+      snapshot: 4,
+      coverage: {
+        firstSequence: 1,
+        lastSequence: 4,
+        eventCount: 4,
+        eventLimit: 200,
+        earlierEventsExcluded: false,
+      },
+      attemptLimit: 8,
+      attemptAnchorsTruncatedWithinCoverage: false,
+      checkpoint: {
+        status: "saved",
+        sha256: checkpointSha256,
+        saveEvent: { status: "observed_in_coverage", sequence: 3 },
+      },
+      attempts: [
+        {
+          identity: "verification-anchor-4",
+          anchorSequence: 4,
+          startSequence: 2,
+          startProvenance: "observed_initial_edit",
+          status: "passed",
+          endSequence: 4,
+          diffSha256,
+          checkpointSha256,
+          checkpointProvenance: "recorded_digest_match",
+          laterAttemptObservedWithinCoverage: false,
+        },
+      ],
+    });
+    expect(
+      Object.keys((projection.attempts as Array<Record<string, unknown>>)[0] ?? {}).sort(),
+    ).toEqual(
+      [
+        "identity",
+        "anchorSequence",
+        "startSequence",
+        "startedAt",
+        "startProvenance",
+        "status",
+        "endSequence",
+        "endedAt",
+        "diffSha256",
+        "checkpointSha256",
+        "checkpointProvenance",
+        "laterAttemptObservedWithinCoverage",
+      ].sort(),
+    );
+    expect(JSON.stringify(projection)).not.toContain(privateSentinel);
+    expect(JSON.stringify(projection)).not.toMatch(/payload|checks|argv|output|changedPaths|diff"/);
+    expect(Buffer.byteLength(JSON.stringify(projection))).toBeLessThan(4_096);
+
+    const corruptDatabase = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    corruptDatabase
+      .prepare("UPDATE run_events SET payload_json = ? WHERE run_id = ? AND sequence = 4")
+      .run(`${privateSentinel}:corrupt-selected-completion`, runId);
+    corruptDatabase.close();
+    const corruptResponse = await fetch(
+      `${server.url}/api/runs/${runId}/verification-attempts?snapshot=4`,
+    );
+    expect(corruptResponse.status).toBe(400);
+    const corruptError = await responseJson(corruptResponse);
+    expect(corruptError).toMatchObject({ error: { code: "DATABASE_ERROR" } });
+    expect(JSON.stringify(corruptError)).not.toContain(privateSentinel);
+    const restoreDatabase = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    restoreDatabase
+      .prepare("UPDATE run_events SET payload_json = ? WHERE run_id = ? AND sequence = 4")
+      .run(completedPayload, runId);
+    restoreDatabase.close();
+
+    for (const query of [
+      "",
+      "?snapshot=",
+      "?snapshot=0",
+      "?snapshot=-1",
+      "?snapshot=04",
+      "?snapshot=4.0",
+      "?snapshot=4e0",
+      "?snapshot=9007199254740992",
+      "?snapshot=4&snapshot=4",
+      "?snapshot=4&limit=8",
+      "?before=5&snapshot=4",
+    ]) {
+      const invalid = await fetch(`${server.url}/api/runs/${runId}/verification-attempts${query}`);
+      expect(invalid.status).toBe(422);
+    }
+    expect(
+      (
+        await fetch(
+          `${server.url}/api/runs/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/verification-attempts?snapshot=1`,
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (await postJson(`${server.url}/api/runs/${runId}/verification-attempts?snapshot=4`, {}))
+        .status,
+    ).toBe(404);
+
+    const observer = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    expect(persistenceSnapshot(observer)).toEqual(persistenceBefore);
+    observer
+      .prepare(
+        `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+         VALUES (?, 5, 'review.rejected', ?, '2026-07-22T12:00:05.000Z')`,
+      )
+      .run(runId, "not-json-unrelated-private");
+    observer.close();
+    const conflict = await fetch(
+      `${server.url}/api/runs/${runId}/verification-attempts?snapshot=4`,
+    );
+    expect(conflict.status).toBe(409);
+    expect(await responseJson(conflict)).toMatchObject({
+      error: { code: "EVENT_SNAPSHOT_CONFLICT" },
+    });
+    expect(
+      (
+        await responseJson(
+          await fetch(`${server.url}/api/runs/${runId}/verification-attempts?snapshot=5`),
+        )
+      ).attempts,
+    ).toEqual(projection.attempts);
+
+    await server.close();
+    runtime.close();
+    runtime = await createIcarusRuntime(fixture.stateRoot);
+    server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+    expect(
+      await responseJson(
+        await fetch(`${server.url}/api/runs/${runId}/verification-attempts?snapshot=5`),
+      ),
+    ).toMatchObject({ runId, snapshot: 5, attempts: projection.attempts });
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+  });
+
   test("fails registration closed before invoking a repository clean filter", async () => {
     const fixture = await createFixtureRepository();
     cleanups.push(fixture.cleanup);

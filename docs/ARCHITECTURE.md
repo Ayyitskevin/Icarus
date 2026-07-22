@@ -362,7 +362,7 @@ new run data class, stream, background work, or browser action route. Project an
 repository enumeration plus selected-run approvals remain unpaginated local
 reads and are not claimed bounded by ADR 0017.
 
-## Accepted fifth M3 verification-attempt provenance design
+## Fifth M3 verification-attempt provenance
 
 ADR 0018 defines a separate lazy selected-run read instead of extending the
 automatically refreshed full-run response. The browser supplies the exact
@@ -407,9 +407,9 @@ outcome/relation enums, single-flight lifecycle guards, retained failure state,
 honest copy, and a defined focus fallback.
 Complete private evidence remains in CLI run history.
 
-This accepted design adds no implementation claim, schema, dependency, write,
-event append, Git/source read, raw evidence disclosure, browser mutation, or
-release authority. ADR 0010 remains independently unresolved.
+This implementation adds no schema, dependency, write, event append, Git/source
+read, raw evidence disclosure, browser mutation, or release authority. ADR 0010
+remains independently unresolved.
 
 ## Provider contract
 

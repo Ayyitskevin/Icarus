@@ -34,11 +34,10 @@ evals, context budget allocation, and retrieval-quality fixtures.
 
 ## M3 — Workspace UI
 
-Status: the first bounded vertical slice, second bounded observation slice,
-third bounded older-activity slice, and fourth bounded workspace-run slice are
-accepted with fresh local evidence and exact implementation-head hosted CI. ADR
-0017's run-summary implementation was accepted on 2026-07-21. Full M3 remains
-open.
+Status: the first four bounded slices are accepted with fresh local evidence and
+exact implementation-head hosted CI. The fifth bounded verification-provenance
+slice is implemented with fresh local evidence and uses exact-head hosted CI as
+its merge gate. Full M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
@@ -107,7 +106,7 @@ replaces pages inside a four-page cursor window and labels project matches as
 only the loaded workspace page. Project/repository enumeration and selected-run
 approval lists remain separate unpaginated debt.
 
-ADR 0018 accepts the design for the fifth bounded slice. It defines a separate,
+ADR 0018 implements the fifth bounded slice as a separate,
 explicit selected-run projection over the latest suffix of at most 200 events,
 retains at most eight verification-state intervals, and exposes only validated
 statuses, digests, sequences, timestamps, coverage flags, and safe checkpoint
@@ -117,9 +116,8 @@ Missing starts, timeout detail, process identity, formal supersession, and
 rollback causality remain unknown. Selected payload scalars sit behind fixed
 byte and strict-JSON gates; existing activity routes remain payload-free.
 
-The ADR is accepted design, not yet an implementation claim. Raw evidence,
-checkpoint bytes, complete invocation history, and all guarded actions remain
-CLI concerns.
+The implementation does not expose raw evidence, checkpoint bytes, complete
+invocation history, or guarded actions; those remain CLI concerns.
 
 ## M4 — Runtime and previews
 
@@ -165,12 +163,11 @@ diagnostic, and review capability gates before widening autonomy. Live
 production, customer data, deployment targets, schema changes, and secrets
 remain human-gated and outside automatic dogfood.
 
-## Next recommended slice
+## Current merge gate
 
-Preserve the ADR 0010 security hold. Implement only accepted ADR 0018's separate
-bounded verification-interval and checkpoint projection, fixed payload ceilings,
-exact snapshot conflict, honest unknown/truncation states, and lifecycle-guarded
-inline panel before widening any other M3 surface.
+Preserve the ADR 0010 security hold. Merge the fifth bounded slice only after its
+exact head passes hosted CI and all blocker, high, and medium review findings are
+resolved. Do not widen another M3 surface as part of that closure.
 
 Project/repository enumeration, selected-run approval pagination, file/status
 views, richer diff or raw payload history, complete checkpoint inspection,

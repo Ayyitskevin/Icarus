@@ -73,99 +73,101 @@ the reliability slice without claiming a broader milestone is complete.
 
 ## Fifth M3 slice: bounded verification-attempt provenance
 
-Status values are evidence claims. ADR 0018 is accepted design only. No runtime,
-API, browser, test, schema, dependency, workflow, or release behavior is yet
-claimed implemented.
+Status values are evidence claims. ADR 0018 and its implementation are complete,
+with fresh local acceptance recorded on 2026-07-22. Exact published-head hosted
+CI remains the PR merge gate and is recorded on the PR; this accepts only the
+fifth bounded M3 slice once that gate passes, not full M3.
 
 ### Pinned scalar projection
 
-- [ ] Add one lazy GET route with exactly one canonical positive selected-run
+- [x] Add one lazy GET route with exactly one canonical positive selected-run
       event snapshot and no caller-controlled limit, filter, sort, search, or
       pagination
-- [ ] Select only safe run ID/state fields, never `getRun()` or another full-row
+- [x] Select only safe run ID/state fields, never `getRun()` or another full-row
       loader; require the requested snapshot to equal the current high-water mark
       in one SQLite read transaction
-- [ ] Inspect up to the latest 200 sequences through the existing per-run
+- [x] Inspect up to the latest 200 sequences through the existing per-run
       sequence index, validate a contiguous metadata suffix, derive only explicit
       verification-state intervals, retain the newest eight anchors, and
       distinguish event-window truncation from the eight-summary cap
-- [ ] Preflight `typeof(payload_json) = 'text'` and direct-column
+- [x] Preflight `typeof(payload_json) = 'text'` and direct-column
       `octet_length(payload_json)` before parsing: at most 8 MiB per retained
       completion, 16 KiB per selected lifecycle transition, and 1 KiB for the
       observed checkpoint-save event; do not wrap the column in a cast, JSON
       function, or other expression
-- [ ] Require strict `json_valid(payload_json, 1)`, exactly-once root/nested
+- [x] Require strict `json_valid(payload_json, 1)`, exactly-once root/nested
       selected keys, expected scalar types, fixed transitions, matching
       outer/nested outcomes and diff digests, and canonical SHA-256 values
-- [ ] Leave unrelated payloads unread and never return or materialize raw JSON,
+- [x] Leave unrelated payloads unread and never return or materialize raw JSON,
       diff, checks, argv, output, changed paths, or extra fields in JavaScript
-- [ ] Select only expected checkpoint run ID, canonical digest, and bounded
+- [x] Select only expected checkpoint run ID, canonical digest, and bounded
       canonical timestamp through a dedicated query; never materialize baseline,
       approved, or unrelated full-run fields
-- [ ] Label completed linkage only as recorded digest agreement and
+- [x] Label completed linkage only as recorded digest agreement and
       incomplete/cancelled linkage only as run-checkpoint availability. An absent
       save event in truncated coverage remains not observed, never corrupt
 
 ### Explicit bounded browser panel
 
-- [ ] Place an inline attempt-summary panel below the current verification
+- [x] Place an inline attempt-summary panel below the current verification
       snapshot and visibly show pinned revision, sequence range, fixed limits,
       loaded summaries, and independent truncation states
-- [ ] Keep automatic live reconciliation independent, retain a static pinned
+- [x] Keep automatic live reconciliation independent, retain a static pinned
       panel, and mark it stale when the selected run advances without
       auto-reloading or advancing the live cursor
-- [ ] Capture a fresh current run ID/cursor for every explicit Load, Refresh, or
+- [x] Capture a fresh current run ID/cursor for every explicit Load, Refresh, or
       Retry. Never replay a conflicted request; require operator-triggered
       “Refresh persisted run” before reseeding after a snapshot conflict
-- [ ] Keep one attempt request current; its local aborter handles hidden document,
+- [x] Keep one attempt request current; its local aborter handles hidden document,
       Close, “Refresh persisted run,” older-activity opening, and unmount, while
       parent selection/project changes and Back use aggregate cancellation; reject
       late/mismatched success by run/snapshot/generation
-- [ ] Attempt-panel Close and run refresh must not cancel an older-history
+- [x] Attempt-panel Close and run refresh must not cancel an older-history
       request. Before opening older activity, abort the attempt request first,
       then mark history open and launch its request without aggregate cancellation
-- [ ] Register one aggregate parent auxiliary-read cancellation callback invoked
+- [x] Register one aggregate parent auxiliary-read cancellation callback invoked
       only for selected-run/project changes and Back; it invalidates both
       controllers and generations
-- [ ] Enforce exact keys and constants; coverage formula and count from 1 through
+- [x] Enforce exact keys and constants; coverage formula and count from 1 through
       200; no more than eight attempts; sequence order; exact outcome/relation
       enums; canonical timestamps/digests; checkpoint unions/relations; and
       truncation implications before accepting a response
-- [ ] Preserve the last valid panel after failure, render honest snapshot-scoped
+- [x] Preserve the last valid panel after failure, render honest snapshot-scoped
       empty/completeness copy, and provide CLI guidance without implying a pass,
       byte rehash, current completeness, or a total
-- [ ] Use labelled/busy/status semantics, digest wrapping, semantic lists/times,
+- [x] Use labelled/busy/status semantics, digest wrapping, semantic lists/times,
       non-focus-stealing updates, and an enabled verification-section fallback
       when operator Close cannot return focus to a disabled launcher
 
 ### Scope and acceptance gate
 
-- [ ] Add no schema/migration, dependency, write, event append, checkpoint
+- [x] Add no schema/migration, dependency, write, event append, checkpoint
       creation/rehash, Git/source read, private evidence disclosure, total count,
       older-attempt pagination, stream, watcher, daemon, browser approval,
       rerun/restore/execution, command, commit, push, deployment, or workflow
       authority
-- [ ] Preserve the payload-free existing event routes, loopback/same-origin/CSP
+- [x] Preserve the payload-free existing event routes, loopback/same-origin/CSP
       boundary, guarded CLI, workspace-run page, older-activity behavior, and
       unresolved ADR 0010 security hold
-- [ ] Prove 0/1/8/9 attempts, both truncation modes, exact snapshot conflict,
+- [x] Prove 0/1/8/9 attempts, both truncation modes, exact snapshot conflict,
       concurrent append, save-before-attempt ordering/checkpoint states, gaps,
       TEXT-only storage, strict RFC-8259 acceptance, relevant JSON5 and duplicate
       selected-key rejection, wrong scalar types, unrelated private-payload
       immunity, and ASCII/multibyte exact-bound and over-bound cases at both the
       8 MiB completion, 16 KiB transition, and 1 KiB checkpoint-event ceilings,
       plus fixed response size
-- [ ] Prove index plans, zero durable writes/events, unchanged source/Git, and
+- [x] Prove index plans, zero durable writes/events, unchanged source/Git, and
       SQL shape that never selects private checkpoint/full-run columns or returns
       raw event payloads; poisoned excluded columns must not affect the route
-- [ ] Prove fixed coverage/collection bounds, outcome/relation enums, exact client
+- [x] Prove fixed coverage/collection bounds, outcome/relation enums, exact client
       relations, fresh-seed conflict recovery, live reconciliation versus
       operator-refresh behavior, request-local/aggregate cancellation ordering,
       retained retry, staleness, lifecycle/late guards, focus fallback, visible
       copy, and private-sentinel absence in real-browser coverage
-- [ ] Run the fresh full local gate, both audits, API and real-browser smokes,
-      `git diff --check`, independent review, and exact implementation-head
-      hosted CI before changing the ADR status or calling the slice accepted
+- [x] Run the fresh full local gate, both audits, API and real-browser smokes,
+      `git diff --check`, and seven independent review passes. Require exact
+      published-head hosted CI on the PR before merge; that external result cannot
+      be self-recorded in the commit it validates
 
 ## Most recently accepted M3 slice: fourth bounded workspace run summaries
 

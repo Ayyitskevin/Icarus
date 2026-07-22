@@ -18,6 +18,16 @@ const processSource = await readFile("packages/core/src/process.ts", "utf8");
 const gitSource = await readFile("packages/core/src/git.ts", "utf8");
 const sandboxSource = await readFile("packages/core/src/sandbox.ts", "utf8");
 const workspaceServerSource = await readFile("packages/api/src/server.ts", "utf8");
+const workspacePresenterSource = await readFile("packages/api/src/present.ts", "utf8");
+const workspaceApiSource = await readFile("packages/workspace/src/api.ts", "utf8");
+const verificationAttemptsUiSource = await readFile(
+  "packages/workspace/src/verification-attempts.ts",
+  "utf8",
+);
+const verificationAttemptsPanelSource = await readFile(
+  "packages/workspace/src/VerificationAttemptsPanel.tsx",
+  "utf8",
+);
 const workspaceUiSources = await collectSources(
   "packages/workspace/src",
   (name) => name.endsWith(".ts") || name.endsWith(".tsx"),
@@ -25,6 +35,11 @@ const workspaceUiSources = await collectSources(
 const providerSource = await readFile("packages/core/src/providers.ts", "utf8");
 const runtimeSource = await readFile("packages/core/src/runtime.ts", "utf8");
 const storeSource = await readFile("packages/core/src/store.ts", "utf8");
+const verificationProjectionSource = await readFile(
+  "packages/core/src/verification-provenance.ts",
+  "utf8",
+);
+const compactVerificationProjectionSource = verificationProjectionSource.replace(/\s+/g, " ");
 const actionlintToolSource = await readFile("scripts/actionlint-tool.mjs", "utf8");
 const actionlintSetupSource = await readFile("scripts/setup-actionlint.mjs", "utf8");
 const workflowLintSource = await readFile("scripts/workflow-lint.mjs", "utf8");
@@ -36,8 +51,13 @@ const workflowLintIndex = ciWorkflowSource.indexOf("run: pnpm workflow:lint");
 const frozenInstallIndex = ciWorkflowSource.indexOf("run: pnpm install --frozen-lockfile");
 const ignore = await readFile(".gitignore", "utf8");
 const testSources = await collectSources("tests", (name) => name.endsWith(".test.ts"));
+const eventPageMethodStart = storeSource.indexOf("  listEventPage(");
 const historyMethodStart = storeSource.indexOf("  listEventHistoryPage(");
 const historyMethodEnd = storeSource.indexOf("\n  #appendEvent(", historyMethodStart);
+const eventPageStoreSource =
+  eventPageMethodStart >= 0 && historyMethodStart > eventPageMethodStart
+    ? storeSource.slice(eventPageMethodStart, historyMethodStart)
+    : "";
 const historyStoreSource =
   historyMethodStart >= 0 && historyMethodEnd > historyMethodStart
     ? storeSource.slice(historyMethodStart, historyMethodEnd)
@@ -56,6 +76,37 @@ const workspaceSnapshotEnd = workspaceServerSource.indexOf(
 const workspaceSnapshotSource =
   workspaceSnapshotStart >= 0 && workspaceSnapshotEnd > workspaceSnapshotStart
     ? workspaceServerSource.slice(workspaceSnapshotStart, workspaceSnapshotEnd)
+    : "";
+const verificationRouteStart = workspaceServerSource.indexOf("  const runVerificationAttempts =");
+const verificationRouteEnd = workspaceServerSource.indexOf(
+  '  if (method === "GET" && runEventHistory !== null)',
+  verificationRouteStart,
+);
+const verificationRouteSource =
+  verificationRouteStart >= 0 && verificationRouteEnd > verificationRouteStart
+    ? workspaceServerSource.slice(verificationRouteStart, verificationRouteEnd)
+    : "";
+const verificationPresenterStart = workspacePresenterSource.indexOf(
+  "export function presentRunVerificationAttempts(",
+);
+const verificationPresenterEnd = workspacePresenterSource.indexOf(
+  "\nexport function presentWorkspaceRunPage(",
+  verificationPresenterStart,
+);
+const verificationPresenterSource =
+  verificationPresenterStart >= 0 && verificationPresenterEnd > verificationPresenterStart
+    ? workspacePresenterSource.slice(verificationPresenterStart, verificationPresenterEnd)
+    : "";
+const verificationApiRequestStart = workspaceApiSource.indexOf(
+  "export function getRunVerificationAttempts(",
+);
+const verificationApiRequestEnd = workspaceApiSource.indexOf(
+  "\nfunction normalizeContextPreview(",
+  verificationApiRequestStart,
+);
+const verificationApiRequestSource =
+  verificationApiRequestStart >= 0 && verificationApiRequestEnd > verificationApiRequestStart
+    ? workspaceApiSource.slice(verificationApiRequestStart, verificationApiRequestEnd)
     : "";
 
 const assertions = {
@@ -126,6 +177,107 @@ const assertions = {
     historyStoreSource.includes("ORDER BY sequence DESC") &&
     historyStoreSource.includes("RUN_EVENT_PAGE_LIMIT + 1") &&
     !historyStoreSource.includes("payload_json"),
+  workspaceRecentEventsMetadataOnly:
+    eventPageStoreSource.includes("SELECT sequence, run_id, type, created_at") &&
+    eventPageStoreSource.includes("ORDER BY sequence") &&
+    eventPageStoreSource.includes("RUN_EVENT_PAGE_LIMIT + 1") &&
+    !eventPageStoreSource.includes("payload_json"),
+  workspaceVerificationProjectionBounded:
+    verificationProjectionSource.includes(
+      "export const RUN_VERIFICATION_ATTEMPT_EVENT_LIMIT = 200",
+    ) &&
+    verificationProjectionSource.includes("export const RUN_VERIFICATION_ATTEMPT_LIMIT = 8") &&
+    verificationProjectionSource.includes("snapshot - RUN_VERIFICATION_ATTEMPT_EVENT_LIMIT + 1") &&
+    verificationProjectionSource.includes("sequence >= ? AND sequence <= ?") &&
+    (verificationProjectionSource.match(/LIMIT 200/g)?.length ?? 0) === 2 &&
+    verificationProjectionSource.includes("anchors.slice(-RUN_VERIFICATION_ATTEMPT_LIMIT)") &&
+    verificationProjectionSource.includes(
+      "attemptAnchorsTruncatedWithinCoverage: anchors.length > RUN_VERIFICATION_ATTEMPT_LIMIT",
+    ),
+  workspaceVerificationProjectionSafeColumns:
+    compactVerificationProjectionSource.includes(
+      "SELECT id, CASE WHEN typeof(state) = 'text' AND octet_length(state) <= 32 THEN state ELSE NULL END AS state, CASE WHEN resume_state IS NULL THEN NULL WHEN typeof(resume_state) = 'text' AND octet_length(resume_state) <= 32 THEN resume_state ELSE 1 END AS resume_state FROM runs WHERE id = ?",
+    ) &&
+    compactVerificationProjectionSource.includes(
+      "SELECT run_id, checkpoint_sha256, created_at FROM checkpoints WHERE run_id = ?",
+    ) &&
+    compactVerificationProjectionSource.includes(
+      "SELECT sequence, run_id, type, created_at FROM run_events",
+    ) &&
+    !verificationProjectionSource.includes("SELECT *") &&
+    !/(?:provider_json|base_commit|context_json|context_artifact_path|context_sha256|plan_json|plan_sha256|edit_json|cache_path|worktree_path|baseline_base64|approved_base64|verification_json|tool_calls|input_tokens|output_tokens|active_runtime_ms|estimated_cost_usd|reserved_cost_usd|error_code|error_message)/.test(
+      verificationProjectionSource,
+    ) &&
+    !/(?:getRun|getCheckpoint|listEvents|getRunHistory)\(/.test(verificationProjectionSource),
+  workspaceVerificationPayloadPreflighted:
+    compactVerificationProjectionSource.includes(
+      "SELECT sequence, typeof(payload_json) AS storage_type, octet_length(payload_json) AS payload_bytes FROM run_events WHERE run_id = ? AND sequence = ?",
+    ) &&
+    verificationProjectionSource.includes("const COMPLETION_PAYLOAD_LIMIT = 8 * 1024 * 1024") &&
+    verificationProjectionSource.includes("const TRANSITION_PAYLOAD_LIMIT = 16 * 1024") &&
+    verificationProjectionSource.includes("const CHECKPOINT_EVENT_PAYLOAD_LIMIT = 1024") &&
+    verificationProjectionSource.includes(
+      "preflightPayload(database, runId, event.sequence, COMPLETION_PAYLOAD_LIMIT)",
+    ) &&
+    verificationProjectionSource.includes(
+      "preflightPayload(database, runId, event.sequence, TRANSITION_PAYLOAD_LIMIT)",
+    ) &&
+    verificationProjectionSource.includes(
+      "preflightPayload(database, runId, event.sequence, CHECKPOINT_EVENT_PAYLOAD_LIMIT)",
+    ) &&
+    verificationProjectionSource.includes("json_valid(payload_json, 1)"),
+  workspaceVerificationPayloadStaysInSql:
+    !verificationProjectionSource.includes("JSON.parse(") &&
+    !verificationProjectionSource.includes("JSON.stringify(") &&
+    !/SELECT\s+payload_json(?:\s|,)/i.test(compactVerificationProjectionSource) &&
+    !/payload_json\s+AS\s+payload_json/i.test(compactVerificationProjectionSource) &&
+    !verificationPresenterSource.includes("payload") &&
+    !verificationApiRequestSource.includes("JSON.parse(") &&
+    !verificationAttemptsUiSource.includes("JSON.parse("),
+  workspaceVerificationPresenterAllowlists:
+    [
+      "runId: snapshot.runId",
+      "snapshot: snapshot.snapshot",
+      "firstSequence: snapshot.coverage.firstSequence",
+      "attemptAnchorsTruncatedWithinCoverage:",
+      "identity: attempt.identity",
+      "anchorSequence: attempt.anchorSequence",
+      "startSequence: attempt.startSequence",
+      "startedAt: attempt.startedAt",
+      "startProvenance: attempt.startProvenance",
+      "status: attempt.status",
+      "endSequence: attempt.endSequence",
+      "endedAt: attempt.endedAt",
+      "diffSha256: attempt.diffSha256",
+      "checkpointSha256: attempt.checkpointSha256",
+      "checkpointProvenance: attempt.checkpointProvenance",
+      "laterAttemptObservedWithinCoverage: attempt.laterAttemptObservedWithinCoverage",
+    ].every((field) => verificationPresenterSource.includes(field)) &&
+    !/\.\.\.(?:snapshot|attempt|checkpoint)/.test(verificationPresenterSource) &&
+    !/(?:payloadJson|rawPayload|baselineBase64|approvedBase64|checks|argv|stdout|stderr|actor|error)/.test(
+      verificationPresenterSource,
+    ),
+  workspaceVerificationRouteReadOnly:
+    verificationRouteSource.includes('if (method === "GET" && runVerificationAttempts !== null)') &&
+    verificationRouteSource.includes("runVerificationAttemptsQuery(searchParams)") &&
+    verificationRouteSource.includes("presentRunVerificationAttempts(") &&
+    verificationRouteSource.includes("service.getRunVerificationAttempts(runId, snapshot)") &&
+    !/(?:POST|PUT|PATCH|DELETE|readJson|approve|execute|commit|push|deploy)/.test(
+      verificationRouteSource,
+    ) &&
+    verificationApiRequestSource.includes("requestJson<unknown>(") &&
+    verificationApiRequestSource.includes("/verification-attempts?snapshot=") &&
+    !/(?:method:|body:|JSON\.stringify|postJson)/.test(verificationApiRequestSource),
+  workspaceVerificationUiHasNoUnsafeSinks:
+    [verificationAttemptsUiSource, verificationAttemptsPanelSource].every(
+      (source) =>
+        !/(?:dangerouslySetInnerHTML|innerHTML|window\.open|window\.location|location\.(?:assign|replace)|<a\b|href\s*=|<form\b|formAction|onSubmit)/.test(
+          source,
+        ),
+    ) &&
+    !/(?:postJson|createProject|createRun|planRun|approve|execute|commit|push|deploy)\(/.test(
+      verificationAttemptsPanelSource,
+    ),
   workspaceRunSummaryMetadataOnly:
     workspaceRunPageSource.includes("SELECT CAST(rowid AS TEXT) AS cursor") &&
     workspaceRunPageSource.includes(

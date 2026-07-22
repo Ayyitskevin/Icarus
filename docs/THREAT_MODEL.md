@@ -112,7 +112,7 @@ approval/event disclosure, stream, daemon, or browser action route. Project and
 repository enumeration and selected-run approval lists remain unpaginated. ADR
 0010 remains an independent release hold.
 
-## Accepted fifth M3 verification-attempt design threats
+## Implemented fifth M3 verification-attempt threats
 
 | Threat | Required control | Required evidence and limits |
 | --- | --- | --- |
@@ -120,15 +120,15 @@ repository enumeration and selected-run approval lists remain unpaginated. ADR
 | SQLite accepts a payload the CLI rejects, or selected JSON work is not byte-bounded | require TEXT storage and direct-column `octet_length(payload_json)` before JSON work: 8 MiB completions, 16 KiB lifecycle transitions, 1 KiB checkpoint saves; strict `json_valid(..., 1)`, exactly-once selected keys, and scalar types | BLOB/number, RFC-8259, JSON5, duplicate-selected-key, wrong-type, and exact/over-bound tests; unrelated corrupt payloads remain unread |
 | The UI invents an attempt identity, timeout, supersession, or rollback relation from adjacency | derive only non-overlapping `verifying` intervals from explicit validated state transitions; mark starts outside coverage; retain unknown timeout/reason; describe only a later observed anchor, never formal supersession | boundary-straddling, crash resume, timeout-collapse, cancellation, failure, restore, and rollback non-correlation tests |
 | A sparse type query makes one optional read proportional to complete history | identify types only inside the exact contiguous suffix of up to 200 sequences and use the per-run sequence index; retain eight with no history count | more-than-200-event, 0/1/8/9-attempt, response-size, and query-plan tests; no full-history scan |
-| Event and checkpoint data come from different moments or reverse causality | exact-current client snapshot in one transaction; safe checkpoint columns in the same snapshot; observed save sequence precedes every verification sequence in coverage | concurrent append before the transaction conflicts; append after yields a coherent pinned response; missing, duplicate, mismatched, post-attempt, and save-order checkpoint regressions fail |
+| Event and checkpoint data come from different moments or reverse causality | exact-current client snapshot in one transaction; safe checkpoint columns in the same snapshot; an observed save sequence precedes every completed attempt that cites its digest | concurrent append before the transaction conflicts; append after yields a coherent pinned response; missing, duplicate, mismatched, post-completion, and save-order checkpoint regressions fail |
 | “Checkpoint provenance” is mistaken for fresh byte integrity | never select baseline/approved Base64; completed attempts may report only recorded digest agreement; incomplete/cancelled intervals report only run-checkpoint availability; an unobserved save event is not called older, missing, or corrupt | private-byte sentinels and poisoned excluded-column tests; no rehash or restore call |
 | Truncated summaries are presented as complete current history | independent `earlierEventsExcluded` and `attemptAnchorsTruncatedWithinCoverage`; no complete-invocation claim; fixed-limit copy and CLI guidance | empty, coverage-only, attempt-only, boundary-unknown, and dual-truncation presenter/browser tests |
 | A stale or late auxiliary response loops, replaces another run, or escapes cancellation | fresh current seed per explicit action; conflicts require operator run refresh; automatic live reconciliation only marks stale; parent-only aggregate cancellation plus request-local ordering; exact bounds, enums, and relational validation | live-versus-manual refresh, attempt-Close/history independence, abort-before-history-open, hidden/selection/Back/unmount, stale retry, focus fallback, and cancellation-ignoring real-browser races |
 | The view widens browser authority | GET-only route and text-only inline region; no approval, rerun, restore, command, Git, or mutation path | method negatives, zero SQLite logical writes/events, unchanged source/Git fingerprints, and static route/raw-HTML/workflow assertions |
 
-ADR 0018 is accepted design only. It preserves the loopback/same-origin/CSP
-boundary, guarded CLI authority, and independent ADR 0010 release hold.
-Implementation and acceptance evidence remain open.
+ADR 0018's controls are implemented and locally evidenced while preserving the
+loopback/same-origin/CSP boundary and guarded CLI authority. Exact-head hosted CI
+is a merge gate; ADR 0010 remains an independent release hold.
 
 ## Inherited repository automation hold
 

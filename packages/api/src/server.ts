@@ -20,6 +20,7 @@ import {
   runDraftRequest,
   runEventHistoryQuery,
   runEventsQuery,
+  runVerificationAttemptsQuery,
   workspaceRunPageQuery,
 } from "./contracts.js";
 import {
@@ -28,6 +29,7 @@ import {
   presentRun,
   presentRunEventHistoryPage,
   presentRunEventPage,
+  presentRunVerificationAttempts,
   presentWorkspaceRunPage,
 } from "./present.js";
 
@@ -446,9 +448,22 @@ async function routeApi(
     json(response, 200, presentRunById(options, runId));
     return true;
   }
-  const runDetail = /^\/api\/runs\/([^/]+)$/.exec(pathname);
+  const runVerificationAttempts = /^\/api\/runs\/([^/]+)\/verification-attempts$/.exec(pathname);
   const runEventHistory = /^\/api\/runs\/([^/]+)\/events\/history$/.exec(pathname);
   const runEvents = /^\/api\/runs\/([^/]+)\/events$/.exec(pathname);
+  const runDetail = /^\/api\/runs\/([^/]+)$/.exec(pathname);
+  if (method === "GET" && runVerificationAttempts !== null) {
+    const runId = decodedRouteId(runVerificationAttempts[1] ?? "", "run id");
+    const { snapshot } = runVerificationAttemptsQuery(searchParams);
+    json(
+      response,
+      200,
+      presentRunVerificationAttempts(
+        options.runtime.service.getRunVerificationAttempts(runId, snapshot),
+      ),
+    );
+    return true;
+  }
   if (method === "GET" && runEventHistory !== null) {
     const runId = decodedRouteId(runEventHistory[1] ?? "", "run id");
     const { before, snapshot } = runEventHistoryQuery(searchParams);

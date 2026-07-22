@@ -24,6 +24,7 @@ const EVENT_POLL_INTERVAL_MS = 2_000;
 const EVENT_POLL_FIRST_BACKOFF_MS = 4_000;
 const HISTORICAL_EVENT_HIGH_WATER = 500;
 const HISTORICAL_EVENT_SENTINEL = "/private/browser-history-payload-sentinel";
+const VERIFICATION_PRIVATE_SENTINEL = "/private/browser-verification-response-sentinel";
 const RUN_SUMMARY_PAGE_SIZE = 12;
 const RUN_SUMMARY_MAX_PAGES = 4;
 const RUN_SUMMARY_FIXTURE_COUNT = RUN_SUMMARY_PAGE_SIZE * RUN_SUMMARY_MAX_PAGES;
@@ -678,6 +679,16 @@ class BrowserPage {
     }, label);
   }
 
+  verificationFact(label) {
+    return this.call((factLabel) => {
+      const root = document.querySelector("#verification-attempts");
+      const term = Array.from(root?.querySelectorAll("dt") ?? []).find(
+        (candidate) => candidate.textContent?.trim() === factLabel,
+      );
+      return term?.parentElement?.querySelector("dd")?.textContent?.trim() ?? null;
+    }, label);
+  }
+
   contextFact(label) {
     return this.call((factLabel) => {
       const root = document.querySelector("#context-summary-heading")?.closest("section");
@@ -889,10 +900,12 @@ async function createBrowserPage(chromium, workspaceUrl) {
   const browserErrors = [];
   let eventFailuresRemaining = 0;
   let eventHistoryFailuresRemaining = 0;
+  let verificationAttemptFailuresRemaining = 0;
   let runPageFailuresRemaining = 0;
   let repositoryStatusFailuresRemaining = 0;
   let eventRequestHold = null;
   let historyRequestHold = null;
+  let verificationRequestHold = null;
   let runPageRequestHold = null;
   let workspaceRequestHold = null;
   chromium.cdp.on(sessionId, "Network.requestWillBeSent", (event) => {
@@ -943,6 +956,7 @@ async function createBrowserPage(chromium, workspaceUrl) {
     let external = false;
     let localEventPoll = false;
     let localEventHistory = false;
+    let localVerificationAttempt = false;
     let localRunPage = false;
     let localRepositoryStatus = false;
     let localWorkspaceRead = false;
@@ -959,6 +973,10 @@ async function createBrowserPage(chromium, workspaceUrl) {
         parsed.origin === workspaceUrl &&
         event.request?.method === "GET" &&
         parsed.pathname.endsWith("/events/history");
+      localVerificationAttempt =
+        parsed.origin === workspaceUrl &&
+        event.request?.method === "GET" &&
+        parsed.pathname.endsWith("/verification-attempts");
       localRunPage =
         parsed.origin === workspaceUrl &&
         event.request?.method === "GET" &&
@@ -1008,6 +1026,22 @@ async function createBrowserPage(chromium, workspaceUrl) {
       historyRequestHold.observed(observation);
       return;
     }
+    if (
+      localVerificationAttempt &&
+      verificationRequestHold !== null &&
+      verificationRequestHold.event === null
+    ) {
+      const observation = {
+        requestId: event.requestId,
+        networkId: event.networkId ?? null,
+        url: requestUrl,
+        observedAt: Date.now(),
+      };
+      verificationRequestHold.event = event;
+      verificationRequestHold.observation = observation;
+      verificationRequestHold.observed(observation);
+      return;
+    }
     if (localRunPage && runPageRequestHold !== null && runPageRequestHold.event === null) {
       const observation = {
         requestId: event.requestId,
@@ -1022,13 +1056,22 @@ async function createBrowserPage(chromium, workspaceUrl) {
     }
     const failEventPoll = localEventPoll && eventFailuresRemaining > 0;
     const failEventHistory = localEventHistory && eventHistoryFailuresRemaining > 0;
+    const failVerificationAttempt =
+      localVerificationAttempt && verificationAttemptFailuresRemaining > 0;
     const failRunPage = localRunPage && runPageFailuresRemaining > 0;
     const failRepositoryStatus = localRepositoryStatus && repositoryStatusFailuresRemaining > 0;
     if (failEventPoll) eventFailuresRemaining -= 1;
     if (failEventHistory) eventHistoryFailuresRemaining -= 1;
+    if (failVerificationAttempt) verificationAttemptFailuresRemaining -= 1;
     if (failRunPage) runPageFailuresRemaining -= 1;
     if (failRepositoryStatus) repositoryStatusFailuresRemaining -= 1;
-    if (failEventPoll || failEventHistory || failRunPage || failRepositoryStatus) {
+    if (
+      failEventPoll ||
+      failEventHistory ||
+      failVerificationAttempt ||
+      failRunPage ||
+      failRepositoryStatus
+    ) {
       void chromium.cdp
         .send(
           "Fetch.fulfillRequest",
@@ -1084,6 +1127,9 @@ async function createBrowserPage(chromium, workspaceUrl) {
     },
     failNextEventHistory: () => {
       eventHistoryFailuresRemaining += 1;
+    },
+    failNextVerificationAttempt: () => {
+      verificationAttemptFailuresRemaining += 1;
     },
     failNextRunPage: () => {
       runPageFailuresRemaining += 1;
@@ -1227,6 +1273,76 @@ async function createBrowserPage(chromium, workspaceUrl) {
         finish,
       };
     },
+    holdNextVerificationAttempt: () => {
+      if (verificationRequestHold !== null) {
+        throw new Error("A verification-attempt request is already held");
+      }
+      let markObserved;
+      const observed = new Promise((resolve) => {
+        markObserved = resolve;
+      });
+      const hold = {
+        event: null,
+        observation: null,
+        observed: markObserved,
+      };
+      verificationRequestHold = hold;
+      let finishPromise = null;
+      const finish = () => {
+        if (finishPromise !== null) return finishPromise;
+        finishPromise = (async () => {
+          if (verificationRequestHold === hold) verificationRequestHold = null;
+          const held = hold.event;
+          if (held === null) return "not_observed";
+          try {
+            await chromium.cdp.send(
+              "Fetch.continueRequest",
+              { requestId: held.requestId },
+              sessionId,
+            );
+            return "continued";
+          } catch (releaseError) {
+            const sawCancellation = () =>
+              held.networkId !== null &&
+              held.networkId !== undefined &&
+              networkFailures.some(
+                (failure) => failure.requestId === held.networkId && failure.canceled,
+              );
+            if (!sawCancellation()) {
+              await waitForObserved(
+                sawCancellation,
+                "the browser cancellation for an aborted verification-attempt request",
+                500,
+              ).catch(() => undefined);
+            }
+            if (sawCancellation()) return "cancelled";
+            try {
+              await chromium.cdp.send(
+                "Fetch.failRequest",
+                { requestId: held.requestId, errorReason: "Aborted" },
+                sessionId,
+              );
+              return "failed";
+            } catch (cleanupError) {
+              if (sawCancellation()) return "cancelled";
+              throw new Error(
+                `Could not release or fail the held verification-attempt request: ${
+                  releaseError instanceof Error ? releaseError.message : String(releaseError)
+                }; cleanup failed: ${
+                  cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+                }`,
+              );
+            }
+          }
+        })();
+        return finishPromise;
+      };
+      return {
+        observed,
+        observation: () => hold.observation,
+        finish,
+      };
+    },
     holdNextRunPage: () => {
       if (runPageRequestHold !== null) throw new Error("A run-page request is already held");
       let markObserved;
@@ -1352,6 +1468,7 @@ let chromium;
 let releaseProviderResponse;
 let finishHeldBrowserEventPoll;
 let finishHeldBrowserHistoryRequest;
+let finishHeldBrowserVerificationRequest;
 let finishHeldBrowserRunPageRequest;
 try {
   const repository = path.join(root, "repository");
@@ -2081,6 +2198,570 @@ try {
     true,
   );
   assert.equal(provider.requests.length, 0);
+
+  const verificationRequestPath = `/api/runs/${encodeURIComponent(
+    browserRunId,
+  )}/verification-attempts`;
+  const verificationRequests = () =>
+    networkRequests.filter((request) => {
+      if (request.method !== "GET" || request.url === undefined) return false;
+      const url = new URL(request.url);
+      return url.origin === workspace.url && url.pathname === verificationRequestPath;
+    });
+  assert.equal(
+    verificationRequests().length,
+    0,
+    "verification provenance must remain lazy until the operator opens it",
+  );
+  const directVerificationResponse = await fetch(
+    `${workspace.url}${verificationRequestPath}?snapshot=${HISTORICAL_EVENT_HIGH_WATER}`,
+  );
+  assert.equal(directVerificationResponse.status, 200);
+  const directVerification = await directVerificationResponse.json();
+  assert.equal(directVerification.snapshot, HISTORICAL_EVENT_HIGH_WATER);
+  assert.equal(directVerification.coverage.eventCount, 200);
+  assert.deepEqual(directVerification.attempts, []);
+  assert.equal(JSON.stringify(directVerification).includes(HISTORICAL_EVENT_SENTINEL), false);
+
+  await page.clickButton("Load verification evidence");
+  await page.waitFor(
+    () => {
+      const root = document.querySelector("#verification-attempts");
+      const status = root?.querySelector('[role="status"]')?.textContent?.trim() ?? "";
+      return (
+        root?.getAttribute("aria-busy") === "false" &&
+        status !== "Verification evidence has not been loaded." &&
+        status !== "Loading pinned verification evidence."
+      );
+    },
+    [],
+    "the lazy bounded verification projection",
+  );
+  const initialVerificationStatus = await page.call(
+    () =>
+      document.querySelector('#verification-attempts [role="status"]')?.textContent?.trim() ?? null,
+  );
+  assert.equal(initialVerificationStatus, "Loaded 0 verification intervals at revision 500.");
+  assert.equal((await page.bodyText()).includes("No verification interval was observed"), true);
+  assert.equal(await page.verificationFact("Pinned revision"), "500");
+  assert.equal(await page.verificationFact("Sequence coverage"), "301–500");
+  assert.equal(await page.verificationFact("Events examined"), "200 of 200 maximum");
+  assert.equal(await page.verificationFact("Attempt intervals"), "0 of 8 maximum");
+  assert.equal(verificationRequests().length, 1);
+  let verificationUrl = new URL(verificationRequests()[0].url);
+  assert.deepEqual([...verificationUrl.searchParams.keys()], ["snapshot"]);
+  assert.equal(verificationUrl.searchParams.get("snapshot"), "500");
+  body = await page.bodyText();
+  assert.equal(body.includes(HISTORICAL_EVENT_SENTINEL), false);
+  assert.equal(body.includes(VERIFICATION_PRIVATE_SENTINEL), false);
+
+  browserPage.failNextVerificationAttempt();
+  await page.clickButton("Refresh evidence");
+  await page.waitFor(
+    () =>
+      document.querySelector("#verification-attempts")?.getAttribute("aria-busy") === "false" &&
+      document.body.innerText.includes("Controlled browser smoke read failure."),
+    [],
+    "a retained verification projection after a transient read failure",
+  );
+  assert.equal(await page.verificationFact("Pinned revision"), "500");
+  assert.equal((await page.bodyText()).includes("No verification interval was observed"), true);
+  await page.clickButton("Retry evidence");
+  await page.waitFor(
+    () =>
+      document.querySelector("#verification-attempts")?.getAttribute("aria-busy") === "false" &&
+      !document.body.innerText.includes("Controlled browser smoke read failure."),
+    [],
+    "a successful explicit verification retry",
+  );
+
+  assert.equal(
+    await page.call((sentinel) => {
+      const originalFetch = window.fetch;
+      let used = false;
+      window.fetch = async (input, init) => {
+        const requestUrl =
+          typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+        if (used || !requestUrl.includes("/verification-attempts?snapshot=")) {
+          return originalFetch.call(window, input, init);
+        }
+        used = true;
+        const response = await originalFetch.call(window, input, init);
+        const value = await response.json();
+        value.privateUnexpectedField = sentinel;
+        window.fetch = originalFetch;
+        return new Response(JSON.stringify(value), {
+          status: response.status,
+          headers: { "content-type": "application/json; charset=utf-8" },
+        });
+      };
+      return true;
+    }, VERIFICATION_PRIVATE_SENTINEL),
+    true,
+  );
+  await page.clickButton("Refresh evidence");
+  await page.waitFor(
+    () =>
+      document.querySelector("#verification-attempts")?.getAttribute("aria-busy") === "false" &&
+      document.body.innerText.includes("verification-attempt response shape was invalid"),
+    [],
+    "strict browser rejection of an extra response field",
+  );
+  assert.equal(await page.verificationFact("Pinned revision"), "500");
+  assert.equal((await page.bodyText()).includes(VERIFICATION_PRIVATE_SENTINEL), false);
+  await page.clickButton("Retry evidence");
+  await page.waitFor(
+    () =>
+      document.querySelector("#verification-attempts")?.getAttribute("aria-busy") === "false" &&
+      !document.body.innerText.includes("verification-attempt response shape was invalid"),
+    [],
+    "a valid response after strict response-shape rejection",
+  );
+
+  const hostileVerificationError =
+    '<img src="x" onerror="window.__icarusVerificationErrorExecuted=true">';
+  assert.equal(
+    await page.call((message) => {
+      const originalFetch = window.fetch;
+      let used = false;
+      window.fetch = (input, init) => {
+        const requestUrl =
+          typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+        if (used || !requestUrl.includes("/verification-attempts?snapshot=")) {
+          return originalFetch.call(window, input, init);
+        }
+        used = true;
+        window.fetch = originalFetch;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: { code: "HOSTILE_BROWSER_FIXTURE", message },
+            }),
+            {
+              status: 503,
+              headers: { "content-type": "application/json; charset=utf-8" },
+            },
+          ),
+        );
+      };
+      return true;
+    }, hostileVerificationError),
+    true,
+  );
+  await page.clickButton("Refresh evidence");
+  await page.waitFor(
+    (message) => document.body.innerText.includes(message),
+    [hostileVerificationError],
+    "literal hostile verification error text",
+  );
+  assert.equal(
+    await page.call(
+      () =>
+        document.querySelector("#verification-attempts img") === null &&
+        window.__icarusVerificationErrorExecuted !== true,
+    ),
+    true,
+    "hostile error text must not create an element or execute an event handler",
+  );
+  assert.equal(await page.verificationFact("Pinned revision"), "500");
+  await page.clickButton("Retry evidence");
+  await page.waitFor(
+    (message) =>
+      document.querySelector("#verification-attempts")?.getAttribute("aria-busy") === "false" &&
+      !document.body.innerText.includes(message),
+    [hostileVerificationError],
+    "a valid response after hostile error rendering",
+  );
+
+  assert.equal(
+    await page.call(() => {
+      const originalFetch = window.fetch;
+      let used = false;
+      window.fetch = async (input, init) => {
+        const requestUrl =
+          typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+        if (used || !requestUrl.includes("/verification-attempts?snapshot=")) {
+          return originalFetch.call(window, input, init);
+        }
+        used = true;
+        const response = await originalFetch.call(window, input, init);
+        const value = await response.json();
+        value.runId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        window.fetch = originalFetch;
+        return new Response(JSON.stringify(value), {
+          status: response.status,
+          headers: { "content-type": "application/json; charset=utf-8" },
+        });
+      };
+      return true;
+    }),
+    true,
+  );
+  await page.clickButton("Refresh evidence");
+  await page.waitFor(
+    () => document.body.innerText.includes("verification-attempt response metadata was invalid"),
+    [],
+    "strict browser rejection of a mismatched run seed",
+  );
+  assert.equal(await page.verificationFact("Pinned revision"), "500");
+  await page.clickButton("Retry evidence");
+  await page.waitFor(
+    () =>
+      document.querySelector("#verification-attempts")?.getAttribute("aria-busy") === "false" &&
+      !document.body.innerText.includes("verification-attempt response metadata was invalid"),
+    [],
+    "a valid response after mismatched-seed rejection",
+  );
+
+  assert.equal(
+    await page.call(() => {
+      const originalFetch = window.fetch;
+      const state = { observed: false, release: null, originalFetch };
+      window.__icarusLateVerificationResponse = state;
+      window.fetch = (input, init) => {
+        const requestUrl =
+          typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+        if (state.observed || !requestUrl.includes("/verification-attempts?snapshot=")) {
+          return originalFetch.call(window, input, init);
+        }
+        state.observed = true;
+        return new Promise((resolve, reject) => {
+          state.release = async () => {
+            try {
+              const options = init === undefined ? {} : { ...init, signal: undefined };
+              const response = await originalFetch.call(window, input, options);
+              const value = await response.json();
+              value.snapshot = 499;
+              resolve(
+                new Response(JSON.stringify(value), {
+                  status: response.status,
+                  headers: { "content-type": "application/json; charset=utf-8" },
+                }),
+              );
+            } catch (error) {
+              reject(error);
+            }
+          };
+        });
+      };
+      return true;
+    }),
+    true,
+  );
+  await page.clickButton("Refresh evidence");
+  await page.waitFor(
+    () => window.__icarusLateVerificationResponse?.observed === true,
+    [],
+    "the deliberately delayed cancellation-ignoring verification response",
+  );
+  await page.clickButton("Close");
+  await page.waitFor(
+    () =>
+      !document.body.innerText.includes("Pinned revision") &&
+      document.querySelector("#verification-attempts")?.getAttribute("aria-busy") === "false",
+    [],
+    "the closed verification panel before a late successful response",
+  );
+  assert.equal(
+    await page.call(
+      () =>
+        document.activeElement instanceof HTMLButtonElement &&
+        document.activeElement.textContent?.trim() === "Load verification evidence",
+    ),
+    true,
+    "operator Close must restore focus before any late response settles",
+  );
+  await page.clickButton("Load verification evidence");
+  await page.waitFor(
+    () =>
+      document.querySelector('#verification-attempts [role="status"]')?.textContent?.trim() ===
+      "Loaded 0 verification intervals at revision 500.",
+    [],
+    "replacement verification request B before delayed request A settles",
+  );
+  assert.equal(
+    await page.call(async () => {
+      const state = window.__icarusLateVerificationResponse;
+      if (state === undefined || typeof state.release !== "function") return false;
+      window.fetch = state.originalFetch;
+      await state.release();
+      delete window.__icarusLateVerificationResponse;
+      return true;
+    }),
+    true,
+  );
+  await delay(100);
+  assert.equal(
+    await page.call(
+      () =>
+        document.querySelector('#verification-attempts [role="status"]')?.textContent?.trim() ===
+          "Loaded 0 verification intervals at revision 500." &&
+        !document.body.innerText.includes("verification-attempt response metadata was invalid"),
+    ),
+    true,
+    "late mismatched request A must not overwrite or clear replacement request B",
+  );
+  assert.equal(await page.verificationFact("Pinned revision"), "500");
+  const appendDatabase = new Database(path.join(stateRoot, "icarus.sqlite3"));
+  try {
+    appendDatabase
+      .prepare(
+        `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        browserRunId,
+        HISTORICAL_EVENT_HIGH_WATER + 1,
+        "operation.finished",
+        `${HISTORICAL_EVENT_SENTINEL}:stale-pin`,
+        "2026-07-20T12:00:00.000Z",
+      );
+  } finally {
+    appendDatabase.close();
+  }
+  await page.waitFor(
+    () => document.body.innerText.includes("Newer persisted activity exists"),
+    [],
+    "a pinned verification panel becoming stale under live reconciliation",
+  );
+  assert.equal(await page.verificationFact("Pinned revision"), "500");
+  await page.clickButton("Refresh evidence");
+  await page.waitFor(
+    () =>
+      document.querySelector("#verification-attempts")?.getAttribute("aria-busy") === "false" &&
+      !document.body.innerText.includes("Newer persisted activity exists"),
+    [],
+    "an explicit refresh to the newest verification snapshot",
+  );
+  assert.equal(await page.verificationFact("Pinned revision"), "501");
+  assert.equal(await page.verificationFact("Sequence coverage"), "302–501");
+
+  const conflictVerificationRequest = browserPage.holdNextVerificationAttempt();
+  finishHeldBrowserVerificationRequest = conflictVerificationRequest.finish;
+  await page.clickButton("Refresh evidence");
+  await conflictVerificationRequest.observed;
+  const conflictDatabase = new Database(path.join(stateRoot, "icarus.sqlite3"));
+  try {
+    conflictDatabase
+      .prepare(
+        `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        browserRunId,
+        HISTORICAL_EVENT_HIGH_WATER + 2,
+        "operation.finished",
+        `${HISTORICAL_EVENT_SENTINEL}:snapshot-conflict`,
+        "2026-07-20T12:00:00.000Z",
+      );
+  } finally {
+    conflictDatabase.close();
+  }
+  const conflictVerificationOutcome = await conflictVerificationRequest.finish();
+  finishHeldBrowserVerificationRequest = undefined;
+  assert.equal(conflictVerificationOutcome, "continued");
+  await page.waitFor(
+    () =>
+      document.body.innerText.includes("successful persisted-run refresh is required") &&
+      document.body.innerText.includes("run advanced before this pinned read began"),
+    [],
+    "the verification snapshot-conflict lock",
+  );
+  assert.equal(await page.verificationFact("Pinned revision"), "501");
+  assert.equal(await page.buttonDisabled("Retry evidence"), true);
+  const conflictLockedRequestCount = verificationRequests().length;
+  await delay(100);
+  assert.equal(
+    verificationRequests().length,
+    conflictLockedRequestCount,
+    "the conflict lock must not replay its failed snapshot",
+  );
+  await page.clickButton("Refresh persisted run");
+  await page.waitFor(
+    () =>
+      !document.body.innerText.includes("successful persisted-run refresh is required") &&
+      Array.from(document.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Refresh evidence" && !button.disabled,
+      ),
+    [],
+    "successful persisted-run refresh unlocking a conflicted verification panel",
+  );
+  await page.clickButton("Refresh evidence");
+  await page.waitFor(
+    () =>
+      document.querySelector("#verification-attempts")?.getAttribute("aria-busy") === "false" &&
+      !document.body.innerText.includes("Newer persisted activity exists"),
+    [],
+    "explicit verification retry after conflict recovery",
+  );
+  assert.equal(await page.verificationFact("Pinned revision"), "502");
+  assert.equal(await page.verificationFact("Sequence coverage"), "303–502");
+
+  const verificationPersistenceBefore = workspaceStateSnapshot(
+    path.join(stateRoot, "icarus.sqlite3"),
+  );
+  const verificationSourceBefore = await fingerprint(repository);
+  const hiddenVerificationRequest = browserPage.holdNextVerificationAttempt();
+  finishHeldBrowserVerificationRequest = hiddenVerificationRequest.finish;
+  await page.clickButton("Refresh evidence");
+  await hiddenVerificationRequest.observed;
+  await page.setVisibility("hidden");
+  await page.waitFor(
+    () => document.body.innerText.includes("cancelled while this tab was hidden"),
+    [],
+    "hidden-document verification cancellation",
+  );
+  const hiddenVerificationOutcome = await hiddenVerificationRequest.finish();
+  finishHeldBrowserVerificationRequest = undefined;
+  assert.equal(hiddenVerificationOutcome, "cancelled");
+  await page.setVisibility("visible");
+  await page.clickButton("Retry evidence");
+  await page.waitFor(
+    () =>
+      document.querySelector("#verification-attempts")?.getAttribute("aria-busy") === "false" &&
+      !document.body.innerText.includes("cancelled while this tab was hidden"),
+    [],
+    "verification retry after hidden-document cancellation",
+  );
+
+  const refreshVerificationRequest = browserPage.holdNextVerificationAttempt();
+  finishHeldBrowserVerificationRequest = refreshVerificationRequest.finish;
+  await page.clickButton("Refresh evidence");
+  await refreshVerificationRequest.observed;
+  await page.clickButton("Refresh persisted run");
+  await page.waitFor(
+    () => document.body.innerText.includes("cancelled by the persisted-run refresh"),
+    [],
+    "persisted-run refresh cancelling verification evidence first",
+  );
+  const refreshVerificationOutcome = await refreshVerificationRequest.finish();
+  finishHeldBrowserVerificationRequest = undefined;
+  assert.equal(refreshVerificationOutcome, "cancelled");
+  await page.clickButton("Retry evidence");
+  await page.waitFor(
+    () =>
+      document.querySelector("#verification-attempts")?.getAttribute("aria-busy") === "false" &&
+      !document.body.innerText.includes("cancelled by the persisted-run refresh"),
+    [],
+    "verification retry after persisted-run refresh cancellation",
+  );
+
+  const historyVerificationRequest = browserPage.holdNextVerificationAttempt();
+  finishHeldBrowserVerificationRequest = historyVerificationRequest.finish;
+  await page.clickButton("Refresh evidence");
+  await historyVerificationRequest.observed;
+  const verificationHistoryRequestBaseline = networkRequests.length;
+  await page.clickButton("Load older activity");
+  const historyVerificationOutcome = await historyVerificationRequest.finish();
+  finishHeldBrowserVerificationRequest = undefined;
+  assert.equal(historyVerificationOutcome, "cancelled");
+  await page.waitFor(
+    () =>
+      document.querySelector(".history-panel")?.getAttribute("aria-busy") === "false" &&
+      document.body.innerText.includes("cancelled before older activity opened"),
+    [],
+    "abort-before-history verification ordering with retained evidence",
+  );
+  assert.equal(await page.verificationFact("Pinned revision"), "502");
+  const verificationHistoryNetworkRequest = networkRequests
+    .slice(verificationHistoryRequestBaseline)
+    .find(
+      (request) => request.method === "GET" && request.url?.includes("/events/history?before="),
+    );
+  assert.notEqual(verificationHistoryNetworkRequest, undefined);
+  const verificationHistoryUrl = new URL(verificationHistoryNetworkRequest.url);
+  assert.equal(verificationHistoryUrl.searchParams.get("snapshot"), "502");
+  await page.clickButton("Close");
+  await page.waitFor(
+    () => document.activeElement?.id === "run-verification",
+    [],
+    "verification focus fallback while older activity disables its launcher",
+  );
+  await page.clickButton("Close older activity");
+  await page.waitFor(
+    () => document.querySelector(".history-panel") === null,
+    [],
+    "closing older activity after verification cancellation ordering",
+  );
+  await page.clickButton("Load verification evidence");
+  await page.waitFor(
+    () =>
+      document.querySelector("#verification-attempts")?.getAttribute("aria-busy") === "false" &&
+      !document.body.innerText.includes("cancelled before older activity opened"),
+    [],
+    "verification retry after older activity closes",
+  );
+
+  const selectionVerificationRequest = browserPage.holdNextVerificationAttempt();
+  finishHeldBrowserVerificationRequest = selectionVerificationRequest.finish;
+  await page.clickButton("Refresh evidence");
+  await selectionVerificationRequest.observed;
+  await page.clickProject("browser-project-two");
+  await page.waitFor(
+    () =>
+      document.querySelector("#project-detail-heading")?.textContent === "browser-project-two" &&
+      document.querySelector("#run-evidence-heading") === null,
+    [],
+    "selection unmount while verification evidence is in flight",
+  );
+  const selectionVerificationOutcome = await selectionVerificationRequest.finish();
+  finishHeldBrowserVerificationRequest = undefined;
+  assert.equal(selectionVerificationOutcome, "cancelled");
+  assert.deepEqual(
+    workspaceStateSnapshot(path.join(stateRoot, "icarus.sqlite3")),
+    verificationPersistenceBefore,
+    "verification browsing must not mutate durable control state",
+  );
+  assert.deepEqual(
+    await fingerprint(repository),
+    verificationSourceBefore,
+    "verification browsing must not read through to or mutate source state",
+  );
+  body = await page.bodyText();
+  assert.equal(body.includes(HISTORICAL_EVENT_SENTINEL), false);
+  assert.equal(body.includes(VERIFICATION_PRIVATE_SENTINEL), false);
+
+  await page.clickProject("browser-project");
+  await page.waitFor(
+    () => document.querySelector("#project-detail-heading")?.textContent === "browser-project",
+    [],
+    "the original project after verification request isolation",
+  );
+  await page.clickRecentRun(TASK);
+  await page.waitFor(
+    (runId) =>
+      Array.from(document.querySelectorAll(".run-evidence dt")).some(
+        (term) =>
+          term.textContent?.trim() === "Run ID" &&
+          term.parentElement?.querySelector("dd")?.textContent?.trim() === runId,
+      ),
+    [browserRunId],
+    "the original run after verification request isolation",
+  );
+  const boundedVerificationEvidence = {
+    initialSnapshot: 500,
+    staleRefreshedSnapshot: 501,
+    conflictRecoveredSnapshot: 502,
+    eventLimit: 200,
+    attemptLimit: 8,
+    lazy: true,
+    retainedRetry: true,
+    strictShapeRejected: true,
+    mismatchedSeedRejected: true,
+    hostileErrorRenderedAsText: true,
+    replacementRaceRejected: true,
+    lateSuccessRejected: true,
+    stalePinObserved: true,
+    conflictLockRecovered: true,
+    focusRestored: true,
+    hiddenCancellation: hiddenVerificationOutcome,
+    refreshCancellation: refreshVerificationOutcome,
+    historyCancellation: historyVerificationOutcome,
+    selectionCancellation: selectionVerificationOutcome,
+    privatePayloads: "not rendered",
+    durableStateUnchanged: true,
+    sourceUnchanged: true,
+  };
 
   await page.waitFor(
     () =>
@@ -2856,6 +3537,7 @@ try {
   const historyRequests = networkRequests.filter(
     (request) => request.method === "GET" && request.url?.includes("/events/history?before="),
   );
+  const verificationAttemptRequests = verificationRequests();
   const liveReadErrors = networkResponses.filter(
     (response) =>
       (response.url?.endsWith("/repository-status") || response.url?.includes("/events?after=")) &&
@@ -2864,12 +3546,32 @@ try {
   const historyReadErrors = networkResponses.filter(
     (response) => response.url?.includes("/events/history?before=") && response.status !== 200,
   );
+  const verificationReadErrors = networkResponses.filter(
+    (response) =>
+      response.url?.includes("/verification-attempts?snapshot=") && response.status !== 200,
+  );
   assert.equal(contextRequests.length, 3);
   assert.equal(draftRequests.length, 1);
   assert.equal(planRequests.length, 1);
   assert.ok(repositoryStatusRequests.length >= 3);
   assert.ok(eventRequests.length > 0);
-  assert.equal(historyRequests.length, historicalRequestsDuringNavigation.length + 5);
+  assert.equal(
+    historyRequests.length,
+    historicalRequestsDuringNavigation.length + 6,
+    "five historical lifecycle probes plus the verification abort-before-history probe are expected",
+  );
+  assert.ok(verificationAttemptRequests.length >= 10);
+  for (const request of verificationAttemptRequests) {
+    const requestUrl = new URL(request.url);
+    assert.equal(request.method, "GET");
+    assert.equal(requestUrl.pathname, verificationRequestPath);
+    assert.deepEqual([...requestUrl.searchParams.keys()], ["snapshot"]);
+    assert.equal(
+      [500, 501, 502].includes(Number(requestUrl.searchParams.get("snapshot"))),
+      true,
+      "every verification read must stay pinned to an observed selected-run revision",
+    );
+  }
   for (const request of historyRequests) {
     const historyUrl = new URL(request.url);
     assert.equal(
@@ -2877,7 +3579,10 @@ try {
       `/api/runs/${encodeURIComponent(browserRunId)}/events/history`,
     );
     assert.deepEqual([...historyUrl.searchParams.keys()], ["before", "snapshot"]);
-    assert.equal(Number(historyUrl.searchParams.get("snapshot")), historySnapshot);
+    assert.equal(
+      Number(historyUrl.searchParams.get("snapshot")),
+      request.requestId === verificationHistoryNetworkRequest.requestId ? 502 : historySnapshot,
+    );
   }
   const selectedRunEventPaths = new Set([
     `/api/runs/${encodeURIComponent(browserRunId)}/events`,
@@ -2904,6 +3609,10 @@ try {
   assert.deepEqual(
     historyReadErrors.map(({ status }) => status),
     [503],
+  );
+  assert.deepEqual(
+    verificationReadErrors.map(({ status }) => status),
+    [503, 409],
   );
   assert.deepEqual(blockedExternalRequests, []);
   assert.deepEqual(browserErrors, []);
@@ -2945,6 +3654,7 @@ try {
           terminal: heldEventTerminal,
           selectionPreserved: true,
         },
+        boundedVerificationProvenance: boundedVerificationEvidence,
         boundedRunPageNavigation: boundedRunPageEvidence,
         historicalEventNavigation: {
           pinnedRevision: historySnapshot,
@@ -2971,6 +3681,7 @@ try {
         },
         controlledReadFailures: liveReadErrors.length,
         controlledHistoryReadFailures: historyReadErrors.length,
+        controlledVerificationReadFailures: verificationReadErrors.length,
         eventRecoveryDelayMs: recoveryDelayMs,
         evidenceAnchor: contextEvidenceHref,
         repositoryStatusRequests: repositoryStatusRequests.length,
@@ -2988,6 +3699,8 @@ try {
   finishHeldBrowserRunPageRequest = undefined;
   await finishHeldBrowserHistoryRequest?.().catch(() => undefined);
   finishHeldBrowserHistoryRequest = undefined;
+  await finishHeldBrowserVerificationRequest?.().catch(() => undefined);
+  finishHeldBrowserVerificationRequest = undefined;
   await finishHeldBrowserEventPoll?.().catch(() => undefined);
   finishHeldBrowserEventPoll = undefined;
   releaseProviderResponse?.();

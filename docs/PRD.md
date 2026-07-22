@@ -215,10 +215,10 @@ ADR 0017 defines this summary-only navigation contract:
    browser approval, execution, command, commit, push, or deployment authority.
    Preserve the unresolved ADR 0010 hold.
 
-## Accepted fifth M3 bounded verification-attempt design
+## Implemented fifth M3 bounded verification-attempt slice
 
-ADR 0018 is accepted design, not yet implemented product behavior. The slice
-must:
+ADR 0018 is implemented by this bounded product slice. Its continuing contract
+is to:
 
 1. Add one lazy selected-run GET route requiring exactly one canonical positive
    event snapshot and no caller-selected limit, filter, sort, search, or

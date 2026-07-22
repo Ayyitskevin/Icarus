@@ -53,6 +53,8 @@ import {
   runPageDepth,
   runPageRequest,
 } from "./run-page-nav.js";
+import type { VerificationAttemptsPanelHandle } from "./VerificationAttemptsPanel.js";
+import { VerificationAttemptsPanel } from "./VerificationAttemptsPanel.js";
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "unknown";
@@ -1030,7 +1032,7 @@ interface RunEvidenceProps {
   readonly planningCapability: CapabilityView;
   readonly onRunChanged: (run: RunView) => Promise<void>;
   readonly onRefresh: (runId: string) => Promise<void>;
-  readonly registerHistoryCancellation: (cancel: (() => void) | null) => void;
+  readonly registerAuxiliaryCancellation: (cancel: (() => void) | null) => void;
 }
 
 function RunEvidence({
@@ -1038,7 +1040,7 @@ function RunEvidence({
   planningCapability,
   onRunChanged,
   onRefresh,
-  registerHistoryCancellation,
+  registerAuxiliaryCancellation,
 }: RunEvidenceProps) {
   const [planning, setPlanning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -1065,6 +1067,8 @@ function RunEvidence({
   const historyLaunchButtonRef = useRef<HTMLButtonElement | null>(null);
   const historyCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const restoreHistoryFocusRef = useRef(false);
+  const verificationSectionRef = useRef<HTMLElement | null>(null);
+  const verificationAttemptsRef = useRef<VerificationAttemptsPanelHandle | null>(null);
   const historyOpen = historySession !== null;
 
   const storeHistorySession = useCallback((next: HistorySession | null): void => {
@@ -1091,10 +1095,15 @@ function RunEvidence({
     setHistoryRetryRequest(null);
   }, [abortHistoryRequest, storeHistorySession]);
 
+  const cancelAuxiliaryReads = useCallback((): void => {
+    cancelHistorySession();
+    verificationAttemptsRef.current?.cancelForParentNavigation();
+  }, [cancelHistorySession]);
+
   useEffect(() => {
-    registerHistoryCancellation(cancelHistorySession);
-    return () => registerHistoryCancellation(null);
-  }, [cancelHistorySession, registerHistoryCancellation]);
+    registerAuxiliaryCancellation(cancelAuxiliaryReads);
+    return () => registerAuxiliaryCancellation(null);
+  }, [cancelAuxiliaryReads, registerAuxiliaryCancellation]);
 
   useEffect(() => {
     if (historyOpen) {
@@ -1302,6 +1311,7 @@ function RunEvidence({
     setActionError(null);
     try {
       const session = createHistorySession(run);
+      verificationAttemptsRef.current?.abortBeforeHistoryOpen();
       restoreHistoryFocusRef.current = false;
       historyOpenRef.current = true;
       liveRequestRef.current?.abort();
@@ -1343,6 +1353,7 @@ function RunEvidence({
       await onRunChanged(await planRun(run.id));
     } catch (error) {
       setActionError(errorMessage(error));
+      verificationAttemptsRef.current?.abortForPersistedRunRefresh();
       await onRefresh(run.id);
     } finally {
       setPlanning(false);
@@ -1352,8 +1363,10 @@ function RunEvidence({
   const refresh = async (): Promise<void> => {
     setActionError(null);
     setRefreshing(true);
+    verificationAttemptsRef.current?.abortForPersistedRunRefresh();
     try {
       await onRefresh(run.id);
+      verificationAttemptsRef.current?.persistedRunRefreshSucceeded();
     } catch (error) {
       setActionError(errorMessage(error));
     } finally {
@@ -1617,6 +1630,7 @@ function RunEvidence({
       </section>
 
       <section
+        ref={verificationSectionRef}
         id="run-verification"
         className="evidence-block"
         aria-labelledby="verification-heading"
@@ -1638,6 +1652,12 @@ function RunEvidence({
             <dd className="digest">{run.verification.checkpointSha256 ?? "Not produced"}</dd>
           </div>
         </dl>
+        <VerificationAttemptsPanel
+          ref={verificationAttemptsRef}
+          run={run}
+          historyOpen={historyOpen}
+          focusFallbackRef={verificationSectionRef}
+        />
       </section>
 
       <section className="evidence-block" aria-labelledby="checks-heading">
@@ -2135,10 +2155,10 @@ export function App() {
   const runPageGenerationRef = useRef(0);
   const selectionRequestRef = useRef<AbortController | null>(null);
   const selectionGenerationRef = useRef(0);
-  const historyCancellationRef = useRef<(() => void) | null>(null);
+  const auxiliaryCancellationRef = useRef<(() => void) | null>(null);
 
-  const registerHistoryCancellation = useCallback((cancel: (() => void) | null): void => {
-    historyCancellationRef.current = cancel;
+  const registerAuxiliaryCancellation = useCallback((cancel: (() => void) | null): void => {
+    auxiliaryCancellationRef.current = cancel;
   }, []);
 
   const storeRunPageSession = useCallback((session: RunPageSession): void => {
@@ -2340,7 +2360,7 @@ export function App() {
 
   const selectRun = useCallback(
     async (runId: string): Promise<void> => {
-      if (selectedRun?.id !== runId) historyCancellationRef.current?.();
+      if (selectedRun?.id !== runId) auxiliaryCancellationRef.current?.();
       pauseRunPageRequest(
         "Run-page navigation was cancelled when the selected run changed. Retry to continue.",
       );
@@ -2370,7 +2390,7 @@ export function App() {
 
   const selectProject = useCallback(
     (projectId: string): void => {
-      historyCancellationRef.current?.();
+      auxiliaryCancellationRef.current?.();
       pauseRunPageRequest(
         "Run-page navigation was cancelled when the selected project changed. Retry to continue.",
       );
@@ -2382,7 +2402,7 @@ export function App() {
   );
 
   const closeRun = useCallback((): void => {
-    historyCancellationRef.current?.();
+    auxiliaryCancellationRef.current?.();
     pauseRunPageRequest(
       "Run-page navigation was cancelled when the selected run changed. Retry to continue.",
     );
@@ -2542,7 +2562,7 @@ export function App() {
                   planningCapability={workspace.capabilities.planning}
                   onRunChanged={mergeRun}
                   onRefresh={refreshRun}
-                  registerHistoryCancellation={registerHistoryCancellation}
+                  registerAuxiliaryCancellation={registerAuxiliaryCancellation}
                 />
               </div>
             )}

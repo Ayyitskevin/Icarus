@@ -56,7 +56,8 @@ input:focus-visible,
 textarea:focus-visible,
 summary:focus-visible,
 .evidence-nav a:focus-visible,
-.timeline__evidence-link:focus-visible {
+.timeline__evidence-link:focus-visible,
+.evidence-block:focus-visible {
   outline: 3px solid rgb(118 183 255 / 55%);
   outline-offset: 2px;
 }
@@ -93,6 +94,7 @@ h1,
 h2,
 h3,
 h4,
+h5,
 p {
   margin-top: 0;
 }
@@ -564,6 +566,81 @@ pre {
   flex: 1;
 }
 
+.verification-attempts {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.verification-attempts__heading,
+.verification-attempts__subheading,
+.verification-attempts__actions,
+.verification-attempt__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.verification-attempts__heading h4,
+.verification-attempts__heading .eyebrow,
+.verification-attempts__subheading h5,
+.verification-attempt__heading h5,
+.verification-attempts__notice {
+  margin-bottom: 0;
+}
+
+.verification-attempts__omissions,
+.verification-attempts__note,
+.verification-attempt__note {
+  color: var(--muted);
+}
+
+.verification-attempts__actions {
+  justify-content: flex-start;
+}
+
+.verification-attempts__notice,
+.verification-attempts__facts,
+.verification-checkpoint,
+.verification-attempts__guidance {
+  margin-top: 1rem;
+}
+
+.verification-attempts__guidance {
+  margin-bottom: 0;
+  border-left: 2px solid var(--info);
+  padding-left: 0.75rem;
+  color: #b9d9ff;
+}
+
+.verification-checkpoint {
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  padding: 0.9rem;
+  background: rgb(13 18 27 / 60%);
+}
+
+.verification-attempt-list {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.verification-attempt {
+  border: 1px solid rgb(118 183 255 / 32%);
+  border-radius: 0.65rem;
+  padding: 0.9rem;
+  background: rgb(12 27 43 / 34%);
+}
+
+.verification-attempt__note {
+  margin-bottom: 0;
+  font-size: 0.86rem;
+}
+
 .history-panel {
   margin: 1rem 0;
   border: 1px solid rgb(118 183 255 / 38%);
@@ -787,6 +864,9 @@ footer p {
   .repository-status__actions,
   .live-refresh__error,
   .history-launch,
+  .verification-attempts__heading,
+  .verification-attempts__subheading,
+  .verification-attempt__heading,
   .history-panel__heading,
   .history-panel__navigation,
   .history-panel__error,

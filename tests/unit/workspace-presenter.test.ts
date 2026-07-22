@@ -4,6 +4,7 @@ import {
   presentRun,
   presentRunEventHistoryPage,
   presentRunEventPage,
+  presentRunVerificationAttempts,
   presentWorkspaceRunPage,
   workspaceRunPhase,
 } from "../../packages/api/src/present.js";
@@ -13,6 +14,7 @@ import type {
   RunPresentationSnapshot,
   RunRecord,
   RunState,
+  RunVerificationAttemptsSnapshot,
   WorkspaceRunPage,
 } from "../../packages/core/src/types.js";
 import { UNIT_CEILING, UNIT_PROVIDER, UNIT_SANDBOX } from "../support/unit-fixtures.js";
@@ -110,6 +112,204 @@ describe("workspace run presentation", () => {
     expect(Object.keys((view.runs as Array<Record<string, unknown>>)[0] ?? {}).sort()).toEqual(
       ["id", "projectId", "task", "target", "state", "phase", "createdAt", "updatedAt"].sort(),
     );
+  });
+
+  test("reconstructs the exact verification-attempt allowlist without private evidence", () => {
+    const runId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const checkpointSha256 = "c".repeat(64);
+    const diffSha256 = "d".repeat(64);
+    const privateSentinel = "<script>private-payload-navigation-sentinel</script>";
+    const snapshot = {
+      runId,
+      snapshot: 8,
+      coverage: {
+        firstSequence: 1,
+        lastSequence: 8,
+        eventCount: 8,
+        eventLimit: 200,
+        earlierEventsExcluded: false,
+        privatePath: privateSentinel,
+      },
+      attemptLimit: 8,
+      attemptAnchorsTruncatedWithinCoverage: false,
+      checkpoint: {
+        status: "saved",
+        sha256: checkpointSha256,
+        createdAt: "2026-07-22T12:00:03.000Z",
+        baselineBase64: privateSentinel,
+        approvedBase64: privateSentinel,
+        saveEvent: {
+          status: "observed_in_coverage",
+          sequence: 3,
+          timestamp: "2026-07-22T12:00:03.000Z",
+          payloadJson: privateSentinel,
+        },
+      },
+      attempts: [
+        {
+          identity: "verification-anchor-4",
+          anchorSequence: 4,
+          startSequence: 2,
+          startedAt: "2026-07-22T12:00:02.000Z",
+          startProvenance: "observed_initial_edit",
+          status: "passed",
+          endSequence: 4,
+          endedAt: "2026-07-22T12:00:04.000Z",
+          diffSha256,
+          checkpointSha256,
+          checkpointProvenance: "recorded_digest_match",
+          laterAttemptObservedWithinCoverage: true,
+          diff: privateSentinel,
+          checks: [{ argv: [privateSentinel], stdout: privateSentinel }],
+          actor: privateSentinel,
+        },
+        {
+          identity: "verification-anchor-8",
+          anchorSequence: 8,
+          startSequence: null,
+          startedAt: null,
+          startProvenance: "outside_coverage",
+          status: "incomplete_at_snapshot",
+          endSequence: null,
+          endedAt: null,
+          diffSha256: null,
+          checkpointSha256,
+          checkpointProvenance: "run_checkpoint_available",
+          laterAttemptObservedWithinCoverage: false,
+          error: privateSentinel,
+          navigateTo: privateSentinel,
+        },
+      ],
+      payloadJson: privateSentinel,
+      rawPayload: privateSentinel,
+    } as unknown as RunVerificationAttemptsSnapshot;
+
+    const view = presentRunVerificationAttempts(snapshot);
+
+    expect(Object.keys(view).sort()).toEqual(
+      [
+        "runId",
+        "snapshot",
+        "coverage",
+        "attemptLimit",
+        "attemptAnchorsTruncatedWithinCoverage",
+        "checkpoint",
+        "attempts",
+      ].sort(),
+    );
+    expect(Object.keys(view.coverage as Record<string, unknown>).sort()).toEqual(
+      ["firstSequence", "lastSequence", "eventCount", "eventLimit", "earlierEventsExcluded"].sort(),
+    );
+    const checkpoint = view.checkpoint as Record<string, unknown>;
+    expect(Object.keys(checkpoint).sort()).toEqual(
+      ["status", "sha256", "createdAt", "saveEvent"].sort(),
+    );
+    expect(Object.keys(checkpoint.saveEvent as Record<string, unknown>).sort()).toEqual(
+      ["status", "sequence", "timestamp"].sort(),
+    );
+    const attempts = view.attempts as readonly Record<string, unknown>[];
+    expect(attempts).toHaveLength(2);
+    for (const attempt of attempts) {
+      expect(Object.keys(attempt).sort()).toEqual(
+        [
+          "identity",
+          "anchorSequence",
+          "startSequence",
+          "startedAt",
+          "startProvenance",
+          "status",
+          "endSequence",
+          "endedAt",
+          "diffSha256",
+          "checkpointSha256",
+          "checkpointProvenance",
+          "laterAttemptObservedWithinCoverage",
+        ].sort(),
+      );
+    }
+    expect(view).toEqual({
+      runId,
+      snapshot: 8,
+      coverage: {
+        firstSequence: 1,
+        lastSequence: 8,
+        eventCount: 8,
+        eventLimit: 200,
+        earlierEventsExcluded: false,
+      },
+      attemptLimit: 8,
+      attemptAnchorsTruncatedWithinCoverage: false,
+      checkpoint: {
+        status: "saved",
+        sha256: checkpointSha256,
+        createdAt: "2026-07-22T12:00:03.000Z",
+        saveEvent: {
+          status: "observed_in_coverage",
+          sequence: 3,
+          timestamp: "2026-07-22T12:00:03.000Z",
+        },
+      },
+      attempts: [
+        {
+          identity: "verification-anchor-4",
+          anchorSequence: 4,
+          startSequence: 2,
+          startedAt: "2026-07-22T12:00:02.000Z",
+          startProvenance: "observed_initial_edit",
+          status: "passed",
+          endSequence: 4,
+          endedAt: "2026-07-22T12:00:04.000Z",
+          diffSha256,
+          checkpointSha256,
+          checkpointProvenance: "recorded_digest_match",
+          laterAttemptObservedWithinCoverage: true,
+        },
+        {
+          identity: "verification-anchor-8",
+          anchorSequence: 8,
+          startSequence: null,
+          startedAt: null,
+          startProvenance: "outside_coverage",
+          status: "incomplete_at_snapshot",
+          endSequence: null,
+          endedAt: null,
+          diffSha256: null,
+          checkpointSha256,
+          checkpointProvenance: "run_checkpoint_available",
+          laterAttemptObservedWithinCoverage: false,
+        },
+      ],
+    });
+    const serialized = JSON.stringify(view);
+    expect(serialized).not.toContain(privateSentinel);
+    expect(serialized).not.toMatch(
+      /payloadJson|rawPayload|baselineBase64|approvedBase64|"diff":|checks|argv|stdout|actor|error|navigateTo/,
+    );
+
+    const notObserved = presentRunVerificationAttempts({
+      ...snapshot,
+      checkpoint: {
+        status: "saved",
+        sha256: checkpointSha256,
+        createdAt: "2026-07-22T12:00:03.000Z",
+        saveEvent: { status: "not_observed_in_coverage", payloadJson: privateSentinel },
+        baselineBase64: privateSentinel,
+      },
+    } as unknown as RunVerificationAttemptsSnapshot);
+    expect(notObserved.checkpoint).toEqual({
+      status: "saved",
+      sha256: checkpointSha256,
+      createdAt: "2026-07-22T12:00:03.000Z",
+      saveEvent: { status: "not_observed_in_coverage" },
+    });
+
+    const notSaved = presentRunVerificationAttempts({
+      ...snapshot,
+      checkpoint: { status: "not_saved", baselineBase64: privateSentinel },
+      attempts: [],
+    } as unknown as RunVerificationAttemptsSnapshot);
+    expect(notSaved.checkpoint).toEqual({ status: "not_saved" });
+    expect(JSON.stringify([notObserved, notSaved])).not.toContain(privateSentinel);
   });
 
   test("allowlists run evidence and labels missing checks as not run", () => {

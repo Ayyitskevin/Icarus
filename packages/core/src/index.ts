@@ -42,9 +42,19 @@ export type {
   RunPresentationSnapshot,
   RunRecord,
   RunState,
+  RunVerificationAttemptsSnapshot,
   SandboxProfile,
   SunCeiling,
+  VerificationAttemptCheckpointProvenance,
+  VerificationAttemptStartProvenance,
+  VerificationAttemptStatus,
+  VerificationAttemptSummary,
+  VerificationCheckpointSummary,
   VerificationEvidence,
   WorkspaceRunPage,
   WorkspaceRunSummary,
 } from "./types.js";
+export {
+  RUN_VERIFICATION_ATTEMPT_EVENT_LIMIT,
+  RUN_VERIFICATION_ATTEMPT_LIMIT,
+} from "./verification-provenance.js";

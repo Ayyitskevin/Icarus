@@ -178,49 +178,46 @@ mutation, execution, command, commit, push, or deployment authority. File/status
 richer diff or payload-bearing history, and action controls remain deferred, and
 the ADR 0010 release hold remains in force.
 
-## Accepted fifth M3 verification-attempt design
+## Fifth M3 verification-attempt view
 
-ADR 0018 accepts, but does not yet implement, an explicit “Verification &
-Recovery Evidence” panel beneath the selected run's current verification
-snapshot. The operator would load at most eight verification-state intervals
-derived from up to the latest 200 persisted events ending at that exact revision.
-Completed, cancelled, incomplete-failed, and open states would be distinguished
-only from explicit transitions. Missing starts, timeout detail, formal
-supersession, commands, diffs, paths, checkpoint bytes, and complete history
-would remain omitted or unknown.
+ADR 0018 implements an explicit “Verification & Recovery Evidence” panel beneath
+the selected run's current verification snapshot. An operator can load at most
+eight verification-state intervals derived from up to the latest 200 persisted
+events ending at that exact revision. Completed, cancellation-requested,
+incomplete-failed, and open states are distinguished only from explicit
+transitions. Missing starts, timeout detail, formal supersession, commands,
+diffs, paths, checkpoint bytes, and complete history remain omitted or unknown.
 
-A stale request would fail if the run advanced before its read transaction.
-Conflict would preserve any last successful panel and direct the operator to
-“Refresh persisted run.” A later explicit Load/Refresh/Retry would capture the
-new current cursor; it would never replay the conflicted request. Automatic live
-reconciliation would not cancel the panel. Instead, a loaded projection would
-remain pinned and become visibly stale when newer events arrive.
+A stale request fails if the run advanced before its read transaction. A
+conflict preserves any last successful panel and directs the operator to
+“Refresh persisted run.” A later explicit Load/Refresh/Retry captures the new
+current cursor; it never replays the conflicted request. Automatic live
+reconciliation does not cancel the panel. Instead, a loaded projection remains
+pinned and becomes visibly stale when newer events arrive.
 
-The panel would display its revision, inspected sequence range, fixed 200/8
-limits, loaded-summary count, and independent truncation/unknown states. It
-would not claim complete invocation history. Complete private evidence would
-continue through:
+The panel displays its revision, inspected sequence range, fixed 200/8 limits,
+loaded-summary count, and independent truncation/unknown states. It does not
+claim complete invocation history. Complete private evidence continues through:
 
 ```text
 icarus run history <run-id>
 ```
 
-Completed intervals could show only a recorded checkpoint-digest match;
-incomplete intervals could show only run-checkpoint availability. The panel
-would not read or rehash baseline/approved bytes or claim checkpoint integrity.
-Attempt-panel Close and “Refresh persisted run” would abort only the attempt
-request and never an older-history request. Opening older activity would abort
-the attempt request before marking history open and launching its first request.
-The aggregate selected-run auxiliary cancellation callback would be reserved for
-parent-owned selected-run/project changes and Back, where it would invalidate
-both request kinds. Each request would retain its own hidden-document, panel
-Close, and unmount cleanup. The last valid panel would survive a failed retry,
-and operator Close would use the verification section as a focus fallback when
-the launcher is disabled.
+Completed intervals show only a recorded checkpoint-digest match; incomplete
+intervals show only snapshot-level run-checkpoint availability. The panel does
+not read or rehash baseline/approved bytes or claim checkpoint integrity.
+Attempt-panel Close and “Refresh persisted run” abort only the attempt request
+and never an older-history request. Opening older activity aborts the attempt
+request before marking history open and launching its first request. The
+aggregate selected-run auxiliary cancellation callback is reserved for
+parent-owned selected-run/project changes and Back, where it invalidates both
+request kinds. Each request retains its own hidden-document, panel-Close, and
+unmount cleanup. The last valid panel survives a failed retry, and operator Close
+uses the verification section as a focus fallback when the launcher is disabled.
 
-This accepted design adds no current route or runtime behavior. It must not alter the
-payload-free event APIs, schema, dependencies, source repository, browser action
-authority, guarded CLI, or ADR 0010 hold.
+This implementation adds one GET-only read and inline presentation. It does not
+alter the payload-free event APIs, schema, dependencies, source repository,
+browser action authority, guarded CLI, or ADR 0010 hold.
 
 ## Preflight
 
