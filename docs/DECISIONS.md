@@ -24,6 +24,7 @@ Decision records for the current milestone:
 | [0018](adr/0018-bounded-verification-attempt-provenance.md) | Bounded verification-attempt provenance | Accepted |
 | [0019](adr/0019-bounded-approval-provenance.md) | Bounded approval provenance | Proposed |
 | [0020](adr/0020-bounded-persisted-diff-review.md) | Bounded persisted diff and run-status review | Proposed |
+| [0021](adr/0021-bounded-project-catalog-and-json-responses.md) | Bounded project catalog and JSON responses | Proposed |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.

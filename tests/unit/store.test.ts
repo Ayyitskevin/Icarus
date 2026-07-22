@@ -11,6 +11,7 @@ import {
   CANCELLATION_RECOVERY_OPERATION_KIND,
   CANCELLATION_RECOVERY_RUNTIME_MS,
   IcarusStore,
+  WORKSPACE_PROJECT_CHECKS_MAX_BYTES,
 } from "../../packages/core/src/store.js";
 import {
   createUnitStore,
@@ -81,6 +82,34 @@ function expectIcarusCode(action: () => unknown, code: string): void {
 
 function workspaceRunId(index: number): string {
   return `10000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+}
+
+function workspaceProjectId(index: number): string {
+  return `20000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+}
+
+function insertWorkspaceProject(
+  database: TestDatabase,
+  repositoryId: string,
+  index: number,
+  rowid?: number,
+): void {
+  database
+    .prepare(
+      `INSERT INTO projects
+        (rowid, id, name, repository_id, base_ref, checks_json, sandbox_json, ceiling_json,
+         created_at)
+       VALUES (?, ?, ?, ?, 'main', ?, ?, ?, '2026-07-22T12:00:00.000Z')`,
+    )
+    .run(
+      rowid ?? null,
+      workspaceProjectId(index),
+      `workspace-project-${index}`,
+      repositoryId,
+      JSON.stringify([{ id: "unit", name: "Unit check", argv: ["node", "--test"] }]),
+      JSON.stringify(UNIT_SANDBOX),
+      JSON.stringify(UNIT_CEILING),
+    );
 }
 
 function insertWorkspaceRun(
@@ -949,6 +978,190 @@ describe("SQLite run persistence", () => {
     corruptor.close();
     expectIcarusCode(() => reopened.listEventHistoryPage(UNIT_RUN_ID, 271, 270), "DATABASE_ERROR");
     reopened.close();
+  });
+
+  it("opens the canonical empty workspace project page", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+
+    expect(fixture.store.openWorkspaceProjectPage()).toEqual({
+      before: 1,
+      snapshot: 0,
+      nextBefore: 1,
+      hasMore: false,
+      projects: [],
+    });
+    expect(fixture.store.listWorkspaceProjectPage(1, 0)).toEqual(
+      fixture.store.openWorkspaceProjectPage(),
+    );
+    fixture.store.close();
+  });
+
+  it("rejects project configurations above the persisted browser-read ceiling", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    const repository = fixture.store.addRepository({
+      name: "oversized-project-config",
+      path: "/tmp/oversized-project-config",
+      device: 1,
+      inode: 2,
+    });
+
+    expectIcarusCode(
+      () =>
+        fixture.store.addProject({
+          name: "oversized-project",
+          repositoryId: repository.id,
+          baseRef: "main",
+          checks: [
+            {
+              id: "oversized",
+              name: "Oversized check",
+              argv: ["node", "x".repeat(WORKSPACE_PROJECT_CHECKS_MAX_BYTES)],
+            },
+          ],
+          sandbox: UNIT_SANDBOX,
+          ceiling: UNIT_CEILING,
+        }),
+      "PROJECT_CONFIGURATION_TOO_LARGE",
+    );
+    expect(fixture.store.listProjects()).toEqual([]);
+    fixture.store.close();
+  });
+
+  it("pages more than 200 joined projects through a pinned intrinsic-rowid snapshot", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    const repository = fixture.store.addRepository({
+      name: "workspace-catalog",
+      path: "/tmp/workspace-catalog",
+      device: 1,
+      inode: 2,
+    });
+    const database = new Database(fixture.databasePath);
+    for (let index = 1; index <= 205; index += 1) {
+      insertWorkspaceProject(database, repository.id, index);
+    }
+    database.prepare("DELETE FROM projects WHERE rowid = 100").run();
+
+    const plan = database
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT p.rowid
+         FROM projects AS p
+         JOIN repositories AS r ON r.id = p.repository_id
+         WHERE p.rowid < ? AND p.rowid <= ?
+         ORDER BY p.rowid DESC
+         LIMIT 13`,
+      )
+      .all(206, 205) as Array<Record<string, unknown>>;
+    expect(plan.map((entry) => String(entry.detail)).join("\n")).toMatch(
+      /SEARCH p USING INTEGER PRIMARY KEY \(rowid<\?\)/,
+    );
+    expect(plan.map((entry) => String(entry.detail)).join("\n")).toMatch(
+      /SEARCH r USING (?:COVERING )?INDEX .* \(id=\?\)/,
+    );
+
+    const first = fixture.store.openWorkspaceProjectPage();
+    expect(first).toMatchObject({ before: 206, snapshot: 205, nextBefore: 194, hasMore: true });
+    expect(first.projects).toHaveLength(12);
+    expect(first.projects.map(({ project }) => project.id)).toEqual(
+      Array.from({ length: 12 }, (_, index) => workspaceProjectId(205 - index)),
+    );
+    expect(first.projects[0]).toMatchObject({
+      project: { name: "workspace-project-205", repositoryId: repository.id },
+      repository: { id: repository.id, path: "/tmp/workspace-catalog" },
+    });
+
+    const second = fixture.store.listWorkspaceProjectPage(first.nextBefore, first.snapshot);
+    expect(second).toMatchObject({ before: 194, snapshot: 205, nextBefore: 182, hasMore: true });
+    expect(second.projects.map(({ project }) => project.id)).toEqual(
+      Array.from({ length: 12 }, (_, index) => workspaceProjectId(193 - index)),
+    );
+    expect(
+      fixture.store.listWorkspaceProjectPage(105, 205).projects.map(({ project }) => project.id),
+    ).toEqual([104, 103, 102, 101, 99, 98, 97, 96, 95, 94, 93, 92].map(workspaceProjectId));
+
+    insertWorkspaceProject(database, repository.id, 206);
+    expect(fixture.store.listWorkspaceProjectPage(206, 205)).toEqual(first);
+    const newest = fixture.store.openWorkspaceProjectPage();
+    expect(newest).toMatchObject({ before: 207, snapshot: 206 });
+    expect(newest.projects[0]).toMatchObject({ project: { id: workspaceProjectId(206) } });
+
+    database.close();
+    fixture.store.close();
+  });
+
+  it("rejects invalid project cursors and bounded selected-row corruption", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    const repository = fixture.store.addRepository({
+      name: "workspace-corruption",
+      path: "/tmp/workspace-corruption",
+      device: 1,
+      inode: 2,
+    });
+    const database = new Database(fixture.databasePath);
+    for (let index = 1; index <= 20; index += 1) {
+      insertWorkspaceProject(database, repository.id, index);
+    }
+    database.prepare("DELETE FROM projects WHERE rowid = 10").run();
+
+    for (const [before, snapshot] of [
+      [0, 20],
+      [-1, 20],
+      [1.5, 20],
+      [21, -1],
+      [21, Number.MAX_SAFE_INTEGER],
+      [22, 20],
+      [10, 20],
+      [21, 21],
+    ]) {
+      expectIcarusCode(
+        () => fixture.store.listWorkspaceProjectPage(before ?? 0, snapshot ?? 0),
+        "INVALID_PROJECT_CURSOR",
+      );
+    }
+
+    const originalChecks = JSON.stringify([
+      { id: "unit", name: "Unit check", argv: ["node", "--test"] },
+    ]);
+    database.prepare("UPDATE projects SET checks_json = ? WHERE rowid = 20").run("not-json");
+    expectIcarusCode(() => fixture.store.openWorkspaceProjectPage(), "DATABASE_ERROR");
+    database.prepare("UPDATE projects SET checks_json = ? WHERE rowid = 20").run(Buffer.from("[]"));
+    expectIcarusCode(() => fixture.store.openWorkspaceProjectPage(), "DATABASE_ERROR");
+    database
+      .prepare("UPDATE projects SET checks_json = ? WHERE rowid = 20")
+      .run(`"${"private-oversized-sentinel".padEnd(WORKSPACE_PROJECT_CHECKS_MAX_BYTES, "x")}"`);
+    expectIcarusCode(() => fixture.store.openWorkspaceProjectPage(), "DATABASE_ERROR");
+    database
+      .prepare("UPDATE projects SET checks_json = ? WHERE rowid = 20")
+      .run(JSON.stringify([{ id: "unit", name: "Unit", argv: ["node"], private: "sentinel" }]));
+    expectIcarusCode(() => fixture.store.openWorkspaceProjectPage(), "DATABASE_ERROR");
+    database.prepare("UPDATE projects SET checks_json = ? WHERE rowid = 20").run(originalChecks);
+
+    database.prepare("UPDATE projects SET sandbox_json = ? WHERE rowid = 20").run("[]");
+    expectIcarusCode(() => fixture.store.openWorkspaceProjectPage(), "DATABASE_ERROR");
+    database
+      .prepare("UPDATE projects SET sandbox_json = ? WHERE rowid = 20")
+      .run(JSON.stringify(UNIT_SANDBOX));
+    database
+      .prepare("UPDATE repositories SET path = ? WHERE id = ?")
+      .run("x".repeat(4_097), repository.id);
+    expectIcarusCode(() => fixture.store.openWorkspaceProjectPage(), "DATABASE_ERROR");
+    database
+      .prepare("UPDATE repositories SET path = '/tmp/workspace-corruption' WHERE id = ?")
+      .run(repository.id);
+
+    database.prepare("UPDATE projects SET checks_json = ? WHERE rowid = 1").run("not-json");
+    expect(fixture.store.openWorkspaceProjectPage().projects).toHaveLength(12);
+
+    database.exec("PRAGMA foreign_keys = OFF");
+    database.prepare("DELETE FROM repositories WHERE id = ?").run(repository.id);
+    expectIcarusCode(() => fixture.store.openWorkspaceProjectPage(), "DATABASE_ERROR");
+
+    database.close();
+    fixture.store.close();
   });
 
   it("opens the canonical empty workspace run page", () => {

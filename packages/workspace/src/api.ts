@@ -41,9 +41,33 @@ export interface CheckConfiguration {
 }
 
 export interface RepositoryView {
-  readonly id?: string;
+  readonly id: string;
   readonly name: string;
   readonly path: string;
+}
+
+export interface ProjectSandboxView {
+  readonly image: string;
+  readonly cpus: number;
+  readonly memoryMb: number;
+  readonly pids: number;
+  readonly tmpfsMb: number;
+}
+
+export interface ProjectCeilingView {
+  readonly maxToolCalls: number;
+  readonly maxActiveRuntimeMs: number;
+  readonly maxContextBytes: number;
+  readonly maxOutputTokensPerCall: number;
+  readonly maxTotalTokens: number;
+  readonly maxCostUsd: number;
+  readonly maxFilesChanged: 1;
+  readonly maxFileBytes: number;
+  readonly maxDiffBytes: number;
+  readonly maxCommandOutputBytes: number;
+  readonly maxRawCommandOutputBytes: number;
+  readonly providerTimeoutMs: number;
+  readonly commandTimeoutMs: number;
 }
 
 export type RepositoryAvailability = "available" | "missing" | "identity_changed" | "unavailable";
@@ -68,10 +92,9 @@ export interface ProjectView {
   readonly baseRef: string;
   readonly repository: RepositoryView;
   readonly checks: readonly CheckConfiguration[];
-  readonly sandboxImage?: string;
-  readonly sandbox?: { readonly image: string };
-  readonly createdAt?: string;
-  readonly updatedAt?: string;
+  readonly sandbox: ProjectSandboxView;
+  readonly ceiling: ProjectCeilingView;
+  readonly createdAt: string;
 }
 
 export interface ContextEntryView {
@@ -430,8 +453,21 @@ export interface RunView {
 
 export interface WorkspaceView {
   readonly capabilities: WorkspaceCapabilities;
-  readonly projects: readonly ProjectView[];
+  readonly projectPage: ProjectPageView;
   readonly runPage: RunPageView;
+}
+
+export interface ProjectPageView {
+  readonly before: number;
+  readonly snapshot: number;
+  readonly nextBefore: number;
+  readonly hasMore: boolean;
+  readonly projects: readonly ProjectView[];
+}
+
+export interface ProjectPageCursor {
+  readonly before: number;
+  readonly snapshot: number;
 }
 
 export interface RunPageCursor {
@@ -534,6 +570,13 @@ export function getWorkspace(signal?: AbortSignal): Promise<WorkspaceView> {
 
 export function createProject(input: CreateProjectInput): Promise<ProjectView> {
   return postJson<ProjectView>("/api/projects", input);
+}
+
+export function getProjectPage(cursor: ProjectPageCursor, signal?: AbortSignal): Promise<unknown> {
+  return requestJson<unknown>(
+    `/api/projects?before=${encodeURIComponent(String(cursor.before))}&snapshot=${encodeURIComponent(String(cursor.snapshot))}`,
+    signal === undefined ? {} : { signal },
+  );
 }
 
 export function previewProjectContext(

@@ -71,6 +71,47 @@ the reliability slice without claiming a broader milestone is complete.
       passed its real `quality` job at exact implementation head
       `f8fe03e399fb46f197bbcbc0df8f1edabbe2e0c9`
 
+## Eighth M3 candidate: bounded project catalog and JSON transport
+
+ADR 0021 and its implementation are a local candidate on 2026-07-22. This
+records one bounded read projection and a shared response fail-safe; it does not
+accept the ADR, widen browser authority, or close the inherited ADR 0010 hold.
+
+### Pinned joined project pages
+
+- [x] Replace the workspace's complete project collection with one newest-first
+      page of at most 12 joined project/repository records and strict
+      `before` plus `snapshot` continuation
+- [x] Use one intrinsic-project-rowid `LIMIT 13` range query and one repository
+      primary-key join, with no project/repository N+1 hydration or complete-list
+      scan
+- [x] Gate persisted storage classes, text bytes, and strict JSON before parsing;
+      cap checks at 1 MiB and sandbox/ceiling profiles at 16 KiB, validate exact
+      nested keys and policy, and enforce the JSON caps on supported writes
+- [x] Present only allowlisted project/repository fields and omit repository
+      device/inode identity even though the joined store record validates it
+- [x] Replace project pages in a four-position browser cursor window; reject
+      stale responses, abort superseded/lifecycle reads, retain the last success
+      for retry, and preserve an independently selected project
+- [x] Use exact indexed repository/project-name and project-ID lookups for
+      creation and draft planning instead of complete collection scans
+
+### Aggregate response safety and scope
+
+- [x] Serialize every JSON body, including its trailing newline, before sending
+      headers; reject more than 8 MiB with fixed `RESPONSE_TOO_LARGE` copy and
+      never write a partial success body
+- [x] Add no schema/migration, dependency, data deletion, Git/source read,
+      provider call, browser approval/execution, command, commit, push,
+      deployment, or release authority
+- [x] Pass 50 focused store/client/response/service/API tests, the API smoke with
+      unchanged source, and fresh full `pnpm check`: workflow validation;
+      formatting 92 files; lint/typecheck; 168 unit/provider and 44 integration
+      tests; evaluation 5 passed, 0 failed, 5 unsupported; 109 security tests
+      plus 47 static assertions; and a 23-module production build
+- [ ] Complete independent final review and exact published-head hosted CI
+      before accepting ADR 0021
+
 ## Seventh M3 candidate: bounded persisted diff and run-status review
 
 ADR 0020 and its implementation are a local candidate on 2026-07-22. This
@@ -828,7 +869,8 @@ The inherited ADR 0010 security hold remains separate from local feature work.
 ADR 0016 implements only bounded older event metadata for the third M3 slice.
 ADR 0017 implements only bounded workspace-wide run summaries for the fourth.
 ADR 0019 bounds only the ordinary newest approval suffix. ADR 0020 presents only
-the already persisted one-file diff. Project/repository enumeration, older
-approval pagination, current file/status views, multi-file or payload-bearing
-diff/history, patch materialization, browser approval, and execution remain
+the already persisted one-file diff. ADR 0021 bounds the project/repository
+catalog and aggregate JSON transport. Older approval pagination, current
+file/status views, multi-file or payload-bearing diff/history, patch
+materialization, browser approval, and execution remain
 later, explicitly reviewed expansions. See `docs/ROADMAP.md`.

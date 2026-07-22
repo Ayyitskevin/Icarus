@@ -52,6 +52,8 @@ export type {
   VerificationAttemptSummary,
   VerificationCheckpointSummary,
   VerificationEvidence,
+  WorkspaceProjectEntry,
+  WorkspaceProjectPage,
   WorkspaceRunPage,
   WorkspaceRunSummary,
 } from "./types.js";

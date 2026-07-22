@@ -449,6 +449,35 @@ run SQLite hydration. A dedicated scalar projection for every full-run field is
 separate future work. This slice adds no route, query, Git/source read, timing
 source, browser action, or release authority.
 
+## Eighth M3 project-catalog and response bounds
+
+`GET /api/workspace` opens independent project and run insertion snapshots.
+The project half is one newest-first page, not a catalog total. Its data query
+seeks the projects rowid B-tree, joins the repository primary-key index, visits
+13 rows, retains 12, and validates every selected column before presentation.
+Continuation requests carry only the pinned `snapshot` and exclusive `before`;
+external database maintenance invalidates the session rather than being hidden.
+
+Project checks cross the store boundary only as strict TEXT JSON at or below
+1 MiB; sandbox and ceiling profiles are at most 16 KiB. Direct SQL `CASE`,
+`typeof`, `octet_length`, and `json_valid(..., 1)` gates precede JavaScript
+parsing. Exact nested-key and policy validation reconstructs the domain records.
+The same JSON byte caps apply on supported project writes. API presentation
+omits repository device/inode metadata even though the joined record validates
+it. Indexed exact-name and project-ID paths replace complete-list scans in
+creation.
+
+The React project session mirrors the bounded run session: one current page,
+three newer cursors, one request generation, exact response validation, and
+abort/retry behavior. Project selection is an independent retained object, so
+catalog navigation does not silently erase the detail being inspected.
+
+All API JSON goes through one final serializer. Serialization and the 8 MiB
+UTF-8 check complete before `writeHead`; only then are status and safe headers
+sent. An overflow reaches the ordinary top-level error boundary as
+`RESPONSE_TOO_LARGE`, allowing a small fixed HTTP 500 response instead of a
+partial success. Static assets retain their existing file-serving path.
+
 ## Provider contract
 
 The provider-neutral port accepts model identity, capability metadata, a typed

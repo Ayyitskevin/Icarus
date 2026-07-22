@@ -145,6 +145,19 @@ ADR 0020 remains Proposed until the full merge and exact-head hosted gates
 close. Browser and independent-review gates are complete. ADR 0010 remains an
 independent release hold.
 
+## Candidate eighth M3 project-catalog and transport threats
+
+| Threat | Required control | Required evidence and limits |
+| --- | --- | --- |
+| Workspace bootstrap or paging hydrates an unbounded catalog or performs N+1 work | return one newest-first pinned page; use one intrinsic-project-rowid `LIMIT 13` range query joined through repository primary key; creation uses exact indexed lookups | empty and more-than-200-project tests, rowid gaps, insertion-stable snapshots, exact query-plan assertions, collection loaders forced to throw, and at most 12 presented rows |
+| Malformed or oversized persisted project configuration consumes host memory or crosses a private field | preflight SQLite storage class and byte length before strict JSON parsing; validate exact keys, scalar bounds, and policy; enforce the same checks/sandbox/ceiling caps on supported writes; reconstruct an explicit presenter | TEXT/BLOB, invalid/extra JSON, malformed policy, oversized field/config, and excluded-private-column tests; checks at most 1 MiB and sandbox/ceiling at most 16 KiB |
+| Stale or repeated navigation accumulates the catalog or silently replaces the project under review | replace rather than append pages; retain at most four positions; require exact snapshot/cursor identity; abort superseded and lifecycle requests; keep last success for explicit retry and retain selected project separately | client tests cover four-page depth, stale responses, malformed nested shapes, failure retention, retry, and independent selection; no total-count claim |
+| A large aggregate response sends success headers, partial JSON, or rejected private bytes before failure | completely serialize with the trailing newline and enforce one 8 MiB UTF-8 ceiling before `writeHead`; emit a small fixed `RESPONSE_TOO_LARGE` error through the ordinary boundary | exact-bound and one-byte-over unit tests plus an oversized selected-run integration test prove no success headers, no private sentinel, no partial JSON, and continued server health |
+| The catalog widens browser authority or reads the source checkout | keep the route GET-only and the view text-only; add no Git/source, provider, approval, execution, command, commit, push, deployment, or release path | method/static guards, zero logical SQLite writes, unchanged action routes, and explicit ADR scope |
+
+ADR 0021 remains Proposed until fresh full local, independent-review, and exact
+published-head gates close. ADR 0010 remains an independent release hold.
+
 ## Inherited repository automation hold
 
 `.github/workflows/opencode.yml` came from the pre-existing remote root and was

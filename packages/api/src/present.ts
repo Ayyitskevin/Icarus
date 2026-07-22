@@ -14,6 +14,7 @@ import {
   type RunRecord,
   type RunState,
   type RunVerificationAttemptsSnapshot,
+  type WorkspaceProjectPage,
   type WorkspaceRunPage,
 } from "@icarus/core";
 
@@ -119,6 +120,16 @@ export function presentProject(
     sandbox: project.sandbox,
     ceiling: project.ceiling,
     createdAt: project.createdAt,
+  };
+}
+
+export function presentWorkspaceProjectPage(page: WorkspaceProjectPage): Record<string, unknown> {
+  return {
+    before: page.before,
+    snapshot: page.snapshot,
+    nextBefore: page.nextBefore,
+    hasMore: page.hasMore,
+    projects: page.projects.map(({ project, repository }) => presentProject(project, repository)),
   };
 }
 

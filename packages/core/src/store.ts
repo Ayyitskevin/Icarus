@@ -38,6 +38,8 @@ import type {
   SandboxProfile,
   SunCeiling,
   VerificationEvidence,
+  WorkspaceProjectEntry,
+  WorkspaceProjectPage,
   WorkspaceRunPage,
   WorkspaceRunSummary,
 } from "./types.js";
@@ -53,6 +55,9 @@ export const RUN_EVENT_PAGE_LIMIT = 64;
 export const RUN_PRESENTATION_EVENT_LIMIT = 200;
 export const RUN_PRESENTATION_APPROVAL_LIMIT = 12;
 export const WORKSPACE_RUN_PAGE_LIMIT = 12;
+export const WORKSPACE_PROJECT_PAGE_LIMIT = 12;
+export const WORKSPACE_PROJECT_CHECKS_MAX_BYTES = 1024 * 1024;
+export const WORKSPACE_PROJECT_PROFILE_MAX_BYTES = 16 * 1024;
 const APPROVAL_RUN_ID_MAX_BYTES = 64;
 const APPROVAL_KIND_MAX_BYTES = 16;
 const APPROVAL_DIGEST_MAX_BYTES = 64;
@@ -62,8 +67,12 @@ const EVENT_TYPE_MAX_BYTES = 128;
 const EVENT_TIMESTAMP_MAX_BYTES = 64;
 const RUN_SUMMARY_TASK_MAX_BYTES = 8 * 1024;
 const RUN_SUMMARY_TARGET_MAX_BYTES = 1_024;
+const PROJECT_NAME_MAX_BYTES = 100;
+const PROJECT_BASE_REF_MAX_BYTES = 256;
+const REPOSITORY_PATH_MAX_BYTES = 4_096;
 const RUN_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const SAFE_RUN_SNAPSHOT_MAX = Number.MAX_SAFE_INTEGER - 1;
+const SAFE_WORKSPACE_SNAPSHOT_MAX = Number.MAX_SAFE_INTEGER - 1;
+const PROJECT_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
 const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 const EVENT_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const RUN_STATES: ReadonlySet<string> = new Set<RunState>([
@@ -409,10 +418,223 @@ function sqliteRowid(value: unknown, name: string, allowZero: boolean): number {
   return Number(parsed);
 }
 
-function sqliteMaximumRowid(value: unknown): bigint {
-  const raw = text(value, "run snapshot");
-  invariant(/^(0|[1-9][0-9]*)$/.test(raw), "DATABASE_ERROR", "Run snapshot is invalid");
+function sqliteMaximumRowid(value: unknown, name: string): bigint {
+  const raw = text(value, name);
+  invariant(/^(0|[1-9][0-9]*)$/.test(raw), "DATABASE_ERROR", `${name} is invalid`);
   return BigInt(raw);
+}
+
+function exactRecord(
+  value: unknown,
+  keys: readonly string[],
+  name: string,
+): Record<string, unknown> {
+  invariant(
+    typeof value === "object" && value !== null && !Array.isArray(value),
+    "DATABASE_ERROR",
+    `${name} is not an object`,
+  );
+  const record = value as Record<string, unknown>;
+  const actual = Object.keys(record);
+  invariant(
+    actual.length === keys.length && keys.every((key) => actual.includes(key)),
+    "DATABASE_ERROR",
+    `${name} has invalid fields`,
+  );
+  return record;
+}
+
+function workspaceCheckProfiles(value: unknown): readonly CheckProfile[] {
+  invariant(
+    Array.isArray(value) && value.length > 0,
+    "DATABASE_ERROR",
+    "Project checks are invalid",
+  );
+  const checks = value.map((entry, index): CheckProfile => {
+    const check = exactRecord(entry, ["id", "name", "argv"], `project.checks[${index}]`);
+    invariant(
+      typeof check.id === "string" &&
+        check.id.length > 0 &&
+        typeof check.name === "string" &&
+        check.name.length > 0 &&
+        Array.isArray(check.argv) &&
+        check.argv.length > 0 &&
+        check.argv.every(
+          (part) =>
+            typeof part === "string" &&
+            part.length > 0 &&
+            !part.includes("\0") &&
+            !/[\r\n]/.test(part),
+        ),
+      "DATABASE_ERROR",
+      "Project checks are invalid",
+    );
+    return {
+      id: check.id,
+      name: check.name,
+      argv: check.argv as string[],
+    };
+  });
+  try {
+    assertCheckProfiles(checks);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Project checks are invalid");
+  }
+  return checks;
+}
+
+function workspaceSandboxProfile(value: unknown): SandboxProfile {
+  const profile = exactRecord(
+    value,
+    ["image", "cpus", "memoryMb", "pids", "tmpfsMb"],
+    "project.sandbox",
+  );
+  invariant(
+    typeof profile.image === "string" &&
+      typeof profile.cpus === "number" &&
+      typeof profile.memoryMb === "number" &&
+      typeof profile.pids === "number" &&
+      typeof profile.tmpfsMb === "number",
+    "DATABASE_ERROR",
+    "Project sandbox is invalid",
+  );
+  const sandbox: SandboxProfile = {
+    image: profile.image,
+    cpus: profile.cpus,
+    memoryMb: profile.memoryMb,
+    pids: profile.pids,
+    tmpfsMb: profile.tmpfsMb,
+  };
+  try {
+    assertSandboxProfile(sandbox);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Project sandbox is invalid");
+  }
+  return sandbox;
+}
+
+const SUN_CEILING_KEYS = [
+  "maxToolCalls",
+  "maxActiveRuntimeMs",
+  "maxContextBytes",
+  "maxOutputTokensPerCall",
+  "maxTotalTokens",
+  "maxCostUsd",
+  "maxFilesChanged",
+  "maxFileBytes",
+  "maxDiffBytes",
+  "maxCommandOutputBytes",
+  "maxRawCommandOutputBytes",
+  "providerTimeoutMs",
+  "commandTimeoutMs",
+] as const satisfies readonly (keyof SunCeiling)[];
+
+function workspaceSunCeiling(value: unknown): SunCeiling {
+  const record = exactRecord(value, SUN_CEILING_KEYS, "project.ceiling");
+  invariant(
+    SUN_CEILING_KEYS.every((key) => typeof record[key] === "number"),
+    "DATABASE_ERROR",
+    "Project ceiling is invalid",
+  );
+  const ceiling = Object.fromEntries(
+    SUN_CEILING_KEYS.map((key) => [key, record[key]]),
+  ) as unknown as SunCeiling;
+  try {
+    assertSunCeiling(ceiling);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Project ceiling is invalid");
+  }
+  return ceiling;
+}
+
+function workspaceProjectEntryRow(
+  entry: unknown,
+  before: number,
+  snapshot: number,
+): { readonly cursor: number; readonly entry: WorkspaceProjectEntry } {
+  const value = row(entry, "workspace project");
+  const cursor = sqliteRowid(value.cursor, "project cursor", false);
+  const projectId = text(value.project_id, "project.id");
+  const projectName = text(value.project_name, "project.name");
+  const repositoryId = text(value.repository_id, "repository.id");
+  const repositoryName = text(value.repository_name, "repository.name");
+  const repositoryPath = text(value.repository_path, "repository.path");
+  const baseRef = text(value.base_ref, "project.base_ref");
+  const projectCreatedAt = text(value.project_created_at, "project.created_at");
+  const repositoryCreatedAt = text(value.repository_created_at, "repository.created_at");
+  const repositoryDevice = numberValue(value.repository_device, "repository.device");
+  const repositoryInode = numberValue(value.repository_inode, "repository.inode");
+  invariant(cursor < before && cursor <= snapshot, "DATABASE_ERROR", "Project cursor is invalid");
+  invariant(
+    RUN_ID_PATTERN.test(projectId) && RUN_ID_PATTERN.test(repositoryId),
+    "DATABASE_ERROR",
+    "Project identity is invalid",
+  );
+  invariant(
+    PROJECT_NAME_PATTERN.test(projectName) && PROJECT_NAME_PATTERN.test(repositoryName),
+    "DATABASE_ERROR",
+    "Project name metadata is invalid",
+  );
+  invariant(
+    repositoryPath.trim().length > 0 &&
+      !repositoryPath.includes("\0") &&
+      Buffer.byteLength(repositoryPath, "utf8") <= REPOSITORY_PATH_MAX_BYTES,
+    "DATABASE_ERROR",
+    "Repository path is invalid",
+  );
+  invariant(
+    baseRef.length > 0 &&
+      !baseRef.startsWith("-") &&
+      !/[\r\n\0]/.test(baseRef) &&
+      Buffer.byteLength(baseRef, "utf8") <= PROJECT_BASE_REF_MAX_BYTES,
+    "DATABASE_ERROR",
+    "Project base ref is invalid",
+  );
+  invariant(
+    Number.isSafeInteger(repositoryDevice) &&
+      repositoryDevice >= 0 &&
+      Number.isSafeInteger(repositoryInode) &&
+      repositoryInode >= 0,
+    "DATABASE_ERROR",
+    "Repository identity metadata is invalid",
+  );
+  invariant(
+    isCanonicalTimestamp(projectCreatedAt) && isCanonicalTimestamp(repositoryCreatedAt),
+    "DATABASE_ERROR",
+    "Project timestamp metadata is invalid",
+  );
+  const checks = workspaceCheckProfiles(
+    parseJson<unknown>(value.checks_json, "project.checks_json"),
+  );
+  const sandbox = workspaceSandboxProfile(
+    parseJson<unknown>(value.sandbox_json, "project.sandbox_json"),
+  );
+  const ceiling = workspaceSunCeiling(
+    parseJson<unknown>(value.ceiling_json, "project.ceiling_json"),
+  );
+  return {
+    cursor,
+    entry: {
+      project: {
+        id: projectId,
+        name: projectName,
+        repositoryId,
+        baseRef,
+        checks,
+        sandbox,
+        ceiling,
+        createdAt: projectCreatedAt,
+      },
+      repository: {
+        id: repositoryId,
+        name: repositoryName,
+        path: repositoryPath,
+        device: repositoryDevice,
+        inode: repositoryInode,
+        createdAt: repositoryCreatedAt,
+      },
+    },
+  };
 }
 
 function workspaceRunSummaryRow(
@@ -669,11 +891,16 @@ export class IcarusStore {
   }
 
   getRepositoryByName(name: string): RepositoryRecord {
-    const value = row(
-      this.#database.prepare("SELECT id FROM repositories WHERE name = ?").get(name),
-      "repository",
-    );
-    return this.getRepository(text(value.id, "repository.id"));
+    const repository = this.findRepositoryByName(name);
+    invariant(repository !== null, "NOT_FOUND", "Repository was not found");
+    return repository;
+  }
+
+  findRepositoryByName(name: string): RepositoryRecord | null {
+    const value = this.#database.prepare("SELECT id FROM repositories WHERE name = ?").get(name);
+    return value === undefined
+      ? null
+      : this.getRepository(text(row(value, "repository").id, "repository.id"));
   }
 
   addProject(input: {
@@ -687,6 +914,16 @@ export class IcarusStore {
     assertCheckProfiles(input.checks);
     assertSandboxProfile(input.sandbox);
     assertSunCeiling(input.ceiling);
+    const checksJson = json(input.checks);
+    const sandboxJson = json(input.sandbox);
+    const ceilingJson = json(input.ceiling);
+    invariant(
+      Buffer.byteLength(checksJson, "utf8") <= WORKSPACE_PROJECT_CHECKS_MAX_BYTES &&
+        Buffer.byteLength(sandboxJson, "utf8") <= WORKSPACE_PROJECT_PROFILE_MAX_BYTES &&
+        Buffer.byteLength(ceilingJson, "utf8") <= WORKSPACE_PROJECT_PROFILE_MAX_BYTES,
+      "PROJECT_CONFIGURATION_TOO_LARGE",
+      "Project configuration exceeds the persisted workspace byte limits",
+    );
     this.getRepository(input.repositoryId);
     const record: ProjectRecord = {
       id: this.#id(),
@@ -709,9 +946,9 @@ export class IcarusStore {
         record.name,
         record.repositoryId,
         record.baseRef,
-        json(record.checks),
-        json(record.sandbox),
-        json(record.ceiling),
+        checksJson,
+        sandboxJson,
+        ceilingJson,
         record.createdAt,
       );
     return record;
@@ -775,11 +1012,138 @@ export class IcarusStore {
   }
 
   getProjectByName(name: string): ProjectRecord {
-    const value = row(
-      this.#database.prepare("SELECT id FROM projects WHERE name = ?").get(name),
-      "project",
+    const project = this.findProjectByName(name);
+    invariant(project !== null, "NOT_FOUND", "Project was not found");
+    return project;
+  }
+
+  findProjectByName(name: string): ProjectRecord | null {
+    const value = this.#database.prepare("SELECT id FROM projects WHERE name = ?").get(name);
+    return value === undefined
+      ? null
+      : this.getProject(text(row(value, "project").id, "project.id"));
+  }
+
+  openWorkspaceProjectPage(): WorkspaceProjectPage {
+    return this.#workspaceProjectPage(null);
+  }
+
+  listWorkspaceProjectPage(before: number, snapshot: number): WorkspaceProjectPage {
+    invariant(
+      Number.isSafeInteger(before) && before > 0,
+      "INVALID_PROJECT_CURSOR",
+      "Workspace project cursor must be a positive safe integer",
     );
-    return this.getProject(text(value.id, "project.id"));
+    invariant(
+      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_WORKSPACE_SNAPSHOT_MAX,
+      "INVALID_PROJECT_CURSOR",
+      "Workspace project snapshot must be a nonnegative safe integer",
+    );
+    return this.#workspaceProjectPage({ before, snapshot });
+  }
+
+  #workspaceProjectPage(
+    requested: { readonly before: number; readonly snapshot: number } | null,
+  ): WorkspaceProjectPage {
+    const transaction = this.#database.transaction((): WorkspaceProjectPage => {
+      const maximum = sqliteMaximumRowid(
+        row(
+          this.#database
+            .prepare("SELECT CAST(COALESCE(MAX(rowid), 0) AS TEXT) AS snapshot FROM projects")
+            .get(),
+          "project snapshot",
+        ).snapshot,
+        "project snapshot",
+      );
+      let before: number;
+      let snapshot: number;
+      if (requested === null) {
+        invariant(
+          maximum <= BigInt(SAFE_WORKSPACE_SNAPSHOT_MAX),
+          "DATABASE_ERROR",
+          "Workspace project snapshot is unsafe",
+        );
+        snapshot = Number(maximum);
+        before = snapshot + 1;
+      } else {
+        before = requested.before;
+        snapshot = requested.snapshot;
+        invariant(
+          BigInt(snapshot) <= maximum,
+          "INVALID_PROJECT_CURSOR",
+          "Workspace project snapshot is ahead of persisted history",
+        );
+        if (snapshot > 0) {
+          invariant(
+            this.#database.prepare("SELECT 1 FROM projects WHERE rowid = ?").get(snapshot) !==
+              undefined,
+            "INVALID_PROJECT_CURSOR",
+            "Workspace project snapshot anchor is missing",
+          );
+        }
+        const pageOneBefore = snapshot + 1;
+        if (before !== pageOneBefore) {
+          invariant(
+            before <= snapshot &&
+              this.#database.prepare("SELECT 1 FROM projects WHERE rowid = ?").get(before) !==
+                undefined,
+            "INVALID_PROJECT_CURSOR",
+            "Workspace project cursor anchor is missing",
+          );
+        }
+      }
+      const rows = this.#database
+        .prepare(
+          `SELECT CAST(p.rowid AS TEXT) AS cursor,
+                  CASE WHEN typeof(p.id) = 'text' AND octet_length(p.id) <= 64
+                       THEN p.id END AS project_id,
+                  CASE WHEN typeof(p.name) = 'text' AND octet_length(p.name) <= ${PROJECT_NAME_MAX_BYTES}
+                       THEN p.name END AS project_name,
+                  CASE WHEN typeof(p.repository_id) = 'text' AND octet_length(p.repository_id) <= 64
+                       THEN p.repository_id END AS repository_id,
+                  CASE WHEN typeof(p.base_ref) = 'text' AND octet_length(p.base_ref) <= ${PROJECT_BASE_REF_MAX_BYTES}
+                       THEN p.base_ref END AS base_ref,
+                  CASE WHEN typeof(p.checks_json) = 'text'
+                         AND octet_length(p.checks_json) <= ${WORKSPACE_PROJECT_CHECKS_MAX_BYTES}
+                         AND json_valid(p.checks_json, 1)
+                       THEN p.checks_json END AS checks_json,
+                  CASE WHEN typeof(p.sandbox_json) = 'text'
+                         AND octet_length(p.sandbox_json) <= ${WORKSPACE_PROJECT_PROFILE_MAX_BYTES}
+                         AND json_valid(p.sandbox_json, 1)
+                       THEN p.sandbox_json END AS sandbox_json,
+                  CASE WHEN typeof(p.ceiling_json) = 'text'
+                         AND octet_length(p.ceiling_json) <= ${WORKSPACE_PROJECT_PROFILE_MAX_BYTES}
+                         AND json_valid(p.ceiling_json, 1)
+                       THEN p.ceiling_json END AS ceiling_json,
+                  CASE WHEN typeof(p.created_at) = 'text' AND octet_length(p.created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
+                       THEN p.created_at END AS project_created_at,
+                  CASE WHEN typeof(r.name) = 'text' AND octet_length(r.name) <= ${PROJECT_NAME_MAX_BYTES}
+                       THEN r.name END AS repository_name,
+                  CASE WHEN typeof(r.path) = 'text' AND octet_length(r.path) <= ${REPOSITORY_PATH_MAX_BYTES}
+                       THEN r.path END AS repository_path,
+                  CASE WHEN typeof(r.device) = 'integer' THEN r.device END AS repository_device,
+                  CASE WHEN typeof(r.inode) = 'integer' THEN r.inode END AS repository_inode,
+                  CASE WHEN typeof(r.created_at) = 'text' AND octet_length(r.created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
+                       THEN r.created_at END AS repository_created_at
+           FROM projects AS p
+           LEFT JOIN repositories AS r ON r.id = p.repository_id
+           WHERE p.rowid < ? AND p.rowid <= ?
+           ORDER BY p.rowid DESC
+           LIMIT 13`,
+        )
+        .all(before, snapshot) as unknown[];
+      const entries = rows.map((entry) => workspaceProjectEntryRow(entry, before, snapshot));
+      const hasMore = entries.length > WORKSPACE_PROJECT_PAGE_LIMIT;
+      const retained = entries.slice(0, WORKSPACE_PROJECT_PAGE_LIMIT);
+      return {
+        before,
+        snapshot,
+        nextBefore: retained.at(-1)?.cursor ?? before,
+        hasMore,
+        projects: retained.map((entry) => entry.entry),
+      };
+    });
+    return transaction();
   }
 
   createRun(input: NewRunInput): RunRecord {
@@ -984,7 +1348,7 @@ export class IcarusStore {
       "Workspace run cursor must be a positive safe integer",
     );
     invariant(
-      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_RUN_SNAPSHOT_MAX,
+      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_WORKSPACE_SNAPSHOT_MAX,
       "INVALID_RUN_CURSOR",
       "Workspace run snapshot must be a nonnegative safe integer",
     );
@@ -1002,12 +1366,13 @@ export class IcarusStore {
             .get(),
           "run snapshot",
         ).snapshot,
+        "run snapshot",
       );
       let before: number;
       let snapshot: number;
       if (requested === null) {
         invariant(
-          maximum <= BigInt(SAFE_RUN_SNAPSHOT_MAX),
+          maximum <= BigInt(SAFE_WORKSPACE_SNAPSHOT_MAX),
           "DATABASE_ERROR",
           "Workspace run snapshot is unsafe",
         );

@@ -261,6 +261,27 @@ This view reuses the ordinary selected-run read and adds no route, Git/source
 read, mutation, or action. `verification completed` activity navigates to the
 fixed diff section; `checkpoint saved` continues to navigate to verification.
 
+## Bounded project catalog and JSON transport
+
+The workspace loads at most 12 newest projects. Use the explicit Newer/Older
+buttons within the four-page browser window. The membership snapshot does not
+include projects created after the page session opened; Refresh workspace or a
+successful project registration opens a new newest session. Use
+`icarus project list` when complete catalog output is required.
+
+`INVALID_PROJECT_CURSOR` means the pinned session is stale, malformed, or was
+invalidated by unsupported external SQLite deletion/replacement/`VACUUM`; open
+a fresh page rather than editing cursor values. `DATABASE_ERROR` while loading
+a project page means selected persisted identity/configuration failed its
+storage, byte, JSON, or policy checks. Preserve and back up state for operator
+inspection; do not patch the database in place.
+
+Every API JSON body is serialized before headers and may be at most 8 MiB,
+including its newline. `RESPONSE_TOO_LARGE` is a fixed HTTP 500 safety response,
+not permission to raise the limit or return partial evidence. Use the narrower
+CLI listing/status command and investigate which persisted presentation
+exceeded its intended field bound. Static assets are not part of this JSON cap.
+
 ## Preflight
 
 Approval and execution require util-linux `flock` at `/usr/bin/flock` and a

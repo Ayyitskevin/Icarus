@@ -292,6 +292,34 @@ improves review of the already persisted one-file verification diff:
    commit, push, deployment, current file/status, multi-file diff, raw history,
    and payload navigation outside this slice.
 
+## Candidate eighth M3 bounded project-catalog and transport slice
+
+ADR 0021 closes the remaining unbounded workspace catalog/transport path:
+
+1. Replace workspace `projects` with a newest-first `projectPage` of at most 12
+   joined project/repository presentations and add strict pinned continuation
+   reads at `GET /api/projects?before=&snapshot=`.
+2. Use one `LIMIT 13` intrinsic-rowid range query joined through the repository
+   primary key. Decode no per-project or per-repository follow-up query.
+3. Gate selected persisted text and strict JSON by storage class and bytes in
+   SQL before parsing: 1 MiB checks, 16 KiB sandbox/ceiling, and smaller fixed
+   identity/path/ref/timestamp limits. Enforce the JSON bounds on new writes.
+4. Replace project pages in the browser, retain at most four page positions,
+   validate exact nested shapes, reject stale responses, preserve the last
+   success/retry, and abort on refresh, hiding, selection, or unmount.
+5. Preserve selected/new-project behavior: a selected record can remain visible
+   outside the current page, and successful creation selects it before opening
+   a fresh newest-page session. Complete listing remains available through
+   `icarus project list`.
+6. Replace project-name, repository-name, and run-project collection scans with
+   exact indexed lookups.
+7. Serialize every API JSON response before headers and reject more than 8 MiB
+   UTF-8, including the trailing newline, with a fixed safe
+   `RESPONSE_TOO_LARGE` error. Never return partial JSON or rejected content.
+8. Add no schema/migration, dependency, deletion, Git/source read, provider
+   call, browser approval/execution, command, commit, push, deployment, or
+   release authority. Preserve ADR 0010.
+
 ## Sun ceiling
 
 Every run records maximum active runtime, provider output tokens, total tokens,

@@ -177,6 +177,46 @@ export function workspaceRunPageQuery(searchParams: URLSearchParams): WorkspaceR
   return { kind: "continuation", before, snapshot };
 }
 
+export type WorkspaceProjectPageQuery =
+  | { readonly kind: "new" }
+  | { readonly kind: "continuation"; readonly before: number; readonly snapshot: number };
+
+export function workspaceProjectPageQuery(
+  searchParams: URLSearchParams,
+): WorkspaceProjectPageQuery {
+  const keys = Array.from(searchParams.keys());
+  if (keys.length === 0) return { kind: "new" };
+  const beforeValues = searchParams.getAll("before");
+  const snapshotValues = searchParams.getAll("snapshot");
+  if (
+    keys.length !== 2 ||
+    new Set(keys).size !== 2 ||
+    !keys.includes("before") ||
+    !keys.includes("snapshot") ||
+    beforeValues.length !== 1 ||
+    snapshotValues.length !== 1
+  ) {
+    invalid("Project page requests require exactly one before and snapshot query parameter");
+  }
+  const rawBefore = beforeValues[0] ?? "";
+  const rawSnapshot = snapshotValues[0] ?? "";
+  if (!POSITIVE_EVENT_CURSOR_PATTERN.test(rawBefore) || !EVENT_CURSOR_PATTERN.test(rawSnapshot)) {
+    invalid("before and snapshot must be canonical safe integers");
+  }
+  const before = Number(rawBefore);
+  const snapshot = Number(rawSnapshot);
+  if (
+    !Number.isSafeInteger(before) ||
+    before <= 0 ||
+    !Number.isSafeInteger(snapshot) ||
+    snapshot < 0 ||
+    snapshot > SAFE_RUN_SNAPSHOT_MAX
+  ) {
+    invalid("before and snapshot must be canonical safe integers");
+  }
+  return { kind: "continuation", before, snapshot };
+}
+
 export function runEventsQuery(searchParams: URLSearchParams): { readonly after: number } {
   const keys = Array.from(searchParams.keys());
   const values = searchParams.getAll("after");

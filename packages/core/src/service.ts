@@ -56,6 +56,7 @@ import type {
   SandboxProfile,
   SunCeiling,
   VerificationEvidence,
+  WorkspaceProjectPage,
   WorkspaceRunPage,
 } from "./types.js";
 import { CONTEXT_AUDIT_POLICY_VERSION } from "./types.js";
@@ -311,12 +312,14 @@ export interface IcarusServiceOptions {
   readonly now?: () => string;
 }
 
-export interface PlanRunInput {
-  readonly projectName: string;
+export type PlanRunInput = (
+  | { readonly projectName: string; readonly projectId?: never }
+  | { readonly projectId: string; readonly projectName?: never }
+) & {
   readonly task: string;
   readonly target: string;
   readonly provider: ProviderConfig;
-}
+};
 
 export class IcarusService {
   readonly #stateRoot: string;
@@ -385,6 +388,10 @@ export class IcarusService {
     return this.#store.listRepositories();
   }
 
+  findRepositoryByName(name: string): RepositoryRecord | null {
+    return this.#store.findRepositoryByName(name);
+  }
+
   async registerRepositoryProject(
     input: {
       readonly repository: {
@@ -445,8 +452,20 @@ export class IcarusService {
     return this.#store.listProjects();
   }
 
+  findProjectByName(name: string): ProjectRecord | null {
+    return this.#store.findProjectByName(name);
+  }
+
   getProject(projectId: string): ProjectRecord {
     return this.#store.getProject(projectId);
+  }
+
+  openWorkspaceProjectPage(): WorkspaceProjectPage {
+    return this.#store.openWorkspaceProjectPage();
+  }
+
+  listWorkspaceProjectPage(before: number, snapshot: number): WorkspaceProjectPage {
+    return this.#store.listWorkspaceProjectPage(before, snapshot);
   }
 
   async getProjectRepositoryStatus(
@@ -590,14 +609,17 @@ export class IcarusService {
   }
 
   createRunDraft(input: PlanRunInput): RunRecord {
-    const project = this.#store.getProjectByName(input.projectName);
+    const projectId =
+      input.projectId === undefined
+        ? this.#store.getProjectByName(input.projectName).id
+        : input.projectId;
     const provider = canonicalProvider(input.provider);
     const target = assertAllowedTarget(input.target);
     const task = taskText(input.task);
     const runId = this.#id();
     return this.#store.createRun({
       id: runId,
-      projectId: project.id,
+      projectId,
       task,
       target,
       provider,

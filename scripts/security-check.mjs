@@ -22,6 +22,10 @@ const workspacePresenterSource = await readFile("packages/api/src/present.ts", "
 const workspaceApiSource = await readFile("packages/workspace/src/api.ts", "utf8");
 const workspaceAppSource = await readFile("packages/workspace/src/App.tsx", "utf8");
 const workspaceLivePollSource = await readFile("packages/workspace/src/live-poll.ts", "utf8");
+const workspaceProjectPageNavSource = await readFile(
+  "packages/workspace/src/project-page-nav.ts",
+  "utf8",
+);
 const cliSource = await readFile("packages/cli/src/main.ts", "utf8");
 const verificationAttemptsUiSource = await readFile(
   "packages/workspace/src/verification-attempts.ts",
@@ -70,6 +74,18 @@ const workspaceRunPageEnd = storeSource.indexOf("\n  transition(", workspaceRunP
 const workspaceRunPageSource =
   workspaceRunPageStart >= 0 && workspaceRunPageEnd > workspaceRunPageStart
     ? storeSource.slice(workspaceRunPageStart, workspaceRunPageEnd)
+    : "";
+const workspaceProjectPageStart = storeSource.indexOf("  #workspaceProjectPage(");
+const workspaceProjectPageEnd = storeSource.indexOf("\n  createRun(", workspaceProjectPageStart);
+const workspaceProjectPageSource =
+  workspaceProjectPageStart >= 0 && workspaceProjectPageEnd > workspaceProjectPageStart
+    ? storeSource.slice(workspaceProjectPageStart, workspaceProjectPageEnd)
+    : "";
+const jsonSerializerStart = workspaceServerSource.indexOf("export function serializeJsonResponse(");
+const jsonSerializerEnd = workspaceServerSource.indexOf("\nfunction json(", jsonSerializerStart);
+const jsonSerializerSource =
+  jsonSerializerStart >= 0 && jsonSerializerEnd > jsonSerializerStart
+    ? workspaceServerSource.slice(jsonSerializerStart, jsonSerializerEnd)
     : "";
 const approvalProjectionStart = storeSource.indexOf("  getRunPresentationSnapshot(");
 const approvalProjectionEnd = storeSource.indexOf("\n  listEventPage(", approvalProjectionStart);
@@ -442,6 +458,49 @@ const assertions = {
     !workspaceSnapshotSource.includes("listRuns(") &&
     !workspaceSnapshotSource.includes("presentationSnapshot(") &&
     !workspaceSnapshotSource.includes("presentRun("),
+  workspaceProjectCatalogIsJoinedAndBounded:
+    workspaceProjectPageSource.includes("SELECT CAST(p.rowid AS TEXT) AS cursor") &&
+    workspaceProjectPageSource.includes("FROM projects AS p") &&
+    workspaceProjectPageSource.includes("JOIN repositories AS r ON r.id = p.repository_id") &&
+    workspaceProjectPageSource.includes("WHERE p.rowid < ? AND p.rowid <= ?") &&
+    workspaceProjectPageSource.includes("ORDER BY p.rowid DESC") &&
+    workspaceProjectPageSource.includes("LIMIT 13") &&
+    workspaceProjectPageSource.includes("octet_length(p.checks_json)") &&
+    workspaceProjectPageSource.includes("octet_length(p.sandbox_json)") &&
+    workspaceProjectPageSource.includes("octet_length(p.ceiling_json)") &&
+    workspaceProjectPageSource.includes("json_valid(p.checks_json, 1)") &&
+    !workspaceProjectPageSource.includes("getProject(") &&
+    !workspaceProjectPageSource.includes("getRepository("),
+  workspaceBootstrapUsesBoundedProjectPage:
+    workspaceSnapshotSource.includes("openWorkspaceProjectPage()") &&
+    workspaceSnapshotSource.includes("presentWorkspaceProjectPage") &&
+    workspaceSnapshotSource.includes("projectPage:") &&
+    !workspaceSnapshotSource.includes("listProjects(") &&
+    !workspaceSnapshotSource.includes("listRepositories(") &&
+    !workspaceSnapshotSource.includes("projects:"),
+  workspaceCreatePathsAvoidCollectionScans:
+    !workspaceServerSource.includes(".listProjects()") &&
+    !workspaceServerSource.includes(".listRepositories()") &&
+    workspaceServerSource.includes("findProjectByName(input.project.name)") &&
+    workspaceServerSource.includes("findRepositoryByName(input.repository.name)") &&
+    workspaceServerSource.includes("projectId: input.projectId"),
+  workspaceJsonResponsesArePreflightBounded:
+    workspaceServerSource.includes("MAX_JSON_RESPONSE_BYTES = 8 * 1024 * 1024") &&
+    jsonSerializerSource.includes('Buffer.byteLength(body, "utf8")') &&
+    jsonSerializerSource.includes('"RESPONSE_TOO_LARGE"') &&
+    workspaceServerSource.indexOf("const body = serializeJsonResponse(value)") <
+      workspaceServerSource.indexOf("response.writeHead(status") &&
+    workspaceServerSource.includes('error.code === "RESPONSE_TOO_LARGE"') &&
+    !jsonSerializerSource.includes("response.writeHead"),
+  workspaceProjectNavigationIsBoundedAndStaleSafe:
+    workspaceProjectPageNavSource.includes("PROJECT_PAGE_MAX_PAGES = 4") &&
+    workspaceProjectPageNavSource.includes("PROJECT_PAGE_SIZE = 12") &&
+    workspaceProjectPageNavSource.includes("validateProjectPage(page, request)") &&
+    workspaceProjectPageNavSource.includes("request.snapshot !== session.snapshot") &&
+    workspaceProjectPageNavSource.includes("expected.before !== request.before") &&
+    workspaceAppSource.includes("projectPageGenerationRef.current !== generation") &&
+    workspaceAppSource.includes("abortProjectPageRequest()") &&
+    workspaceAppSource.includes("pauseProjectPageRequest("),
   workspaceNoRawHtml: workspaceUiSources.every(
     (source) => !source.includes("dangerouslySetInnerHTML") && !source.includes("innerHTML"),
   ),
