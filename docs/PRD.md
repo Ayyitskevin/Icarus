@@ -180,6 +180,40 @@ ADR 0016 defines this metadata-only navigation contract:
    approval, execution, command, commit, push, or deployment authority. Preserve
    portable read-only support and the unresolved ADR 0010 hold.
 
+## Fourth M3 bounded workspace-run slice
+
+ADR 0017 defines this summary-only navigation contract:
+
+1. Replace the unbounded full-run collection in the workspace bootstrap with one
+   fixed 12-row summary page. Add a GET run-page route that either opens a new
+   session or accepts exactly one canonical positive `before` and one canonical
+   nonnegative `snapshot`; expose no caller-controlled limit, project filter,
+   sort, or search.
+2. Pin membership to the current maximum safe SQLite rowid and query the
+   intrinsic rowid B-tree in descending insertion order with `LIMIT 13`.
+   Retain 12 rows, derive the next exclusive cursor from the oldest retained row,
+   use the request cursor itself when the page is empty, and fail closed on
+   invalid, unsafe, or detectably missing cursor anchors. External rewrites that
+   leave numeric anchors present remain out of scope and require a new session.
+3. Return only run/project IDs, bounded task and target text, exact state,
+   host-derived phase, and bounded canonical timestamps. Never select or decode
+   provider, context, plan, edit, diff, verification, error, usage, approval, or
+   event columns for a summary page.
+4. Fetch the existing full selected-run view only after an operator chooses a
+   summary. The page snapshot pins membership, not state; state and update time
+   remain current when the page is read.
+5. Replace pages instead of accumulating them. Allow one 12-row page plus at most
+   three newer cursors, preserve the last successful page on failure, use strict
+   single-flight lifecycle cancellation and stale-response guards, and direct the
+   operator to CLI run listing beyond the four-page window.
+6. Label page size and project matches truthfully rather than presenting either
+   as a total. Keep selected-run live/history cursors independent from workspace
+   summary cursors.
+7. Add no schema/migration, dependency, write, event append, deletion, database
+   maintenance, Git/source read, new disclosure class, stream, watcher, daemon,
+   browser approval, execution, command, commit, push, or deployment authority.
+   Preserve the unresolved ADR 0010 hold.
+
 ## Sun ceiling
 
 Every run records maximum active runtime, provider output tokens, total tokens,

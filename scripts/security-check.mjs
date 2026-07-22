@@ -42,6 +42,21 @@ const historyStoreSource =
   historyMethodStart >= 0 && historyMethodEnd > historyMethodStart
     ? storeSource.slice(historyMethodStart, historyMethodEnd)
     : "";
+const workspaceRunPageStart = storeSource.indexOf("  #workspaceRunPage(");
+const workspaceRunPageEnd = storeSource.indexOf("\n  transition(", workspaceRunPageStart);
+const workspaceRunPageSource =
+  workspaceRunPageStart >= 0 && workspaceRunPageEnd > workspaceRunPageStart
+    ? storeSource.slice(workspaceRunPageStart, workspaceRunPageEnd)
+    : "";
+const workspaceSnapshotStart = workspaceServerSource.indexOf("function workspaceSnapshot(");
+const workspaceSnapshotEnd = workspaceServerSource.indexOf(
+  "\nasync function routeApi(",
+  workspaceSnapshotStart,
+);
+const workspaceSnapshotSource =
+  workspaceSnapshotStart >= 0 && workspaceSnapshotEnd > workspaceSnapshotStart
+    ? workspaceServerSource.slice(workspaceSnapshotStart, workspaceSnapshotEnd)
+    : "";
 
 const assertions = {
   controllerNeverUsesShell:
@@ -111,6 +126,24 @@ const assertions = {
     historyStoreSource.includes("ORDER BY sequence DESC") &&
     historyStoreSource.includes("RUN_EVENT_PAGE_LIMIT + 1") &&
     !historyStoreSource.includes("payload_json"),
+  workspaceRunSummaryMetadataOnly:
+    workspaceRunPageSource.includes("SELECT CAST(rowid AS TEXT) AS cursor") &&
+    workspaceRunPageSource.includes(
+      "id, project_id, task, target, state, created_at, updated_at",
+    ) &&
+    workspaceRunPageSource.includes("WHERE rowid < ? AND rowid <= ?") &&
+    workspaceRunPageSource.includes("ORDER BY rowid DESC") &&
+    workspaceRunPageSource.includes("LIMIT 13") &&
+    !/(?:provider_json|resume_state|base_commit|context_json|context_artifact_path|context_sha256|plan_json|plan_sha256|edit_json|cache_path|worktree_path|baseline_base64|approved_base64|diff|verification_json|tool_calls|input_tokens|output_tokens|active_runtime_ms|estimated_cost_usd|reserved_cost_usd|error_code|error_message|version)/.test(
+      workspaceRunPageSource,
+    ),
+  workspaceBootstrapUsesBoundedRunPage:
+    workspaceSnapshotSource.includes("openWorkspaceRunPage()") &&
+    workspaceSnapshotSource.includes("presentWorkspaceRunPage") &&
+    workspaceSnapshotSource.includes("runPage:") &&
+    !workspaceSnapshotSource.includes("listRuns(") &&
+    !workspaceSnapshotSource.includes("presentationSnapshot(") &&
+    !workspaceSnapshotSource.includes("presentRun("),
   workspaceNoRawHtml: workspaceUiSources.every(
     (source) => !source.includes("dangerouslySetInnerHTML") && !source.includes("innerHTML"),
   ),

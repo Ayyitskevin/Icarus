@@ -79,6 +79,39 @@ function expectIcarusCode(action: () => unknown, code: string): void {
   }
 }
 
+function workspaceRunId(index: number): string {
+  return `10000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+}
+
+function insertWorkspaceRun(
+  database: TestDatabase,
+  projectId: string,
+  index: number,
+  rowid?: number,
+): void {
+  database
+    .prepare(
+      `INSERT INTO runs
+        (rowid, id, project_id, task, target, provider_json, state, base_commit, context_json,
+         context_artifact_path, context_sha256, diff, error_message, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'completed', '', ?, ?, '', ?, ?, ?, ?)`,
+    )
+    .run(
+      rowid ?? null,
+      workspaceRunId(index),
+      projectId,
+      `Workspace task ${index}`,
+      `src/run-${index}.txt`,
+      "not-json:private-provider-sentinel",
+      "not-json:private-context-sentinel",
+      "/private/runtime/context-sentinel",
+      "+private diff sentinel",
+      "private error sentinel",
+      "2026-07-20T12:00:00.000Z",
+      "2026-07-20T12:01:00.000Z",
+    );
+}
+
 function approvePreparedRun(store: IcarusStore): void {
   const project = store.getProject(store.getRun(UNIT_RUN_ID).projectId);
   const run = store.getRun(UNIT_RUN_ID);
@@ -903,6 +936,166 @@ describe("SQLite run persistence", () => {
     corruptor.close();
     expectIcarusCode(() => reopened.listEventHistoryPage(UNIT_RUN_ID, 271, 270), "DATABASE_ERROR");
     reopened.close();
+  });
+
+  it("opens the canonical empty workspace run page", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+
+    expect(fixture.store.openWorkspaceRunPage()).toEqual({
+      before: 1,
+      snapshot: 0,
+      nextBefore: 1,
+      hasMore: false,
+      runs: [],
+    });
+    expect(fixture.store.listWorkspaceRunPage(1, 0)).toEqual(fixture.store.openWorkspaceRunPage());
+    fixture.store.close();
+  });
+
+  it("pages bounded run summaries by pinned rowid without hydrating heavy columns", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    const { projectId } = seedUnitProject(fixture.store);
+    const mutator = new Database(fixture.databasePath);
+    for (let index = 1; index <= 205; index += 1) {
+      insertWorkspaceRun(mutator, projectId, index);
+    }
+    mutator
+      .prepare("UPDATE runs SET task = ?, target = ? WHERE rowid BETWEEN 194 AND 205")
+      .run("\u0001".repeat(8 * 1024), "\u0001".repeat(1024));
+    mutator.prepare("DELETE FROM runs WHERE rowid = ?").run(100);
+    const queryPlan = mutator
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT CAST(rowid AS TEXT) AS cursor,
+                id, project_id, task, target, state, created_at, updated_at
+         FROM runs
+         WHERE rowid < ? AND rowid <= ?
+         ORDER BY rowid DESC
+         LIMIT 13`,
+      )
+      .all(206, 205)
+      .map((entry) => String((entry as Record<string, unknown>).detail));
+    expect(queryPlan.some((detail) => detail.includes("INTEGER PRIMARY KEY"))).toBe(true);
+    expect(queryPlan.every((detail) => !detail.includes("SCAN runs"))).toBe(true);
+    mutator.close();
+
+    const first = fixture.store.openWorkspaceRunPage();
+    expect(first).toMatchObject({
+      before: 206,
+      snapshot: 205,
+      nextBefore: 194,
+      hasMore: true,
+    });
+    expect(first.runs.map((run) => run.id)).toEqual(
+      Array.from({ length: 12 }, (_, index) => workspaceRunId(205 - index)),
+    );
+    expect(JSON.stringify(first)).not.toMatch(
+      /private-provider|private-context|\/private\/runtime|private diff|private error/,
+    );
+    expect(Buffer.byteLength(JSON.stringify(first), "utf8")).toBeLessThanOrEqual(704 * 1024);
+
+    const second = fixture.store.listWorkspaceRunPage(first.nextBefore, first.snapshot);
+    expect(second).toMatchObject({
+      before: 194,
+      snapshot: 205,
+      nextBefore: 182,
+      hasMore: true,
+    });
+    expect(second.runs.map((run) => run.id)).toEqual(
+      Array.from({ length: 12 }, (_, index) => workspaceRunId(193 - index)),
+    );
+    const acrossGap = fixture.store.listWorkspaceRunPage(105, first.snapshot);
+    expect(acrossGap).toMatchObject({ before: 105, nextBefore: 92, hasMore: true });
+    expect(acrossGap.runs.map((run) => run.id)).toEqual(
+      [104, 103, 102, 101, 99, 98, 97, 96, 95, 94, 93, 92].map(workspaceRunId),
+    );
+    expect(fixture.store.listWorkspaceRunPage(first.before, first.snapshot)).toEqual(first);
+
+    const concurrent = new Database(fixture.databasePath);
+    insertWorkspaceRun(concurrent, projectId, 206);
+    concurrent.close();
+    expect(fixture.store.listWorkspaceRunPage(first.before, first.snapshot)).toEqual(first);
+    const newest = fixture.store.openWorkspaceRunPage();
+    expect(newest).toMatchObject({
+      before: 207,
+      snapshot: 206,
+    });
+    expect(newest.runs[0]).toMatchObject({ id: workspaceRunId(206) });
+
+    expectIcarusCode(() => fixture.store.listWorkspaceRunPage(0, 205), "INVALID_RUN_CURSOR");
+    expectIcarusCode(() => fixture.store.listWorkspaceRunPage(206, -1), "INVALID_RUN_CURSOR");
+    expectIcarusCode(
+      () => fixture.store.listWorkspaceRunPage(206, Number.MAX_SAFE_INTEGER),
+      "INVALID_RUN_CURSOR",
+    );
+    expectIcarusCode(() => fixture.store.listWorkspaceRunPage(207, 205), "INVALID_RUN_CURSOR");
+    expectIcarusCode(() => fixture.store.listWorkspaceRunPage(100, 205), "INVALID_RUN_CURSOR");
+    expectIcarusCode(() => fixture.store.listWorkspaceRunPage(208, 207), "INVALID_RUN_CURSOR");
+
+    const observer = new Database(fixture.databasePath);
+    const persistedBefore = observer.prepare("SELECT rowid, * FROM runs ORDER BY rowid").all();
+    observer.close();
+    fixture.store.listWorkspaceRunPage(second.before, second.snapshot);
+    fixture.store.close();
+
+    const reopened = new IcarusStore(fixture.databasePath, {
+      now: () => "2026-07-20T12:02:00.000Z",
+      id: makeUnitIdGenerator(),
+    });
+    expect(reopened.listWorkspaceRunPage(first.before, first.snapshot)).toEqual(first);
+    const afterRead = new Database(fixture.databasePath);
+    expect(afterRead.prepare("SELECT rowid, * FROM runs ORDER BY rowid").all()).toEqual(
+      persistedBefore,
+    );
+    afterRead.close();
+
+    const corruptor = new Database(fixture.databasePath);
+    corruptor.exec("PRAGMA foreign_keys = OFF");
+    const corruptions: readonly [string, unknown, unknown][] = [
+      ["id", "INVALID-ID", workspaceRunId(205)],
+      ["project_id", "INVALID-PROJECT", projectId],
+      ["task", "", "Workspace task 205"],
+      ["task", "x".repeat(8 * 1024 + 1), "Workspace task 205"],
+      ["target", "bad\0target", "src/run-205.txt"],
+      ["target", "é".repeat(513), "src/run-205.txt"],
+      ["state", "unknown", "completed"],
+      ["created_at", "2026-02-30T12:00:00.000Z", "2026-07-20T12:00:00.000Z"],
+      ["updated_at", "2026-07-20T12:01:00+00:00", "2026-07-20T12:01:00.000Z"],
+    ];
+    for (const [column, invalidValue, validValue] of corruptions) {
+      corruptor.prepare(`UPDATE runs SET ${column} = ? WHERE rowid = 205`).run(invalidValue);
+      expectIcarusCode(() => reopened.listWorkspaceRunPage(206, 205), "DATABASE_ERROR");
+      corruptor.prepare(`UPDATE runs SET ${column} = ? WHERE rowid = 205`).run(validValue);
+    }
+    corruptor.prepare("DELETE FROM runs WHERE rowid = 205").run();
+    expectIcarusCode(() => reopened.listWorkspaceRunPage(206, 205), "INVALID_RUN_CURSOR");
+    corruptor.close();
+    reopened.close();
+  });
+
+  it("accepts the final safe workspace snapshot and rejects the next rowid", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    const { projectId } = seedUnitProject(fixture.store);
+    const safeMutator = new Database(fixture.databasePath);
+    insertWorkspaceRun(safeMutator, projectId, 1, Number.MAX_SAFE_INTEGER - 1);
+    safeMutator.close();
+
+    expect(fixture.store.openWorkspaceRunPage()).toMatchObject({
+      before: Number.MAX_SAFE_INTEGER,
+      snapshot: Number.MAX_SAFE_INTEGER - 1,
+      hasMore: false,
+      runs: [expect.objectContaining({ id: workspaceRunId(1) })],
+    });
+
+    const unsafeMutator = new Database(fixture.databasePath);
+    insertWorkspaceRun(unsafeMutator, projectId, 2, Number.MAX_SAFE_INTEGER);
+    unsafeMutator.close();
+
+    expectIcarusCode(() => fixture.store.openWorkspaceRunPage(), "DATABASE_ERROR");
+    fixture.store.close();
   });
 
   it("builds a bounded presentation snapshot without decoding event payloads", () => {

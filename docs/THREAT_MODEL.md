@@ -96,6 +96,22 @@ ADR 0016 adds no write, event append, Git/source read, filename/content/diff/che
 disclosure, schema/dependency, stream, daemon, or browser action route. ADR 0010
 remains an independent release hold.
 
+## Fourth M3 workspace-run summary threats
+
+| Threat | Required control | Required evidence and limits |
+| --- | --- | --- |
+| Workspace bootstrap grows with all run history or decodes private full-run fields | replace all-run hydration with a direct fixed-field rowid query, descending `LIMIT 13`, 12 retained summaries, and lazy selected-run detail | more-than-200-run and query-plan tests prove fixed row visits, response size, no N+1 full presentation, and omission of corrupt/private heavy columns |
+| New insertions shift older pages or a forged cursor creates unbounded work | pin membership to a safe `MAX(rowid)`; require canonical `before` and `snapshot`, validate their relation/existence, and seek the intrinsic rowid B-tree | empty, gap, boundary, unsafe-integer, malformed/duplicate/unknown query, concurrent-insert, and reopen tests |
+| A rowid cursor is mistaken for a durable run identity or survives unsupported database rewriting | expose rowid only as top-level ephemeral session metadata; no per-run rowid, bookmark claim, deletion, replacement, or `VACUUM` route; fail closed when cursor anchors disappear | UI copy and response-shape tests; external direct database mutation and maintenance remain out of scope and require opening a new session |
+| A late page overwrites a newer page or selected run | one current request, abort on hidden/new-page/refresh/selection/unmount, exact generation/cursor validation, and summary state independent from selected full-run state | pure client and real-browser held-request, contention, delayed-success, selection, and failure/retry tests |
+| A partial page is presented as complete workspace or project history | no total count; fixed loaded-row label; project list says it contains matches only from the loaded workspace page; four-page cap with CLI guidance | presenter/client/browser copy and navigation tests |
+
+ADR 0017 adds no schema/dependency, write, event append, database-maintenance
+route, Git/source read, provider/context/plan/edit/diff/check/output/error/usage/
+approval/event disclosure, stream, daemon, or browser action route. Project and
+repository enumeration and selected-run approval lists remain unpaginated. ADR
+0010 remains an independent release hold.
+
 ## Inherited repository automation hold
 
 `.github/workflows/opencode.yml` came from the pre-existing remote root and was

@@ -164,6 +164,14 @@ four-page cursor window and complete payload-bearing history remains available
 only through `run history`. Use the CLI for events outside that bounded browser
 window.
 
+ADR 0017 is accepted. Workspace bootstrap returns one 12-row metadata-only
+summary page and loads full evidence only after selection. Older/newer pages use
+an ephemeral pinned SQLite insertion cursor and a four-page browser window;
+project matches describe only the loaded workspace page. The workspace no longer
+hydrates every run for its bounded sidebar. Use
+`icarus run list [--project NAME]` for complete run listing beyond the browser
+window.
+
 No migration, dependency install, daemon, watcher, Server-Sent Events, or
 WebSocket setup accompanies these read-only slices. They add no browser approval,
 mutation, execution, command, commit, push, or deployment authority. File/status,

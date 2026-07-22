@@ -37,6 +37,8 @@ import type {
   SandboxProfile,
   SunCeiling,
   VerificationEvidence,
+  WorkspaceRunPage,
+  WorkspaceRunSummary,
 } from "./types.js";
 import { CONTEXT_AUDIT_POLICY_VERSION } from "./types.js";
 
@@ -47,10 +49,31 @@ export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
 export const RUN_EVENT_PAGE_LIMIT = 64;
 export const RUN_PRESENTATION_EVENT_LIMIT = 200;
+export const WORKSPACE_RUN_PAGE_LIMIT = 12;
 const EVENT_TYPE_MAX_BYTES = 128;
 const EVENT_TIMESTAMP_MAX_BYTES = 64;
+const RUN_SUMMARY_TASK_MAX_BYTES = 8 * 1024;
+const RUN_SUMMARY_TARGET_MAX_BYTES = 1_024;
+const RUN_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+const SAFE_RUN_SNAPSHOT_MAX = Number.MAX_SAFE_INTEGER - 1;
 const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 const EVENT_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+const RUN_STATES: ReadonlySet<string> = new Set<RunState>([
+  "preparing",
+  "planned",
+  "awaiting_egress_approval",
+  "awaiting_approval",
+  "running",
+  "verifying",
+  "awaiting_review",
+  "completed",
+  "rolling_back",
+  "cancelling",
+  "failed",
+  "cancelled",
+  "rolled_back",
+  "restoring",
+]);
 const RUN_PRESENTATION_ACTION_EVENT_LIMIT = 2;
 const RUN_PRESENTATION_ACTION_EVENT_TYPES = [
   "edit.materialized",
@@ -223,16 +246,97 @@ function asJsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue;
 }
 
+function isCanonicalTimestamp(value: string): boolean {
+  const parsedTimestamp = Date.parse(value);
+  const canonicalTimestamp = Number.isFinite(parsedTimestamp)
+    ? new Date(parsedTimestamp).toISOString()
+    : "";
+  return (
+    Buffer.byteLength(value, "utf8") <= EVENT_TIMESTAMP_MAX_BYTES &&
+    EVENT_TIMESTAMP_PATTERN.test(value) &&
+    (value === canonicalTimestamp ||
+      (canonicalTimestamp.endsWith(".000Z") && value === canonicalTimestamp.replace(".000Z", "Z")))
+  );
+}
+
+function sqliteRowid(value: unknown, name: string, allowZero: boolean): number {
+  const raw = text(value, name);
+  invariant(
+    (allowZero ? /^(0|[1-9][0-9]*)$/ : /^[1-9][0-9]*$/).test(raw),
+    "DATABASE_ERROR",
+    `${name} is not canonical decimal text`,
+  );
+  const parsed = BigInt(raw);
+  invariant(parsed <= BigInt(Number.MAX_SAFE_INTEGER), "DATABASE_ERROR", `${name} is unsafe`);
+  return Number(parsed);
+}
+
+function sqliteMaximumRowid(value: unknown): bigint {
+  const raw = text(value, "run snapshot");
+  invariant(/^(0|[1-9][0-9]*)$/.test(raw), "DATABASE_ERROR", "Run snapshot is invalid");
+  return BigInt(raw);
+}
+
+function workspaceRunSummaryRow(
+  entry: unknown,
+  before: number,
+  snapshot: number,
+): { readonly cursor: number; readonly summary: WorkspaceRunSummary } {
+  const value = row(entry, "workspace run summary");
+  const cursor = sqliteRowid(value.cursor, "run cursor", false);
+  const id = text(value.id, "run.id");
+  const projectId = text(value.project_id, "run.project_id");
+  const task = text(value.task, "run.task");
+  const target = text(value.target, "run.target");
+  const state = text(value.state, "run.state");
+  const createdAt = text(value.created_at, "run.created_at");
+  const updatedAt = text(value.updated_at, "run.updated_at");
+  invariant(cursor < before && cursor <= snapshot, "DATABASE_ERROR", "Run cursor is invalid");
+  invariant(
+    RUN_ID_PATTERN.test(id) && RUN_ID_PATTERN.test(projectId),
+    "DATABASE_ERROR",
+    "Run summary identity is invalid",
+  );
+  invariant(
+    task.trim().length > 0 &&
+      !task.includes("\0") &&
+      Buffer.byteLength(task, "utf8") <= RUN_SUMMARY_TASK_MAX_BYTES,
+    "DATABASE_ERROR",
+    "Run task is invalid",
+  );
+  invariant(
+    target.trim().length > 0 &&
+      !target.includes("\0") &&
+      Buffer.byteLength(target, "utf8") <= RUN_SUMMARY_TARGET_MAX_BYTES,
+    "DATABASE_ERROR",
+    "Run target is invalid",
+  );
+  invariant(RUN_STATES.has(state), "DATABASE_ERROR", "Run state is invalid");
+  invariant(
+    isCanonicalTimestamp(createdAt) && isCanonicalTimestamp(updatedAt),
+    "DATABASE_ERROR",
+    "Run timestamp is invalid",
+  );
+  return {
+    cursor,
+    summary: {
+      id,
+      projectId,
+      task,
+      target,
+      state: state as RunState,
+      createdAt,
+      updatedAt,
+    },
+  };
+}
+
 function eventSummaryRow(entry: unknown, name: string, expectedRunId: string): EventSummaryRecord {
   const value = row(entry, name);
   const sequence = numberValue(value.sequence, "event.sequence");
   const runId = text(value.run_id, "event.run_id");
   const type = text(value.type, "event.type");
   const createdAt = text(value.created_at, "event.created_at");
-  const parsedTimestamp = Date.parse(createdAt);
-  const canonicalTimestamp = Number.isFinite(parsedTimestamp)
-    ? new Date(parsedTimestamp).toISOString()
-    : "";
   invariant(
     Number.isSafeInteger(sequence) && sequence > 0 && runId === expectedRunId,
     "DATABASE_ERROR",
@@ -243,15 +347,7 @@ function eventSummaryRow(entry: unknown, name: string, expectedRunId: string): E
     "DATABASE_ERROR",
     "Event type is invalid",
   );
-  invariant(
-    Buffer.byteLength(createdAt, "utf8") <= EVENT_TIMESTAMP_MAX_BYTES &&
-      EVENT_TIMESTAMP_PATTERN.test(createdAt) &&
-      (createdAt === canonicalTimestamp ||
-        (canonicalTimestamp.endsWith(".000Z") &&
-          createdAt === canonicalTimestamp.replace(".000Z", "Z"))),
-    "DATABASE_ERROR",
-    "Event timestamp is invalid",
-  );
+  invariant(isCanonicalTimestamp(createdAt), "DATABASE_ERROR", "Event timestamp is invalid");
   return { sequence, runId, type, createdAt };
 }
 
@@ -724,6 +820,97 @@ export class IcarusStore {
             .prepare("SELECT id FROM runs WHERE project_id = ? ORDER BY created_at DESC, id DESC")
             .all(projectId) as unknown[]);
     return values.map((value) => this.getRun(text(row(value, "run list").id, "run.id")));
+  }
+
+  openWorkspaceRunPage(): WorkspaceRunPage {
+    return this.#workspaceRunPage(null);
+  }
+
+  listWorkspaceRunPage(before: number, snapshot: number): WorkspaceRunPage {
+    invariant(
+      Number.isSafeInteger(before) && before > 0,
+      "INVALID_RUN_CURSOR",
+      "Workspace run cursor must be a positive safe integer",
+    );
+    invariant(
+      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_RUN_SNAPSHOT_MAX,
+      "INVALID_RUN_CURSOR",
+      "Workspace run snapshot must be a nonnegative safe integer",
+    );
+    return this.#workspaceRunPage({ before, snapshot });
+  }
+
+  #workspaceRunPage(
+    requested: { readonly before: number; readonly snapshot: number } | null,
+  ): WorkspaceRunPage {
+    const transaction = this.#database.transaction((): WorkspaceRunPage => {
+      const maximum = sqliteMaximumRowid(
+        row(
+          this.#database
+            .prepare("SELECT CAST(COALESCE(MAX(rowid), 0) AS TEXT) AS snapshot FROM runs")
+            .get(),
+          "run snapshot",
+        ).snapshot,
+      );
+      let before: number;
+      let snapshot: number;
+      if (requested === null) {
+        invariant(
+          maximum <= BigInt(SAFE_RUN_SNAPSHOT_MAX),
+          "DATABASE_ERROR",
+          "Workspace run snapshot is unsafe",
+        );
+        snapshot = Number(maximum);
+        before = snapshot + 1;
+      } else {
+        before = requested.before;
+        snapshot = requested.snapshot;
+        invariant(
+          BigInt(snapshot) <= maximum,
+          "INVALID_RUN_CURSOR",
+          "Workspace run snapshot is ahead of persisted history",
+        );
+        if (snapshot > 0) {
+          invariant(
+            this.#database.prepare("SELECT 1 FROM runs WHERE rowid = ?").get(snapshot) !==
+              undefined,
+            "INVALID_RUN_CURSOR",
+            "Workspace run snapshot anchor is missing",
+          );
+        }
+        const pageOneBefore = snapshot + 1;
+        if (before !== pageOneBefore) {
+          invariant(
+            before <= snapshot &&
+              this.#database.prepare("SELECT 1 FROM runs WHERE rowid = ?").get(before) !==
+                undefined,
+            "INVALID_RUN_CURSOR",
+            "Workspace run cursor anchor is missing",
+          );
+        }
+      }
+      const rows = this.#database
+        .prepare(
+          `SELECT CAST(rowid AS TEXT) AS cursor,
+                  id, project_id, task, target, state, created_at, updated_at
+           FROM runs
+           WHERE rowid < ? AND rowid <= ?
+           ORDER BY rowid DESC
+           LIMIT 13`,
+        )
+        .all(before, snapshot) as unknown[];
+      const summaries = rows.map((entry) => workspaceRunSummaryRow(entry, before, snapshot));
+      const hasMore = summaries.length > WORKSPACE_RUN_PAGE_LIMIT;
+      const retained = summaries.slice(0, WORKSPACE_RUN_PAGE_LIMIT);
+      return {
+        before,
+        snapshot,
+        nextBefore: retained.at(-1)?.cursor ?? before,
+        hasMore,
+        runs: retained.map((entry) => entry.summary),
+      };
+    });
+    return transaction();
   }
 
   transition(

@@ -329,6 +329,38 @@ streaming, background work, or browser action route. Workspace-wide run and
 approval enumeration remain the existing unpaginated local reads and are not
 made bounded by ADR 0016.
 
+## Fourth M3 workspace-run summary path
+
+ADR 0017 replaces the run portion of workspace bootstrap with a direct,
+metadata-only page. The first store transaction pins
+`CAST(COALESCE(MAX(rowid), 0) AS TEXT)` as a session-only membership snapshot and
+reads at most 13 rows through the intrinsic rowid B-tree. It returns 12 summaries
+and a next exclusive cursor without a count or full-run decode. Continuations
+require the exact pinned snapshot and cursor. Empty history uses snapshot zero.
+The implementation was accepted on 2026-07-21.
+
+Summary rows contain only IDs, bounded task/target text, state, host-derived
+phase, and timestamps. Provider configuration, context, plan, edit, diff,
+verification, errors, usage, approvals, and events remain absent. Full evidence
+continues through the existing selected-run route only after explicit selection.
+The snapshot fixes page membership, not live run state.
+
+React retains one page plus three newer cursors, replaces pages, guards one
+request by exact generation/cursors, preserves the last page on failure, and
+aborts on lifecycle or selection changes. Project matches are explicitly scoped
+to the loaded workspace page. Selected-run polling and event-history cursors stay
+independent.
+
+The rowid cursor is ephemeral and not a public run identity. Icarus exposes no
+run deletion, replacement, or database-vacuum route; unsupported external
+rewrites invalidate the page session. Durable cross-maintenance chronological
+pagination would require a separately approved schema index.
+
+This path adds no write, migration, dependency, Git/source read, disclosure of a
+new run data class, stream, background work, or browser action route. Project and
+repository enumeration plus selected-run approvals remain unpaginated local
+reads and are not claimed bounded by ADR 0017.
+
 ## Provider contract
 
 The provider-neutral port accepts model identity, capability metadata, a typed

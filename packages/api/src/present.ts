@@ -10,6 +10,7 @@ import type {
   RunPresentationSnapshot,
   RunRecord,
   RunState,
+  WorkspaceRunPage,
 } from "@icarus/core";
 
 export type WorkspaceRunPhase =
@@ -224,6 +225,25 @@ export function presentRunEventHistoryPage(page: RunEventHistoryPage): Record<st
       label: event.type.replaceAll(".", " "),
       evidenceSection: evidenceSection(event.type),
       timestamp: event.createdAt,
+    })),
+  };
+}
+
+export function presentWorkspaceRunPage(page: WorkspaceRunPage): Record<string, unknown> {
+  return {
+    before: page.before,
+    snapshot: page.snapshot,
+    nextBefore: page.nextBefore,
+    hasMore: page.hasMore,
+    runs: page.runs.map((run) => ({
+      id: run.id,
+      projectId: run.projectId,
+      task: run.task,
+      target: run.target,
+      state: run.state,
+      phase: workspaceRunPhase(run.state),
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
     })),
   };
 }

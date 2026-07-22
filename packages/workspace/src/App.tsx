@@ -7,6 +7,7 @@ import type {
   CreateProjectInput,
   ProjectView,
   RepositoryStatusView,
+  RunSummaryView,
   RunView,
   TimelineEntryView,
   WorkspaceView,
@@ -19,11 +20,13 @@ import {
   getRun,
   getRunEventHistory,
   getRunEvents,
+  getRunPage,
   getWorkspace,
   planRun,
   previewProjectContext,
   unwrapContextPreview,
 } from "./api.js";
+import type { HistoryDirection, HistoryRequest, HistorySession } from "./history-nav.js";
 import {
   acceptHistoryPage,
   canNavigateNewer,
@@ -33,7 +36,6 @@ import {
   historyPageDepth,
   historyRequest,
 } from "./history-nav.js";
-import type { HistoryDirection, HistoryRequest, HistorySession } from "./history-nav.js";
 import {
   advanceEventPoll,
   eventPollDelayMs,
@@ -41,6 +43,16 @@ import {
   liveEventAnnouncement,
   snapshotIncludesObservedRevision,
 } from "./live-poll.js";
+import type { RunPageDirection, RunPageRequest, RunPageSession } from "./run-page-nav.js";
+import {
+  acceptRunPage,
+  canNavigateToNewerRuns,
+  canNavigateToOlderRuns,
+  createRunPageSession,
+  RUN_PAGE_MAX_PAGES,
+  runPageDepth,
+  runPageRequest,
+} from "./run-page-nav.js";
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "unknown";
@@ -74,16 +86,6 @@ function newestRun(current: RunView | undefined, candidate: RunView): RunView {
   return current !== undefined && runEventCursor(current) > runEventCursor(candidate)
     ? current
     : candidate;
-}
-
-function workspaceWithRun(current: WorkspaceView | null, run: RunView): WorkspaceView | null {
-  if (current === null) return current;
-  const existing = current.runs.find((candidate) => candidate.id === run.id);
-  const merged = newestRun(existing, run);
-  return {
-    ...current,
-    runs: [merged, ...current.runs.filter((candidate) => candidate.id !== run.id)],
-  };
 }
 
 const EVIDENCE_LINKS = [
@@ -658,7 +660,7 @@ function ContextSummary({
 interface ProjectDetailProps {
   readonly project: ProjectView;
   readonly planningCapability: CapabilityView;
-  readonly runs: readonly RunView[];
+  readonly runs: readonly RunSummaryView[];
   readonly onSelectRun: (runId: string) => Promise<void>;
   readonly onRunCreated: (run: RunView) => Promise<void>;
 }
@@ -920,13 +922,20 @@ function ProjectDetail({
       <section className="panel" aria-labelledby="project-runs-heading">
         <div className="panel__heading">
           <div>
-            <p className="eyebrow">Persisted history</p>
-            <h2 id="project-runs-heading">Project runs</h2>
+            <p className="eyebrow">Loaded workspace page</p>
+            <h2 id="project-runs-heading">Project matches in loaded page</h2>
           </div>
-          <span className="count">{runs.length}</span>
+          <span className="count">{runs.length} loaded</span>
         </div>
+        <p className="panel__intro">
+          These are matches in the currently loaded workspace run page, not the project&apos;s
+          complete history.
+        </p>
         {runs.length === 0 ? (
-          <p className="empty-state">No run requests exist for this project.</p>
+          <p className="empty-state">
+            No runs for this project appear in the loaded workspace page. Use{" "}
+            <code>icarus run list --project {project.name}</code> for complete project history.
+          </p>
         ) : (
           <ul className="selection-list">
             {runs.map((run) => (
@@ -1990,15 +1999,140 @@ function RunEvidence({
   );
 }
 
+interface WorkspaceRunPageProps {
+  readonly session: RunPageSession;
+  readonly busy: boolean;
+  readonly error: string | null;
+  readonly retryRequest: RunPageRequest | null;
+  readonly selectedRunId: string | null;
+  readonly selectingRunId: string | null;
+  readonly onNavigate: (direction: RunPageDirection) => void;
+  readonly onRetry: () => void;
+  readonly onSelectRun: (runId: string) => Promise<void>;
+}
+
+function WorkspaceRunPage({
+  session,
+  busy,
+  error,
+  retryRequest,
+  selectedRunId,
+  selectingRunId,
+  onNavigate,
+  onRetry,
+  onSelectRun,
+}: WorkspaceRunPageProps) {
+  const page = session.page;
+  const depth = runPageDepth(session);
+  const canLoadOlder = canNavigateToOlderRuns(session);
+  const canLoadNewer = canNavigateToNewerRuns(session);
+  const depthCapped = page.hasMore && depth === RUN_PAGE_MAX_PAGES;
+
+  return (
+    <section id="workspace-run-page" aria-labelledby="all-runs-heading" aria-busy={busy}>
+      <div className="sidebar__heading">
+        <div>
+          <h2 id="all-runs-heading">Loaded run page</h2>
+          <small>Newest-first insertion order</small>
+        </div>
+        <span className="count">{page.runs.length} loaded</span>
+      </div>
+      <p className="run-page__status" role="status">
+        Page {depth} in a pinned session window of at most {RUN_PAGE_MAX_PAGES}. Membership is
+        pinned; state and update time reflect when this page was read.
+      </p>
+      {error === null ? null : (
+        <div className="message message--error run-page__error" role="alert">
+          <span>{error}</span>
+          <button
+            type="button"
+            className="button--secondary"
+            disabled={busy || retryRequest === null}
+            onClick={onRetry}
+          >
+            Retry run page
+          </button>
+        </div>
+      )}
+      {page.runs.length === 0 ? (
+        <p className="empty-state">No run records exist in this pinned workspace page.</p>
+      ) : (
+        <ul className="selection-list selection-list--compact">
+          {page.runs.map((run) => (
+            <li key={run.id}>
+              <button
+                type="button"
+                className={selectedRunId === run.id ? "is-selected" : undefined}
+                aria-pressed={selectedRunId === run.id}
+                aria-label={`Open full evidence for ${run.task}`}
+                onClick={() => void onSelectRun(run.id)}
+              >
+                <span>
+                  <strong>{run.task}</strong>
+                  <small>
+                    {run.target}
+                    {selectingRunId === run.id ? " · Loading full evidence…" : ""}
+                  </small>
+                </span>
+                <span className={statusClass(run.phase)}>{run.phase.replaceAll("_", " ")}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <nav className="run-page__navigation" aria-label="Loaded run page navigation">
+        <button
+          type="button"
+          className="button--secondary"
+          disabled={busy || !canLoadNewer}
+          onClick={() => onNavigate("newer")}
+        >
+          Newer runs
+        </button>
+        <button
+          type="button"
+          className="button--secondary"
+          disabled={busy || !canLoadOlder}
+          onClick={() => onNavigate("older")}
+        >
+          Older runs
+        </button>
+      </nav>
+      {depthCapped ? (
+        <p className="run-page__guidance">
+          This browser session keeps four run pages. Use{" "}
+          <code>icarus run list [--project NAME]</code> for complete history beyond this window.
+        </p>
+      ) : page.hasMore ? null : (
+        <p className="run-page__guidance">
+          No older runs remain in this pinned session. Use{" "}
+          <code>icarus run list [--project NAME]</code> for complete run listing.
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function App() {
   const [workspace, setWorkspace] = useState<WorkspaceView | null>(null);
+  const [runPageSession, setRunPageSession] = useState<RunPageSession | null>(null);
+  const [runPageBusy, setRunPageBusy] = useState(false);
+  const [runPageError, setRunPageError] = useState<string | null>(null);
+  const [runPageRetryRequest, setRunPageRetryRequest] = useState<RunPageRequest | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunView | null>(null);
+  const [selectingRunId, setSelectingRunId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const workspaceRequestRef = useRef<AbortController | null>(null);
   const workspaceGenerationRef = useRef(0);
+  const runPageSessionRef = useRef<RunPageSession | null>(null);
+  const runPageRequestRef = useRef<{
+    readonly controller: AbortController;
+    readonly request: RunPageRequest;
+  } | null>(null);
+  const runPageGenerationRef = useRef(0);
   const selectionRequestRef = useRef<AbortController | null>(null);
   const selectionGenerationRef = useRef(0);
   const historyCancellationRef = useRef<(() => void) | null>(null);
@@ -2007,81 +2141,165 @@ export function App() {
     historyCancellationRef.current = cancel;
   }, []);
 
+  const storeRunPageSession = useCallback((session: RunPageSession): void => {
+    runPageSessionRef.current = session;
+    setRunPageSession(session);
+  }, []);
+
+  const abortRunPageRequest = useCallback((): RunPageRequest | null => {
+    runPageGenerationRef.current += 1;
+    const pending = runPageRequestRef.current;
+    runPageRequestRef.current = null;
+    pending?.controller.abort();
+    return pending?.request ?? null;
+  }, []);
+
+  const resetRunPageRequest = useCallback((): void => {
+    abortRunPageRequest();
+    setRunPageBusy(false);
+    setRunPageError(null);
+    setRunPageRetryRequest(null);
+  }, [abortRunPageRequest]);
+
+  const pauseRunPageRequest = useCallback(
+    (message: string): void => {
+      const request = abortRunPageRequest();
+      if (request === null) return;
+      setRunPageBusy(false);
+      setRunPageError(message);
+      setRunPageRetryRequest(request);
+    },
+    [abortRunPageRequest],
+  );
+
   const cancelPendingRunSelection = useCallback((): void => {
     selectionGenerationRef.current += 1;
     selectionRequestRef.current?.abort();
     selectionRequestRef.current = null;
+    setSelectingRunId(null);
   }, []);
 
-  const loadWorkspace = useCallback(async (initial = false): Promise<WorkspaceView | null> => {
-    workspaceRequestRef.current?.abort();
-    const controller = new AbortController();
-    const generation = workspaceGenerationRef.current + 1;
-    const selectionGeneration = selectionGenerationRef.current;
-    workspaceGenerationRef.current = generation;
-    workspaceRequestRef.current = controller;
-    if (initial) setLoading(true);
-    else setRefreshing(true);
-    setWorkspaceError(null);
-    try {
-      const next = await getWorkspace(controller.signal);
-      if (controller.signal.aborted || workspaceGenerationRef.current !== generation) return null;
-      setWorkspace((current) => {
-        if (current === null) return next;
-        const incomingIds = new Set(next.runs.map((run) => run.id));
-        return {
-          ...next,
-          runs: [
-            ...next.runs.map((run) =>
-              newestRun(
-                current.runs.find((candidate) => candidate.id === run.id),
-                run,
-              ),
-            ),
-            ...current.runs.filter((run) => !incomingIds.has(run.id)),
-          ],
-        };
-      });
-      if (selectionGenerationRef.current === selectionGeneration) {
-        setSelectedProjectId((current) => {
-          if (current !== null && next.projects.some((project) => project.id === current)) {
-            return current;
-          }
-          return next.projects.at(0)?.id ?? null;
-        });
-        setSelectedRun((current) => {
-          if (current === null) return null;
-          const candidate = next.runs.find((run) => run.id === current.id);
-          return candidate === undefined ? current : newestRun(current, candidate);
-        });
+  const loadWorkspace = useCallback(
+    async (initial = false): Promise<WorkspaceView | null> => {
+      resetRunPageRequest();
+      workspaceRequestRef.current?.abort();
+      const controller = new AbortController();
+      const generation = workspaceGenerationRef.current + 1;
+      const selectionGeneration = selectionGenerationRef.current;
+      workspaceGenerationRef.current = generation;
+      workspaceRequestRef.current = controller;
+      if (initial) setLoading(true);
+      else setRefreshing(true);
+      setWorkspaceError(null);
+      try {
+        const next = await getWorkspace(controller.signal);
+        const nextRunPageSession = createRunPageSession(next.runPage);
+        if (controller.signal.aborted || workspaceGenerationRef.current !== generation) return null;
+        setWorkspace(next);
+        storeRunPageSession(nextRunPageSession);
+        if (selectionGenerationRef.current === selectionGeneration) {
+          setSelectedProjectId((current) => {
+            if (current !== null && next.projects.some((project) => project.id === current)) {
+              return current;
+            }
+            return next.projects.at(0)?.id ?? null;
+          });
+        }
+        return next;
+      } catch (error) {
+        if (
+          !controller.signal.aborted &&
+          workspaceGenerationRef.current === generation &&
+          selectionGenerationRef.current === selectionGeneration
+        ) {
+          setWorkspaceError(errorMessage(error));
+        }
+        return null;
+      } finally {
+        if (workspaceRequestRef.current === controller) workspaceRequestRef.current = null;
+        if (workspaceGenerationRef.current === generation) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
-      return next;
-    } catch (error) {
-      if (
-        !controller.signal.aborted &&
-        workspaceGenerationRef.current === generation &&
-        selectionGenerationRef.current === selectionGeneration
-      ) {
-        setWorkspaceError(errorMessage(error));
+    },
+    [resetRunPageRequest, storeRunPageSession],
+  );
+
+  const requestRunPage = useCallback(
+    async (request: RunPageRequest): Promise<void> => {
+      if (workspaceRequestRef.current !== null) return;
+      if (runPageRequestRef.current !== null) abortRunPageRequest();
+      const controller = new AbortController();
+      const generation = runPageGenerationRef.current + 1;
+      runPageGenerationRef.current = generation;
+      runPageRequestRef.current = { controller, request };
+      setRunPageBusy(true);
+      setRunPageError(null);
+      setRunPageRetryRequest(null);
+      try {
+        const response = await getRunPage(request, controller.signal);
+        if (controller.signal.aborted || runPageGenerationRef.current !== generation) return;
+        const current = runPageSessionRef.current;
+        if (current === null) {
+          throw new Error("The workspace run page session is unavailable.");
+        }
+        const next = acceptRunPage(current, request, response);
+        if (controller.signal.aborted || runPageGenerationRef.current !== generation) return;
+        storeRunPageSession(next);
+        setWorkspace((value) => (value === null ? value : { ...value, runPage: next.page }));
+      } catch (error) {
+        if (!controller.signal.aborted && runPageGenerationRef.current === generation) {
+          setRunPageError(errorMessage(error));
+          setRunPageRetryRequest(request);
+        }
+      } finally {
+        if (runPageRequestRef.current?.controller === controller) runPageRequestRef.current = null;
+        if (runPageGenerationRef.current === generation) setRunPageBusy(false);
       }
-      return null;
-    } finally {
-      if (workspaceRequestRef.current === controller) workspaceRequestRef.current = null;
-      if (workspaceGenerationRef.current === generation) {
-        setLoading(false);
-        setRefreshing(false);
+    },
+    [abortRunPageRequest, storeRunPageSession],
+  );
+
+  const navigateRunPage = useCallback(
+    (direction: RunPageDirection): void => {
+      const current = runPageSessionRef.current;
+      if (current === null) return;
+      try {
+        void requestRunPage(runPageRequest(current, direction));
+      } catch (error) {
+        setRunPageError(errorMessage(error));
+        setRunPageRetryRequest(null);
       }
-    }
-  }, []);
+    },
+    [requestRunPage],
+  );
+
+  const retryRunPage = useCallback((): void => {
+    if (runPageRetryRequest !== null) void requestRunPage(runPageRetryRequest);
+  }, [requestRunPage, runPageRetryRequest]);
 
   useEffect(() => {
     void loadWorkspace(true);
     return () => {
+      abortRunPageRequest();
       workspaceGenerationRef.current += 1;
       workspaceRequestRef.current?.abort();
       workspaceRequestRef.current = null;
     };
-  }, [loadWorkspace]);
+  }, [abortRunPageRequest, loadWorkspace]);
+
+  useEffect(() => {
+    const handleVisibility = (): void => {
+      if (!pageIsVisible()) {
+        pauseRunPageRequest(
+          "Run-page navigation paused while this document is hidden. Retry when it is visible.",
+        );
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [pauseRunPageRequest]);
 
   useEffect(
     () => () => {
@@ -2092,25 +2310,25 @@ export function App() {
 
   const selectedProject =
     workspace?.projects.find((project) => project.id === selectedProjectId) ?? null;
-  const projectRuns = workspace?.runs.filter((run) => run.projectId === selectedProjectId) ?? [];
+  const projectRuns =
+    runPageSession?.page.runs.filter((run) => run.projectId === selectedProjectId) ?? [];
 
   const mergeRun = useCallback(async (run: RunView): Promise<void> => {
     setSelectedRun((current) => (current?.id === run.id ? newestRun(current, run) : current));
-    setWorkspace((current) => workspaceWithRun(current, run));
   }, []);
 
   const openRun = useCallback(async (run: RunView): Promise<void> => {
     setSelectedRun((current) => (current?.id === run.id ? newestRun(current, run) : run));
     setSelectedProjectId(run.projectId);
-    setWorkspace((current) => workspaceWithRun(current, run));
   }, []);
 
   const openCreatedRun = useCallback(
     async (run: RunView): Promise<void> => {
       cancelPendingRunSelection();
       await openRun(run);
+      await loadWorkspace();
     },
-    [cancelPendingRunSelection, openRun],
+    [cancelPendingRunSelection, loadWorkspace, openRun],
   );
 
   const refreshRun = useCallback(
@@ -2123,11 +2341,15 @@ export function App() {
   const selectRun = useCallback(
     async (runId: string): Promise<void> => {
       if (selectedRun?.id !== runId) historyCancellationRef.current?.();
+      pauseRunPageRequest(
+        "Run-page navigation was cancelled when the selected run changed. Retry to continue.",
+      );
       selectionRequestRef.current?.abort();
       const controller = new AbortController();
       const generation = selectionGenerationRef.current + 1;
       selectionGenerationRef.current = generation;
       selectionRequestRef.current = controller;
+      setSelectingRunId(runId);
       setWorkspaceError(null);
       try {
         const run = await getRun(runId, controller.signal);
@@ -2140,26 +2362,38 @@ export function App() {
         }
       } finally {
         if (selectionRequestRef.current === controller) selectionRequestRef.current = null;
+        if (selectionGenerationRef.current === generation) setSelectingRunId(null);
       }
     },
-    [openRun, selectedRun?.id],
+    [openRun, pauseRunPageRequest, selectedRun?.id],
   );
 
   const selectProject = useCallback(
     (projectId: string): void => {
       historyCancellationRef.current?.();
+      pauseRunPageRequest(
+        "Run-page navigation was cancelled when the selected project changed. Retry to continue.",
+      );
       cancelPendingRunSelection();
       setSelectedProjectId(projectId);
       setSelectedRun(null);
     },
-    [cancelPendingRunSelection],
+    [cancelPendingRunSelection, pauseRunPageRequest],
   );
 
   const closeRun = useCallback((): void => {
     historyCancellationRef.current?.();
+    pauseRunPageRequest(
+      "Run-page navigation was cancelled when the selected run changed. Retry to continue.",
+    );
     cancelPendingRunSelection();
     setSelectedRun(null);
-  }, [cancelPendingRunSelection]);
+  }, [cancelPendingRunSelection, pauseRunPageRequest]);
+
+  const refreshWorkspace = useCallback(async (): Promise<void> => {
+    cancelPendingRunSelection();
+    await loadWorkspace();
+  }, [cancelPendingRunSelection, loadWorkspace]);
 
   const projectCreated = async (project: ProjectView): Promise<void> => {
     cancelPendingRunSelection();
@@ -2191,7 +2425,7 @@ export function App() {
           type="button"
           className="button--secondary"
           disabled={refreshing}
-          onClick={() => void loadWorkspace()}
+          onClick={() => void refreshWorkspace()}
         >
           {refreshing ? "Refreshing…" : "Refresh workspace"}
         </button>
@@ -2200,7 +2434,11 @@ export function App() {
       {workspaceError === null ? null : (
         <div className="message message--error app-message" role="alert">
           <span>{workspaceError}</span>
-          <button type="button" className="button--secondary" onClick={() => void loadWorkspace()}>
+          <button
+            type="button"
+            className="button--secondary"
+            onClick={() => void refreshWorkspace()}
+          >
             Retry
           </button>
         </div>
@@ -2256,36 +2494,24 @@ export function App() {
               )}
             </section>
 
-            <section aria-labelledby="all-runs-heading">
-              <div className="sidebar__heading">
-                <h2 id="all-runs-heading">Recent runs</h2>
-                <span className="count">{workspace.runs.length}</span>
-              </div>
-              {workspace.runs.length === 0 ? (
-                <p className="empty-state">No run records exist.</p>
-              ) : (
-                <ul className="selection-list selection-list--compact">
-                  {workspace.runs.slice(0, 12).map((run) => (
-                    <li key={run.id}>
-                      <button
-                        type="button"
-                        className={selectedRun?.id === run.id ? "is-selected" : undefined}
-                        aria-pressed={selectedRun?.id === run.id}
-                        onClick={() => void selectRun(run.id)}
-                      >
-                        <span>
-                          <strong>{run.task}</strong>
-                          <small>{run.target}</small>
-                        </span>
-                        <span className={statusClass(run.phase)}>
-                          {run.phase.replaceAll("_", " ")}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+            {runPageSession === null ? (
+              <section id="workspace-run-page" aria-labelledby="all-runs-heading">
+                <h2 id="all-runs-heading">Loaded run page</h2>
+                <p className="empty-state">The bounded run page is unavailable.</p>
+              </section>
+            ) : (
+              <WorkspaceRunPage
+                session={runPageSession}
+                busy={runPageBusy || refreshing}
+                error={runPageError}
+                retryRequest={runPageRetryRequest}
+                selectedRunId={selectedRun?.id ?? null}
+                selectingRunId={selectingRunId}
+                onNavigate={navigateRunPage}
+                onRetry={retryRunPage}
+                onSelectRun={selectRun}
+              />
+            )}
           </aside>
 
           <div className="content">
