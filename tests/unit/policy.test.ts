@@ -5,6 +5,8 @@ import { IcarusError } from "../../packages/core/src/errors.js";
 import {
   applyExactReplacement,
   checkpointDigest,
+  parseEditProposal,
+  parsePlanProposal,
   planApprovalDigest,
 } from "../../packages/core/src/policy.js";
 import type { EditProposal } from "../../packages/core/src/types.js";
@@ -105,6 +107,58 @@ describe("approval digests", () => {
     for (const mutation of mutations) {
       expect(checkpointDigest(mutation)).not.toBe(baseline);
     }
+  });
+});
+
+describe("provider proposal policy", () => {
+  const target = "src/greeting.txt";
+  const checks = [{ id: "unit", name: "Unit check", argv: ["node", "--test"] }];
+  const plan = {
+    summary: "Update one tracked file.",
+    steps: ["Apply one exact replacement."],
+    risks: [],
+    target,
+    checkIds: ["unit"],
+  };
+  const preimageSha256 = sha256("hello\n");
+  const edit = {
+    path: target,
+    expectedPreimageSha256: preimageSha256,
+    findText: "hello",
+    replaceText: "goodbye",
+    rationale: "Update the fixture greeting.",
+  };
+
+  it.each([
+    ["command", "forbidden-command"],
+    ["tool", "shell"],
+    ["argv", ["sh", "-c", "forbidden-command"]],
+  ])("rejects a model-proposed plan %s field", (key, value) => {
+    expectIcarusCode(
+      () => parsePlanProposal({ ...plan, [key]: value }, target, checks),
+      "INVALID_PROVIDER_OUTPUT",
+    );
+  });
+
+  it.each([
+    ["unregistered", ["unregistered"]],
+    ["duplicate", ["unit", "unit"]],
+  ])("rejects %s model-selected checks", (_case, checkIds) => {
+    expectIcarusCode(
+      () => parsePlanProposal({ ...plan, checkIds }, target, checks),
+      "CHECK_MISMATCH",
+    );
+  });
+
+  it.each([
+    ["command", "forbidden-command"],
+    ["tool", "shell"],
+    ["argv", ["sh", "-c", "forbidden-command"]],
+  ])("rejects a model-proposed edit %s field", (key, value) => {
+    expectIcarusCode(
+      () => parseEditProposal({ ...edit, [key]: value }, target, preimageSha256),
+      "INVALID_PROVIDER_OUTPUT",
+    );
   });
 });
 

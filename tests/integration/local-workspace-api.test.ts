@@ -294,8 +294,23 @@ describe("loopback local workspace API", () => {
       await responseJson(await fetch(`${server.url}/api/runs/${runId}/events?after=0`)),
     ).toEqual(initialEvents);
 
-    const forbiddenApproval = await postJson(`${server.url}/api/runs/${runId}/approve`, {});
-    expect(forbiddenApproval.status).toBe(404);
+    for (const route of [
+      "approve",
+      "edit",
+      "execute",
+      "checks",
+      "rerun",
+      "review",
+      "rollback",
+      "restore",
+      "commit",
+      "merge",
+      "push",
+      "deploy",
+    ]) {
+      const forbiddenAction = await postJson(`${server.url}/api/runs/${runId}/${route}`, {});
+      expect(forbiddenAction.status).toBe(404);
+    }
     expect(provider.requests).toHaveLength(0);
     expect(runtime.service.getRun(runId).state).toBe("preparing");
 
