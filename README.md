@@ -77,14 +77,14 @@ validated states, sequences, timestamps, digests, coverage, and recorded
 checkpoint relations. Raw payloads, diffs, paths, checks, output, checkpoint
 bytes, complete history, and every guarded action remain CLI-only.
 
-The sixth candidate slice bounds ordinary selected-run approval provenance to
+The sixth merged observation slice bounds ordinary selected-run approval provenance to
 the newest 12 validated recorded decisions, reports when earlier decisions were
 excluded, and keeps complete history in the CLI. Recorded actors and digests are
 provenance facts, not fresh authentication or byte-integrity checks. Existing
 state requires a verified backup and one explicitly approved
 `approval-index-v1` migration; see `docs/OPERATIONS.md`.
 
-The seventh candidate slice turns the already persisted one-file verification
+The seventh merged observation slice turns the already persisted one-file verification
 diff into explicit review evidence. At most 256 KiB of complete patch text is
 shown; displayed bytes are rehashed against the recorded digest, while a larger
 recorded diff becomes metadata-only with no partial preview or format validation
@@ -92,7 +92,7 @@ by this projection. Exact persisted run state, verification outcome, path, size,
 patch statistics, and digest provenance
 appear together without another Git/source read or any browser action.
 
-The eighth candidate slice replaces the workspace's unbounded project catalog
+The eighth merged observation slice replaces the workspace's unbounded project catalog
 with one pinned, newest-first page of at most 12 joined project/repository
 records. The browser replaces pages inside a four-position cursor window,
 preserves an independently selected project or the exact owner of a visible
@@ -101,6 +101,11 @@ storage- and byte-gate persisted project JSON before strict decoding; creation
 uses exact indexed lookups. Every HTTP JSON response is completely serialized
 under an 8 MiB UTF-8 ceiling before success headers are sent, with bounded error
 copy and a fixed non-recursive fallback.
+
+These bounded observation slices are merged and exact implementation-head
+hosted CI verified. They do not complete full M3, establish native macOS or
+Windows acceptance, clear ADR 0010, authorize a live approval-index migration,
+or make Icarus production-ready.
 
 Not yet included: browser approval or execution, arbitrary agent tool use,
 model-written shell commands, semantic search, commits or pushes, application
@@ -258,6 +263,7 @@ repository.
 
 ## Documentation
 
+- [Release readiness](docs/README.md)
 - [Product requirements](docs/PRD.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Implementation plan](docs/PLANS.md)

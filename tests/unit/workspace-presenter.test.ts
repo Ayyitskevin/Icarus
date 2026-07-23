@@ -767,6 +767,42 @@ describe("workspace run presentation", () => {
       ].sort(),
     );
 
+    const exactBoundaryPrefix = [
+      "diff --git a/src/greeting.txt b/src/greeting.txt",
+      "index ce01362..63c704a 100644",
+      "--- a/src/greeting.txt",
+      "+++ b/src/greeting.txt",
+      "@@ -1 +1 @@",
+      "-Hello",
+      "+",
+    ].join("\n");
+    const exactBoundaryDiff = `${exactBoundaryPrefix}${"x".repeat(
+      WORKSPACE_DIFF_DISPLAY_MAX_BYTES - Buffer.byteLength(exactBoundaryPrefix, "utf8") - 1,
+    )}\n`;
+    const exactBoundaryDigest = createHash("sha256")
+      .update(exactBoundaryDiff, "utf8")
+      .digest("hex");
+    const exactBoundary = presentRun(
+      project,
+      presentationSnapshot({
+        run: {
+          ...run,
+          diff: exactBoundaryDiff,
+          verification: { ...verification, diffSha256: exactBoundaryDigest },
+        },
+        approvals: [],
+        events: [],
+      }),
+    );
+    expect(Buffer.byteLength(exactBoundaryDiff, "utf8")).toBe(WORKSPACE_DIFF_DISPLAY_MAX_BYTES);
+    expect(exactBoundary.diff).toBe(exactBoundaryDiff);
+    expect(exactBoundary.diffReview).toMatchObject({
+      status: "available",
+      sha256: exactBoundaryDigest,
+      byteCount: WORKSPACE_DIFF_DISPLAY_MAX_BYTES,
+      digestProvenance: "displayed_text_rehash_match",
+    });
+
     const outsideSentinel = "outside-browser-bound-private-tail";
     const oversizedDiff = [
       "diff --git a/src/greeting.txt b/src/greeting.txt",

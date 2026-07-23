@@ -1,6 +1,11 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  validateCiWorkflowSupplyChain,
+  validateWorkflowAttributes,
+} from "./ci-workflow-policy.mjs";
+
 async function collectSources(directory, include) {
   const sources = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -55,6 +60,21 @@ const workflowLintSource = await readFile("scripts/workflow-lint.mjs", "utf8");
 const packageSource = await readFile("package.json", "utf8");
 const packageJson = JSON.parse(packageSource);
 const ciWorkflowSource = await readFile(".github/workflows/ci.yml", "utf8");
+const gitAttributesSource = await readFile(".gitattributes", "utf8");
+let ciWorkflowSupplyChainPinned = false;
+try {
+  validateCiWorkflowSupplyChain(ciWorkflowSource);
+  ciWorkflowSupplyChainPinned = true;
+} catch {
+  // The named assertion below reports policy drift without widening the gate.
+}
+let workflowLineEndingsPinned = false;
+try {
+  validateWorkflowAttributes(gitAttributesSource);
+  workflowLineEndingsPinned = true;
+} catch {
+  // The named assertion below reports policy drift without widening the gate.
+}
 const workflowSetupIndex = ciWorkflowSource.indexOf("run: pnpm workflow:setup");
 const workflowLintIndex = ciWorkflowSource.indexOf("run: pnpm workflow:lint");
 const frozenInstallIndex = ciWorkflowSource.indexOf("run: pnpm install --frozen-lockfile");
@@ -237,6 +257,8 @@ const assertions = {
     workflowLintSource.includes("verifyDefaultBinaryAncestors") &&
     workflowLintSource.includes('"-shellcheck="') &&
     workflowLintSource.includes('"-pyflakes="'),
+  ciWorkflowSupplyChainPinned,
+  workflowLineEndingsPinned,
   workspaceFixedLoopback:
     workspaceServerSource.includes('server.listen(port, "127.0.0.1"') &&
     !workspaceServerSource.includes('"0.0.0.0"'),
@@ -246,9 +268,10 @@ const assertions = {
   workspaceBoundedJson:
     workspaceServerSource.includes("MAX_BODY_BYTES") &&
     workspaceServerSource.includes('"application/json"'),
-  workspaceNoExecutionRoutes: !/\/(?:approve|execute|checks|commit|push|deploy)/.test(
-    workspaceServerSource,
-  ),
+  workspaceNoExecutionRoutes:
+    !/\/(?:approve|execute|checks|edit|rerun|review|rollback|restore|commit|push|deploy|merge)/.test(
+      workspaceServerSource,
+    ),
   workspaceHistoryMetadataOnly:
     historyStoreSource.includes("SELECT sequence, run_id, type, created_at") &&
     historyStoreSource.includes("ORDER BY sequence DESC") &&

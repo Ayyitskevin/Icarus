@@ -268,7 +268,7 @@ is to:
     rerun/restore/execution, command, commit, push, deployment, or workflow
     authority. Preserve ADR 0010.
 
-## Candidate sixth and seventh M3 selected-run presentation slices
+## Implemented sixth and seventh M3 selected-run presentation slices
 
 ADR 0019 bounds ordinary approval provenance to the newest 12 validated rows
 with explicit coverage and complete-history CLI guidance. ADR 0020 independently
@@ -292,7 +292,7 @@ improves review of the already persisted one-file verification diff:
    commit, push, deployment, current file/status, multi-file diff, raw history,
    and payload navigation outside this slice.
 
-## Candidate eighth M3 bounded project-catalog and transport slice
+## Implemented eighth M3 bounded project-catalog and transport slice
 
 ADR 0021 closes the remaining unbounded workspace catalog/transport path:
 
@@ -319,6 +319,9 @@ ADR 0021 closes the remaining unbounded workspace catalog/transport path:
 8. Add no schema/migration, dependency, deletion, Git/source read, provider
    call, browser approval/execution, command, commit, push, deployment, or
    release authority. Preserve ADR 0010.
+
+These merged read-only observation slices do not complete M3, resolve ADR 0010,
+establish native acceptance, or add browser action authority.
 
 ## Sun ceiling
 

@@ -1,6 +1,6 @@
 # ADR 0021: Bounded project catalog and JSON responses
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-22
 - Extends: [ADR 0014](0014-loopback-api-react-workspace.md)
 - Related: [ADR 0017](0017-bounded-workspace-run-summaries.md), [ADR 0010](0010-inherited-opencode-workflow-security-hold.md)
@@ -113,6 +113,18 @@ browser approval, execution, command, commit, push, deployment, or release
 authority. It preserves loopback/same-origin/CSP controls, React text rendering,
 guarded CLI lifecycle, and the unresolved ADR 0010 release hold.
 
+## Acceptance evidence
+
+The implementation merged through PR #4. The combined local gate, cached
+Chromium acceptance, and independent review completed with no remaining blocker,
+high, or medium finding. Exact implementation-head hosted CI
+[29963114892](https://github.com/Ayyitskevin/Icarus/actions/runs/29963114892)
+passed at `cb3b97f8fc68b0bf451709b2a023031dc10c1177`; resulting `main` CI
+[29964954585](https://github.com/Ayyitskevin/Icarus/actions/runs/29964954585)
+passed at `03c27640ffd0e8a377f2a17e64dc2be987a52409`.
+
+Acceptance does not resolve ADR 0010 or authorize deployment.
+
 ## Consequences
 
 Workspace project work and browser retention are fixed by page size rather than
@@ -140,4 +152,5 @@ exact-head hosted CI. Local cached Chromium acceptance now covers 50 projects,
 failure/retry, contention, hidden/selection cancellation, delayed-success
 rejection, the four-page cap, off-page run ownership, keyboard skip navigation,
 zero external requests/browser errors, and unchanged source/durable state.
-Until the remaining merge and hosted gates close, this ADR remains Proposed.
+The local, independent-review, merge, and exact-head hosted gates are closed;
+this ADR is Accepted without expanding browser or release authority.
