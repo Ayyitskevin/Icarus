@@ -54,6 +54,13 @@ The pnpm version remains repository-owned through exact
 uses the committed frozen lockfile. Checkout credentials are not persisted, and
 no shared Actions dependency cache is restored or saved.
 
+The repository pins every Git-detected text file to LF and self-pins
+`.gitattributes` through two exact attribute rules. Git-detected binary files
+remain binary. This keeps the byte-reviewed workflow policies, formatter gate,
+and fixture digests portable when Git for Windows would otherwise translate
+text to CRLF; local security tests reject a missing, narrowed, or overridden
+rule.
+
 Each host validates the workflow policy and its own platform/architecture,
 bootstraps and executes the checksum-pinned native actionlint binary, validates
 every workflow plus actionlint's known-invalid negative fixture, installs locked
@@ -91,8 +98,14 @@ Native acceptance becomes explicit and repeatable without pretending that
 Linux-only authority is portable. A candidate is not natively accepted until
 both matrix jobs succeed at that exact commit and the resulting run URL, commit,
 runner image versions, and job conclusions are recorded in the release handoff.
-This local implementation has not been published or dispatched, so both real
-host results remain pending.
+The workflow and policy are published and registered on `main` at
+`03c27640ffd0e8a377f2a17e64dc2be987a52409`, and the exact implementation-head
+Linux CI gate passed. GitHub reports zero native workflow runs, so both real host
+results remain pending.
+
+Merging the workflow accepts its bounded manual mechanism, not its native-host
+result. This ADR remains Proposed until both exact-commit matrix jobs pass and
+their runner evidence is recorded.
 
 The exact workflow digest intentionally makes any change fail the local security
 test until the workflow and policy are reviewed together. Action-release or

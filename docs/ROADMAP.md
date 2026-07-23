@@ -34,12 +34,11 @@ evals, context budget allocation, and retrieval-quality fixtures.
 
 ## M3 — Workspace UI
 
-Status: the first five bounded slices are merged after fresh local evidence and
-exact implementation-head hosted CI. Sixth approval-provenance and seventh
-persisted-diff-review candidates remain under their merge gates. The eighth
-bounded-project-catalog and JSON-transport candidate is implemented locally and
-still requires its local, independent-review, and exact-head hosted gates. Full
-M3 remains open.
+Status: eight bounded observation slices are merged with recorded local,
+independent-review, and exact implementation-head hosted evidence. Native macOS
+and Windows host acceptance remains pending, the approval-index rollout against
+existing state remains operator-gated, and ADR 0010 independently blocks
+release. Full M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
@@ -123,7 +122,7 @@ byte and strict-JSON gates; existing activity routes remain payload-free.
 The implementation does not expose raw evidence, checkpoint bytes, complete
 invocation history, or guarded actions; those remain CLI concerns.
 
-ADR 0019 implements the sixth candidate slice. The ordinary selected-run
+ADR 0019 implements the sixth merged observation slice. The ordinary selected-run
 response retains the newest 12 validated approval decisions and explicit
 coverage metadata while complete approval history remains available through the
 CLI. The page distinguishes recorded provenance from current authentication or
@@ -134,7 +133,7 @@ makes the fixed `LIMIT 13` query avoid a history-sized scan while preserving
 append order across equal timestamps and random UUIDs. Building it against
 existing non-test state remains an explicit backup and operator rollout gate.
 
-ADR 0020 implements the seventh candidate slice without adding another route.
+ADR 0020 implements the seventh merged observation slice without adding another route.
 The existing coherent selected-run snapshot now labels absent, exact, and
 browser-oversized persisted diffs explicitly. Complete patch text is capped at
 256 KiB, rehashed against its recorded verification digest, and accompanied by
@@ -144,7 +143,7 @@ rather than a partial preview; this projection does not parse or rehash their
 hidden text. The browser does not re-read Git or source and gains no review
 action.
 
-ADR 0021 implements the eighth candidate slice. Workspace bootstrap returns one
+ADR 0021 implements the eighth merged observation slice. Workspace bootstrap returns one
 pinned newest-first page of at most 12 projects joined to their repositories;
 strict `before` and `snapshot` continuation uses an intrinsic-rowid
 `LIMIT 13` seek without per-record hydration. Persisted project JSON is
@@ -199,13 +198,14 @@ diagnostic, and review capability gates before widening autonomy. Live
 production, customer data, deployment targets, schema changes, and secrets
 remain human-gated and outside automatic dogfood.
 
-## Current merge gate
+## Current release and acceptance gates
 
-Preserve the ADR 0010 security hold. Do not accept ADR 0021 until its fresh full
-local gate, independent review, and exact published-head hosted CI pass with all
-blocker, high, and medium findings resolved. Keep the sixth and seventh
-candidate gates independent rather than treating this slice as evidence for
-them.
+The merged observation slices do not complete M3 or authorize release. Preserve
+the ADR 0010 security hold. Native acceptance requires successful exact-commit
+macOS and Windows jobs under ADR 0022. Existing non-test state requires a
+verified backup and explicit operator approval before the approval-index
+migration. Every future release candidate still requires fresh local evidence,
+independent review, and exact published-head hosted CI.
 
 Older approval pagination, current file/status views, multi-file or raw payload
 diff/history, complete checkpoint inspection, patch materialization, browser

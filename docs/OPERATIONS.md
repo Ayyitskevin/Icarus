@@ -185,11 +185,12 @@ hydrates every run for its bounded sidebar. Use
 `icarus run list [--project NAME]` for complete run listing beyond the browser
 window.
 
-No migration, dependency install, daemon, watcher, Server-Sent Events, or
-WebSocket setup accompanies these read-only slices. They add no browser approval,
-mutation, execution, command, commit, push, or deployment authority. Current
-file/status, multi-file or payload-bearing diff/history, and action controls
-remain deferred, and the ADR 0010 release hold remains in force.
+Other than the explicitly operator-gated `approval-index-v1` index build above,
+these observation slices add no table/column migration, dependency install,
+daemon, watcher, Server-Sent Events, or WebSocket setup. They add no browser
+approval, mutation, execution, command, commit, push, or deployment authority.
+Current file/status, multi-file or payload-bearing diff/history, and action
+controls remain deferred, and the ADR 0010 release hold remains in force.
 
 ## Fifth M3 verification-attempt view
 

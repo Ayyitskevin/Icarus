@@ -71,11 +71,11 @@ the reliability slice without claiming a broader milestone is complete.
       passed its real `quality` job at exact implementation head
       `f8fe03e399fb46f197bbcbc0df8f1edabbe2e0c9`
 
-## Native-host acceptance candidate
+## Native-host acceptance: implementation merged, hosted acceptance pending
 
-ADR 0022 and its manual workflow are a local candidate on 2026-07-22. This
-records a read-only portability gate; it does not claim native acceptance until
-both hosted jobs pass at the exact published implementation commit.
+ADR 0022 and its manual workflow are merged and registered on the default
+branch. Local policy and portable-composition evidence pass, but no native
+workflow run exists. This does not claim native acceptance.
 
 ### Portable boundary and authority
 
@@ -105,14 +105,15 @@ both hosted jobs pass at the exact published implementation commit.
       smoke pass locally on Linux without claiming native-host execution
 - [x] Combined cached-Chromium acceptance passes with zero browser errors,
       external requests, or source-state changes
-- [ ] Publish the exact implementation head, manually dispatch both native jobs,
-      and record each run URL, runner image version, commit, and conclusion
+- [x] Publish and register the manual workflow on the default branch
+- [ ] With explicit authorization, dispatch one exact candidate commit and
+      record both native job URLs, runner image versions, commit, and conclusions
 
-## Eighth M3 candidate: bounded project catalog and JSON transport
+## Accepted eighth M3 observation slice: bounded project catalog and JSON transport
 
-ADR 0021 and its implementation are a local candidate on 2026-07-22. This
-records one bounded read projection and a shared response fail-safe; it does not
-accept the ADR, widen browser authority, or close the inherited ADR 0010 hold.
+ADR 0021 and its implementation are merged. The recorded combined local gate,
+independent review, and exact implementation-head hosted CI passed. This accepts
+only this bounded observation slice; it does not complete M3 or clear ADR 0010.
 
 ### Pinned joined project pages
 
@@ -153,15 +154,17 @@ accept the ADR, widen browser authority, or close the inherited ADR 0010 hold.
       delayed-success rejection, four retained pages, an off-page run/project
       ownership refresh, keyboard skip navigation, zero browser errors/external
       requests, and unchanged SQLite/source state
-- [ ] Complete independent final review and exact published-head hosted CI
-      before accepting ADR 0021
+- [x] Combined independent review found no remaining blocker, high, or medium
+      finding
+- [x] Exact implementation-head hosted CI
+      [29963114892](https://github.com/Ayyitskevin/Icarus/actions/runs/29963114892)
+      passed at `cb3b97f8fc68b0bf451709b2a023031dc10c1177`
 
-## Seventh M3 candidate: bounded persisted diff and run-status review
+## Accepted seventh M3 observation slice: bounded persisted diff and run-status review
 
-ADR 0020 and its implementation are a local candidate on 2026-07-22. This
-records only review of the already persisted one-file diff. Local real-browser
-acceptance and independent review are complete; exact published-head hosted CI
-remains open.
+ADR 0020 and its implementation are merged. The recorded combined local gate,
+independent review, and exact implementation-head hosted CI passed. This accepts
+only this bounded observation slice; it does not complete M3 or clear ADR 0010.
 
 ### Bounded presentation and truthful status
 
@@ -199,14 +202,15 @@ remains open.
       typecheck, unit/provider/integration/evaluation/security suites, and the
       Vite production build all completed successfully
 - [x] Complete independent review with no blocker, high, or medium findings
-- [ ] Complete exact published-head hosted CI before accepting ADR 0020
+- [x] Exact implementation-head hosted CI
+      [29963114892](https://github.com/Ayyitskevin/Icarus/actions/runs/29963114892)
+      passed at `cb3b97f8fc68b0bf451709b2a023031dc10c1177`
 
-## Sixth M3 candidate: bounded approval provenance
+## Accepted sixth M3 observation slice: bounded approval provenance
 
-Status values are evidence claims. ADR 0019 and its implementation are present
-as a local candidate on 2026-07-22. This records only the bounded ordinary
-approval projection; the full local gate, independent review, and exact
-published-head hosted CI remain required before acceptance.
+ADR 0019 and its implementation are merged. The recorded combined local gate,
+independent review, and exact implementation-head hosted CI passed. This accepts
+only this bounded observation slice; it does not complete M3 or clear ADR 0010.
 
 ### Bounded projection and truthful browser copy
 
@@ -251,14 +255,17 @@ published-head hosted CI remain required before acceptance.
       passed; evaluation reported 5 passed and 5 honestly unsupported; 109
       security tests plus 37 static assertions passed; and Vite built 22 modules
 - [x] Complete independent final review with no blocker, high, or medium finding
-- [ ] Require exact published-head hosted CI before acceptance
+- [x] Exact implementation-head hosted CI
+      [29963114892](https://github.com/Ayyitskevin/Icarus/actions/runs/29963114892)
+      passed at `cb3b97f8fc68b0bf451709b2a023031dc10c1177`
 
 ## Fifth M3 slice: bounded verification-attempt provenance
 
 Status values are evidence claims. ADR 0018 and its implementation are complete,
 with fresh local acceptance recorded on 2026-07-22. Exact published-head hosted
-CI remains the PR merge gate and is recorded on the PR; this accepts only the
-fifth bounded M3 slice once that gate passes, not full M3.
+CI [29934193961](https://github.com/Ayyitskevin/Icarus/actions/runs/29934193961)
+passed before merge at `10b4dfed65a473b3da8d886bf0e5ed8c4078cd21`.
+This accepts only the fifth bounded slice, not full M3.
 
 ### Pinned scalar projection
 

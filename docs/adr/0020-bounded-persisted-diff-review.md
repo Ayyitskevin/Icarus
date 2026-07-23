@@ -1,6 +1,6 @@
 # ADR 0020: Bounded persisted diff and run-status review
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-22
 - Depends on: [ADR 0019](0019-bounded-approval-provenance.md)
 - Extends: [ADR 0014](0014-loopback-api-react-workspace.md)
@@ -108,6 +108,18 @@ rerun, rollback, restore, arbitrary command, commit, push, deployment, account,
 workflow, stream, watcher, daemon, Git/source read, or public endpoint. Existing
 loopback/same-origin controls, guarded CLI lifecycle, approval provenance, and
 ADR 0010 remain unchanged.
+
+## Acceptance evidence
+
+The implementation merged through PR #4. The combined local gate, cached
+Chromium acceptance, and independent review completed with no remaining blocker,
+high, or medium finding. Exact implementation-head hosted CI
+[29963114892](https://github.com/Ayyitskevin/Icarus/actions/runs/29963114892)
+passed at `cb3b97f8fc68b0bf451709b2a023031dc10c1177`; resulting `main` CI
+[29964954585](https://github.com/Ayyitskevin/Icarus/actions/runs/29964954585)
+passed at `03c27640ffd0e8a377f2a17e64dc2be987a52409`.
+
+Acceptance does not resolve ADR 0010 or authorize deployment.
 
 ## Consequences
 
