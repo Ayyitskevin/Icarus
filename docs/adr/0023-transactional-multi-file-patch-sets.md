@@ -33,19 +33,37 @@ must remain fully reversible from persisted evidence.
 
 ### Approved change set
 
-The operator continues to select one primary target when starting a run. That
-target anchors context assembly and the rules chain and is unchanged.
+The operator selects the candidate set when starting a run: one or more
+repository-relative paths, at most `ceiling.maxFilesChanged`, each satisfying
+the existing protected-path policy. The first selected path remains the anchor
+for the rules chain. This is the existing `--target` selection widened from one
+path to a set; it is not a new kind of authority.
 
-The plan proposal gains `targets`: the sorted, deduplicated set of
-repository-relative paths the run is authorized to change. It must contain the
-primary target, must contain at most `ceiling.maxFilesChanged` entries, and
-every entry must satisfy the existing protected-path policy. The plan approval
-digest binds that set, so approval authorizes an exact maximum authority rather
-than an open-ended agent.
+Context assembly includes the content of every selected path that exists at the
+base commit, each recorded as a `target` entry with its own digest. Selected
+paths that do not exist are legal `create` candidates and contribute no bytes.
 
-A patch set may change a non-empty subset of the approved targets. It may never
-introduce a path outside the set. Reviewing a smaller change than authorized is
+The plan proposal gains `targets`: the sorted, deduplicated subset of the
+operator's selection that the plan actually intends to change. The plan
+approval digest binds that subset, so approval authorizes an exact maximum
+authority rather than an open-ended agent.
+
+A patch set may change a non-empty subset of the approved plan targets. It may
+never introduce a path outside that subset. Changing less than authorized is
 normal; exceeding the authorization is a fail-closed error.
+
+The operator selects the candidate set rather than the model discovering it,
+because egress approval binds the exact context manifest digest. A model that
+chose its own files would need their contents after that approval, which would
+either send unapproved bytes to a provider or require a second egress gate
+mid-run. Candidate discovery is a retrieval capability and is deferred to the
+context-intelligence phase, where the discovered set can be re-assembled into a
+new context and approved before egress rather than after it.
+
+Because the context manifest now carries a target set, its audit policy version
+advances. A context artifact assembled under the previous version is rejected
+with the existing outdated-policy error rather than being misread as tampering,
+and its run must be replanned.
 
 ### Patch set
 
@@ -151,6 +169,14 @@ readable as single-file patch sets; their rows are not rewritten.
   arrive after the model had already written content, collapsing the plan gate
   into the edit gate and removing the operator's ability to bound authority
   before generation.
+- **Letting the plan name files outside the operator's selection.** Their
+  contents are not in the approved context, so the edit call would either
+  proceed blind or ship unapproved repository bytes to a provider.
+- **A second egress gate between plan approval and execution.** It would make
+  model-chosen files possible today, at the cost of an extra human decision on
+  every remote run and a second approval state to recover through. The same
+  capability arrives with retrieval, where one re-assembled context can be
+  approved once.
 - **Unbounded target sets.** An approved set with no ceiling is an unbounded
   agent with extra steps.
 - **New `SunCeiling` fields for patch limits.** Every persisted project ceiling

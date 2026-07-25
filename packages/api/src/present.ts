@@ -328,6 +328,7 @@ type PersistedDiffReview =
   | {
       readonly status: "not_produced";
       readonly path: null;
+      readonly paths: readonly [];
       readonly sha256: null;
       readonly byteCount: 0;
       readonly lineCount: 0;
@@ -340,6 +341,7 @@ type PersistedDiffReview =
   | {
       readonly status: "available";
       readonly path: string;
+      readonly paths: readonly string[];
       readonly sha256: string;
       readonly byteCount: number;
       readonly lineCount: number;
@@ -352,6 +354,7 @@ type PersistedDiffReview =
   | {
       readonly status: "outside_browser_bound";
       readonly path: string;
+      readonly paths: readonly string[];
       readonly sha256: string;
       readonly byteCount: number;
       readonly lineCount: null;
@@ -369,12 +372,30 @@ interface PresentedPersistedDiff {
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const DIFF_HUNK_PATTERN = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$/;
-const DIFF_INDEX_PATTERN = /^index [a-f0-9]{7,64}\.\.[a-f0-9]{7,64} [0-7]{6}$/;
+const DIFF_INDEX_PATTERN = /^index [a-f0-9]{7,64}\.\.[a-f0-9]{7,64}(?: [0-7]{6})?$/;
+const DIFF_FILE_MODE_PATTERN = /^(?:new|deleted) file mode [0-7]{6}$/;
+const DIFF_DEV_NULL = "/dev/null";
 const DIFF_NO_NEWLINE_MARKER = "\\ No newline at end of file";
 const VERIFICATION_OUTCOMES = new Set(["passed", "failed", "unavailable"]);
 
 function invalidPersistedDiff(): never {
   throw new IcarusError("DATABASE_ERROR", "Persisted diff evidence is invalid");
+}
+
+/**
+ * A patch-set run's verified changed paths must equal its recorded patch-set
+ * paths. A run recorded before ADR 0023 keeps the single-target rule.
+ */
+function patchSetCoversChangedPaths(run: RunRecord, changedPaths: readonly string[]): boolean {
+  if (run.patchSet === null) {
+    return changedPaths.length === 1 && changedPaths[0] === run.target;
+  }
+  const expected = [...run.patchSet.edits.map((edit) => edit.path)].sort();
+  const observed = [...changedPaths].sort();
+  return (
+    expected.length === observed.length &&
+    expected.every((entry, index) => entry === observed[index])
+  );
 }
 
 function decodeGitPathToken(token: string): string {
@@ -466,16 +487,36 @@ function parseGitPathFields(value: string, count: number): readonly string[] {
   return fields;
 }
 
-function assertDiffHeaderTarget(value: string, target: string): void {
-  if (value === `a/${target} b/${target}`) return;
+/**
+ * Resolves which approved path a `diff --git` header names. A header naming a
+ * path outside the verified changed set fails closed rather than being
+ * rendered.
+ */
+function resolveDiffHeaderTarget(value: string, expected: ReadonlySet<string>): string {
+  for (const target of expected) {
+    if (value === `a/${target} b/${target}`) return target;
+  }
   const [oldPath, newPath] = parseGitPathFields(value, 2);
-  if (oldPath !== `a/${target}` || newPath !== `b/${target}`) invalidPersistedDiff();
+  if (
+    oldPath === undefined ||
+    newPath === undefined ||
+    !oldPath.startsWith("a/") ||
+    oldPath.slice(2) !== newPath.slice(2) ||
+    !newPath.startsWith("b/")
+  ) {
+    invalidPersistedDiff();
+  }
+  const target = oldPath.slice(2);
+  if (!expected.has(target)) invalidPersistedDiff();
+  return target;
 }
 
 function assertFileHeaderTarget(line: string, prefix: "--- " | "+++ ", target: string): void {
   if (!line.startsWith(prefix)) invalidPersistedDiff();
-  const expected = `${prefix === "--- " ? "a" : "b"}/${target}`;
   const value = line.slice(prefix.length);
+  // Git names the absent side of a create or delete `/dev/null`.
+  if (value === DIFF_DEV_NULL || value === `${DIFF_DEV_NULL}\t`) return;
+  const expected = `${prefix === "--- " ? "a" : "b"}/${target}`;
   if (value === expected || value === `${expected}\t`) return;
   const quotedValue = value.endsWith("\t") ? value.slice(0, -1) : value;
   const [decoded] = parseGitPathFields(quotedValue, 1);
@@ -490,29 +531,72 @@ function parseHunkNumber(value: string | undefined, fallback?: number): number {
   return parsed;
 }
 
+/**
+ * Validates the persisted patch against the exact set of changed paths and
+ * returns aggregate statistics (ADR 0023). Every file section must name a path
+ * in the set, no path may appear twice, and every path must be present, so a
+ * patch cannot silently describe more or fewer files than were verified.
+ */
 function inspectDisplayedPatch(
   diff: string,
-  target: string,
+  targets: readonly string[],
 ): {
   readonly lineCount: number;
   readonly addedLines: number;
   readonly deletedLines: number;
   readonly hunkCount: number;
+  readonly fileCount: number;
 } {
   const lines = diff.split("\n");
   if (lines.at(-1) === "") lines.pop();
-  if (lines.length < 7 || !lines[0]?.startsWith("diff --git ")) invalidPersistedDiff();
+  if (lines.length < 5 || !lines[0]?.startsWith("diff --git ")) invalidPersistedDiff();
 
-  assertDiffHeaderTarget(lines[0].slice(11), target);
-  if (!DIFF_INDEX_PATTERN.test(lines[1] ?? "")) invalidPersistedDiff();
-  assertFileHeaderTarget(lines[2] ?? "", "--- ", target);
-  assertFileHeaderTarget(lines[3] ?? "", "+++ ", target);
-
-  let index = 4;
+  const expected = new Set(targets);
+  const seen = new Set<string>();
+  let index = 0;
   let hunkCount = 0;
   let addedLines = 0;
   let deletedLines = 0;
+
   while (index < lines.length) {
+    const header = lines[index];
+    if (header === undefined || !header.startsWith("diff --git ")) invalidPersistedDiff();
+    const target = resolveDiffHeaderTarget(header.slice(11), expected);
+    if (seen.has(target)) invalidPersistedDiff();
+    seen.add(target);
+    index += 1;
+
+    if (DIFF_FILE_MODE_PATTERN.test(lines[index] ?? "")) index += 1;
+    if (!DIFF_INDEX_PATTERN.test(lines[index] ?? "")) invalidPersistedDiff();
+    index += 1;
+    assertFileHeaderTarget(lines[index] ?? "", "--- ", target);
+    index += 1;
+    assertFileHeaderTarget(lines[index] ?? "", "+++ ", target);
+    index += 1;
+
+    index = inspectFileHunks(lines, index, (added, deleted, hunks) => {
+      addedLines += added;
+      deletedLines += deleted;
+      hunkCount += hunks;
+    });
+  }
+
+  if (seen.size !== expected.size) invalidPersistedDiff();
+  if (hunkCount === 0 || addedLines + deletedLines === 0) invalidPersistedDiff();
+  return { lineCount: lines.length, addedLines, deletedLines, hunkCount, fileCount: seen.size };
+}
+
+/** Consumes one file section's hunks, returning the index of the next section. */
+function inspectFileHunks(
+  lines: readonly string[],
+  start: number,
+  record: (addedLines: number, deletedLines: number, hunkCount: number) => void,
+): number {
+  let index = start;
+  let hunkCount = 0;
+  let addedLines = 0;
+  let deletedLines = 0;
+  while (index < lines.length && !(lines[index] ?? "").startsWith("diff --git ")) {
     const match = DIFF_HUNK_PATTERN.exec(lines[index] ?? "");
     if (match === null) invalidPersistedDiff();
     parseHunkNumber(match[1]);
@@ -557,8 +641,9 @@ function inspectDisplayedPatch(
       index += 1;
     }
   }
-  if (hunkCount === 0 || addedLines + deletedLines === 0) invalidPersistedDiff();
-  return { lineCount: lines.length, addedLines, deletedLines, hunkCount };
+  if (hunkCount === 0) invalidPersistedDiff();
+  record(addedLines, deletedLines, hunkCount);
+  return index;
 }
 
 function presentPersistedDiff(project: ProjectRecord, run: RunRecord): PresentedPersistedDiff {
@@ -569,6 +654,7 @@ function presentPersistedDiff(project: ProjectRecord, run: RunRecord): Presented
       review: {
         status: "not_produced",
         path: null,
+        paths: [],
         sha256: null,
         byteCount: 0,
         lineCount: 0,
@@ -596,11 +682,15 @@ function presentPersistedDiff(project: ProjectRecord, run: RunRecord): Presented
     !SHA256_PATTERN.test(verification.diffSha256) ||
     typeof verification.checkpointSha256 !== "string" ||
     !SHA256_PATTERN.test(verification.checkpointSha256) ||
-    verification.changedPaths.length !== 1 ||
-    verification.changedPaths[0] !== run.target
+    verification.changedPaths.length === 0 ||
+    verification.changedPaths.length > project.ceiling.maxFilesChanged ||
+    verification.changedPaths.some((entry) => typeof entry !== "string" || entry.length === 0) ||
+    new Set(verification.changedPaths).size !== verification.changedPaths.length ||
+    !patchSetCoversChangedPaths(run, verification.changedPaths)
   ) {
     invalidPersistedDiff();
   }
+  const changedPaths = [...verification.changedPaths].sort();
   const byteCount = Buffer.byteLength(run.diff, "utf8");
   if (byteCount <= 0 || byteCount > project.ceiling.maxDiffBytes) invalidPersistedDiff();
 
@@ -609,7 +699,8 @@ function presentPersistedDiff(project: ProjectRecord, run: RunRecord): Presented
       text: null,
       review: {
         status: "outside_browser_bound",
-        path: run.target,
+        path: changedPaths[0] ?? run.target,
+        paths: changedPaths,
         sha256: verification.diffSha256,
         byteCount,
         lineCount: null,
@@ -627,14 +718,15 @@ function presentPersistedDiff(project: ProjectRecord, run: RunRecord): Presented
 
   const { lineCount, addedLines, deletedLines, hunkCount } = inspectDisplayedPatch(
     run.diff,
-    run.target,
+    changedPaths,
   );
 
   return {
     text: run.diff,
     review: {
       status: "available",
-      path: run.target,
+      path: changedPaths[0] ?? run.target,
+      paths: changedPaths,
       sha256: verification.diffSha256,
       byteCount,
       lineCount,

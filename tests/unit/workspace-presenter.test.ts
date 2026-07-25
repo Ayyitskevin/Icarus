@@ -802,6 +802,7 @@ describe("workspace run presentation", () => {
     expect(available.diffReview).toEqual({
       status: "available",
       path: "src/greeting.txt",
+      paths: ["src/greeting.txt"],
       sha256: digest,
       byteCount: Buffer.byteLength(diff, "utf8"),
       lineCount: 8,
@@ -815,6 +816,7 @@ describe("workspace run presentation", () => {
       [
         "status",
         "path",
+        "paths",
         "sha256",
         "byteCount",
         "lineCount",
@@ -895,6 +897,7 @@ describe("workspace run presentation", () => {
     expect(oversized.diffReview).toEqual({
       status: "outside_browser_bound",
       path: "src/greeting.txt",
+      paths: ["src/greeting.txt"],
       sha256: oversizedDigest,
       byteCount: Buffer.byteLength(oversizedDiff, "utf8"),
       lineCount: null,

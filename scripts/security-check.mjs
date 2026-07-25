@@ -408,8 +408,8 @@ const assertions = {
   patchSetMigrationHumanGated:
     storeSource.includes("allowPatchSetMigration") &&
     storeSource.includes("function inspectPatchSetSchema") &&
-    storeSource.includes("PRAGMA table_info('patch_sets')") === false &&
-    storeSource.includes("PRAGMA table_info('${expected.table}')") &&
+    storeSource.includes("PRAGMA table_info('") &&
+    storeSource.includes("expected.columns.every((column, index) => columns[index] === column)") &&
     storeSource.includes(
       "Patch-set migration requires a state backup and explicit operator approval",
     ) &&
@@ -483,20 +483,26 @@ const assertions = {
     "Array.isArray(verification.changedPaths)",
     "SHA256_PATTERN.test(verification.diffSha256)",
     "SHA256_PATTERN.test(verification.checkpointSha256)",
-    "verification.changedPaths.length !== 1",
-    "verification.changedPaths[0] !== run.target",
+    "verification.changedPaths.length === 0",
+    "verification.changedPaths.length > project.ceiling.maxFilesChanged",
+    "new Set(verification.changedPaths).size !== verification.changedPaths.length",
+    "patchSetCoversChangedPaths(run, verification.changedPaths)",
+    "changedPaths.length === 1 && changedPaths[0] === run.target",
     'Buffer.byteLength(run.diff, "utf8")',
     "byteCount > project.ceiling.maxDiffBytes",
     'createHash("sha256").update(run.diff, "utf8").digest("hex")',
     "displayedSha256 !== verification.diffSha256",
     "decodeGitPathToken",
     'new TextDecoder("utf-8", { fatal: true })',
-    "assertDiffHeaderTarget(lines[0].slice(11), target)",
-    'assertFileHeaderTarget(lines[2] ?? "", "--- ", target)',
-    'assertFileHeaderTarget(lines[3] ?? "", "+++ ", target)',
+    "resolveDiffHeaderTarget(header.slice(11), expected)",
+    "if (seen.has(target)) invalidPersistedDiff();",
+    "if (seen.size !== expected.size) invalidPersistedDiff();",
+    'assertFileHeaderTarget(lines[index] ?? "", "--- ", target)',
+    'assertFileHeaderTarget(lines[index] ?? "", "+++ ", target)',
+    "if (!expected.has(target)) invalidPersistedDiff();",
     `value === \`a/\${target} b/\${target}\``,
     `value === \`\${expected}\\t\``,
-    "DIFF_INDEX_PATTERN.test(lines[1]",
+    "DIFF_INDEX_PATTERN.test(lines[index]",
     "DIFF_HUNK_PATTERN.exec(lines[index]",
     "oldLines > expectedOldLines",
     "newLines > expectedNewLines",
