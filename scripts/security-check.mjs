@@ -47,6 +47,8 @@ const workspaceUiSources = await collectSources(
   (name) => name.endsWith(".ts") || name.endsWith(".tsx"),
 );
 const providerSource = await readFile("packages/core/src/providers.ts", "utf8");
+const policySource = await readFile("packages/core/src/policy.ts", "utf8");
+const serviceSource = await readFile("packages/core/src/service.ts", "utf8");
 const runtimeSource = await readFile("packages/core/src/runtime.ts", "utf8");
 const storeSource = await readFile("packages/core/src/store.ts", "utf8");
 const verificationProjectionSource = await readFile(
@@ -402,7 +404,44 @@ const assertions = {
     storeSource.includes('"DATABASE_MIGRATION_REQUIRED"') &&
     cliSource.includes("ICARUS_APPROVE_SCHEMA_MIGRATION") &&
     cliSource.includes('"approval-index-v1"') &&
-    cliSource.includes("allowApprovalIndexMigration: approvalIndexMigrationApproved()"),
+    cliSource.includes("allowApprovalIndexMigration: migrationApproval.approvalIndex"),
+  patchSetMigrationHumanGated:
+    storeSource.includes("allowPatchSetMigration") &&
+    storeSource.includes("function inspectPatchSetSchema") &&
+    storeSource.includes("PRAGMA table_info('patch_sets')") === false &&
+    storeSource.includes("PRAGMA table_info('${expected.table}')") &&
+    storeSource.includes(
+      "Patch-set migration requires a state backup and explicit operator approval",
+    ) &&
+    cliSource.includes('"patch-set-v2"') &&
+    cliSource.includes("allowPatchSetMigration: migrationApproval.patchSet"),
+  patchSetBoundsEveryPathAndOperation: [
+    "approvedTargets.has(editPath)",
+    "Patch set changed a path outside the approved targets",
+    "assertAllowedTarget(asBoundedString(object.path",
+    "Patch set changes the same path twice",
+    "FILE_BUDGET_EXCEEDED",
+    "STALE_PREIMAGE",
+  ].every((fragment) => policySource.includes(fragment)),
+  patchSetApplicationStagesBeforeApplying:
+    gitSource.includes("async applyFileWrites(") &&
+    gitSource.includes("await this.#stageContent(privateRunRoot") &&
+    gitSource.includes("const privateRunRoot = path.dirname(path.resolve(worktreePath))") &&
+    gitSource.includes("for (const entry of [...applied].reverse())"),
+  patchSetVerificationRequiresExactPathSet:
+    serviceSource.includes("samePathSet(preflightChangedPaths, patchPaths)") &&
+    serviceSource.includes("samePathSet(finalChangedPaths, patchPaths)") &&
+    serviceSource.includes("samePathSet(changedPaths, patchPaths)") &&
+    storeSource.includes("this.#changedPathsMatchPatchSet(current, verification.changedPaths)"),
+  patchSetIntentPrecedesWorktreeWrites:
+    serviceSource.includes("run = this.#store.recordPatchSetIntent(runId, patchSet, files)") &&
+    serviceSource.indexOf("recordPatchSetIntent(runId, patchSet, files)") <
+      serviceSource.indexOf("await this.#git.applyFileWrites(worktreePath, pending"),
+  anthropicCredentialsAreOriginPinned:
+    providerSource.includes('"ANTHROPIC_ORIGIN_DENIED"') &&
+    providerSource.includes('url.hostname.toLowerCase() === "api.anthropic.com"') &&
+    providerSource.includes('"PROVIDER_SECRET_DETECTED"') &&
+    providerSource.includes("!text.includes(this.#apiKey)"),
   workspaceApprovalProjectionFailsClosed: [
     "runId === expectedRunId",
     "APPROVAL_KINDS.has",

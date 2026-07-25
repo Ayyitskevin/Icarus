@@ -71,6 +71,16 @@ import {
 import type { VerificationAttemptsPanelHandle } from "./VerificationAttemptsPanel.js";
 import { VerificationAttemptsPanel } from "./VerificationAttemptsPanel.js";
 
+/** Splits the candidate-target textarea into unique, non-empty paths (ADR 0023). */
+function selectedTargets(value: string): string[] {
+  const seen = new Set<string>();
+  for (const line of value.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length > 0) seen.add(trimmed);
+  }
+  return [...seen];
+}
+
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "unknown";
   if (bytes < 1024) return `${bytes} B`;
@@ -754,7 +764,7 @@ function ProjectDetail({
       const run = await createRun({
         projectId: project.id,
         task: task.trim(),
-        target: target.trim(),
+        targets: selectedTargets(target),
         provider: { model: model.trim(), baseUrl: new URL(baseUrl).toString() },
       });
       await onRunCreated(run);
@@ -886,14 +896,19 @@ function ProjectDetail({
               placeholder="Describe the bounded change to plan."
             />
           </label>
-          <label>
-            Tracked target
-            <input
+          <label className="form-grid__wide">
+            Candidate targets (one path per line)
+            <textarea
               required
+              rows={3}
               value={target}
               onChange={(event) => setTarget(event.target.value)}
-              placeholder="src/example.ts"
+              placeholder={"src/example.ts\nsrc/example.test.ts"}
             />
+            <small>
+              The plan may change any subset of these paths. A path that does not exist yet is a
+              create candidate. The first path anchors the rules chain.
+            </small>
           </label>
           <label>
             Model
@@ -927,7 +942,7 @@ function ProjectDetail({
                 planningCapability.status !== "available" ||
                 !providerValidation.configured ||
                 task.trim().length === 0 ||
-                target.trim().length === 0
+                selectedTargets(target).length === 0
               }
             >
               {creatingDraft ? "Saving draft…" : "Create persisted draft"}
@@ -1655,12 +1670,21 @@ function RunEvidence({
             </div>
             <p>{run.action.rationale ?? "No rationale was recorded."}</p>
             <p>
-              <strong>Path:</strong> {run.action.path ?? run.target}
-            </p>
-            <p>
               <strong>Browser execution allowed:</strong> {run.action.allowed ? "Yes" : "No"}
             </p>
-            {run.action.files === undefined || run.action.files.length === 0 ? null : (
+            {run.action.operations !== undefined && run.action.operations.length > 0 ? (
+              <ul>
+                {run.action.operations.map((operation) => (
+                  <li key={operation.path}>
+                    <code>{operation.op}</code> {operation.path}
+                  </li>
+                ))}
+              </ul>
+            ) : run.action.files === undefined || run.action.files.length === 0 ? (
+              <p>
+                <strong>Path:</strong> {run.action.path ?? run.target}
+              </p>
+            ) : (
               <ul>
                 {run.action.files.map((file) => (
                   <li key={file}>{file}</li>
