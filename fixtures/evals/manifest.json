@@ -55,7 +55,7 @@
       "evaluator": "unsupported_contract",
       "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
       "futureEvidence": ["multi_file_diff", "regression_check"],
-      "unsupportedReason": "Milestone 1 permits exactly one existing file",
+      "unsupportedReason": "The patch-set boundary permits this change; an executable multi-file evaluator and its recorded evidence remain outstanding",
       "representativePaths": ["src/cart.py", "checks/test_cart.py"]
     },
     {
@@ -71,7 +71,7 @@
       "evaluator": "unsupported_contract",
       "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
       "futureEvidence": ["behavior_equivalence", "multi_file_diff"],
-      "unsupportedReason": "Module-scale refactors are outside the one-replacement slice",
+      "unsupportedReason": "Module-scale refactors need behavior-equivalence evidence beyond the patch-set boundary",
       "representativePaths": ["src/format_name.py", "src/profile.py", "checks/test_profile.py"]
     },
     {

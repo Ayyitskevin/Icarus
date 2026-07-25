@@ -429,7 +429,7 @@ registered project ceiling.
 
 The presenter returns complete diff text only at or below a fixed 262,144-byte
 browser cap. It validates paired presence, the project ceiling, one exact target,
-canonical recorded digest, exact displayed-byte rehash, one ordered single-file
+canonical recorded digest, exact displayed-byte rehash, ordered per-file
 Git patch bound to that target, and internally consistent hunk counts. The
 resulting metadata distinguishes absent, available/rehashed, and larger
 recorded-only evidence. A larger recorded diff is not parsed, rehashed, or
@@ -549,7 +549,10 @@ fail-closed audit or make imported repositories writable.
 - Provider output with recognizable credential material fails before plan/edit
   persistence; known credentials, including credentials reflected by thrown
   transport errors, and command/error output are redacted.
-- A proposal is one exact replacement in an existing tracked UTF-8 text file.
+- A proposal is a patch set over the operator-approved target subset (ADR 0023):
+  ordered exact replacements in existing tracked UTF-8 text files, complete
+  content for a created path, and preimage-bound removal for a deleted path.
+  Every path is validated independently and protected paths always refuse.
 - Protected edit names include `.git`, non-template `.env*`, credential/key
   configuration; safe `.env.{example,sample,template}` files remain eligible,
   Icarus metadata, and repository rule files. Model visibility and intrinsic

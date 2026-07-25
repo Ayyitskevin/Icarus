@@ -18,14 +18,20 @@ distributed-execution concerns.
 
 ## Milestone 1 job to be done
 
-Given a clean local Git repository and one selected tracked text file, Kevin can
-ask a configured model to plan one exact replacement. Before Icarus creates a
-private workspace, requests edit bytes, or mutates code, he can inspect and
-digest-approve the plan. Icarus applies the later edit proposal in a private
-detached worktree, runs only checks Kevin registered
-inside a no-network sandbox, records evidence, and leaves the source checkout
-untouched. Kevin can approve the result, reject it, resume an interrupted stage,
-roll it back, or restore the recorded checkpoint.
+Given a clean local Git repository and a selected set of candidate paths, Kevin
+can ask a configured model to plan a patch set across the subset it intends to
+change. Before Icarus creates a private workspace, requests edit bytes, or
+mutates code, he can inspect and digest-approve the plan, whose digest binds the
+approved target set. Icarus applies the later patch set in a private detached
+worktree as one unit, runs only checks Kevin registered inside a no-network
+sandbox, records evidence, and leaves the source checkout untouched. Kevin can
+approve the result, reject it, resume an interrupted stage, roll it back, or
+restore the recorded checkpoint.
+
+Patch sets may modify existing tracked UTF-8 text files, create paths that do
+not exist, and delete paths that do (ADR 0023). Rename is expressed as a delete
+plus a create. Every path is validated independently against the protected-path
+policy, and the number of changed files is bounded by the project ceiling.
 
 ## Functional requirements
 

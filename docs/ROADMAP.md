@@ -1,5 +1,10 @@
 # Roadmap
 
+`docs/FABLE_ICARUS_VISION.md` supersedes the sequencing of M2-M7 below. Its
+phase 1 — transactional multi-file patch sets — is implemented under ADR 0023,
+which supersedes the ADR 0003 mutation boundary. The milestone records below are
+retained as history and as the source of the release holds that remain open.
+
 ## M0 — Foundation
 
 Status: fresh local and exact implementation-head hosted gates passed; security
