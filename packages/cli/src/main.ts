@@ -78,6 +78,15 @@ function required(options: ParsedOptions, name: string): string {
   return values[0];
 }
 
+/** Repeatable option requiring at least one non-empty value (ADR 0023). */
+function requiredAll(options: ParsedOptions, name: string): readonly string[] {
+  const values = options.values.get(name) ?? [];
+  if (values.length === 0 || values.some((value) => value.length === 0)) {
+    fail("INVALID_ARGUMENT", `${name} must be provided at least once`);
+  }
+  return values;
+}
+
 function optional(options: ParsedOptions, name: string): string | undefined {
   const values = options.values.get(name) ?? [];
   if (values.length > 1) {
@@ -150,16 +159,23 @@ function stateRoot(): string {
   );
 }
 
-function approvalIndexMigrationApproved(): boolean {
+/**
+ * Each migration is approved by its own exact token, so approving one never
+ * silently approves another. A database needing both is migrated by two
+ * explicit invocations.
+ */
+function schemaMigrationApproval(): {
+  readonly approvalIndex: boolean;
+  readonly patchSet: boolean;
+} {
   const approval = process.env.ICARUS_APPROVE_SCHEMA_MIGRATION;
-  if (approval === undefined) return false;
-  if (approval !== "approval-index-v1") {
-    fail(
-      "INVALID_DATABASE_CONFIGURATION",
-      "ICARUS_APPROVE_SCHEMA_MIGRATION must equal approval-index-v1",
-    );
-  }
-  return true;
+  if (approval === undefined) return { approvalIndex: false, patchSet: false };
+  if (approval === "approval-index-v1") return { approvalIndex: true, patchSet: false };
+  if (approval === "patch-set-v2") return { approvalIndex: false, patchSet: true };
+  fail(
+    "INVALID_DATABASE_CONFIGURATION",
+    "ICARUS_APPROVE_SCHEMA_MIGRATION must equal approval-index-v1 or patch-set-v2",
+  );
 }
 
 function registrationPathForPreflight(args: readonly string[]): string | undefined {
@@ -190,13 +206,17 @@ function publicRun(run: RunRecord): Record<string, unknown> {
     },
     plan: run.plan,
     planSha256: run.planSha256,
-    edit:
-      run.edit === null
+    patchSet:
+      run.patchSet === null
         ? null
         : {
-            path: run.edit.path,
-            expectedPreimageSha256: run.edit.expectedPreimageSha256,
-            rationale: run.edit.rationale,
+            summary: run.patchSet.summary,
+            edits: run.patchSet.edits.map((edit) => ({
+              op: edit.op,
+              path: edit.path,
+              expectedPreimageSha256: edit.op === "create" ? null : edit.expectedPreimageSha256,
+              rationale: edit.rationale,
+            })),
           },
     diff: run.diff,
     verification: run.verification,
@@ -220,7 +240,7 @@ function usage(): never {
       "icarus repo list",
       "icarus project add --name NAME --repo REPO --base-ref REF --sandbox-image IMAGE --check JSON",
       "icarus project list",
-      "icarus run plan --project NAME --task TEXT --target PATH --provider ollama|openai --model MODEL [provider options]",
+      "icarus run plan --project NAME --task TEXT --target PATH [--target PATH ...] --provider ollama|openai --model MODEL [provider options]",
       "icarus run approve-egress RUN --context-sha SHA --actor ACTOR",
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
       "icarus run status RUN",
@@ -331,7 +351,7 @@ async function dispatch(
           {
             projectName: required(options, "--project"),
             task: required(options, "--task"),
-            target: required(options, "--target"),
+            targets: requiredAll(options, "--target"),
             provider,
           },
           signal,
@@ -462,8 +482,10 @@ async function main(): Promise<void> {
     if (registrationPath !== undefined) {
       await assertRegistrationStateSeparation(root, registrationPath);
     }
+    const migrationApproval = schemaMigrationApproval();
     runtime = await createIcarusRuntime(root, {
-      allowApprovalIndexMigration: approvalIndexMigrationApproved(),
+      allowApprovalIndexMigration: migrationApproval.approvalIndex,
+      allowPatchSetMigration: migrationApproval.patchSet,
     });
     await dispatch(runtime, args, controller.signal);
   } catch (error) {

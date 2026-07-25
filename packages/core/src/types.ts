@@ -1,6 +1,6 @@
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
-export const CONTEXT_AUDIT_POLICY_VERSION = "tracked-tree-secret-audit-v1";
+export const CONTEXT_AUDIT_POLICY_VERSION = "tracked-tree-secret-audit-v2";
 
 export type RunState =
   | "preparing"
@@ -28,7 +28,7 @@ export interface SunCeiling {
   readonly maxOutputTokensPerCall: number;
   readonly maxTotalTokens: number;
   readonly maxCostUsd: number;
-  readonly maxFilesChanged: 1;
+  readonly maxFilesChanged: number;
   readonly maxFileBytes: number;
   readonly maxDiffBytes: number;
   readonly maxCommandOutputBytes: number;
@@ -143,7 +143,8 @@ export interface ContextEntry {
 export interface ContextBundle {
   readonly auditPolicyVersion: typeof CONTEXT_AUDIT_POLICY_VERSION;
   readonly baseCommit: string;
-  readonly target: string;
+  /** The operator's candidate selection, sorted and deduplicated (ADR 0023). */
+  readonly targets: readonly string[];
   readonly repositoryMap: readonly string[];
   readonly entries: readonly ContextEntry[];
   readonly totalBytes: number;
@@ -159,7 +160,8 @@ export interface ContextManifestEntry {
 export interface ContextManifest {
   readonly auditPolicyVersion: typeof CONTEXT_AUDIT_POLICY_VERSION;
   readonly baseCommit: string;
-  readonly target: string;
+  /** The operator's candidate selection, sorted and deduplicated (ADR 0023). */
+  readonly targets: readonly string[];
   readonly repositoryMap: readonly string[];
   readonly entries: readonly ContextManifestEntry[];
   readonly totalBytes: number;
@@ -170,15 +172,82 @@ export interface PlanProposal {
   readonly steps: readonly string[];
   readonly risks: readonly string[];
   readonly target: string;
+  /**
+   * The exact set of repository-relative paths this run is authorized to
+   * change (ADR 0023). Sorted, deduplicated, and always containing `target`.
+   * Plan approval binds this set, so it is a maximum authority rather than a
+   * prediction: a patch set may change a non-empty subset and may never
+   * introduce a path outside it.
+   */
+  readonly targets: readonly string[];
   readonly checkIds: readonly string[];
 }
 
+/** Retained to decode runs persisted before ADR 0023 (schema v1). */
 export interface EditProposal {
   readonly path: string;
   readonly expectedPreimageSha256: string;
   readonly findText: string;
   readonly replaceText: string;
   readonly rationale: string;
+}
+
+export type FileEditOperation = "modify" | "create" | "delete";
+
+export interface FileReplacement {
+  readonly findText: string;
+  readonly replaceText: string;
+}
+
+/**
+ * One file-scoped operation inside a patch set (ADR 0023). A `modify` carries
+ * ordered replacements that must each match exactly once against the content
+ * produced by the preceding replacement; a `create` carries complete content;
+ * a `delete` carries only its preimage binding.
+ */
+export type FileEdit =
+  | {
+      readonly op: "modify";
+      readonly path: string;
+      readonly expectedPreimageSha256: string;
+      readonly replacements: readonly FileReplacement[];
+      readonly rationale: string;
+    }
+  | {
+      readonly op: "create";
+      readonly path: string;
+      readonly content: string;
+      readonly rationale: string;
+    }
+  | {
+      readonly op: "delete";
+      readonly path: string;
+      readonly expectedPreimageSha256: string;
+      readonly rationale: string;
+    };
+
+export interface PatchSet {
+  readonly summary: string;
+  readonly edits: readonly FileEdit[];
+}
+
+/**
+ * One path's baseline and approved bytes inside a tree checkpoint. `baseline`
+ * is absent for a created path and `approved` is absent for a deleted path;
+ * neither absence is ever inferred as an empty file.
+ */
+export interface CheckpointFile {
+  readonly path: string;
+  readonly op: FileEditOperation;
+  readonly baselineBase64: string | null;
+  readonly approvedBase64: string | null;
+}
+
+export interface TreeCheckpoint {
+  readonly runId: string;
+  readonly sha256: string;
+  readonly files: readonly CheckpointFile[];
+  readonly createdAt: string;
 }
 
 export interface ProviderUsage {
@@ -231,10 +300,16 @@ export interface RunRecord {
   readonly contextSha256: string;
   readonly plan: PlanProposal | null;
   readonly planSha256: string | null;
-  readonly edit: EditProposal | null;
+  /**
+   * The proposed change (ADR 0023). Runs persisted before that decision are
+   * presented as an equivalent single `modify` edit rather than being rewritten.
+   */
+  readonly patchSet: PatchSet | null;
   readonly cachePath: string | null;
   readonly worktreePath: string | null;
+  /** Legacy single-file checkpoint bytes; null for patch-set runs. */
   readonly baselineBase64: string | null;
+  /** Legacy single-file checkpoint bytes; null for patch-set runs. */
   readonly approvedBase64: string | null;
   readonly diff: string | null;
   readonly verification: VerificationEvidence | null;

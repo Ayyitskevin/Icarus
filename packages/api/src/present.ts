@@ -757,21 +757,25 @@ export function presentRun(
       ? { status: "proposed", materialized: false }
       : { status: "unknown", materialized: null },
   );
-  if (run.edit !== null && actionState.status === "unknown") {
+  if (run.patchSet !== null && actionState.status === "unknown") {
     warnings.push(
       "Action status predates the bounded browser timeline; use the CLI for complete history.",
     );
   }
+  const patchPaths = run.patchSet === null ? [] : run.patchSet.edits.map((edit) => edit.path);
   const action =
-    run.edit === null
+    run.patchSet === null
       ? null
       : {
           status: actionState.status,
-          kind: "one_exact_replacement",
-          summary: "One exact replacement in the selected tracked text file",
-          path: run.edit.path,
-          files: [run.edit.path],
-          rationale: run.edit.rationale,
+          kind: "patch_set",
+          summary: `Patch set across ${patchPaths.length} approved ${
+            patchPaths.length === 1 ? "path" : "paths"
+          }`,
+          path: patchPaths[0] ?? run.target,
+          files: patchPaths,
+          operations: run.patchSet.edits.map((edit) => ({ path: edit.path, op: edit.op })),
+          rationale: run.patchSet.summary,
           allowed: false,
         };
   return {
@@ -796,7 +800,8 @@ export function presentRun(
       run.contextSha256.length === 0
         ? null
         : {
-            target: run.context.target,
+            target: run.target,
+            targets: run.context.targets,
             baseCommit: run.context.baseCommit,
             sha256: run.contextSha256,
             totalBytes: run.context.totalBytes,

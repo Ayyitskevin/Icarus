@@ -119,19 +119,34 @@ export function contextPreviewRequest(value: unknown): { readonly target: string
 export interface RunDraftRequest {
   readonly projectId: string;
   readonly task: string;
-  readonly target: string;
+  readonly targets: readonly string[];
   readonly provider: { readonly model: string; readonly baseUrl: string };
 }
 
+/** ADR 0023 bounds the browser's candidate selection to the host file ceiling. */
+const MAX_REQUEST_TARGETS = 64;
+
 export function runDraftRequest(value: unknown): RunDraftRequest {
   const body = objectValue(value, "request");
-  exactKeys(body, ["projectId", "task", "target", "provider"], "request");
+  exactKeys(body, ["projectId", "task", "targets", "provider"], "request");
   const provider = objectValue(body.provider, "provider");
   exactKeys(provider, ["model", "baseUrl"], "provider");
+  if (!Array.isArray(body.targets)) {
+    throw new IcarusError("INVALID_REQUEST", "targets must be an array");
+  }
+  if (body.targets.length < 1 || body.targets.length > MAX_REQUEST_TARGETS) {
+    throw new IcarusError("INVALID_REQUEST", "targets has an invalid length");
+  }
+  const targets = body.targets.map((entry, index) =>
+    stringValue(entry, `targets[${index}]`, { maxBytes: 1_024 }),
+  );
+  if (new Set(targets).size !== targets.length) {
+    throw new IcarusError("INVALID_REQUEST", "targets must be unique");
+  }
   return {
     projectId: stringValue(body.projectId, "projectId", { maxBytes: 100 }),
     task: stringValue(body.task, "task", { maxBytes: 8 * 1024 }),
-    target: stringValue(body.target, "target", { maxBytes: 1_024 }),
+    targets,
     provider: {
       model: stringValue(provider.model, "provider.model", { maxBytes: 256 }),
       baseUrl: stringValue(provider.baseUrl, "provider.baseUrl", { maxBytes: 2_048 }),
