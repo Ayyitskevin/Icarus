@@ -437,6 +437,37 @@ const assertions = {
     serviceSource.includes("run = this.#store.recordPatchSetIntent(runId, patchSet, files)") &&
     serviceSource.indexOf("recordPatchSetIntent(runId, patchSet, files)") <
       serviceSource.indexOf("await this.#git.applyFileWrites(worktreePath, pending"),
+  repairLoopIsBoundedAndGateGranted:
+    policySource.includes("export const MAX_REPAIR_ITERATIONS = 3") &&
+    policySource.includes("repairIterations <= MAX_REPAIR_ITERATIONS") &&
+    storeSource.includes("beginRepairIteration(runId: string)") &&
+    storeSource.includes('"REPAIR_BUDGET_EXHAUSTED"') &&
+    storeSource.includes('this.#hasApproval(runId, "plan", current.planSha256, "approve")') &&
+    storeSource.includes('current.verification.outcome === "failed"') &&
+    // The grant is spent from the durable operation ledger, never a mutable
+    // counter, and the counted kind is the named repair constant.
+    storeSource.includes('export const REPAIR_OPERATION_KIND = "provider.revise"') &&
+    storeSource.includes("FROM operations") &&
+    storeSource.includes("WHERE run_id = ? AND kind = '") &&
+    !storeSource.includes("repair_iterations_used") &&
+    // A recorded patch set may only be replaced by an iteration that was
+    // already charged, and by exactly one replacement per charged iteration.
+    storeSource.includes("this.#supersessionIsAuthorized(current)") &&
+    storeSource.includes("if (charged < 1 || charged > granted) return false") &&
+    storeSource.includes('this.#countEvents(run.id, "patch_set.superseded") < charged'),
+  repairLoopCannotWidenAuthority:
+    serviceSource.includes("parsePatchSet(") &&
+    serviceSource.includes("plan.targets,") &&
+    // A repair returns the worktree to baseline before proposing a revision.
+    serviceSource.includes('"baseline",') &&
+    serviceSource.includes("Repair could not return the private worktree to its baseline") &&
+    serviceSource.includes("Repair preserved unexpected worktree bytes for human inspection"),
+  repairLoopLandsExhaustionHonestly:
+    serviceSource.includes("this.#store.remainingRepairGrant(runId) > 0") &&
+    serviceSource.includes(
+      "return this.#store.recordVerificationAndAwaitReview(runId, diff, verification);",
+    ) &&
+    storeSource.includes("Only a failing verification may be retained for repair"),
   anthropicCredentialsAreOriginPinned:
     providerSource.includes('"ANTHROPIC_ORIGIN_DENIED"') &&
     providerSource.includes('url.hostname.toLowerCase() === "api.anthropic.com"') &&

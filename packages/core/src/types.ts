@@ -180,6 +180,13 @@ export interface PlanProposal {
    * introduce a path outside it.
    */
   readonly targets: readonly string[];
+  /**
+   * Additional attempts this plan requests when registered checks fail
+   * (ADR 0024). Bound by the plan approval digest, so approving the plan is
+   * the operator decision that authorizes the loop. Zero preserves
+   * single-attempt behavior.
+   */
+  readonly repairIterations: number;
   readonly checkIds: readonly string[];
 }
 

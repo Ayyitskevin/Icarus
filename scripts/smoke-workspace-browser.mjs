@@ -375,6 +375,7 @@ async function startProvider() {
                 risks: ["This browser smoke stops before execution"],
                 target: TARGET,
                 targets: [TARGET],
+                repairIterations: 0,
                 checkIds: ["verify"],
               }),
             },

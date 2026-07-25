@@ -28,6 +28,13 @@ sandbox, records evidence, and leaves the source checkout untouched. Kevin can
 approve the result, reject it, resume an interrupted stage, roll it back, or
 restore the recorded checkpoint.
 
+When registered checks fail, a plan that requested a repair grant may retry
+within it (ADR 0024): Icarus returns the private worktree to its baseline, asks
+the provider for a corrected patch set using the bounded check evidence, and
+re-verifies. The grant is capped, spent from the durable operation ledger, and
+approved as part of the plan. A run whose grant is exhausted still lands its
+failing evidence for review and cannot be approved.
+
 Patch sets may modify existing tracked UTF-8 text files, create paths that do
 not exist, and delete paths that do (ADR 0023). Rename is expressed as a delete
 plus a create. Every path is validated independently against the protected-path

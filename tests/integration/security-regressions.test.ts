@@ -680,6 +680,7 @@ describe("release security regressions", () => {
           risks: [],
           target: "../outside",
           targets: ["../outside"],
+          repairIterations: 0,
           checkIds: ["verify"],
         },
       },

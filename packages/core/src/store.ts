@@ -12,6 +12,7 @@ import {
   assertSandboxProfile,
   assertSunCeiling,
   checkpointDigest,
+  MAX_REPAIR_ITERATIONS,
   planApprovalDigest,
   treeCheckpointDigest,
 } from "./policy.js";
@@ -53,6 +54,8 @@ import { readRunVerificationAttempts } from "./verification-provenance.js";
 type Row = Record<string, unknown>;
 
 export const CANCELLATION_RECOVERY_OPERATION_KIND = "cancellation.recovery";
+/** Operation kind whose ledger rows count spent repair attempts (ADR 0024). */
+export const REPAIR_OPERATION_KIND = "provider.revise";
 export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
 export const RUN_EVENT_PAGE_LIMIT = 64;
@@ -1838,15 +1841,29 @@ export class IcarusStore {
         "Checkpoint files do not match the patch set paths",
       );
 
+      // A patch set is immutable within its revision. A repair iteration
+      // (ADR 0024) supersedes it, and the superseded digest is appended to the
+      // event stream before the replacement is written so the history stays in
+      // the append-only log rather than in a second table.
       const existing = this.#database
-        .prepare("SELECT 1 FROM patch_sets WHERE run_id = ?")
+        .prepare("SELECT patch_set_json FROM patch_sets WHERE run_id = ?")
         .get(runId);
+      const supersedes = existing === undefined ? null : current.patchSet;
       invariant(
-        existing === undefined,
+        existing === undefined || this.#supersessionIsAuthorized(current),
         "IMMUTABLE_ARTIFACT_CONFLICT",
         "A patch set is already recorded for this run",
       );
       const now = this.#now();
+      if (supersedes !== null) {
+        this.#appendEvent(runId, "patch_set.superseded", {
+          digest: digestJson(asJsonValue(supersedes)),
+          paths: supersedes.edits.map((edit) => edit.path).sort(),
+        });
+        this.#database.prepare("DELETE FROM patch_sets WHERE run_id = ?").run(runId);
+        this.#database.prepare("DELETE FROM checkpoint_files WHERE run_id = ?").run(runId);
+        this.#database.prepare("DELETE FROM checkpoints WHERE run_id = ?").run(runId);
+      }
       this.#database
         .prepare("INSERT INTO patch_sets (run_id, patch_set_json, created_at) VALUES (?, ?, ?)")
         .run(runId, json(patchSet), now);
@@ -1867,6 +1884,104 @@ export class IcarusStore {
       this.#appendEvent(runId, "patch_set.intent_recorded", {
         paths: editPaths,
         operations: patchSet.edits.map((edit) => edit.op),
+      });
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
+  /**
+   * Repair attempts already spent, counted from the durable operation ledger
+   * (ADR 0024) so the count survives a crash and cannot drift from the work
+   * actually charged.
+   */
+  countRepairIterations(runId: string): number {
+    const value = row(
+      this.#database
+        .prepare(
+          `SELECT COUNT(*) AS used FROM operations
+           WHERE run_id = ? AND kind = '${REPAIR_OPERATION_KIND}'`,
+        )
+        .get(runId),
+      "repair iteration count",
+    );
+    return numberValue(value.used, "repair.used");
+  }
+
+  /** Remaining approved repair attempts for a run (ADR 0024). */
+  remainingRepairGrant(runId: string): number {
+    return this.#repairGrantRemaining(this.getRun(runId));
+  }
+
+  #repairGrantRemaining(run: RunRecord): number {
+    if (run.plan === null) return 0;
+    const granted = Math.min(run.plan.repairIterations, MAX_REPAIR_ITERATIONS);
+    return Math.max(0, granted - this.countRepairIterations(run.id));
+  }
+
+  /**
+   * A recorded patch set may be replaced only by a repair iteration that has
+   * already been charged (ADR 0024). The grant is spent by the revise call
+   * itself, so the replacement is authorized by that charge rather than by the
+   * grant still remaining after it — otherwise a grant of one could never
+   * record the revision it paid for. Exactly one supersession per charged
+   * iteration, and never more iterations than the approved plan granted.
+   */
+  #supersessionIsAuthorized(run: RunRecord): boolean {
+    if (run.plan === null) return false;
+    const granted = Math.min(run.plan.repairIterations, MAX_REPAIR_ITERATIONS);
+    const charged = this.countRepairIterations(run.id);
+    if (charged < 1 || charged > granted) return false;
+    return this.#countEvents(run.id, "patch_set.superseded") < charged;
+  }
+
+  #countEvents(runId: string, type: string): number {
+    const value = row(
+      this.#database
+        .prepare("SELECT COUNT(*) AS total FROM run_events WHERE run_id = ? AND type = ?")
+        .get(runId, type),
+      "run event count",
+    );
+    return numberValue(value.total, "run_events.total");
+  }
+
+  /**
+   * Re-enters execution after a failed verification. Requires an approved plan
+   * carrying an unspent repair grant and a recorded failing verification; the
+   * generic transition path stays closed to this edge.
+   */
+  beginRepairIteration(runId: string): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const current = this.getRun(runId);
+      invariant(current.state === "verifying", "INVALID_STATE", "Run is not verifying");
+      invariant(current.plan !== null, "MISSING_PLAN", "Repair requires an approved plan");
+      invariant(
+        current.planSha256 !== null &&
+          this.#hasApproval(runId, "plan", current.planSha256, "approve"),
+        "MISSING_APPROVAL",
+        "Repair requires the exact approved plan",
+      );
+      invariant(
+        current.verification !== null && current.verification.outcome === "failed",
+        "VERIFICATION_NOT_PASSED",
+        "Repair requires a recorded failing verification",
+      );
+      const remaining = this.#repairGrantRemaining(current);
+      invariant(remaining > 0, "REPAIR_BUDGET_EXHAUSTED", "The approved repair grant is exhausted");
+      assertTransition(current.state, "running");
+      const now = this.#now();
+      const result = this.#database
+        .prepare(
+          `UPDATE runs SET state = 'running', resume_state = NULL, error_code = NULL,
+           error_message = NULL, version = version + 1, updated_at = ?
+           WHERE id = ? AND state = 'verifying'`,
+        )
+        .run(now, runId);
+      invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+      this.#appendEvent(runId, "repair.requested", {
+        from: "verifying",
+        to: "running",
+        remaining,
       });
     });
     transaction();
@@ -1925,10 +2040,17 @@ export class IcarusStore {
     };
   }
 
+  /**
+   * Records a completed verification attempt. `nextState` is `awaiting_review`
+   * for a landing attempt and `verifying` for an attempt that an approved
+   * repair grant will retry (ADR 0024); either way the complete evidence and
+   * diff are appended to the event stream.
+   */
   recordVerificationAndAwaitReview(
     runId: string,
     diff: string,
     verification: VerificationEvidence,
+    nextState: "awaiting_review" | "verifying" = "awaiting_review",
   ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
@@ -1988,16 +2110,28 @@ export class IcarusStore {
         "CHECKPOINT_MISMATCH",
         "Verification is not bound to the immutable checkpoint",
       );
+      if (nextState === "verifying") {
+        invariant(
+          verification.outcome === "failed",
+          "VERIFICATION_OUTCOME_MISMATCH",
+          "Only a failing verification may be retained for repair",
+        );
+        invariant(
+          this.#repairGrantRemaining(current) > 0,
+          "REPAIR_BUDGET_EXHAUSTED",
+          "The approved repair grant is exhausted",
+        );
+      }
       const now = this.#now();
       this.#database
         .prepare(
-          `UPDATE runs SET diff = ?, verification_json = ?, state = 'awaiting_review',
+          `UPDATE runs SET diff = ?, verification_json = ?, state = ?,
            version = version + 1, updated_at = ? WHERE id = ? AND state = 'verifying'`,
         )
-        .run(diff, json(verification), now, runId);
+        .run(diff, json(verification), nextState, now, runId);
       this.#appendEvent(runId, "verification.completed", {
         from: "verifying",
-        to: "awaiting_review",
+        to: nextState,
         outcome: verification.outcome,
         diffSha256: verification.diffSha256,
         diff,

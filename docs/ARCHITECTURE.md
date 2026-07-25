@@ -549,6 +549,14 @@ fail-closed audit or make imported repositories writable.
 - Provider output with recognizable credential material fails before plan/edit
   persistence; known credentials, including credentials reflected by thrown
   transport errors, and command/error output are redacted.
+- A failed verification may re-enter execution while an approved repair grant
+  and the run's budgets both remain (ADR 0024). The grant is carried by the plan,
+  so the operator authorizes the loop with the approval they already give; it is
+  capped at three attempts, spent from the durable operation ledger, and each
+  re-entry passes a dedicated gated transition. A revision returns the worktree
+  to its baseline, is validated against the same approved targets and ceilings,
+  and supersedes its predecessor with the append-only event stream as history.
+  Exhaustion lands failing evidence at `awaiting_review`, never a pass.
 - A proposal is a patch set over the operator-approved target subset (ADR 0023):
   ordered exact replacements in existing tracked UTF-8 text files, complete
   content for a created path, and preimage-bound removal for a deleted path.

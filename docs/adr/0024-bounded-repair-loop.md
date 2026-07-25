@@ -72,6 +72,14 @@ verification with its diff and evidence — is the record. The alternative,
 keeping every revision in its own row, would add a schema migration and a
 second source of truth for questions the event log already answers.
 
+A replacement is authorized by an iteration that has *already* been charged,
+not by the grant still remaining after that charge — the revise call spends the
+grant before it can return anything to record, so a grant of one would
+otherwise never be able to write the revision it paid for. The store therefore
+admits exactly one supersession per charged `provider.revise` operation and
+never more charged iterations than the approved plan granted, which also closes
+the reverse hole: a patch set cannot be replaced by an uncharged write.
+
 Baseline bytes never change across revisions, because they are the pinned base
 commit's bytes. Only the approved side moves, so rollback and restore keep
 working unchanged: rollback still returns the worktree to the base commit, and
