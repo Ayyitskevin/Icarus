@@ -58,7 +58,7 @@ function makeInput(
     runId: RUN_ID,
     worktreePath,
     baseCommit: SANDBOX_BASE_COMMIT,
-    target: SANDBOX_TARGET,
+    targets: [SANDBOX_TARGET],
     checks: [CHECK],
     sandbox: SANDBOX,
     ceiling: overrides.ceiling ?? CEILING,

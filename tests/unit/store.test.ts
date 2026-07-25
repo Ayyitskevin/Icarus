@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { sha256 } from "../../packages/core/src/digest.js";
 import { IcarusError } from "../../packages/core/src/errors.js";
-import { checkpointDigest, planApprovalDigest } from "../../packages/core/src/policy.js";
+import { planApprovalDigest, treeCheckpointDigest } from "../../packages/core/src/policy.js";
 import { createProviderConfig } from "../../packages/core/src/provider.js";
 import {
   CANCELLATION_RECOVERY_OPERATION_KIND,
@@ -13,6 +13,7 @@ import {
   IcarusStore,
   WORKSPACE_PROJECT_CHECKS_MAX_BYTES,
 } from "../../packages/core/src/store.js";
+import type { CheckpointFile, PatchSet } from "../../packages/core/src/types.js";
 import {
   createUnitStore,
   makeUnitIdGenerator,
@@ -57,7 +58,7 @@ function prepareRun(store: IcarusStore): void {
     id: UNIT_RUN_ID,
     projectId,
     task: "Update the greeting",
-    target: UNIT_PLAN.target,
+    targets: UNIT_PLAN.targets,
     provider: UNIT_PROVIDER,
   });
   store.pinRunBase(UNIT_RUN_ID, UNIT_BASE_COMMIT);
@@ -148,7 +149,7 @@ function approvePreparedRun(store: IcarusStore): void {
     task: run.task,
     baseCommit: run.baseCommit,
     contextSha256: run.contextSha256,
-    target: run.target,
+    targets: run.context.targets,
     provider: run.provider,
     checks: project.checks,
     sandbox: project.sandbox,
@@ -168,7 +169,7 @@ describe("SQLite run persistence", () => {
       id: UNIT_RUN_ID,
       projectId,
       task: "Update the greeting",
-      target: UNIT_PLAN.target,
+      targets: UNIT_PLAN.targets,
       provider: createProviderConfig({
         kind: "openai",
         model: "remote-contract-model",
@@ -205,7 +206,7 @@ describe("SQLite run persistence", () => {
       id: UNIT_RUN_ID,
       projectId,
       task: "Update the greeting",
-      target: UNIT_PLAN.target,
+      targets: UNIT_PLAN.targets,
       provider: UNIT_PROVIDER,
     });
     fixture.store.close();
@@ -426,7 +427,7 @@ describe("SQLite run persistence", () => {
       task: "Update the greeting",
       baseCommit: UNIT_BASE_COMMIT,
       contextSha256: unitContextDigest(unitContextManifest()),
-      target: UNIT_PLAN.target,
+      targets: UNIT_PLAN.targets,
       provider: UNIT_PROVIDER,
       checks: project.checks,
       sandbox: UNIT_SANDBOX,
@@ -448,37 +449,36 @@ describe("SQLite run persistence", () => {
     fixture.store.approvePlan(UNIT_RUN_ID, digest, "unit-operator");
     const baselineBase64 = Buffer.from("hello\n").toString("base64");
     const approvedBase64 = Buffer.from("goodbye\n").toString("base64");
-    fixture.store.recordWorkspace(UNIT_RUN_ID, "/tmp/cache.git", "/tmp/worktree", baselineBase64);
-    fixture.store.recordEditIntent(
-      UNIT_RUN_ID,
+    fixture.store.recordWorkspace(UNIT_RUN_ID, "/tmp/cache.git", "/tmp/worktree", null);
+    const checkpointFiles: readonly CheckpointFile[] = [
       {
         path: UNIT_PLAN.target,
-        expectedPreimageSha256: "f".repeat(64),
-        findText: "hello",
-        replaceText: "goodbye",
-        rationale: "Update the fixture.",
+        op: "modify",
+        baselineBase64,
+        approvedBase64,
       },
-      approvedBase64,
-    );
-    const checkpointSha256 = checkpointDigest({
+    ];
+    const patchSet: PatchSet = {
+      summary: "Update the fixture.",
+      edits: [
+        {
+          op: "modify",
+          path: UNIT_PLAN.target,
+          expectedPreimageSha256: "f".repeat(64),
+          replacements: [{ findText: "hello", replaceText: "goodbye" }],
+          rationale: "Update the fixture.",
+        },
+      ],
+    };
+    fixture.store.recordPatchSetIntent(UNIT_RUN_ID, patchSet, checkpointFiles);
+    expect(fixture.store.listCheckpointFiles(UNIT_RUN_ID)).toEqual(checkpointFiles);
+    const checkpointSha256 = treeCheckpointDigest({
       runId: UNIT_RUN_ID,
       baseCommit: UNIT_BASE_COMMIT,
-      target: UNIT_PLAN.target,
-      baselineBase64,
-      approvedBase64,
+      files: checkpointFiles,
     });
-    const first = fixture.store.saveCheckpoint(
-      UNIT_RUN_ID,
-      baselineBase64,
-      approvedBase64,
-      checkpointSha256,
-    );
-    const second = fixture.store.saveCheckpoint(
-      UNIT_RUN_ID,
-      baselineBase64,
-      approvedBase64,
-      checkpointSha256,
-    );
+    const first = fixture.store.saveTreeCheckpoint(UNIT_RUN_ID, checkpointSha256);
+    const second = fixture.store.saveTreeCheckpoint(UNIT_RUN_ID, checkpointSha256);
     expect(second).toEqual(first);
     expect(
       fixture.store.listEvents(UNIT_RUN_ID).filter((event) => event.type === "checkpoint.saved"),
@@ -496,7 +496,7 @@ describe("SQLite run persistence", () => {
       task: run.task,
       baseCommit: run.baseCommit,
       contextSha256: run.contextSha256,
-      target: run.target,
+      targets: run.context.targets,
       provider: run.provider,
       checks: project.checks,
       sandbox: project.sandbox,
@@ -679,31 +679,37 @@ describe("SQLite run persistence", () => {
 
     const baselineBase64 = Buffer.from("hello\n").toString("base64");
     const approvedBase64 = Buffer.from("goodbye\n").toString("base64");
-    fixture.store.recordWorkspace(
-      UNIT_RUN_ID,
-      "/tmp/unit-cache.git",
-      "/tmp/unit-worktree",
-      baselineBase64,
-    );
-    fixture.store.recordEditIntent(
-      UNIT_RUN_ID,
+    fixture.store.recordWorkspace(UNIT_RUN_ID, "/tmp/unit-cache.git", "/tmp/unit-worktree", null);
+    const checkpointFiles: readonly CheckpointFile[] = [
       {
         path: UNIT_PLAN.target,
-        expectedPreimageSha256: sha256("hello\n"),
-        findText: "hello",
-        replaceText: "goodbye",
-        rationale: "Exercise the failed verification gate.",
+        op: "modify",
+        baselineBase64,
+        approvedBase64,
       },
-      approvedBase64,
+    ];
+    fixture.store.recordPatchSetIntent(
+      UNIT_RUN_ID,
+      {
+        summary: "Exercise the failed verification gate.",
+        edits: [
+          {
+            op: "modify",
+            path: UNIT_PLAN.target,
+            expectedPreimageSha256: sha256("hello\n"),
+            replacements: [{ findText: "hello", replaceText: "goodbye" }],
+            rationale: "Exercise the failed verification gate.",
+          },
+        ],
+      },
+      checkpointFiles,
     );
-    const checkpointSha256 = checkpointDigest({
+    const checkpointSha256 = treeCheckpointDigest({
       runId: UNIT_RUN_ID,
       baseCommit: UNIT_BASE_COMMIT,
-      target: UNIT_PLAN.target,
-      baselineBase64,
-      approvedBase64,
+      files: checkpointFiles,
     });
-    fixture.store.saveCheckpoint(UNIT_RUN_ID, baselineBase64, approvedBase64, checkpointSha256);
+    fixture.store.saveTreeCheckpoint(UNIT_RUN_ID, checkpointSha256);
     fixture.store.transition(UNIT_RUN_ID, "verifying", "execution.completed");
 
     const diff = "diff --git a/src/greeting.txt b/src/greeting.txt\n-fail\n+still fail\n";
@@ -774,7 +780,7 @@ describe("SQLite run persistence", () => {
       id: UNIT_RUN_ID,
       projectId,
       task: "Exercise event cursor pagination",
-      target: UNIT_PLAN.target,
+      targets: UNIT_PLAN.targets,
       provider: UNIT_PROVIDER,
     });
     for (let index = 0; index < 70; index += 1) {
@@ -827,7 +833,7 @@ describe("SQLite run persistence", () => {
       id: UNIT_RUN_ID,
       projectId,
       task: "Inspect older event metadata",
-      target: UNIT_PLAN.target,
+      targets: UNIT_PLAN.targets,
       provider: UNIT_PROVIDER,
     });
 
@@ -1083,7 +1089,7 @@ describe("SQLite run persistence", () => {
           id: "30000000-0000-4000-8000-000000000001",
           projectId,
           task: "Reject oversized persisted configuration before creating a run",
-          target: UNIT_PLAN.target,
+          targets: UNIT_PLAN.targets,
           provider: UNIT_PROVIDER,
         }),
       "DATABASE_ERROR",
@@ -1456,7 +1462,7 @@ describe("SQLite run persistence", () => {
       id: UNIT_RUN_ID,
       projectId,
       task: "Keep private event details outside presentation",
-      target: UNIT_PLAN.target,
+      targets: UNIT_PLAN.targets,
       provider: UNIT_PROVIDER,
     });
 
@@ -1525,7 +1531,7 @@ describe("SQLite run persistence", () => {
       id: UNIT_RUN_ID,
       projectId,
       task: "Bound approval provenance",
-      target: UNIT_PLAN.target,
+      targets: UNIT_PLAN.targets,
       provider: UNIT_PROVIDER,
     });
 
@@ -1699,7 +1705,7 @@ describe("SQLite run persistence", () => {
       id: UNIT_RUN_ID,
       projectId,
       task: "Keep event polling independent from full run decoding",
-      target: UNIT_PLAN.target,
+      targets: UNIT_PLAN.targets,
       provider: UNIT_PROVIDER,
     });
 

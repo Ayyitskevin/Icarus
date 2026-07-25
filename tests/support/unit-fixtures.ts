@@ -48,6 +48,7 @@ export const UNIT_PLAN: PlanProposal = {
   steps: ["Replace one exact string.", "Run the registered check."],
   risks: ["The expected text may have changed."],
   target: "src/greeting.txt",
+  targets: ["src/greeting.txt"],
   checkIds: ["unit"],
 };
 
@@ -102,7 +103,7 @@ export function unitContextManifest(): ContextManifest {
   return {
     auditPolicyVersion: CONTEXT_AUDIT_POLICY_VERSION,
     baseCommit: UNIT_BASE_COMMIT,
-    target: "src/greeting.txt",
+    targets: ["src/greeting.txt"],
     repositoryMap: ["src/greeting.txt"],
     entries: [
       {

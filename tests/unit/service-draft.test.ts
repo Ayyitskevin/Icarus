@@ -235,7 +235,7 @@ describe("run drafts", () => {
     const draft = service.createRunDraft({
       projectName: "unit-project",
       task: "Replace the greeting.",
-      target: TARGET,
+      targets: [TARGET],
       provider: UNIT_PROVIDER,
     });
 
@@ -251,7 +251,7 @@ describe("run drafts", () => {
     });
     expect(draft.context).toMatchObject({
       baseCommit: "",
-      target: TARGET,
+      targets: [TARGET],
       repositoryMap: [],
       entries: [],
       totalBytes: 0,
