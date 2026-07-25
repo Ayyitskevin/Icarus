@@ -39,14 +39,21 @@ describe("OpenAI remote lifecycle", () => {
         steps: ["Apply one exact replacement", "Run the registered verification check"],
         risks: ["The exact preimage may have changed"],
         target: "src/greeting.txt",
+        targets: ["src/greeting.txt"],
         checkIds: ["verify"],
       },
       {
-        path: "src/greeting.txt",
-        expectedPreimageSha256: preimageSha256,
-        findText: preimage,
-        replaceText: "Hello, Icarus!\n",
-        rationale: "Implement the approved greeting change only.",
+        summary: "Implement the approved greeting change only.",
+        edits: [
+          {
+            op: "modify",
+            path: "src/greeting.txt",
+            expectedPreimageSha256: preimageSha256,
+            replacements: [{ findText: preimage, replaceText: "Hello, Icarus!\n" }],
+            content: null,
+            rationale: "Implement the approved greeting change only.",
+          },
+        ],
       },
     ];
     const requests: Array<{ readonly url: string; readonly body: Record<string, unknown> }> = [];
@@ -95,7 +102,7 @@ describe("OpenAI remote lifecycle", () => {
       const awaitingEgress = await runtime.service.planRun({
         projectName: "golden",
         task: "Replace the greeting and run the check.",
-        target: "src/greeting.txt",
+        targets: ["src/greeting.txt"],
         provider,
       });
       expect(awaitingEgress.state).toBe("awaiting_egress_approval");

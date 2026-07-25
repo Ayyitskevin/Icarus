@@ -240,7 +240,7 @@ describe("loopback local workspace API", () => {
     const draftResponse = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Review one exact greeting replacement.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "contract-model", baseUrl: provider.baseUrl },
     });
     expect(draftResponse.status).toBe(201);
@@ -431,7 +431,7 @@ describe("loopback local workspace API", () => {
     const failedDraftResponse = await postJson(`${server.url}/api/runs`, {
       projectId: String(failedProject.id),
       task: "Preserve a provider failure as an honest run state.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "contract-model", baseUrl: provider.baseUrl },
     });
     expect(failedDraftResponse.status).toBe(201);
@@ -470,7 +470,7 @@ describe("loopback local workspace API", () => {
     const excludedDraftResponse = await postJson(`${server.url}/api/runs`, {
       projectId: String(excludedProject.id),
       task: "Reject a generated target inside the guarded lifecycle.",
-      target: "generated/client.ts",
+      targets: ["generated/client.ts"],
       provider: { model: "contract-model", baseUrl: provider.baseUrl },
     });
     expect(excludedDraftResponse.status).toBe(201);
@@ -494,7 +494,7 @@ describe("loopback local workspace API", () => {
     const replacementDraft = await postJson(`${server.url}/api/runs`, {
       projectId: String(excludedProject.id),
       task: "A failed validation must not block a replacement draft.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "contract-model", baseUrl: provider.baseUrl },
     });
     expect(replacementDraft.status).toBe(201);
@@ -544,7 +544,7 @@ describe("loopback local workspace API", () => {
     const draftResponse = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Review persisted diff evidence.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
     });
     const runId = String((await responseJson(draftResponse)).id);
@@ -618,6 +618,7 @@ describe("loopback local workspace API", () => {
         "byteCount",
         "lineCount",
         "addedLines",
+        "paths",
         "deletedLines",
         "hunkCount",
         "browserByteLimit",
@@ -770,7 +771,7 @@ describe("loopback local workspace API", () => {
     const createdResponse = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Open a newer workspace page session.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
     });
     expect(createdResponse.status).toBe(201);
@@ -973,7 +974,7 @@ describe("loopback local workspace API", () => {
     const draftResponse = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Exercise the response ceiling.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
     });
     const runId = String((await responseJson(draftResponse)).id);
@@ -1073,7 +1074,7 @@ describe("loopback local workspace API", () => {
     const draftResponse = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Keep persisted event payloads private.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
     });
     const runId = String((await responseJson(draftResponse)).id);
@@ -1295,7 +1296,7 @@ describe("loopback local workspace API", () => {
     const draftResponse = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Inspect scalar verification provenance.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
     });
     const runId = String((await responseJson(draftResponse)).id);
@@ -1976,7 +1977,7 @@ describe("loopback local workspace API", () => {
     const malformedProvider = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Reject a malformed provider URL without creating a draft.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "invalid", baseUrl: "not a URL" },
     });
     expect(malformedProvider.status).toBe(422);
@@ -1988,7 +1989,7 @@ describe("loopback local workspace API", () => {
     const remoteProvider = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Do not send this task remotely.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "remote", baseUrl: "https://models.example.invalid/" },
     });
     expect(remoteProvider.status).toBe(422);

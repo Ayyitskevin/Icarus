@@ -561,7 +561,7 @@ describe("release security regressions", () => {
       const awaitingEgress = await runtime.service.planRun({
         projectName: "golden",
         task: "Replace the greeting.",
-        target: "src/greeting.txt",
+        targets: ["src/greeting.txt"],
         provider: createProviderConfig({
           kind: "openai",
           model: "contract-model",
@@ -613,7 +613,7 @@ describe("release security regressions", () => {
       const awaitingEgress = await runtime.service.planRun({
         projectName: "golden",
         task: "Replace the greeting.",
-        target: "src/greeting.txt",
+        targets: ["src/greeting.txt"],
         provider: createProviderConfig({
           kind: "openai",
           model: "contract-model",
@@ -679,6 +679,7 @@ describe("release security regressions", () => {
           steps: ["Escape the approved workspace"],
           risks: [],
           target: "../outside",
+          targets: ["../outside"],
           checkIds: ["verify"],
         },
       },

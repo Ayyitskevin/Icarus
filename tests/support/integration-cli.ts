@@ -183,26 +183,36 @@ export async function startOllamaQueue(initial: readonly QueuedProviderResponse[
   };
 }
 
-export function planResponse(): QueuedProviderResponse {
+export function planResponse(
+  targets: readonly string[] = ["src/greeting.txt"],
+): QueuedProviderResponse {
   return {
     content: {
       summary: "Replace the operator-selected greeting.",
       steps: ["Apply one exact replacement", "Run the registered verification check"],
       risks: ["The exact preimage may have changed"],
-      target: "src/greeting.txt",
+      target: targets[0] ?? "src/greeting.txt",
+      targets: [...targets],
       checkIds: ["verify"],
     },
   };
 }
 
+/** A single-file patch set, the ADR 0023 successor of the one-edit response. */
 export function editResponse(preimageSha256: string): QueuedProviderResponse {
   return {
     content: {
-      path: "src/greeting.txt",
-      expectedPreimageSha256: preimageSha256,
-      findText: "Hello, world!\n",
-      replaceText: "Hello, Icarus!\n",
-      rationale: "Implement the approved greeting change only.",
+      summary: "Implement the approved greeting change only.",
+      edits: [
+        {
+          op: "modify",
+          path: "src/greeting.txt",
+          expectedPreimageSha256: preimageSha256,
+          replacements: [{ findText: "Hello, world!\n", replaceText: "Hello, Icarus!\n" }],
+          content: null,
+          rationale: "Implement the approved greeting change only.",
+        },
+      ],
     },
   };
 }
