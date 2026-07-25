@@ -331,12 +331,149 @@ export class OpenAIResponsesGateway implements ModelGateway {
   }
 }
 
+const ANTHROPIC_VERSION = "2023-06-01";
+
+/**
+ * Anthropic Messages adapter. The Messages API has no strict JSON-schema
+ * response mode, so the schema is enforced by a single forced tool call whose
+ * input schema is the requested structure. Tool use is not exposed to the run:
+ * the tool is a transport for structured output, and its input is returned as
+ * text for the same validators every other adapter's output passes through.
+ */
+export class AnthropicMessagesGateway implements ModelGateway {
+  readonly config: ProviderConfig;
+  readonly #apiKey: string;
+  readonly #fetch: typeof fetch;
+
+  constructor(
+    config: ProviderConfig,
+    apiKey: string,
+    fetchImplementation: typeof fetch = globalThis.fetch,
+  ) {
+    invariant(
+      config.kind === "anthropic",
+      "PROVIDER_MISMATCH",
+      "Anthropic gateway received the wrong provider config",
+    );
+    invariant(apiKey.length > 0, "ANTHROPIC_API_KEY_REQUIRED", "ANTHROPIC_API_KEY is required");
+    invariant(
+      apiKey.length >= 8 && apiKey.length <= 512 && !/[\s\0]/.test(apiKey),
+      "ANTHROPIC_API_KEY_INVALID",
+      "ANTHROPIC_API_KEY must contain 8 to 512 non-whitespace characters",
+    );
+    const { url, locality } = parseProviderBaseUrl(config.baseUrl);
+    invariant(
+      locality === "loopback" ||
+        (url.protocol === "https:" &&
+          url.hostname.toLowerCase() === "api.anthropic.com" &&
+          (url.port === "" || url.port === "443")),
+      "ANTHROPIC_ORIGIN_DENIED",
+      "Remote Anthropic credentials may only be sent to api.anthropic.com",
+    );
+    this.config = config;
+    this.#apiKey = apiKey;
+    this.#fetch = fetchImplementation;
+  }
+
+  async generateStructured(
+    request: StructuredGenerationRequest,
+    signal?: AbortSignal,
+  ): Promise<StructuredGenerationResult> {
+    const response = await fetchJson(
+      endpoint(this.config.baseUrl, "messages"),
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+          "x-api-key": this.#apiKey,
+          "anthropic-version": ANTHROPIC_VERSION,
+        },
+        body: JSON.stringify({
+          model: this.config.model,
+          max_tokens: request.maxOutputTokens,
+          system: request.instructions,
+          messages: [{ role: "user", content: request.input }],
+          tools: [
+            {
+              name: request.schemaName,
+              description: "Return the required structured result.",
+              input_schema: request.schema,
+            },
+          ],
+          tool_choice: { type: "tool", name: request.schemaName },
+        }),
+      },
+      request.timeoutMs,
+      signal,
+      [this.#apiKey],
+      this.#fetch,
+    );
+    const object = asObject(response.value, "Anthropic response");
+    invariant(
+      object.stop_reason !== "refusal",
+      "PROVIDER_REFUSAL",
+      "Anthropic refused the structured request",
+    );
+    invariant(
+      object.stop_reason !== "max_tokens",
+      "PROVIDER_PROTOCOL_ERROR",
+      "Anthropic response stopped at the output ceiling",
+    );
+    invariant(
+      Array.isArray(object.content),
+      "PROVIDER_PROTOCOL_ERROR",
+      "Anthropic response has no content array",
+    );
+
+    const structured: string[] = [];
+    for (const blockValue of object.content) {
+      const block = asObject(blockValue, "Anthropic content block");
+      if (block.type !== "tool_use") {
+        continue;
+      }
+      invariant(
+        block.name === request.schemaName,
+        "PROVIDER_PROTOCOL_ERROR",
+        "Anthropic returned an unexpected tool call",
+      );
+      structured.push(JSON.stringify(block.input));
+    }
+    invariant(
+      structured.length === 1,
+      "PROVIDER_PROTOCOL_ERROR",
+      "Anthropic response did not contain exactly one structured result",
+    );
+    const text = structured[0] as string;
+    invariant(
+      !text.includes(this.#apiKey),
+      "PROVIDER_SECRET_DETECTED",
+      "Provider output contained credential material and was discarded",
+    );
+    const usage = asObject(object.usage, "Anthropic usage");
+    const inputTokens = optionalCount(usage.input_tokens);
+    const outputTokens = optionalCount(usage.output_tokens);
+    return {
+      text,
+      usage: {
+        inputTokens,
+        outputTokens,
+        estimatedCostUsd: calculateReportedCost(this.config, inputTokens, outputTokens),
+        latencyMs: response.latencyMs,
+      },
+    };
+  }
+}
+
 export function createGateway(
   config: ProviderConfig,
   environment: NodeJS.ProcessEnv,
 ): ModelGateway {
   if (config.kind === "ollama") {
     return new OllamaGateway(config);
+  }
+  if (config.kind === "anthropic") {
+    return new AnthropicMessagesGateway(config, environment.ANTHROPIC_API_KEY ?? "");
   }
   return new OpenAIResponsesGateway(config, environment.OPENAI_API_KEY ?? "");
 }

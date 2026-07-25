@@ -45,6 +45,8 @@ const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
 const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const DIGEST_IMAGE_PATTERN = /^[a-z0-9][a-z0-9._/-]*(?::[a-zA-Z0-9._-]+)?@sha256:[a-f0-9]{64}$/;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+/** Mirrors the host patch-set file ceiling (ADR 0023). */
+const MAX_CHANGED_FILES = 64;
 
 export type ProjectPageDirection = "older" | "newer";
 
@@ -163,7 +165,7 @@ function validateCeiling(value: unknown): asserts value is ProjectCeilingView {
   const integerKeys = CEILING_KEYS.filter((key) => key !== "maxCostUsd");
   if (
     !integerKeys.every((key) => Number.isSafeInteger(value[key]) && Number(value[key]) > 0) ||
-    value.maxFilesChanged !== 1 ||
+    Number(value.maxFilesChanged) > MAX_CHANGED_FILES ||
     typeof value.maxCostUsd !== "number" ||
     !Number.isFinite(value.maxCostUsd) ||
     value.maxCostUsd < 0 ||

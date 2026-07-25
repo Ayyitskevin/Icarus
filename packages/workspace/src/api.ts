@@ -61,7 +61,7 @@ export interface ProjectCeilingView {
   readonly maxOutputTokensPerCall: number;
   readonly maxTotalTokens: number;
   readonly maxCostUsd: number;
-  readonly maxFilesChanged: 1;
+  readonly maxFilesChanged: number;
   readonly maxFileBytes: number;
   readonly maxDiffBytes: number;
   readonly maxCommandOutputBytes: number;
@@ -112,6 +112,7 @@ export interface ExcludedContextEntryView {
 
 export interface ContextMetadataView {
   readonly target: string;
+  readonly targets?: readonly string[];
   readonly baseCommit?: string;
   readonly sha256?: string;
   readonly digest?: string;
@@ -173,6 +174,7 @@ export interface PlanView {
   readonly steps: readonly string[];
   readonly risks: readonly string[];
   readonly target?: string;
+  readonly targets?: readonly string[];
   readonly checkIds?: readonly string[];
 }
 
@@ -191,6 +193,8 @@ export interface ActionView {
   readonly rationale?: string;
   readonly path?: string;
   readonly files?: readonly string[];
+  /** Per-path patch-set operations (ADR 0023). */
+  readonly operations?: readonly { readonly path: string; readonly op: string }[];
   readonly allowed?: boolean;
 }
 
@@ -491,7 +495,7 @@ export interface CreateProjectInput {
 export interface CreateRunInput {
   readonly projectId: string;
   readonly task: string;
-  readonly target: string;
+  readonly targets: readonly string[];
   readonly provider: {
     readonly model: string;
     readonly baseUrl: string;

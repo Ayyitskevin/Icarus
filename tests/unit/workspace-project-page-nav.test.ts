@@ -161,7 +161,7 @@ describe("workspace bounded project-page navigation", () => {
       {
         ...valid,
         projects: [
-          { ...first, ceiling: { ...first.ceiling, maxFilesChanged: 2 } },
+          { ...first, ceiling: { ...first.ceiling, maxFilesChanged: 65 } },
           ...valid.projects.slice(1),
         ],
       },

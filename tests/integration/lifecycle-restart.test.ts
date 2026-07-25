@@ -305,7 +305,7 @@ describe("CLI lifecycle across process restarts", () => {
         gate: null,
         action: {
           status: "completed",
-          kind: "one_exact_replacement",
+          kind: "patch_set",
           path: "src/greeting.txt",
           files: ["src/greeting.txt"],
           allowed: false,

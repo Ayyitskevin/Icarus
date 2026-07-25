@@ -169,6 +169,20 @@ startup fails with `DATABASE_MIGRATION_REQUIRED`; any other value fails as
 `INVALID_DATABASE_CONFIGURATION`. Remove the variable immediately after the
 index exists. This is an operator gate, not a persistent configuration.
 
+The ADR 0023 patch-set schema uses the same gate with its own exact token,
+`ICARUS_APPROVE_SCHEMA_MIGRATION=patch-set-v2`. It adds two tables and rewrites
+no existing row, so runs recorded under schema v1 keep their single-file edit
+and checkpoint columns and remain readable. Each migration is approved only by
+its own token: a state root needing both runs two separate invocations, one per
+token, each after its own verified backup. Startup inspects the existing
+database read-only and fails with `DATABASE_MIGRATION_REQUIRED` before opening
+it for writing.
+
+Because the plan approval digest now binds the approved target set, the policy
+version advances. A run already parked in `awaiting_approval` under the previous
+policy cannot be approved after the upgrade and must be replanned; this is
+deliberate, since the approval no longer describes what it would authorize.
+
 The accepted ADR 0016 implementation adds an explicit selected-run
 older-activity panel pinned to the coherent run revision, backed by a direct
 reverse 64-row metadata page rather than a forward drain from sequence zero.

@@ -438,7 +438,7 @@ async function routeApi(
     const run = options.runtime.service.createRunDraft({
       projectId: input.projectId,
       task: input.task,
-      target: input.target,
+      targets: input.targets,
       provider,
     });
     json(response, 201, presentRunById(options, run.id));

@@ -18,6 +18,8 @@ import {
   workspaceRunPhase,
 } from "../../packages/api/src/present.js";
 import type {
+  FileEdit,
+  PatchSet,
   ProjectRecord,
   RunHistory,
   RunPresentationSnapshot,
@@ -26,6 +28,7 @@ import type {
   RunVerificationAttemptsSnapshot,
   WorkspaceRunPage,
 } from "../../packages/core/src/types.js";
+import { CONTEXT_AUDIT_POLICY_VERSION } from "../../packages/core/src/types.js";
 import { ApprovalProvenance } from "../../packages/workspace/src/App.js";
 import { UNIT_CEILING, UNIT_PROVIDER, UNIT_SANDBOX } from "../support/unit-fixtures.js";
 
@@ -384,9 +387,9 @@ describe("workspace run presentation", () => {
       resumeState: null,
       baseCommit: "",
       context: {
-        auditPolicyVersion: "tracked-tree-secret-audit-v1",
+        auditPolicyVersion: CONTEXT_AUDIT_POLICY_VERSION,
         baseCommit: "",
-        target: "src/greeting.txt",
+        targets: ["src/greeting.txt"],
         repositoryMap: [],
         entries: [],
         totalBytes: 0,
@@ -395,7 +398,7 @@ describe("workspace run presentation", () => {
       contextSha256: "",
       plan: null,
       planSha256: null,
-      edit: null,
+      patchSet: null,
       cachePath: "/private/state/cache.git",
       worktreePath: "/private/state/worktree",
       baselineBase64: "c2VjcmV0LWJhc2VsaW5l",
@@ -457,20 +460,30 @@ describe("workspace run presentation", () => {
     expect(serialized).not.toContain("c2VjcmV0");
     expect(serialized).not.toContain("/private/state");
 
-    const withEdit: RunRecord = {
-      ...run,
-      edit: {
-        path: run.target,
-        expectedPreimageSha256: "a".repeat(64),
-        findText: "Hello",
-        replaceText: "Hello, Icarus",
-        rationale: "Apply one exact replacement.",
-      },
+    const greetingEdit: FileEdit = {
+      op: "modify",
+      path: run.target,
+      expectedPreimageSha256: "a".repeat(64),
+      replacements: [{ findText: "Hello", replaceText: "Hello, Icarus" }],
+      rationale: "Apply one exact replacement.",
     };
+    const patchSet: PatchSet = {
+      summary: "Replace the greeting and record the change.",
+      edits: [
+        greetingEdit,
+        {
+          op: "create",
+          path: "src/notes.md",
+          content: "# Notes\n",
+          rationale: "Record the change alongside the greeting.",
+        },
+      ],
+    };
+    const withPatchSet: RunRecord = { ...run, patchSet };
     const proposed = presentRun(
       project,
       presentationSnapshot({
-        run: withEdit,
+        run: withPatchSet,
         approvals: [],
         events: [
           {
@@ -484,12 +497,52 @@ describe("workspace run presentation", () => {
       }),
     );
     expect(proposed).toMatchObject({
-      action: { status: "proposed", path: run.target, allowed: false },
+      action: {
+        status: "proposed",
+        kind: "patch_set",
+        summary: "Patch set across 2 approved paths",
+        path: run.target,
+        files: [run.target, "src/notes.md"],
+        operations: [
+          { path: run.target, op: "modify" },
+          { path: "src/notes.md", op: "create" },
+        ],
+        rationale: patchSet.summary,
+        allowed: false,
+      },
+    });
+    expect(Object.keys(proposed.action as Record<string, unknown>).sort()).toEqual(
+      ["status", "kind", "summary", "path", "files", "operations", "rationale", "allowed"].sort(),
+    );
+    const singlePathAction = presentRun(
+      project,
+      presentationSnapshot({
+        run: { ...run, patchSet: { summary: patchSet.summary, edits: [greetingEdit] } },
+        approvals: [],
+        events: [
+          {
+            sequence: 1,
+            runId: run.id,
+            type: "edit.intent_recorded",
+            payload: {},
+            createdAt: run.createdAt,
+          },
+        ],
+      }),
+    ).action as Record<string, unknown>;
+    expect(singlePathAction).toMatchObject({
+      status: "proposed",
+      kind: "patch_set",
+      summary: "Patch set across 1 approved path",
+      path: run.target,
+      files: [run.target],
+      operations: [{ path: run.target, op: "modify" }],
+      allowed: false,
     });
     const materialized = presentRun(
       project,
       presentationSnapshot({
-        run: withEdit,
+        run: withPatchSet,
         approvals: [],
         events: [
           {
@@ -513,7 +566,7 @@ describe("workspace run presentation", () => {
     const cancelledBeforeMaterialization = presentRun(
       project,
       presentationSnapshot({
-        run: withEdit,
+        run: withPatchSet,
         approvals: [],
         events: [
           {
@@ -539,7 +592,7 @@ describe("workspace run presentation", () => {
     const revertedAfterMaterialization = presentRun(
       project,
       presentationSnapshot({
-        run: withEdit,
+        run: withPatchSet,
         approvals: [],
         events: [
           {
@@ -577,7 +630,7 @@ describe("workspace run presentation", () => {
     }));
     const unknownAfterTruncatedMaterialization = presentRun(
       project,
-      presentationSnapshot({ run: withEdit, approvals: [], events: truncatedActionEvents }),
+      presentationSnapshot({ run: withPatchSet, approvals: [], events: truncatedActionEvents }),
     );
     expect(unknownAfterTruncatedMaterialization).toMatchObject({
       action: { status: "unknown" },
@@ -706,9 +759,9 @@ describe("workspace run presentation", () => {
       resumeState: null,
       baseCommit: "a".repeat(40),
       context: {
-        auditPolicyVersion: "tracked-tree-secret-audit-v1",
+        auditPolicyVersion: CONTEXT_AUDIT_POLICY_VERSION,
         baseCommit: "a".repeat(40),
-        target: "src/greeting.txt",
+        targets: ["src/greeting.txt"],
         repositoryMap: ["src/greeting.txt"],
         entries: [],
         totalBytes: 0,
@@ -717,7 +770,7 @@ describe("workspace run presentation", () => {
       contextSha256: "b".repeat(64),
       plan: null,
       planSha256: null,
-      edit: null,
+      patchSet: null,
       cachePath: "/private/cache.git",
       worktreePath: "/private/worktree",
       baselineBase64: "SGVsbG8=",
@@ -739,10 +792,17 @@ describe("workspace run presentation", () => {
 
     const available = presentRun(project, presentationSnapshot({ run, approvals: [], events: [] }));
     expect(Buffer.byteLength(diff, "utf8")).toBeGreaterThan(diff.length);
+    expect(available.context).toMatchObject({
+      target: run.target,
+      targets: ["src/greeting.txt"],
+      baseCommit: "a".repeat(40),
+      sha256: "b".repeat(64),
+    });
     expect(available.diff).toBe(diff);
     expect(available.diffReview).toEqual({
       status: "available",
       path: "src/greeting.txt",
+      paths: ["src/greeting.txt"],
       sha256: digest,
       byteCount: Buffer.byteLength(diff, "utf8"),
       lineCount: 8,
@@ -756,6 +816,7 @@ describe("workspace run presentation", () => {
       [
         "status",
         "path",
+        "paths",
         "sha256",
         "byteCount",
         "lineCount",
@@ -836,6 +897,7 @@ describe("workspace run presentation", () => {
     expect(oversized.diffReview).toEqual({
       status: "outside_browser_bound",
       path: "src/greeting.txt",
+      paths: ["src/greeting.txt"],
       sha256: oversizedDigest,
       byteCount: Buffer.byteLength(oversizedDiff, "utf8"),
       lineCount: null,

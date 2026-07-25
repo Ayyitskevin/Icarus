@@ -72,6 +72,7 @@ async function startProvider() {
               steps: ["Review the selected target", "Run the registered check only after approval"],
               risks: ["This workspace smoke stops before execution"],
               target: "src/app.txt",
+              targets: ["src/app.txt"],
               checkIds: ["verify"],
             }),
           },
@@ -154,7 +155,7 @@ try {
   const draft = await post(`${workspace.url}/api/runs`, {
     projectId: project.id,
     task: "Inspect a bounded local change request.",
-    target: "src/app.txt",
+    targets: ["src/app.txt"],
     provider: { model: "smoke-contract", baseUrl: provider.baseUrl },
   });
   if (draft.state !== "preparing" || draft.phase !== "draft" || provider.requests() !== 0) {

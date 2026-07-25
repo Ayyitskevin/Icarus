@@ -4,9 +4,13 @@ import { containsSecretShapedContent, isProtectedEditPath } from "./context.js";
 import { digestJson, sha256 } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
 import type {
+  CheckpointFile,
   CheckProfile,
   EditProposal,
+  FileEdit,
+  FileReplacement,
   JsonValue,
+  PatchSet,
   PlanProposal,
   ProviderConfig,
   SandboxProfile,
@@ -18,7 +22,17 @@ const DIGEST_IMAGE_PATTERN = /^[a-z0-9][a-z0-9._/-]*(?::[a-zA-Z0-9._-]+)?@sha256
 const ENCODED_PATH_PATTERN = /%(?:2e|2f|5c)/i;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
-export const POLICY_VERSION = "m1-v1";
+/**
+ * Advanced by ADR 0023: the plan approval digest now binds a target set, so an
+ * approval recorded under the previous policy cannot authorize a patch set.
+ */
+export const POLICY_VERSION = "patch-set-v2";
+
+/** Hard host ceiling on operator-selected candidate paths and patch-set size. */
+export const MAX_CHANGED_FILES = 64;
+/** Ordered exact replacements permitted inside one `modify` edit. */
+export const MAX_REPLACEMENTS_PER_FILE = 32;
+const MAX_REPLACEMENT_TEXT_LENGTH = 262_144;
 
 export const DEFAULT_CEILING: SunCeiling = {
   maxToolCalls: 40,
@@ -27,7 +41,7 @@ export const DEFAULT_CEILING: SunCeiling = {
   maxOutputTokensPerCall: 8_192,
   maxTotalTokens: 100_000,
   maxCostUsd: 2,
-  maxFilesChanged: 1,
+  maxFilesChanged: 8,
   maxFileBytes: 256 * 1024,
   maxDiffBytes: 256 * 1024,
   maxCommandOutputBytes: 256 * 1024,
@@ -51,7 +65,7 @@ export function planApprovalDigest(input: {
   readonly task: string;
   readonly baseCommit: string;
   readonly contextSha256: string;
-  readonly target: string;
+  readonly targets: readonly string[];
   readonly provider: ProviderConfig;
   readonly checks: readonly CheckProfile[];
   readonly sandbox: SandboxProfile;
@@ -60,12 +74,12 @@ export function planApprovalDigest(input: {
 }): string {
   return digestJson(
     toJsonValue({
-      schemaVersion: 1,
+      schemaVersion: 2,
       policyVersion: POLICY_VERSION,
       task: input.task,
       baseCommit: input.baseCommit,
       contextSha256: input.contextSha256,
-      target: input.target,
+      targets: [...input.targets],
       provider: input.provider,
       checks: input.checks,
       sandbox: input.sandbox,
@@ -75,6 +89,7 @@ export function planApprovalDigest(input: {
   );
 }
 
+/** Retained to verify checkpoints persisted before ADR 0023 (schema v1). */
 export function checkpointDigest(input: {
   readonly runId: string;
   readonly baseCommit: string;
@@ -94,10 +109,44 @@ export function checkpointDigest(input: {
   );
 }
 
+/**
+ * Binds a run's complete restorable state: every affected path, its operation,
+ * and the digests of its baseline and approved bytes. A missing side is
+ * recorded as null so a created or deleted path can never be confused with an
+ * empty file.
+ */
+export function treeCheckpointDigest(input: {
+  readonly runId: string;
+  readonly baseCommit: string;
+  readonly files: readonly CheckpointFile[];
+}): string {
+  return digestJson(
+    toJsonValue({
+      schemaVersion: 2,
+      runId: input.runId,
+      baseCommit: input.baseCommit,
+      files: [...input.files]
+        .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
+        .map((file) => ({
+          path: file.path,
+          op: file.op,
+          baselineSha256:
+            file.baselineBase64 === null
+              ? null
+              : sha256(Buffer.from(file.baselineBase64, "base64")),
+          approvedSha256:
+            file.approvedBase64 === null
+              ? null
+              : sha256(Buffer.from(file.approvedBase64, "base64")),
+        })),
+    }),
+  );
+}
+
 export const PLAN_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "steps", "risks", "target", "checkIds"],
+  required: ["summary", "steps", "risks", "target", "targets", "checkIds"],
   properties: {
     summary: { type: "string", minLength: 1, maxLength: 1_000 },
     steps: {
@@ -112,6 +161,13 @@ export const PLAN_SCHEMA = {
       items: { type: "string", minLength: 1, maxLength: 500 },
     },
     target: { type: "string", minLength: 1, maxLength: 1_024 },
+    targets: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_CHANGED_FILES,
+      items: { type: "string", minLength: 1, maxLength: 1_024 },
+      uniqueItems: true,
+    },
     checkIds: {
       type: "array",
       minItems: 1,
@@ -122,6 +178,7 @@ export const PLAN_SCHEMA = {
   },
 } satisfies JsonValue;
 
+/** Retained to describe runs planned before ADR 0023. */
 export const EDIT_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -132,6 +189,50 @@ export const EDIT_SCHEMA = {
     findText: { type: "string", minLength: 1, maxLength: 262_144 },
     replaceText: { type: "string", maxLength: 262_144 },
     rationale: { type: "string", minLength: 1, maxLength: 1_000 },
+  },
+} satisfies JsonValue;
+
+/**
+ * Every property is required and optional values are nullable, because strict
+ * structured-output modes reject optional properties. Discriminant rules are
+ * enforced by `parsePatchSet` rather than by schema composition.
+ */
+export const PATCH_SET_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "edits"],
+  properties: {
+    summary: { type: "string", minLength: 1, maxLength: 1_000 },
+    edits: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_CHANGED_FILES,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["op", "path", "expectedPreimageSha256", "replacements", "content", "rationale"],
+        properties: {
+          op: { type: "string", enum: ["modify", "create", "delete"] },
+          path: { type: "string", minLength: 1, maxLength: 1_024 },
+          expectedPreimageSha256: { type: ["string", "null"] },
+          replacements: {
+            type: ["array", "null"],
+            maxItems: MAX_REPLACEMENTS_PER_FILE,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["findText", "replaceText"],
+              properties: {
+                findText: { type: "string", minLength: 1, maxLength: MAX_REPLACEMENT_TEXT_LENGTH },
+                replaceText: { type: "string", maxLength: MAX_REPLACEMENT_TEXT_LENGTH },
+              },
+            },
+          },
+          content: { type: ["string", "null"], maxLength: MAX_REPLACEMENT_TEXT_LENGTH },
+          rationale: { type: "string", minLength: 1, maxLength: 1_000 },
+        },
+      },
+    },
   },
 } satisfies JsonValue;
 
@@ -254,9 +355,11 @@ export function assertSunCeiling(ceiling: SunCeiling): void {
     );
   }
   invariant(
-    ceiling.maxFilesChanged === 1,
+    Number.isSafeInteger(ceiling.maxFilesChanged) &&
+      ceiling.maxFilesChanged >= 1 &&
+      ceiling.maxFilesChanged <= MAX_CHANGED_FILES,
     "INVALID_CEILING",
-    "Milestone 1 permits exactly one changed file",
+    `Sun ceiling maxFilesChanged must be between 1 and ${MAX_CHANGED_FILES}`,
   );
   invariant(
     Number.isFinite(ceiling.maxCostUsd) && ceiling.maxCostUsd >= 0,
@@ -323,14 +426,20 @@ function asBoundedString(
   return value;
 }
 
-function asStringArray(value: unknown, name: string, min: number, max: number): string[] {
+function asStringArray(
+  value: unknown,
+  name: string,
+  min: number,
+  max: number,
+  maxLength = 500,
+): string[] {
   invariant(Array.isArray(value), "INVALID_PROVIDER_OUTPUT", `${name} must be an array`);
   invariant(
     value.length >= min && value.length <= max,
     "INVALID_PROVIDER_OUTPUT",
     `${name} has invalid length`,
   );
-  return value.map((entry, index) => asBoundedString(entry, `${name}[${index}]`, 500));
+  return value.map((entry, index) => asBoundedString(entry, `${name}[${index}]`, maxLength));
 }
 
 export function parseProviderJson(text: string, maxBytes: number): unknown {
@@ -350,23 +459,40 @@ export function parseProviderJson(text: string, maxBytes: number): unknown {
 
 export function parsePlanProposal(
   value: unknown,
-  target: string,
+  selection: readonly string[],
   checks: readonly CheckProfile[],
 ): PlanProposal {
   const object = asObject(value, "plan");
-  const allowedKeys = new Set(["summary", "steps", "risks", "target", "checkIds"]);
+  const allowedKeys = new Set(["summary", "steps", "risks", "target", "targets", "checkIds"]);
   invariant(
     Object.keys(object).every((key) => allowedKeys.has(key)),
     "INVALID_PROVIDER_OUTPUT",
     "Plan has unknown fields",
   );
 
+  const anchor = selection[0];
+  invariant(anchor !== undefined, "INVALID_TARGET_SELECTION", "Run has no selected target");
   const proposalTarget = asBoundedString(object.target, "target", 1_024);
   invariant(
-    proposalTarget === target,
+    proposalTarget === anchor,
     "TARGET_MISMATCH",
     "Provider plan changed the operator-selected target",
   );
+
+  const selected = new Set(selection);
+  const proposalTargets = asStringArray(object.targets, "targets", 1, MAX_CHANGED_FILES, 1_024);
+  invariant(
+    proposalTargets.every((candidate) => selected.has(candidate)),
+    "TARGET_MISMATCH",
+    "Provider plan proposed a path outside the operator-selected targets",
+  );
+  invariant(
+    new Set(proposalTargets).size === proposalTargets.length,
+    "TARGET_MISMATCH",
+    "Provider plan proposed a duplicate target",
+  );
+  const targets = [...proposalTargets].sort();
+
   const checkIds = asStringArray(object.checkIds, "checkIds", 1, 8);
   const allowedChecks = new Set(checks.map((check) => check.id));
   invariant(
@@ -385,6 +511,7 @@ export function parsePlanProposal(
     steps: asStringArray(object.steps, "steps", 1, 8),
     risks: asStringArray(object.risks, "risks", 0, 6),
     target: proposalTarget,
+    targets,
     checkIds,
   };
 }
@@ -435,6 +562,242 @@ export function parseEditProposal(
   };
 }
 
+/** The worktree state a patch set is validated against, per approved path. */
+export interface PatchSetPreimage {
+  readonly exists: boolean;
+  readonly sha256: string | null;
+}
+
+function asNullableBoundedString(value: unknown, name: string, maxLength: number): string | null {
+  if (value === null) return null;
+  return asBoundedString(value, name, maxLength, true);
+}
+
+function parseFileEdit(
+  value: unknown,
+  index: number,
+  approvedTargets: ReadonlySet<string>,
+  preimages: ReadonlyMap<string, PatchSetPreimage>,
+): FileEdit {
+  const name = `edits[${index}]`;
+  const object = asObject(value, name);
+  const allowedKeys = new Set([
+    "op",
+    "path",
+    "expectedPreimageSha256",
+    "replacements",
+    "content",
+    "rationale",
+  ]);
+  invariant(
+    Object.keys(object).every((key) => allowedKeys.has(key)),
+    "INVALID_PROVIDER_OUTPUT",
+    `${name} has unknown fields`,
+  );
+
+  const op = asBoundedString(object.op, `${name}.op`, 16);
+  invariant(
+    op === "modify" || op === "create" || op === "delete",
+    "INVALID_PROVIDER_OUTPUT",
+    `${name}.op is not a supported operation`,
+  );
+
+  const editPath = assertAllowedTarget(asBoundedString(object.path, `${name}.path`, 1_024));
+  invariant(
+    approvedTargets.has(editPath),
+    "TARGET_MISMATCH",
+    "Patch set changed a path outside the approved targets",
+  );
+  const preimage = preimages.get(editPath);
+  invariant(preimage !== undefined, "TARGET_MISMATCH", "Patch set path has no approved preimage");
+
+  const rationale = asBoundedString(object.rationale, `${name}.rationale`, 1_000);
+  const expectedPreimageSha256 = asNullableBoundedString(
+    object.expectedPreimageSha256,
+    `${name}.expectedPreimageSha256`,
+    64,
+  );
+  const content = asNullableBoundedString(
+    object.content,
+    `${name}.content`,
+    MAX_REPLACEMENT_TEXT_LENGTH,
+  );
+
+  if (op === "create") {
+    invariant(!preimage.exists, "TARGET_MISMATCH", `${name} creates a path that already exists`);
+    invariant(content !== null, "INVALID_PROVIDER_OUTPUT", `${name} create has no content`);
+    invariant(
+      expectedPreimageSha256 === null,
+      "INVALID_PROVIDER_OUTPUT",
+      `${name} create must not bind a preimage`,
+    );
+    invariant(
+      object.replacements === null ||
+        (Array.isArray(object.replacements) && object.replacements.length === 0),
+      "INVALID_PROVIDER_OUTPUT",
+      `${name} create must not carry replacements`,
+    );
+    return { op: "create", path: editPath, content, rationale };
+  }
+
+  invariant(
+    preimage.exists && preimage.sha256 !== null,
+    "TARGET_MISMATCH",
+    `${name} changes a path that does not exist`,
+  );
+  invariant(
+    expectedPreimageSha256 !== null && SHA256_PATTERN.test(expectedPreimageSha256),
+    "INVALID_PROVIDER_OUTPUT",
+    `${name} preimage digest is invalid`,
+  );
+  invariant(
+    expectedPreimageSha256 === preimage.sha256,
+    "STALE_PREIMAGE",
+    `${name} is bound to the wrong preimage`,
+  );
+
+  if (op === "delete") {
+    invariant(content === null, "INVALID_PROVIDER_OUTPUT", `${name} delete must not carry content`);
+    invariant(
+      object.replacements === null ||
+        (Array.isArray(object.replacements) && object.replacements.length === 0),
+      "INVALID_PROVIDER_OUTPUT",
+      `${name} delete must not carry replacements`,
+    );
+    return { op: "delete", path: editPath, expectedPreimageSha256, rationale };
+  }
+
+  invariant(content === null, "INVALID_PROVIDER_OUTPUT", `${name} modify must not carry content`);
+  invariant(
+    Array.isArray(object.replacements),
+    "INVALID_PROVIDER_OUTPUT",
+    `${name} modify has no replacements`,
+  );
+  const rawReplacements = object.replacements;
+  invariant(
+    rawReplacements.length >= 1 && rawReplacements.length <= MAX_REPLACEMENTS_PER_FILE,
+    "INVALID_PROVIDER_OUTPUT",
+    `${name}.replacements has invalid length`,
+  );
+  const replacements: FileReplacement[] = rawReplacements.map((entry, replacementIndex) => {
+    const replacementName = `${name}.replacements[${replacementIndex}]`;
+    const replacement = asObject(entry, replacementName);
+    const replacementKeys = new Set(["findText", "replaceText"]);
+    invariant(
+      Object.keys(replacement).every((key) => replacementKeys.has(key)),
+      "INVALID_PROVIDER_OUTPUT",
+      `${replacementName} has unknown fields`,
+    );
+    return {
+      findText: asBoundedString(
+        replacement.findText,
+        `${replacementName}.findText`,
+        MAX_REPLACEMENT_TEXT_LENGTH,
+      ),
+      replaceText: asBoundedString(
+        replacement.replaceText,
+        `${replacementName}.replaceText`,
+        MAX_REPLACEMENT_TEXT_LENGTH,
+        true,
+      ),
+    };
+  });
+  return { op: "modify", path: editPath, expectedPreimageSha256, replacements, rationale };
+}
+
+export function parsePatchSet(
+  value: unknown,
+  approvedTargets: readonly string[],
+  preimages: ReadonlyMap<string, PatchSetPreimage>,
+  maxFilesChanged: number,
+): PatchSet {
+  const object = asObject(value, "patchSet");
+  const allowedKeys = new Set(["summary", "edits"]);
+  invariant(
+    Object.keys(object).every((key) => allowedKeys.has(key)),
+    "INVALID_PROVIDER_OUTPUT",
+    "Patch set has unknown fields",
+  );
+  invariant(Array.isArray(object.edits), "INVALID_PROVIDER_OUTPUT", "edits must be an array");
+  invariant(object.edits.length >= 1, "INVALID_PROVIDER_OUTPUT", "Patch set has no edits");
+  invariant(
+    object.edits.length <= Math.min(maxFilesChanged, MAX_CHANGED_FILES),
+    "FILE_BUDGET_EXCEEDED",
+    "Patch set changes more files than the ceiling permits",
+  );
+
+  const approved = new Set(approvedTargets);
+  const edits = object.edits.map((entry, index) =>
+    parseFileEdit(entry, index, approved, preimages),
+  );
+  const seen = new Set<string>();
+  for (const edit of edits) {
+    invariant(
+      !seen.has(edit.path),
+      "INVALID_PROVIDER_OUTPUT",
+      "Patch set changes the same path twice",
+    );
+    seen.add(edit.path);
+  }
+
+  return { summary: asBoundedString(object.summary, "patchSet.summary", 1_000), edits };
+}
+
+/**
+ * Resolves the bytes a single edit produces. Returns null for a delete, so a
+ * removed path is never represented as empty content.
+ */
+export function resolveFileEdit(
+  edit: FileEdit,
+  preimage: string | null,
+  maxFileBytes: number,
+): string | null {
+  if (edit.op === "delete") {
+    invariant(preimage !== null, "STALE_PREIMAGE", "Deleted path has no preimage");
+    invariant(
+      sha256(preimage) === edit.expectedPreimageSha256,
+      "STALE_PREIMAGE",
+      `Bytes changed after the patch set was proposed: ${edit.path}`,
+    );
+    return null;
+  }
+  if (edit.op === "create") {
+    invariant(edit.content.length > 0, "EMPTY_DIFF", `Created file has no content: ${edit.path}`);
+    invariant(
+      Buffer.byteLength(edit.content, "utf8") <= maxFileBytes,
+      "FILE_BUDGET_EXCEEDED",
+      `Created file exceeds the byte ceiling: ${edit.path}`,
+    );
+    return edit.content;
+  }
+
+  invariant(preimage !== null, "STALE_PREIMAGE", "Modified path has no preimage");
+  invariant(
+    sha256(preimage) === edit.expectedPreimageSha256,
+    "STALE_PREIMAGE",
+    `Bytes changed after the patch set was proposed: ${edit.path}`,
+  );
+  let result = preimage;
+  for (const [index, replacement] of edit.replacements.entries()) {
+    const first = result.indexOf(replacement.findText);
+    invariant(first >= 0, "EDIT_NO_MATCH", `Replacement ${index} does not occur in ${edit.path}`);
+    invariant(
+      result.indexOf(replacement.findText, first + 1) === -1,
+      "EDIT_AMBIGUOUS",
+      `Replacement ${index} occurs more than once in ${edit.path}`,
+    );
+    result = `${result.slice(0, first)}${replacement.replaceText}${result.slice(first + replacement.findText.length)}`;
+  }
+  invariant(result !== preimage, "EMPTY_DIFF", `Edit would not change ${edit.path}`);
+  invariant(
+    Buffer.byteLength(result, "utf8") <= maxFileBytes,
+    "FILE_BUDGET_EXCEEDED",
+    `Edited file exceeds the byte ceiling: ${edit.path}`,
+  );
+  return result;
+}
+
+/** Retained to replay runs recorded before ADR 0023. */
 export function applyExactReplacement(
   preimage: string,
   edit: EditProposal,

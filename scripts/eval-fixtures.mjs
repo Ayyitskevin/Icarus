@@ -545,6 +545,7 @@ function planResponse(scenario) {
       steps: ["Apply one exact replacement", "Run the registered verification check"],
       risks: ["The exact preimage may have changed"],
       target: scenario.target,
+      targets: [scenario.target],
       checkIds: ["verify"],
     },
   };
@@ -553,11 +554,17 @@ function planResponse(scenario) {
 function editResponse(scenario) {
   return {
     content: {
-      path: scenario.target,
-      expectedPreimageSha256: sha256(scenario.baseline),
-      findText: scenario.baseline,
-      replaceText: scenario.approved,
-      rationale: "Apply only the approved evaluation fixture change.",
+      summary: "Apply only the approved evaluation fixture change.",
+      edits: [
+        {
+          op: "modify",
+          path: scenario.target,
+          expectedPreimageSha256: sha256(scenario.baseline),
+          replacements: [{ findText: scenario.baseline, replaceText: scenario.approved }],
+          content: null,
+          rationale: "Apply only the approved evaluation fixture change.",
+        },
+      ],
     },
   };
 }
@@ -935,7 +942,7 @@ async function evaluateProductionLifecycle(scenario, contract) {
       const planned = await runtime.service.planRun({
         projectName: "golden",
         task: contract.task,
-        target: scenario.target,
+        targets: [scenario.target],
         provider: configured.provider,
       });
       assertCondition(planned.state === "awaiting_approval", "Run did not reach plan approval");
@@ -1095,7 +1102,7 @@ async function evaluateServiceRejection(scenario, contract) {
         await runtime.service.planRun({
           projectName: "golden",
           task: contract.task,
-          target: scenario.target,
+          targets: [scenario.target],
           provider: configured.provider,
         });
       } catch (error) {
@@ -1166,7 +1173,7 @@ async function evaluateProviderRecovery(scenario, contract) {
       const planned = await runtime.service.planRun({
         projectName: "golden",
         task: contract.task,
-        target: scenario.target,
+        targets: [scenario.target],
         provider: configured.provider,
       });
       assertCondition(planned.planSha256 !== null, "Recovery run did not persist a plan");
@@ -1295,7 +1302,7 @@ async function evaluateInterruptedResume(scenario, contract) {
       const planned = await runtime.service.planRun({
         projectName: "golden",
         task: contract.task,
-        target: scenario.target,
+        targets: [scenario.target],
         provider: configured.provider,
       });
       assertCondition(planned.planSha256 !== null, "Interrupted run did not persist a plan");

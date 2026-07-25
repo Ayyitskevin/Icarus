@@ -6,7 +6,7 @@ Decision records for the current milestone:
 | --- | --- | --- |
 | [0001](adr/0001-typescript-modular-monorepo.md) | TypeScript modular monorepo with headless core and CLI | Accepted |
 | [0002](adr/0002-sqlite-event-history.md) | SQLite for local control state and evidence | Accepted |
-| [0003](adr/0003-detached-worktree-single-file.md) | Detached worktree and one-file mutation boundary | Accepted |
+| [0003](adr/0003-detached-worktree-single-file.md) | Detached worktree and one-file mutation boundary; mutation boundary superseded by ADR 0023 | Partially superseded |
 | [0004](adr/0004-provider-http-adapters.md) | Provider-neutral port with real Ollama and OpenAI HTTP adapters | Accepted |
 | [0005](adr/0005-deterministic-untrusted-context.md) | Deterministic, provenance-preserving, untrusted context first | Accepted |
 | [0006](adr/0006-headless-first-slice.md) | CLI-first slice; partially superseded for the bounded local workspace by ADR 0014 | Partially superseded |
@@ -26,6 +26,7 @@ Decision records for the current milestone:
 | [0020](adr/0020-bounded-persisted-diff-review.md) | Bounded persisted diff and run-status review | Accepted |
 | [0021](adr/0021-bounded-project-catalog-and-json-responses.md) | Bounded project catalog and JSON responses | Accepted |
 | [0022](adr/0022-native-macos-windows-acceptance.md) | Explicit native macOS and Windows acceptance | Proposed — native runs pending |
+| [0023](adr/0023-transactional-multi-file-patch-sets.md) | Transactional multi-file patch sets, superseding the ADR 0003 mutation boundary | Accepted |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.

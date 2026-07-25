@@ -178,7 +178,7 @@ describe("project context preview", () => {
       git as unknown as GitController,
       "/repository",
       "a".repeat(40),
-      "src/app.ts",
+      ["src/app.ts"],
       DEFAULT_CEILING,
     );
 

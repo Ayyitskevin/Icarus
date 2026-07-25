@@ -45,6 +45,16 @@ export function createSandboxGitFixture(): SandboxGitFixture {
       }
       return SANDBOX_EDITED_TEXT;
     },
+    async readOptionalRegularUtf8File(
+      _repositoryPath: string,
+      target: string,
+    ): Promise<string | null> {
+      calls.readRegularUtf8File.push(target);
+      if (target !== SANDBOX_TARGET) {
+        throw new Error(`Unexpected target: ${target}`);
+      }
+      return SANDBOX_EDITED_TEXT;
+    },
   };
   return { git: fake as unknown as GitController, calls };
 }

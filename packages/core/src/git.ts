@@ -46,6 +46,12 @@ export interface PrivateWorkspace {
   readonly worktreePath: string;
 }
 
+/** One file's desired worktree state; null content removes the path. */
+export interface WorktreeFileWrite {
+  readonly path: string;
+  readonly content: string | null;
+}
+
 function gitEnvironment(home: string): Record<string, string> {
   return {
     PATH: process.env.PATH ?? "",
@@ -807,6 +813,221 @@ export class GitController {
     }
   }
 
+  /**
+   * Reads a worktree file, returning null when the path does not exist. Every
+   * other safety rule of `readRegularUtf8File` still applies, so an unsafe path
+   * fails rather than reporting absence.
+   */
+  async readOptionalRegularUtf8File(
+    worktreePath: string,
+    target: string,
+    maxBytes: number,
+  ): Promise<string | null> {
+    const safeTarget = assertRepositoryRelativePath(target);
+    const targetPath = path.join(worktreePath, ...safeTarget.split("/"));
+    try {
+      await lstat(targetPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+    return this.readRegularUtf8File(worktreePath, target, maxBytes);
+  }
+
+  async #assertSafeWriteParents(worktreePath: string, safeTarget: string): Promise<void> {
+    let current = worktreePath;
+    for (const component of safeTarget.split("/").slice(0, -1)) {
+      current = path.join(current, component);
+      let componentStat: Stats;
+      try {
+        componentStat = await lstat(current);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          await mkdir(current, { mode: 0o700 });
+          componentStat = await lstat(current);
+        } else {
+          throw error;
+        }
+      }
+      invariant(
+        componentStat.isDirectory() && !componentStat.isSymbolicLink(),
+        "SYMLINK_DENIED",
+        "Target parent is unsafe",
+      );
+    }
+  }
+
+  async #stageContent(privateRunRoot: string, content: string, mode: number): Promise<string> {
+    const temporaryPath = path.join(privateRunRoot, `.icarus-write-${randomUUID()}.tmp`);
+    const handle = await open(
+      temporaryPath,
+      fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
+      0o600,
+    );
+    try {
+      await handle.writeFile(content, "utf8");
+      await handle.chmod(mode);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    return temporaryPath;
+  }
+
+  /**
+   * Applies several file writes as one unit (ADR 0023). Every path is validated
+   * and every replacement byte is staged outside the worktree before the first
+   * visible change, and a failure part-way through restores the paths already
+   * applied. A process death during application is not compensated here; the
+   * persisted tree checkpoint is what recovers it.
+   */
+  async applyFileWrites(
+    worktreePath: string,
+    writes: readonly WorktreeFileWrite[],
+    maxFileBytes: number,
+  ): Promise<void> {
+    const rootStat = await lstat(worktreePath);
+    invariant(
+      rootStat.isDirectory() &&
+        !rootStat.isSymbolicLink() &&
+        (await realpath(worktreePath)) === path.resolve(worktreePath),
+      "WORKSPACE_IDENTITY_CHANGED",
+      "Private worktree root is unsafe",
+    );
+    const privateRunRoot = path.dirname(path.resolve(worktreePath));
+    const privateRunRootStat = await lstat(privateRunRoot);
+    invariant(
+      privateRunRootStat.isDirectory() &&
+        !privateRunRootStat.isSymbolicLink() &&
+        (await realpath(privateRunRoot)) === privateRunRoot,
+      "WORKSPACE_IDENTITY_CHANGED",
+      "Private run root is unsafe",
+    );
+
+    const ordered = [...writes].sort((left, right) =>
+      left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+    );
+    const staged: {
+      readonly safeTarget: string;
+      readonly targetPath: string;
+      readonly desired: string | null;
+      readonly prior: string | null;
+      readonly priorMode: number;
+      readonly temporaryPath: string | null;
+    }[] = [];
+
+    try {
+      for (const write of ordered) {
+        const safeTarget = assertRepositoryRelativePath(write.path);
+        const targetPath = path.join(worktreePath, ...safeTarget.split("/"));
+        const prior = await this.readOptionalRegularUtf8File(
+          worktreePath,
+          safeTarget,
+          maxFileBytes,
+        );
+        let priorMode = 0o644;
+        if (prior !== null) {
+          const targetStat = await lstat(targetPath);
+          invariant(
+            targetStat.isFile() && !targetStat.isSymbolicLink(),
+            "SPECIAL_FILE_DENIED",
+            "Target is unsafe",
+          );
+          invariant(
+            targetStat.nlink === 1,
+            "HARDLINK_DENIED",
+            "Hard-linked targets are not supported",
+          );
+          priorMode = targetStat.mode & 0o777;
+        } else {
+          invariant(
+            write.content !== null,
+            "SPECIAL_FILE_DENIED",
+            `Cannot remove a path that does not exist: ${safeTarget}`,
+          );
+        }
+        await this.#assertSafeWriteParents(worktreePath, safeTarget);
+        const temporaryPath =
+          write.content === null
+            ? null
+            : await this.#stageContent(privateRunRoot, write.content, priorMode);
+        staged.push({
+          safeTarget,
+          targetPath,
+          desired: write.content,
+          prior,
+          priorMode,
+          temporaryPath,
+        });
+      }
+
+      const applied: typeof staged = [];
+      try {
+        for (const entry of staged) {
+          if (entry.temporaryPath === null) {
+            await unlink(entry.targetPath);
+          } else {
+            await rename(entry.temporaryPath, entry.targetPath);
+          }
+          applied.push(entry);
+        }
+      } catch (error) {
+        for (const entry of [...applied].reverse()) {
+          try {
+            if (entry.prior === null) {
+              await unlink(entry.targetPath).catch(() => undefined);
+            } else {
+              const compensation = await this.#stageContent(
+                privateRunRoot,
+                entry.prior,
+                entry.priorMode,
+              );
+              await rename(compensation, entry.targetPath);
+            }
+          } catch {
+            // Compensation is best effort. The persisted tree checkpoint
+            // remains the authoritative recovery path, and verification will
+            // refuse to present an unexpected worktree as a result.
+          }
+        }
+        throw error;
+      }
+    } finally {
+      for (const entry of staged) {
+        if (entry.temporaryPath !== null) {
+          await unlink(entry.temporaryPath).catch(() => undefined);
+        }
+      }
+    }
+  }
+
+  /**
+   * Records intent-to-add entries so `git diff` renders created files. This
+   * writes the private worktree's own index; the registered source checkout is
+   * never touched.
+   */
+  async stageIntentToAdd(
+    worktreePath: string,
+    paths: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (paths.length === 0) return;
+    await this.#assertNoUnsafeRepositoryConfiguration(worktreePath, signal);
+    await this.#run(
+      worktreePath,
+      ["add", "--intent-to-add", "--", ...paths.map(assertRepositoryRelativePath)],
+      signal,
+    );
+  }
+
+  /** Clears index entries so a rolled-back worktree reports clean. */
+  async resetIndex(worktreePath: string, signal?: AbortSignal): Promise<void> {
+    await this.#assertNoUnsafeRepositoryConfiguration(worktreePath, signal);
+    await this.#run(worktreePath, ["reset", "--quiet", "--"], signal);
+  }
+
   async changedPaths(worktreePath: string, signal?: AbortSignal): Promise<string[]> {
     await this.#assertNoUnsafeRepositoryConfiguration(worktreePath, signal);
     const output = await this.#run(
@@ -820,14 +1041,23 @@ export class GitController {
 
   async diff(
     worktreePath: string,
-    target: string,
+    targets: readonly string[],
     maxBytes: number,
     signal?: AbortSignal,
   ): Promise<string> {
+    invariant(targets.length > 0, "EMPTY_DIFF", "Diff requires at least one path");
     await this.#assertNoUnsafeRepositoryConfiguration(worktreePath, signal);
     const output = await this.#run(
       worktreePath,
-      ["diff", "--binary", "--no-ext-diff", "--no-textconv", "--no-renames", "--", target],
+      [
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-renames",
+        "--",
+        ...[...targets].sort().map(assertRepositoryRelativePath),
+      ],
       signal,
     );
     invariant(

@@ -30,7 +30,7 @@ export interface CheckRunInput {
   readonly runId: string;
   readonly worktreePath: string;
   readonly baseCommit: string;
-  readonly target: string;
+  readonly targets: readonly string[];
   readonly checks: readonly CheckProfile[];
   readonly sandbox: SandboxProfile;
   readonly ceiling: SunCeiling;
@@ -74,7 +74,7 @@ async function createReadOnlySnapshot(
   const directories = new Set<string>([snapshotRoot]);
   const writtenFiles: { path: string; executable: boolean }[] = [];
   let totalBytes = 0;
-  let foundTarget = false;
+  const observedTargets = new Set<string>();
 
   try {
     for (const entry of tree) {
@@ -97,23 +97,28 @@ async function createReadOnlySnapshot(
         `Secret-shaped tracked path is denied in the check snapshot: ${entry.path}`,
       );
 
-      const bytes =
-        entry.path === input.target
-          ? Buffer.from(
-              await git.readRegularUtf8File(
-                input.worktreePath,
-                input.target,
-                Math.min(input.ceiling.maxFileBytes, MAX_TRACKED_TREE_FILE_BYTES),
-              ),
-              "utf8",
-            )
-          : await git.readBlob(
-              input.worktreePath,
-              entry.objectId,
-              MAX_TRACKED_TREE_FILE_BYTES,
-              input.signal,
-            );
-      foundTarget ||= entry.path === input.target;
+      const isTarget = input.targets.includes(entry.path);
+      let bytes: Buffer;
+      if (isTarget) {
+        const worktreeContent = await git.readOptionalRegularUtf8File(
+          input.worktreePath,
+          entry.path,
+          Math.min(input.ceiling.maxFileBytes, MAX_TRACKED_TREE_FILE_BYTES),
+        );
+        observedTargets.add(entry.path);
+        if (worktreeContent === null) {
+          // The patch set deleted this path; the snapshot must not contain it.
+          continue;
+        }
+        bytes = Buffer.from(worktreeContent, "utf8");
+      } else {
+        bytes = await git.readBlob(
+          input.worktreePath,
+          entry.objectId,
+          MAX_TRACKED_TREE_FILE_BYTES,
+          input.signal,
+        );
+      }
       invariant(
         !containsSecretShapedContent(bytes),
         "SNAPSHOT_SECRET_DETECTED",
@@ -140,11 +145,46 @@ async function createReadOnlySnapshot(
       await writeFile(destination, bytes, { flag: "wx", mode: 0o600 });
       writtenFiles.push({ path: destination, executable: entry.mode === "100755" });
     }
-    invariant(
-      foundTarget,
-      "TARGET_NOT_TRACKED",
-      "Approved target is missing from the sandbox snapshot",
-    );
+    // Paths the patch set created do not exist in the pinned tree, so they are
+    // materialized from the private worktree after the tree walk.
+    for (const target of input.targets) {
+      if (observedTargets.has(target)) continue;
+      const worktreeContent = await git.readOptionalRegularUtf8File(
+        input.worktreePath,
+        target,
+        Math.min(input.ceiling.maxFileBytes, MAX_TRACKED_TREE_FILE_BYTES),
+      );
+      invariant(
+        worktreeContent !== null,
+        "TARGET_NOT_TRACKED",
+        `Approved target is missing from the sandbox snapshot: ${target}`,
+      );
+      const bytes = Buffer.from(worktreeContent, "utf8");
+      invariant(
+        !containsSecretShapedContent(bytes),
+        "SNAPSHOT_SECRET_DETECTED",
+        `Secret-shaped tracked content is denied in the check snapshot: ${target}`,
+      );
+      totalBytes += bytes.length;
+      invariant(
+        totalBytes <= MAX_TRACKED_TREE_BYTES,
+        "SNAPSHOT_BUDGET_EXCEEDED",
+        "Tracked repository snapshot exceeds the byte ceiling",
+      );
+      const destination = path.join(snapshotRoot, ...target.split("/"));
+      const parent = path.dirname(destination);
+      await mkdir(parent, { recursive: true, mode: 0o700 });
+      let current = parent;
+      while (current.startsWith(`${snapshotRoot}${path.sep}`)) {
+        directories.add(current);
+        if (current === snapshotRoot) {
+          break;
+        }
+        current = path.dirname(current);
+      }
+      await writeFile(destination, bytes, { flag: "wx", mode: 0o600 });
+      writtenFiles.push({ path: destination, executable: false });
+    }
 
     for (const file of writtenFiles) {
       await chmod(file.path, file.executable ? 0o555 : 0o444);

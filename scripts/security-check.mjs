@@ -47,6 +47,8 @@ const workspaceUiSources = await collectSources(
   (name) => name.endsWith(".ts") || name.endsWith(".tsx"),
 );
 const providerSource = await readFile("packages/core/src/providers.ts", "utf8");
+const policySource = await readFile("packages/core/src/policy.ts", "utf8");
+const serviceSource = await readFile("packages/core/src/service.ts", "utf8");
 const runtimeSource = await readFile("packages/core/src/runtime.ts", "utf8");
 const storeSource = await readFile("packages/core/src/store.ts", "utf8");
 const verificationProjectionSource = await readFile(
@@ -402,7 +404,44 @@ const assertions = {
     storeSource.includes('"DATABASE_MIGRATION_REQUIRED"') &&
     cliSource.includes("ICARUS_APPROVE_SCHEMA_MIGRATION") &&
     cliSource.includes('"approval-index-v1"') &&
-    cliSource.includes("allowApprovalIndexMigration: approvalIndexMigrationApproved()"),
+    cliSource.includes("allowApprovalIndexMigration: migrationApproval.approvalIndex"),
+  patchSetMigrationHumanGated:
+    storeSource.includes("allowPatchSetMigration") &&
+    storeSource.includes("function inspectPatchSetSchema") &&
+    storeSource.includes("PRAGMA table_info('") &&
+    storeSource.includes("expected.columns.every((column, index) => columns[index] === column)") &&
+    storeSource.includes(
+      "Patch-set migration requires a state backup and explicit operator approval",
+    ) &&
+    cliSource.includes('"patch-set-v2"') &&
+    cliSource.includes("allowPatchSetMigration: migrationApproval.patchSet"),
+  patchSetBoundsEveryPathAndOperation: [
+    "approvedTargets.has(editPath)",
+    "Patch set changed a path outside the approved targets",
+    "assertAllowedTarget(asBoundedString(object.path",
+    "Patch set changes the same path twice",
+    "FILE_BUDGET_EXCEEDED",
+    "STALE_PREIMAGE",
+  ].every((fragment) => policySource.includes(fragment)),
+  patchSetApplicationStagesBeforeApplying:
+    gitSource.includes("async applyFileWrites(") &&
+    gitSource.includes("await this.#stageContent(privateRunRoot") &&
+    gitSource.includes("const privateRunRoot = path.dirname(path.resolve(worktreePath))") &&
+    gitSource.includes("for (const entry of [...applied].reverse())"),
+  patchSetVerificationRequiresExactPathSet:
+    serviceSource.includes("samePathSet(preflightChangedPaths, patchPaths)") &&
+    serviceSource.includes("samePathSet(finalChangedPaths, patchPaths)") &&
+    serviceSource.includes("samePathSet(changedPaths, patchPaths)") &&
+    storeSource.includes("this.#changedPathsMatchPatchSet(current, verification.changedPaths)"),
+  patchSetIntentPrecedesWorktreeWrites:
+    serviceSource.includes("run = this.#store.recordPatchSetIntent(runId, patchSet, files)") &&
+    serviceSource.indexOf("recordPatchSetIntent(runId, patchSet, files)") <
+      serviceSource.indexOf("await this.#git.applyFileWrites(worktreePath, pending"),
+  anthropicCredentialsAreOriginPinned:
+    providerSource.includes('"ANTHROPIC_ORIGIN_DENIED"') &&
+    providerSource.includes('url.hostname.toLowerCase() === "api.anthropic.com"') &&
+    providerSource.includes('"PROVIDER_SECRET_DETECTED"') &&
+    providerSource.includes("!text.includes(this.#apiKey)"),
   workspaceApprovalProjectionFailsClosed: [
     "runId === expectedRunId",
     "APPROVAL_KINDS.has",
@@ -444,20 +483,26 @@ const assertions = {
     "Array.isArray(verification.changedPaths)",
     "SHA256_PATTERN.test(verification.diffSha256)",
     "SHA256_PATTERN.test(verification.checkpointSha256)",
-    "verification.changedPaths.length !== 1",
-    "verification.changedPaths[0] !== run.target",
+    "verification.changedPaths.length === 0",
+    "verification.changedPaths.length > project.ceiling.maxFilesChanged",
+    "new Set(verification.changedPaths).size !== verification.changedPaths.length",
+    "patchSetCoversChangedPaths(run, verification.changedPaths)",
+    "changedPaths.length === 1 && changedPaths[0] === run.target",
     'Buffer.byteLength(run.diff, "utf8")',
     "byteCount > project.ceiling.maxDiffBytes",
     'createHash("sha256").update(run.diff, "utf8").digest("hex")',
     "displayedSha256 !== verification.diffSha256",
     "decodeGitPathToken",
     'new TextDecoder("utf-8", { fatal: true })',
-    "assertDiffHeaderTarget(lines[0].slice(11), target)",
-    'assertFileHeaderTarget(lines[2] ?? "", "--- ", target)',
-    'assertFileHeaderTarget(lines[3] ?? "", "+++ ", target)',
+    "resolveDiffHeaderTarget(header.slice(11), expected)",
+    "if (seen.has(target)) invalidPersistedDiff();",
+    "if (seen.size !== expected.size) invalidPersistedDiff();",
+    'assertFileHeaderTarget(lines[index] ?? "", "--- ", target)',
+    'assertFileHeaderTarget(lines[index] ?? "", "+++ ", target)',
+    "if (!expected.has(target)) invalidPersistedDiff();",
     `value === \`a/\${target} b/\${target}\``,
     `value === \`\${expected}\\t\``,
-    "DIFF_INDEX_PATTERN.test(lines[1]",
+    "DIFF_INDEX_PATTERN.test(lines[index]",
     "DIFF_HUNK_PATTERN.exec(lines[index]",
     "oldLines > expectedOldLines",
     "newLines > expectedNewLines",

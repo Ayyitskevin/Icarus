@@ -593,29 +593,48 @@ export async function assembleContext(
   git: GitController,
   repositoryPath: string,
   baseCommit: string,
-  target: string,
+  selection: readonly string[],
   ceiling: SunCeiling,
   signal?: AbortSignal,
 ): Promise<AssembledContext> {
+  const anchor = selection[0];
+  invariant(anchor !== undefined, "INVALID_TARGET_SELECTION", "Run has no selected target");
+  const targets = [...new Set(selection)].sort();
   const tree = await git.listTree(repositoryPath, baseCommit, signal);
   invariant(
     tree.every((entry) => entry.type !== "commit"),
     "SUBMODULE_DENIED",
-    "Milestone 1 does not support repositories containing submodules",
+    "Icarus does not support repositories containing submodules",
   );
   const modelVisibleTextPaths = await assertTrackedTreeSafe(git, repositoryPath, tree, signal);
   const byPath = new Map(tree.map((entry) => [entry.path, entry]));
-  const targetEntry = byPath.get(target);
-  invariant(targetEntry?.type === "blob", "TARGET_NOT_TRACKED", "Target is not a tracked file");
+
+  // A selected path that is absent at the base commit is a legal create
+  // candidate (ADR 0023) and contributes no context bytes. Every selected path
+  // that does exist must be an ordinary, model-visible, non-executable file.
+  const existingTargets: TreeEntry[] = [];
+  for (const target of targets) {
+    const targetEntry = byPath.get(target);
+    if (targetEntry === undefined) {
+      continue;
+    }
+    invariant(targetEntry.type === "blob", "TARGET_NOT_TRACKED", "Target is not a tracked file");
+    invariant(
+      targetEntry.mode === "100644",
+      "TARGET_MODE_DENIED",
+      "Target must be a non-executable regular file",
+    );
+    invariant(
+      !isWorkspaceContextPathExcluded(target),
+      "PROTECTED_PATH",
+      "Target is excluded from model context",
+    );
+    existingTargets.push(targetEntry);
+  }
   invariant(
-    targetEntry.mode === "100644",
-    "TARGET_MODE_DENIED",
-    "Target must be a non-executable regular file",
-  );
-  invariant(
-    !isWorkspaceContextPathExcluded(target),
-    "PROTECTED_PATH",
-    "Target is excluded from model context",
+    byPath.has(anchor),
+    "TARGET_NOT_TRACKED",
+    "The first selected target must exist at the base commit",
   );
 
   const visiblePaths = tree
@@ -660,8 +679,10 @@ export async function assembleContext(
     included.add(entry.path);
   };
 
-  await addEntry(targetEntry, "target");
-  for (const rulePath of ancestorRulePaths(target)) {
+  for (const targetEntry of existingTargets) {
+    await addEntry(targetEntry, "target");
+  }
+  for (const rulePath of ancestorRulePaths(anchor)) {
     const entry = byPath.get(rulePath);
     if (entry?.type === "blob" && modelVisibleTextPaths.has(entry.path)) {
       await addEntry(entry, rulePath === "AGENTS.md" ? "root_rules" : "target_rules");
@@ -691,7 +712,7 @@ export async function assembleContext(
   const bundle: ContextBundle = {
     auditPolicyVersion: CONTEXT_AUDIT_POLICY_VERSION,
     baseCommit,
-    target,
+    targets,
     repositoryMap: selectedMap,
     entries,
     totalBytes,
@@ -699,7 +720,7 @@ export async function assembleContext(
   const manifest: ContextManifest = {
     auditPolicyVersion: CONTEXT_AUDIT_POLICY_VERSION,
     baseCommit,
-    target,
+    targets,
     repositoryMap: selectedMap,
     entries: entries.map(({ path: entryPath, reason, bytes, sha256: entrySha256 }) => ({
       path: entryPath,

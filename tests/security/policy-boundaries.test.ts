@@ -376,6 +376,9 @@ describe("host-owned policy boundaries", () => {
       async readRegularUtf8File(): Promise<string> {
         return "ordinary target text\n";
       },
+      async readOptionalRegularUtf8File(): Promise<string | null> {
+        return "ordinary target text\n";
+      },
       async readBlob(_repository: string, objectId: string): Promise<Buffer> {
         if (objectId !== npmrcObjectId) throw new Error("Unexpected sandbox blob");
         return Buffer.from(npmrc);
@@ -389,7 +392,7 @@ describe("host-owned policy boundaries", () => {
         runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         worktreePath: path.join(root, "worktree"),
         baseCommit: "b".repeat(40),
-        target,
+        targets: [target],
         checks: [{ id: "verify", name: "Verify", argv: ["node", "--version"] }],
         sandbox: {
           image: `node:test@sha256:${"c".repeat(64)}`,
@@ -425,6 +428,9 @@ describe("host-owned policy boundaries", () => {
       async readRegularUtf8File(): Promise<string> {
         return "ordinary target text\n";
       },
+      async readOptionalRegularUtf8File(): Promise<string | null> {
+        return "ordinary target text\n";
+      },
       async readBlob(_repository: string, objectId: string): Promise<Buffer> {
         if (objectId !== secretObjectId) throw new Error("Unexpected sandbox blob");
         return Buffer.from(`${assignment("NPM_TOKEN", secret)}\n`);
@@ -438,7 +444,7 @@ describe("host-owned policy boundaries", () => {
         runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         worktreePath: path.join(root, "worktree"),
         baseCommit: "b".repeat(40),
-        target,
+        targets: [target],
         checks: [{ id: "verify", name: "Verify", argv: ["node", "--version"] }],
         sandbox: {
           image: `node:test@sha256:${"c".repeat(64)}`,

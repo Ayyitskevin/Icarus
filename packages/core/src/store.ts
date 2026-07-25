@@ -8,14 +8,17 @@ import { digestJson, sha256 } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
 import {
   assertCheckProfiles,
+  assertRepositoryRelativePath,
   assertSandboxProfile,
   assertSunCeiling,
   checkpointDigest,
   planApprovalDigest,
+  treeCheckpointDigest,
 } from "./policy.js";
 import { assertTransition } from "./state-machine.js";
 import type {
   ApprovalRecord,
+  CheckpointFile,
   CheckProfile,
   ContextManifest,
   EditProposal,
@@ -24,6 +27,7 @@ import type {
   JsonValue,
   OperationFinish,
   OperationToken,
+  PatchSet,
   PlanProposal,
   ProjectRecord,
   ProviderConfig,
@@ -265,6 +269,28 @@ CREATE INDEX IF NOT EXISTS approvals_by_run
 ON approvals(run_id);
 `;
 
+/**
+ * ADR 0023 storage. Both objects are additive tables, so the migration never
+ * rewrites or alters an existing row. Runs persisted under schema v1 keep their
+ * single-file `edit_json` and checkpoint columns and remain readable.
+ */
+const PATCH_SET_SCHEMA = `
+CREATE TABLE IF NOT EXISTS patch_sets (
+  run_id TEXT PRIMARY KEY REFERENCES runs(id),
+  patch_set_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS checkpoint_files (
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  path TEXT NOT NULL,
+  op TEXT NOT NULL,
+  baseline_base64 TEXT,
+  approved_base64 TEXT,
+  PRIMARY KEY (run_id, path),
+  CHECK (op IN ('modify', 'create', 'delete'))
+);
+`;
+
 type ApprovalIndexStatus = "not_applicable" | "missing" | "valid";
 
 function inspectApprovalIndex(databasePath: string): ApprovalIndexStatus {
@@ -324,6 +350,68 @@ function inspectApprovalIndex(databasePath: string): ApprovalIndexStatus {
       "DATABASE_ERROR",
       "Approval index columns are invalid",
     );
+    return "valid";
+  } finally {
+    database.close();
+  }
+}
+
+type PatchSetSchemaStatus = "not_applicable" | "missing" | "valid";
+
+/**
+ * Read-only shape inspection performed before the writable handle is opened, so
+ * a refusal cannot have mutated the database. A database that predates the
+ * `runs` table is not a migration candidate; a database that has `runs` but
+ * lacks the ADR 0023 tables requires explicit operator approval.
+ */
+function inspectPatchSetSchema(databasePath: string): PatchSetSchemaStatus {
+  if (!existsSync(databasePath)) return "not_applicable";
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const runsTableExists =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runs'")
+        .get() !== undefined;
+    if (!runsTableExists) return "not_applicable";
+
+    const present = new Set(
+      (
+        database
+          .prepare(
+            `SELECT name FROM sqlite_master WHERE type = 'table'
+             AND name IN ('patch_sets', 'checkpoint_files')`,
+          )
+          .all() as unknown[]
+      ).map((entry) => text(row(entry, "patch set table").name, "patch set table.name")),
+    );
+    if (present.size === 0) return "missing";
+    invariant(
+      present.has("patch_sets") && present.has("checkpoint_files"),
+      "DATABASE_ERROR",
+      "Patch-set schema is partially present",
+    );
+
+    const expectedTables = [
+      { table: "patch_sets", columns: ["run_id", "patch_set_json", "created_at"] },
+      {
+        table: "checkpoint_files",
+        columns: ["run_id", "path", "op", "baseline_base64", "approved_base64"],
+      },
+    ] as const;
+    for (const expected of expectedTables) {
+      const columns = (
+        database.prepare(`PRAGMA table_info('${expected.table}')`).all() as unknown[]
+      ).map((entry) =>
+        text(row(entry, `${expected.table} column`).name, `${expected.table} column.name`),
+      );
+      invariant(
+        columns.length === expected.columns.length &&
+          expected.columns.every((column, index) => columns[index] === column),
+        "DATABASE_ERROR",
+        `Patch-set table ${expected.table} has an invalid shape`,
+      );
+    }
     return "valid";
   } finally {
     database.close();
@@ -793,7 +881,12 @@ export interface NewRunInput {
   readonly id: string;
   readonly projectId: string;
   readonly task: string;
-  readonly target: string;
+  /**
+   * The operator's candidate selection (ADR 0023). The first entry anchors the
+   * rules chain and is persisted as the run's target column; the complete
+   * selection travels in the context manifest.
+   */
+  readonly targets: readonly string[];
   readonly provider: ProviderConfig;
 }
 
@@ -885,6 +978,7 @@ export class IcarusStore {
       id?: () => string;
       busyTimeoutMs?: number;
       allowApprovalIndexMigration?: boolean;
+      allowPatchSetMigration?: boolean;
     } = {},
   ) {
     const parent = path.dirname(databasePath);
@@ -907,6 +1001,13 @@ export class IcarusStore {
         "Approval index migration requires a state backup and explicit operator approval",
       );
     }
+    const patchSetStatus = inspectPatchSetSchema(databasePath);
+    if (patchSetStatus === "missing" && options.allowPatchSetMigration !== true) {
+      throw new IcarusError(
+        "DATABASE_MIGRATION_REQUIRED",
+        "Patch-set migration requires a state backup and explicit operator approval",
+      );
+    }
     this.#database = new Database(databasePath);
     chmodSync(databasePath, 0o600);
     this.#database.pragma(`busy_timeout = ${busyTimeoutMs}`);
@@ -915,6 +1016,7 @@ export class IcarusStore {
     this.#database.pragma("synchronous = FULL");
     this.#database.exec(SCHEMA);
     this.#database.exec(APPROVAL_INDEX_SCHEMA);
+    this.#database.exec(PATCH_SET_SCHEMA);
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#id = options.id ?? randomUUID;
   }
@@ -1202,10 +1304,22 @@ export class IcarusStore {
       "Run ID is invalid",
     );
     const now = this.#now();
+    const targets = [...new Set(input.targets)].sort();
+    const anchor = input.targets[0];
+    invariant(
+      anchor !== undefined && targets.length === input.targets.length,
+      "INVALID_TARGET_SELECTION",
+      "Run target selection must be a non-empty set of unique paths",
+    );
+    invariant(
+      targets.length <= project.ceiling.maxFilesChanged,
+      "FILE_BUDGET_EXCEEDED",
+      "Run selects more targets than the ceiling permits",
+    );
     const emptyContext: ContextManifest = {
       auditPolicyVersion: CONTEXT_AUDIT_POLICY_VERSION,
       baseCommit: "",
-      target: input.target,
+      targets,
       repositoryMap: [],
       entries: [],
       totalBytes: 0,
@@ -1223,7 +1337,7 @@ export class IcarusStore {
           id,
           input.projectId,
           input.task,
-          input.target,
+          anchor,
           json(input.provider),
           "",
           json(emptyContext),
@@ -1234,7 +1348,7 @@ export class IcarusStore {
         );
       this.#appendEvent(id, "run.created", {
         state: "preparing",
-        target: input.target,
+        target: anchor,
       });
     });
     transaction();
@@ -1289,7 +1403,9 @@ export class IcarusStore {
       invariant(current.state === "preparing", "INVALID_STATE", "Run is not being prepared");
       invariant(current.baseCommit.length > 0, "MISSING_BASE", "Run base is not pinned");
       invariant(
-        context.baseCommit === current.baseCommit && context.target === current.target,
+        context.baseCommit === current.baseCommit &&
+          context.targets.length === current.context.targets.length &&
+          context.targets.every((target, index) => target === current.context.targets[index]),
         "CONTEXT_MISMATCH",
         "Context does not match the prepared run",
       );
@@ -1345,7 +1461,7 @@ export class IcarusStore {
       contextSha256: text(value.context_sha256, "run.context_sha256"),
       plan: nullableJson<PlanProposal>(value.plan_json, "run.plan_json"),
       planSha256: nullableText(value.plan_sha256, "run.plan_sha256"),
-      edit: nullableJson<EditProposal>(value.edit_json, "run.edit_json"),
+      patchSet: this.#readPatchSet(id, value),
       cachePath: nullableText(value.cache_path, "run.cache_path"),
       worktreePath: nullableText(value.worktree_path, "run.worktree_path"),
       baselineBase64: nullableText(value.baseline_base64, "run.baseline_base64"),
@@ -1524,7 +1640,7 @@ export class IcarusStore {
           task: current.task,
           baseCommit: current.baseCommit,
           contextSha256: current.contextSha256,
-          target: current.target,
+          targets: current.context.targets,
           provider: current.provider,
           checks: project.checks,
           sandbox: project.sandbox,
@@ -1665,7 +1781,7 @@ export class IcarusStore {
     runId: string,
     cachePath: string,
     worktreePath: string,
-    baselineBase64: string,
+    baselineBase64: string | null,
   ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
@@ -1683,24 +1799,130 @@ export class IcarusStore {
     return this.getRun(runId);
   }
 
-  recordEditIntent(runId: string, edit: EditProposal, approvedBase64: string): RunRecord {
+  /**
+   * Persists the proposed change and every affected path's baseline and
+   * approved bytes in one transaction, before any worktree byte is written, so
+   * an interrupted application is always recoverable from durable state.
+   */
+  recordPatchSetIntent(
+    runId: string,
+    patchSet: PatchSet,
+    files: readonly CheckpointFile[],
+  ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
       invariant(current.state === "running", "INVALID_STATE", "Run is not executing");
+      invariant(
+        current.plan !== null,
+        "MISSING_PLAN",
+        "Patch set intent requires an approved plan",
+      );
+      const approved = new Set(current.plan.targets);
+      invariant(
+        patchSet.edits.every((edit) => approved.has(edit.path)),
+        "TARGET_MISMATCH",
+        "Patch set changes a path outside the approved targets",
+      );
+      const project = this.getProject(current.projectId);
+      invariant(
+        patchSet.edits.length <= project.ceiling.maxFilesChanged,
+        "FILE_BUDGET_EXCEEDED",
+        "Patch set changes more files than the ceiling permits",
+      );
+      const editPaths = patchSet.edits.map((edit) => edit.path).sort();
+      const filePaths = files.map((file) => file.path).sort();
+      invariant(
+        editPaths.length === filePaths.length &&
+          editPaths.every((editPath, index) => editPath === filePaths[index]),
+        "CHECKPOINT_MISMATCH",
+        "Checkpoint files do not match the patch set paths",
+      );
+
+      const existing = this.#database
+        .prepare("SELECT 1 FROM patch_sets WHERE run_id = ?")
+        .get(runId);
+      invariant(
+        existing === undefined,
+        "IMMUTABLE_ARTIFACT_CONFLICT",
+        "A patch set is already recorded for this run",
+      );
+      const now = this.#now();
+      this.#database
+        .prepare("INSERT INTO patch_sets (run_id, patch_set_json, created_at) VALUES (?, ?, ?)")
+        .run(runId, json(patchSet), now);
+      const insertFile = this.#database.prepare(
+        `INSERT INTO checkpoint_files (run_id, path, op, baseline_base64, approved_base64)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
+      for (const file of files) {
+        insertFile.run(runId, file.path, file.op, file.baselineBase64, file.approvedBase64);
+      }
       const result = this.#database
         .prepare(
-          `UPDATE runs SET edit_json = ?, approved_base64 = ?, version = version + 1,
-           updated_at = ? WHERE id = ? AND state = 'running'`,
+          `UPDATE runs SET version = version + 1, updated_at = ?
+           WHERE id = ? AND state = 'running'`,
         )
-        .run(json(edit), approvedBase64, this.#now(), runId);
+        .run(now, runId);
       invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
-      this.#appendEvent(runId, "edit.intent_recorded", {
-        path: edit.path,
-        expectedPreimageSha256: edit.expectedPreimageSha256,
+      this.#appendEvent(runId, "patch_set.intent_recorded", {
+        paths: editPaths,
+        operations: patchSet.edits.map((edit) => edit.op),
       });
     });
     transaction();
     return this.getRun(runId);
+  }
+
+  listCheckpointFiles(runId: string): CheckpointFile[] {
+    const rows = this.#database
+      .prepare(
+        `SELECT path, op, baseline_base64, approved_base64 FROM checkpoint_files
+         WHERE run_id = ? ORDER BY path ASC`,
+      )
+      .all(runId) as unknown[];
+    return rows.map((entry) => {
+      const value = row(entry, "checkpoint file");
+      const op = text(value.op, "checkpoint file.op");
+      invariant(
+        op === "modify" || op === "create" || op === "delete",
+        "DATABASE_ERROR",
+        "checkpoint file.op is invalid",
+      );
+      return {
+        path: assertRepositoryRelativePath(text(value.path, "checkpoint file.path")),
+        op,
+        baselineBase64: nullableText(value.baseline_base64, "checkpoint file.baseline_base64"),
+        approvedBase64: nullableText(value.approved_base64, "checkpoint file.approved_base64"),
+      };
+    });
+  }
+
+  #readPatchSet(runId: string, value: Row): PatchSet | null {
+    const stored = this.#database
+      .prepare("SELECT patch_set_json FROM patch_sets WHERE run_id = ?")
+      .get(runId);
+    if (stored !== undefined) {
+      return parseJson<PatchSet>(
+        row(stored, "patch set").patch_set_json,
+        "patch_sets.patch_set_json",
+      );
+    }
+    // Schema v1 rows are presented as the equivalent single modify edit rather
+    // than rewritten in place (ADR 0023).
+    const legacy = nullableJson<EditProposal>(value.edit_json, "run.edit_json");
+    if (legacy === null) return null;
+    return {
+      summary: legacy.rationale,
+      edits: [
+        {
+          op: "modify",
+          path: legacy.path,
+          expectedPreimageSha256: legacy.expectedPreimageSha256,
+          replacements: [{ findText: legacy.findText, replaceText: legacy.replaceText }],
+          rationale: legacy.rationale,
+        },
+      ],
+    };
   }
 
   recordVerificationAndAwaitReview(
@@ -1725,9 +1947,9 @@ export class IcarusStore {
         "Verification digest does not match the persisted diff",
       );
       invariant(
-        verification.changedPaths.length === 1 && verification.changedPaths[0] === current.target,
+        this.#changedPathsMatchPatchSet(current, verification.changedPaths),
         "CHANGED_PATH_MISMATCH",
-        "Verification must contain exactly the approved target",
+        "Verification must contain exactly the patch-set paths",
       );
       const expectedChecks = current.plan.checkIds.map((checkId) => {
         const check = project.checks.find((candidate) => candidate.id === checkId);
@@ -1786,6 +2008,64 @@ export class IcarusStore {
     return this.getRun(runId);
   }
 
+  /**
+   * A patch-set run's changed paths must equal its patch-set paths exactly. A
+   * run recorded before ADR 0023 keeps the single-target rule.
+   */
+  #changedPathsMatchPatchSet(run: RunRecord, changedPaths: readonly string[]): boolean {
+    if (run.patchSet === null) {
+      return changedPaths.length === 1 && changedPaths[0] === run.target;
+    }
+    const expected = [...run.patchSet.edits.map((edit) => edit.path)].sort();
+    const observed = [...changedPaths].sort();
+    return (
+      expected.length === observed.length &&
+      expected.every((expectedPath, index) => expectedPath === observed[index])
+    );
+  }
+
+  /**
+   * Anchors a patch-set run's restorable state. Per-path bytes live in
+   * `checkpoint_files`; the legacy byte columns are stored empty because they
+   * describe a shape this run does not have.
+   */
+  saveTreeCheckpoint(runId: string, checkpointSha256: string): CheckpointRecord {
+    const run = this.getRun(runId);
+    invariant(run.patchSet !== null, "MISSING_EDIT_STATE", "Run has no recorded patch set");
+    const files = this.listCheckpointFiles(runId);
+    invariant(files.length > 0, "MISSING_CHECKPOINT", "Run has no persisted checkpoint files");
+    invariant(
+      treeCheckpointDigest({ runId, baseCommit: run.baseCommit, files }) === checkpointSha256,
+      "CHECKPOINT_MISMATCH",
+      "Checkpoint digest does not match its persisted bytes",
+    );
+    const existing = this.#database
+      .prepare("SELECT * FROM checkpoints WHERE run_id = ?")
+      .get(runId);
+    if (existing !== undefined) {
+      const checkpoint = this.getCheckpoint(runId);
+      invariant(
+        checkpoint.checkpointSha256 === checkpointSha256,
+        "CHECKPOINT_MISMATCH",
+        "An immutable checkpoint already exists with different contents",
+      );
+      return checkpoint;
+    }
+    const createdAt = this.#now();
+    const transaction = this.#database.transaction(() => {
+      this.#database
+        .prepare(
+          `INSERT INTO checkpoints (run_id, baseline_base64, approved_base64, checkpoint_sha256, created_at)
+           VALUES (?, '', '', ?, ?)`,
+        )
+        .run(runId, checkpointSha256, createdAt);
+      this.#appendEvent(runId, "checkpoint.saved", { checkpointSha256 });
+    });
+    transaction();
+    return { runId, baselineBase64: "", approvedBase64: "", checkpointSha256, createdAt };
+  }
+
+  /** Retained for runs recorded before ADR 0023. */
   saveCheckpoint(
     runId: string,
     baselineBase64: string,
