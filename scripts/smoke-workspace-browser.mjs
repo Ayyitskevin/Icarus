@@ -374,6 +374,7 @@ async function startProvider() {
                 ],
                 risks: ["This browser smoke stops before execution"],
                 target: TARGET,
+                targets: [TARGET],
                 checkIds: ["verify"],
               }),
             },
@@ -2295,7 +2296,7 @@ try {
   assert.equal(await page.contextFact("Digest"), firstDigest);
 
   await page.setField("Task", TASK);
-  await page.setField("Tracked target", TARGET);
+  await page.setField("Candidate targets (one path per line)", TARGET);
   await page.setField("Model", "browser-contract-model");
   await page.setField("Loopback provider URL", "not-a-url");
   await page.waitFor(
