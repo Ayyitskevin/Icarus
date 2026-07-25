@@ -240,7 +240,7 @@ function usage(): never {
       "icarus repo list",
       "icarus project add --name NAME --repo REPO --base-ref REF --sandbox-image IMAGE --check JSON",
       "icarus project list",
-      "icarus run plan --project NAME --task TEXT --target PATH [--target PATH ...] --provider ollama|openai --model MODEL [provider options]",
+      "icarus run plan --project NAME --task TEXT --target PATH [--target PATH ...] --provider ollama|openai|anthropic --model MODEL [provider options]",
       "icarus run approve-egress RUN --context-sha SHA --actor ACTOR",
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
       "icarus run status RUN",
@@ -330,12 +330,15 @@ async function dispatch(
     ]);
     noPositionals(options);
     const kind = required(options, "--provider");
-    if (kind !== "ollama" && kind !== "openai") {
-      fail("INVALID_PROVIDER", "--provider must be ollama or openai");
+    if (kind !== "ollama" && kind !== "openai" && kind !== "anthropic") {
+      fail("INVALID_PROVIDER", "--provider must be ollama, openai, or anthropic");
     }
-    const baseUrl =
-      optional(options, "--base-url") ??
-      (kind === "ollama" ? "http://127.0.0.1:11434/" : "https://api.openai.com/v1/");
+    const defaultBaseUrls: Record<typeof kind, string> = {
+      ollama: "http://127.0.0.1:11434/",
+      openai: "https://api.openai.com/v1/",
+      anthropic: "https://api.anthropic.com/v1/",
+    };
+    const baseUrl = optional(options, "--base-url") ?? defaultBaseUrls[kind];
     const inputRate = numberOption(options, "--input-usd-per-million");
     const outputRate = numberOption(options, "--output-usd-per-million");
     const provider = createProviderConfig({
