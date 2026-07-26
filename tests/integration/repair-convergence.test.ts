@@ -13,7 +13,11 @@ import type {
   RepositoryInspection,
   TreeEntry,
 } from "../../packages/core/src/git.js";
-import { DEFAULT_CEILING, DEFAULT_SANDBOX_LIMITS } from "../../packages/core/src/policy.js";
+import {
+  DEFAULT_CEILING,
+  DEFAULT_SANDBOX_LIMITS,
+  MAX_REPAIR_ITERATIONS,
+} from "../../packages/core/src/policy.js";
 import { createProviderConfig, type ModelGateway } from "../../packages/core/src/provider.js";
 import type { CheckRunInput, CheckRunner } from "../../packages/core/src/sandbox.js";
 import { IcarusService } from "../../packages/core/src/service.js";
@@ -34,9 +38,12 @@ const FIXED = "Hello, Icarus!\n";
 const BASE_COMMIT = "b".repeat(40);
 const IMAGE = `python@sha256:${"c".repeat(64)}`;
 
+// The shipped default tool-call ceiling is deliberately NOT raised here: a run
+// that spends the whole repair grant must fit inside it, and measured headroom
+// (36 of 40 after three iterations, 37 after a rollback) is only meaningful if
+// every run of this suite re-measures it.
 const CEILING: SunCeiling = {
   ...DEFAULT_CEILING,
-  maxToolCalls: 200,
   maxActiveRuntimeMs: 120_000,
   commandTimeoutMs: 5_000,
   providerTimeoutMs: 5_000,
@@ -364,6 +371,46 @@ describe("bounded repair loop end to end", () => {
       fixture.close();
     }
   }, 60_000);
+
+  test("spending the whole grant, then rolling back, fits inside the shipped ceiling", async () => {
+    const fixture = await fixtureWith([
+      planProposal(MAX_REPAIR_ITERATIONS),
+      patchSetProducing(BROKEN),
+      patchSetProducing("Hello, Icrus2!\n"),
+      patchSetProducing("Hello, Icrus3!\n"),
+      patchSetProducing(FIXED),
+    ]);
+    try {
+      const planned = await fixture.service.planRun({
+        projectName: "repair-test",
+        task: "Replace the greeting.",
+        targets: [TARGET],
+        provider: fixture.provider,
+      });
+      const settled = await fixture.service.approvePlan(
+        planned.id,
+        planned.planSha256 ?? "",
+        "integration-test",
+      );
+
+      expect(settled.verification?.outcome).toBe("passed");
+      expect(fixture.store.countRepairIterations(planned.id)).toBe(MAX_REPAIR_ITERATIONS);
+      expect(settled.usage.toolCalls).toBeLessThanOrEqual(CEILING.maxToolCalls);
+
+      // Recovery must still be affordable after the grant is fully spent —
+      // an operator who cannot roll back is worse off than one who never ran.
+      const rolled = await fixture.service.rollback(
+        planned.id,
+        settled.verification?.diffSha256 ?? "",
+        "integration-test",
+      );
+      expect(rolled.state).toBe("rolled_back");
+      expect(rolled.usage.toolCalls).toBeLessThanOrEqual(CEILING.maxToolCalls);
+      expect(await readFile(path.join(rolled.worktreePath ?? "", TARGET), "utf8")).toBe(BASELINE);
+    } finally {
+      fixture.close();
+    }
+  }, 120_000);
 
   test("never repairs a run whose plan carries no grant", async () => {
     const fixture = await fixtureWith([planProposal(0), patchSetProducing(BROKEN)]);

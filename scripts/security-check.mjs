@@ -59,6 +59,7 @@ const compactVerificationProjectionSource = verificationProjectionSource.replace
 const actionlintToolSource = await readFile("scripts/actionlint-tool.mjs", "utf8");
 const actionlintSetupSource = await readFile("scripts/setup-actionlint.mjs", "utf8");
 const workflowLintSource = await readFile("scripts/workflow-lint.mjs", "utf8");
+const inheritedWorkflowSource = await readFile(".github/workflows/opencode.yml", "utf8");
 const packageSource = await readFile("package.json", "utf8");
 const packageJson = JSON.parse(packageSource);
 const ciWorkflowSource = await readFile(".github/workflows/ci.yml", "utf8");
@@ -468,6 +469,28 @@ const assertions = {
       "return this.#store.recordVerificationAndAwaitReview(runId, diff, verification);",
     ) &&
     storeSource.includes("Only a failing verification may be retained for repair"),
+  // ADR 0025: the inherited workflow's authorization boundary is owned by this
+  // repository and must not regress to a body-only condition or a mutable ref.
+  inheritedWorkflowIsActorGatedAndPinned:
+    // A repository-owned actor gate exists, and CONTRIBUTOR — which means a
+    // merged PR, not write access — is not admitted.
+    inheritedWorkflowSource.includes("author_association == 'OWNER'") &&
+    inheritedWorkflowSource.includes("author_association == 'MEMBER'") &&
+    inheritedWorkflowSource.includes("author_association == 'COLLABORATOR'") &&
+    !inheritedWorkflowSource.includes("author_association == 'CONTRIBUTOR'") &&
+    // The privileged job cannot run unless the gate job admitted the actor.
+    inheritedWorkflowSource.includes("needs: authorize") &&
+    // Deny-by-default at the top level, and no permissions on the gate itself.
+    inheritedWorkflowSource.includes("permissions: {}") &&
+    // Public sessions stay private.
+    inheritedWorkflowSource.includes("share: false") &&
+    // Every `uses:` is pinned to a 40-hex commit, never a mutable tag.
+    [...inheritedWorkflowSource.matchAll(/uses:\s*(\S+)/g)].every(([, reference]) =>
+      /@[0-9a-f]{40}$/.test(reference),
+    ) &&
+    !inheritedWorkflowSource.includes("@latest") &&
+    // Untrusted comment fields never reach a shell through interpolation.
+    !/run:[^\n]*\$\{\{[^}]*github\.event\.comment/.test(inheritedWorkflowSource),
   anthropicCredentialsAreOriginPinned:
     providerSource.includes('"ANTHROPIC_ORIGIN_DENIED"') &&
     providerSource.includes('url.hostname.toLowerCase() === "api.anthropic.com"') &&
