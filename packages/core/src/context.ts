@@ -543,7 +543,7 @@ async function assertTrackedTreeSafe(
   return modelVisibleTextPaths;
 }
 
-function decodeTextOrNull(bytes: Uint8Array): string | null {
+export function decodeTextOrNull(bytes: Uint8Array): string | null {
   if (Buffer.from(bytes).includes(0)) return null;
   try {
     return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);

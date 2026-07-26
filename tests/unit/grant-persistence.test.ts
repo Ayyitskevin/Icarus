@@ -20,6 +20,7 @@ import {
 
 interface TestDatabase {
   prepare(sql: string): { run(...params: readonly unknown[]): unknown };
+  exec(sql: string): void;
   close(): void;
 }
 
@@ -193,6 +194,95 @@ describe("granted authority is persisted only when it is resolved", () => {
       "PLAN_DIGEST_MISMATCH",
     );
     store.close();
+  });
+});
+
+describe("the approved readable set survives a restart", () => {
+  const manifest: ReadableManifest = {
+    baseCommit: UNIT_BASE_COMMIT,
+    entries: [
+      { path: "src/greeting.txt", sha256: sha256("hello") },
+      { path: "README.md", sha256: sha256("readme") },
+    ],
+  };
+
+  it("returns the manifest the approval bound, and null when no grant asked", () => {
+    const seeded = seedPlannedRun();
+    expect(seeded.store.readableManifest(UNIT_RUN_ID)).toBeNull();
+
+    seeded.store.recordPlanAndAwaitApproval(
+      UNIT_RUN_ID,
+      READ_PLAN,
+      digestFor(seeded.store, READ_PLAN, manifest),
+      manifest,
+    );
+    seeded.store.close();
+
+    const reopened = new IcarusStore(seeded.databasePath, {
+      now: () => "2026-07-19T12:05:00.000Z",
+      id: () => "unit-reopen-id",
+    });
+    const restored = reopened.readableManifest(UNIT_RUN_ID);
+    expect(restored?.baseCommit).toBe(UNIT_BASE_COMMIT);
+    expect(restored?.entries.map((entry) => entry.path)).toEqual(["src/greeting.txt", "README.md"]);
+    reopened.close();
+  });
+
+  it("fails closed when a stored manifest no longer matches its recorded digest", () => {
+    const seeded = seedPlannedRun();
+    seeded.store.recordPlanAndAwaitApproval(
+      UNIT_RUN_ID,
+      READ_PLAN,
+      digestFor(seeded.store, READ_PLAN, manifest),
+      manifest,
+    );
+    seeded.store.close();
+
+    // Widen the stored set behind Icarus's back, leaving the recorded digest
+    // in place — the shape a tampered or corrupted state file would take.
+    const raw = new Database(seeded.databasePath);
+    raw.prepare("UPDATE readable_manifests SET entries_json = ? WHERE run_id = ?").run(
+      JSON.stringify([
+        { path: "src/greeting.txt", sha256: sha256("hello") },
+        { path: "README.md", sha256: sha256("readme") },
+        { path: "src/secret.txt", sha256: sha256("smuggled") },
+      ]),
+      UNIT_RUN_ID,
+    );
+    raw.close();
+
+    const reopened = new IcarusStore(seeded.databasePath, {
+      now: () => "2026-07-19T12:05:00.000Z",
+      id: () => "unit-tamper-id",
+    });
+    expectIcarusCode(() => reopened.readableManifest(UNIT_RUN_ID), "READ_MANIFEST_DRIFT");
+    reopened.close();
+  });
+});
+
+describe("the readable manifest table is an operator-gated migration", () => {
+  it("refuses to add the table to an existing state file without approval", () => {
+    const seeded = seedPlannedRun();
+    seeded.store.close();
+
+    // An existing state file written before ADR 0026 has `runs` but no
+    // `readable_manifests`.
+    const raw = new Database(seeded.databasePath);
+    raw.exec("DROP TABLE readable_manifests");
+    raw.close();
+
+    expectIcarusCode(
+      () => new IcarusStore(seeded.databasePath, { now: () => "2026-07-19T12:05:00.000Z" }),
+      "DATABASE_MIGRATION_REQUIRED",
+    );
+
+    const migrated = new IcarusStore(seeded.databasePath, {
+      now: () => "2026-07-19T12:05:00.000Z",
+      id: () => "unit-migrate-id",
+      allowReadableManifestMigration: true,
+    });
+    expect(migrated.readableManifest(UNIT_RUN_ID)).toBeNull();
+    migrated.close();
   });
 });
 

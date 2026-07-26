@@ -1,6 +1,6 @@
 # ADR 0026: AgentSession loop and host-owned tool registry
 
-- Status: Accepted — implemented in slices; 2a-i landed, 2a-ii/2b/2c outstanding
+- Status: Accepted — implemented in slices; 2a-i and 2a-ii landed, 2a-iii/2b/2c outstanding
 - Date: 2026-07-26
 - Related: [ADR 0023](0023-transactional-multi-file-patch-sets.md) (patch sets),
   [ADR 0024](0024-bounded-repair-loop.md) (bounded repair loop — superseded by
@@ -169,8 +169,12 @@ grants, and browser approvals. That is too much for one reviewable change.
     safe is reviewable before anything can call one. Nothing can resolve a
     manifest yet, so the store refuses a plan requesting `read.manifest`
     rather than binding an unresolved scope into an approval.
-  - **2a-ii.** Manifest resolution against the pinned base commit, its
-    persistence and migration, and the tool registry itself.
+  - **2a-ii (landed).** Resolution of a `read.manifest` scope against the
+    pinned base commit, persistence behind an operator-gated migration, and
+    wiring into the planning path — so the operator now approves an enumerated
+    file list rather than the scope string the model asked for.
+  - **2a-iii.** The tool registry itself: typed schemas, output ceilings,
+    kernel-side grant checks, metered invocations, and fenced results.
 - **2b — the loop and write tools.** `propose_patch`, `apply_patchset`,
   `run_checks`, the AgentSession entity, the `verifying → executing` edge, and
   resume at iteration boundaries. This is where ADR 0024's repair loop is
@@ -255,6 +259,32 @@ only through a coincidence of comparison semantics across two functions rather
 than by design. Decoding now normalizes both fields to the no-capability
 reading, which is what a plan authored before the field meant. Neither default
 can widen authority.
+
+### Decided while implementing 2a-ii
+
+**Scope syntax is not glob.** A trailing slash is a directory prefix; anything
+else is an exact path. Wildcards were considered and rejected: they buy nothing
+here, because the expansion is enumerated into the manifest anyway, and a
+pattern language is a second thing to get right in a security boundary.
+
+**Exclusions are reported, not silent.** A path a scope names can be dropped
+for being context-excluded, intrinsically secret, a symlink, non-UTF-8, or
+secret-shaped. Resolution returns those with reasons rather than just a shorter
+list, so the difference between what was asked for and what was approved is
+visible. A symlink is excluded rather than followed — its bytes are a target
+path, and admitting one would let a read reach somewhere the manifest never
+enumerated.
+
+**Resolution re-verifies rather than inherits.** Whole-repository secret and
+snapshot invariants are already enforced during context assembly, which reads
+every tracked blob. Resolution therefore reads only in-scope blobs instead of
+re-scanning the repository, but re-applies the same predicates per candidate. A
+read sends bytes to a provider, so it re-checks rather than trusting an earlier
+phase.
+
+**The persisted manifest is digest-verified on read.** The stored digest is
+recomputed from the stored entries, so a state file edited underneath Icarus
+fails closed instead of silently widening what a read may return.
 
 ### Two open questions for Kevin, both deliberately unresolved here:
 

@@ -167,14 +167,19 @@ function stateRoot(): string {
 function schemaMigrationApproval(): {
   readonly approvalIndex: boolean;
   readonly patchSet: boolean;
+  readonly readableManifest: boolean;
 } {
+  const none = { approvalIndex: false, patchSet: false, readableManifest: false };
   const approval = process.env.ICARUS_APPROVE_SCHEMA_MIGRATION;
-  if (approval === undefined) return { approvalIndex: false, patchSet: false };
-  if (approval === "approval-index-v1") return { approvalIndex: true, patchSet: false };
-  if (approval === "patch-set-v2") return { approvalIndex: false, patchSet: true };
+  if (approval === undefined) return none;
+  // One token approves exactly one migration. Approving several at once would
+  // let an operator agree to a schema change they never read about.
+  if (approval === "approval-index-v1") return { ...none, approvalIndex: true };
+  if (approval === "patch-set-v2") return { ...none, patchSet: true };
+  if (approval === "readable-manifest-v3") return { ...none, readableManifest: true };
   fail(
     "INVALID_DATABASE_CONFIGURATION",
-    "ICARUS_APPROVE_SCHEMA_MIGRATION must equal approval-index-v1 or patch-set-v2",
+    "ICARUS_APPROVE_SCHEMA_MIGRATION must equal approval-index-v1, patch-set-v2, or readable-manifest-v3",
   );
 }
 
@@ -489,6 +494,7 @@ async function main(): Promise<void> {
     runtime = await createIcarusRuntime(root, {
       allowApprovalIndexMigration: migrationApproval.approvalIndex,
       allowPatchSetMigration: migrationApproval.patchSet,
+      allowReadableManifestMigration: migrationApproval.readableManifest,
     });
     await dispatch(runtime, args, controller.signal);
   } catch (error) {

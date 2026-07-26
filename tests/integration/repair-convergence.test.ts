@@ -440,3 +440,56 @@ describe("bounded repair loop end to end", () => {
     }
   }, 60_000);
 });
+
+describe("read grant resolution end to end", () => {
+  test("resolves the requested scope and binds the enumerated set into the approval", async () => {
+    const fixture = await fixtureWith([
+      {
+        ...(planProposal(0) as Record<string, JsonValue>),
+        grants: [{ kind: "read.manifest", scope: ["src/"], maxCalls: 4 }],
+      } as JsonValue,
+    ]);
+    try {
+      const planned = await fixture.service.planRun({
+        projectName: "repair-test",
+        task: "Replace the greeting.",
+        targets: [TARGET],
+        provider: fixture.provider,
+      });
+
+      expect(planned.state).toBe("awaiting_approval");
+      expect(planned.plan?.grants).toEqual([
+        { kind: "read.manifest", scope: ["src/"], maxCalls: 4 },
+      ]);
+
+      // The operator is asked to approve an enumerated file list pinned by
+      // content digest, not the scope string the model requested.
+      const manifest = fixture.store.readableManifest(planned.id);
+      expect(manifest?.baseCommit).toBe(BASE_COMMIT);
+      expect(manifest?.entries).toEqual([{ path: TARGET, sha256: sha256(BASELINE) }]);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  test("refuses to record a plan whose read scope escapes the repository", async () => {
+    const fixture = await fixtureWith([
+      {
+        ...(planProposal(0) as Record<string, JsonValue>),
+        grants: [{ kind: "read.manifest", scope: ["../outside/"], maxCalls: 1 }],
+      } as JsonValue,
+    ]);
+    try {
+      await expect(
+        fixture.service.planRun({
+          projectName: "repair-test",
+          task: "Replace the greeting.",
+          targets: [TARGET],
+          provider: fixture.provider,
+        }),
+      ).rejects.toBeInstanceOf(IcarusError);
+    } finally {
+      fixture.close();
+    }
+  });
+});

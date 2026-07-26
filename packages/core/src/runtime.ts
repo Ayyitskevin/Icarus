@@ -227,6 +227,7 @@ export async function createIcarusRuntime(
     readonly gatewayFactory?: GatewayFactory;
     readonly allowApprovalIndexMigration?: boolean;
     readonly allowPatchSetMigration?: boolean;
+    readonly allowReadableManifestMigration?: boolean;
   } = {},
 ): Promise<IcarusRuntime> {
   const root = await prepareStateRoot(stateRoot, process.platform);
@@ -238,6 +239,7 @@ export async function createIcarusRuntime(
   const store = new IcarusStore(path.join(root, "icarus.sqlite3"), {
     allowApprovalIndexMigration: options.allowApprovalIndexMigration === true,
     allowPatchSetMigration: options.allowPatchSetMigration === true,
+    allowReadableManifestMigration: options.allowReadableManifestMigration === true,
   });
   const artifacts = new ArtifactStore(root);
   const git = new GitController(controllerHome, runsRoot);
