@@ -5,6 +5,7 @@ import { TextDecoder } from "node:util";
 
 import type { ArtifactStore } from "./artifacts.js";
 import { assembleContext, containsSecretShapedContent, renderContextPrompt } from "./context.js";
+import { resolveReadableManifest } from "./read-manifest.js";
 import { createContextPreview, type ProjectContextPreview } from "./context-preview.js";
 import { digestJson, sha256 } from "./digest.js";
 import { errorMessage, IcarusError, invariant } from "./errors.js";
@@ -1103,10 +1104,22 @@ export class IcarusService {
       // Grant scopes are provider-authored strings and get the same scan.
       ...plan.grants.flatMap((grant) => grant.scope),
     ]);
-    // Resolution of a read.manifest grant lands with the tool registry
-    // (ADR 0026 slice 2b); until then no manifest can be produced, so the
-    // store refuses a plan that requests one rather than binding an
-    // unresolved scope into an approval.
+    // A read.manifest grant is resolved against the pinned base commit before
+    // the approval digest is computed, so the operator approves an enumerated
+    // file list rather than the scope string the model asked for (ADR 0026).
+    const readGrant = plan.grants.find((grant) => grant.kind === "read.manifest");
+    const resolved =
+      readGrant === undefined
+        ? null
+        : await resolveReadableManifest(
+            this.#git,
+            this.#store.getRepository(project.repositoryId).path,
+            run.baseCommit,
+            readGrant.scope,
+            project.ceiling,
+            signal,
+          );
+    const readableManifest = resolved === null ? null : resolved.manifest;
     const digest = planApprovalDigest({
       task: run.task,
       baseCommit: run.baseCommit,
@@ -1117,9 +1130,9 @@ export class IcarusService {
       sandbox: project.sandbox,
       ceiling: project.ceiling,
       plan,
-      readableManifest: null,
+      readableManifest,
     });
-    return this.#store.recordPlanAndAwaitApproval(runId, plan, digest, null);
+    return this.#store.recordPlanAndAwaitApproval(runId, plan, digest, readableManifest);
   }
 
   async #execute(runId: string, signal?: AbortSignal): Promise<RunRecord> {

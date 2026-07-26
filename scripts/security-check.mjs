@@ -52,6 +52,7 @@ const serviceSource = await readFile("packages/core/src/service.ts", "utf8");
 const runtimeSource = await readFile("packages/core/src/runtime.ts", "utf8");
 const storeSource = await readFile("packages/core/src/store.ts", "utf8");
 const typesSource = await readFile("packages/core/src/types.ts", "utf8");
+const readManifestSource = await readFile("packages/core/src/read-manifest.ts", "utf8");
 const verificationProjectionSource = await readFile(
   "packages/core/src/verification-provenance.ts",
   "utf8",
@@ -480,6 +481,43 @@ const assertions = {
     // Session-written bytes are the only alternative to a manifest match, and
     // they must match what this session recorded writing.
     policySource.includes("sessionDigest === input.sha256"),
+  readManifestResolutionIsBoundedAndVetted:
+    // The ceiling is checked before any blob is read, so an over-wide scope is
+    // refused rather than paid for and then refused.
+    readManifestSource.indexOf('"READ_SCOPE_TOO_LARGE"') <
+      readManifestSource.indexOf("await git.readBlob(") &&
+    readManifestSource.includes("isWorkspaceContextPathExcluded(candidate.path)") &&
+    readManifestSource.includes("isIntrinsicallySecretPath(candidate.path)") &&
+    readManifestSource.includes('candidate.mode === "120000"') &&
+    readManifestSource.includes("decodeTextOrNull(bytes) === null") &&
+    readManifestSource.includes("containsSecretShapedContent(bytes)") &&
+    // The validator owns the manifest's invariants even when a resolver
+    // produced it.
+    readManifestSource.includes("assertReadableManifest(manifest)"),
+  readScopeSyntaxAdmitsNoWildcards:
+    readManifestSource.includes("export function pathMatchesScopeEntry(") &&
+    !readManifestSource.includes("minimatch") &&
+    !readManifestSource.includes("globToRegExp") &&
+    !readManifestSource.includes("new RegExp("),
+  readableManifestMigrationHumanGated:
+    storeSource.includes("function inspectReadableManifestSchema(") &&
+    storeSource.includes(
+      'readableManifestStatus === "missing" && options.allowReadableManifestMigration !== true',
+    ) &&
+    storeSource.includes('"DATABASE_MIGRATION_REQUIRED"') &&
+    cliSource.includes('approval === "readable-manifest-v3"') &&
+    // One token approves one migration; the tokens are not combinable.
+    cliSource.includes(
+      "const none = { approvalIndex: false, patchSet: false, readableManifest: false }",
+    ),
+  persistedReadableManifestIsDigestVerified:
+    storeSource.includes("readableManifest(runId: string): ReadableManifest | null") &&
+    storeSource.includes("readableManifestDigest(manifest) ===") &&
+    storeSource.includes("assertReadableManifest(manifest)") &&
+    // Written inside the same transaction that records the plan, so a crash
+    // cannot leave an approved read grant without its manifest.
+    storeSource.indexOf("INSERT INTO readable_manifests") <
+      storeSource.indexOf('this.#appendEvent(runId, "plan.created"'),
   persistedPlansNeverCastPastAbsentFields:
     storeSource.includes("function decodeNullablePlan(") &&
     storeSource.includes("plan: decodeNullablePlan(value.plan_json") &&

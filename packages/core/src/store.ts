@@ -15,6 +15,7 @@ import {
   checkpointDigest,
   MAX_REPAIR_ITERATIONS,
   planApprovalDigest,
+  readableManifestDigest,
   treeCheckpointDigest,
 } from "./policy.js";
 import { assertTransition } from "./state-machine.js";
@@ -35,6 +36,7 @@ import type {
   ProjectRecord,
   ProviderConfig,
   ReadableManifest,
+  ReadableManifestEntry,
   RepositoryRecord,
   RunEventHistoryPage,
   RunEventPage,
@@ -296,6 +298,65 @@ CREATE TABLE IF NOT EXISTS checkpoint_files (
   CHECK (op IN ('modify', 'create', 'delete'))
 );
 `;
+
+/**
+ * ADR 0026 storage. One row per run holding the enumerated readable set its
+ * approval bound. Additive, so the migration never rewrites an existing row —
+ * but it is still operator-gated, because a state file that silently gains a
+ * table is a state file whose shape nobody agreed to.
+ */
+const READABLE_MANIFEST_SCHEMA = `
+CREATE TABLE IF NOT EXISTS readable_manifests (
+  run_id TEXT PRIMARY KEY REFERENCES runs(id),
+  base_commit TEXT NOT NULL,
+  manifest_sha256 TEXT NOT NULL,
+  entries_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`;
+
+type ReadableManifestSchemaStatus = "not_applicable" | "missing" | "valid";
+
+function inspectReadableManifestSchema(databasePath: string): ReadableManifestSchemaStatus {
+  if (!existsSync(databasePath)) return "not_applicable";
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const runsTableExists =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runs'")
+        .get() !== undefined;
+    if (!runsTableExists) return "not_applicable";
+
+    const present =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'readable_manifests'")
+        .get() !== undefined;
+    if (!present) return "missing";
+
+    const expectedColumns = [
+      "run_id",
+      "base_commit",
+      "manifest_sha256",
+      "entries_json",
+      "created_at",
+    ];
+    const columns = (
+      database.prepare("PRAGMA table_info('readable_manifests')").all() as unknown[]
+    ).map((entry) =>
+      text(row(entry, "readable manifest column").name, "readable manifest column.name"),
+    );
+    invariant(
+      columns.length === expectedColumns.length &&
+        expectedColumns.every((column, index) => columns[index] === column),
+      "DATABASE_ERROR",
+      "Readable manifest table has an invalid shape",
+    );
+    return "valid";
+  } finally {
+    database.close();
+  }
+}
 
 type ApprovalIndexStatus = "not_applicable" | "missing" | "valid";
 
@@ -1008,6 +1069,7 @@ export class IcarusStore {
       busyTimeoutMs?: number;
       allowApprovalIndexMigration?: boolean;
       allowPatchSetMigration?: boolean;
+      allowReadableManifestMigration?: boolean;
     } = {},
   ) {
     const parent = path.dirname(databasePath);
@@ -1037,6 +1099,13 @@ export class IcarusStore {
         "Patch-set migration requires a state backup and explicit operator approval",
       );
     }
+    const readableManifestStatus = inspectReadableManifestSchema(databasePath);
+    if (readableManifestStatus === "missing" && options.allowReadableManifestMigration !== true) {
+      throw new IcarusError(
+        "DATABASE_MIGRATION_REQUIRED",
+        "Readable manifest migration requires a state backup and explicit operator approval",
+      );
+    }
     this.#database = new Database(databasePath);
     chmodSync(databasePath, 0o600);
     this.#database.pragma(`busy_timeout = ${busyTimeoutMs}`);
@@ -1046,6 +1115,7 @@ export class IcarusStore {
     this.#database.exec(SCHEMA);
     this.#database.exec(APPROVAL_INDEX_SCHEMA);
     this.#database.exec(PATCH_SET_SCHEMA);
+    this.#database.exec(READABLE_MANIFEST_SCHEMA);
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#id = options.id ?? randomUUID;
   }
@@ -1714,14 +1784,70 @@ export class IcarusStore {
            version = version + 1, updated_at = ? WHERE id = ? AND state = 'planned'`,
         )
         .run(json(plan), planSha256, now, runId);
+      if (readableManifest !== null) {
+        // Persisted in the same transaction that records the plan, so a run
+        // can never reach `awaiting_approval` carrying a grant whose manifest
+        // is absent — the state the store refuses to accept on the way in must
+        // also be unreachable by a crash on the way out.
+        this.#database
+          .prepare(
+            `INSERT INTO readable_manifests
+              (run_id, base_commit, manifest_sha256, entries_json, created_at)
+             VALUES (?, ?, ?, ?, ?)`,
+          )
+          .run(
+            runId,
+            readableManifest.baseCommit,
+            readableManifestDigest(readableManifest),
+            json(readableManifest.entries),
+            now,
+          );
+      }
       this.#appendEvent(runId, "plan.created", {
         from: "planned",
         to: "awaiting_approval",
         planSha256,
+        readableFiles: readableManifest === null ? 0 : readableManifest.entries.length,
       });
     });
     transaction();
     return this.getRun(runId);
+  }
+
+  /**
+   * The enumerated readable set this run's approval bound, or null when the
+   * run was approved with no read grant (ADR 0026).
+   *
+   * The stored digest is recomputed from the stored entries rather than
+   * trusted, so a row edited underneath Icarus fails closed instead of
+   * silently widening what a read may return. Callers still hold the returned
+   * manifest to `assertReadableBytes`; this only guarantees the manifest is
+   * the one that was approved.
+   */
+  readableManifest(runId: string): ReadableManifest | null {
+    const stored = this.#database
+      .prepare(
+        `SELECT base_commit, manifest_sha256, entries_json FROM readable_manifests
+         WHERE run_id = ?`,
+      )
+      .get(runId);
+    if (stored === undefined) return null;
+    const value = row(stored, "readable manifest");
+    const manifest: ReadableManifest = {
+      baseCommit: text(value.base_commit, "readable_manifests.base_commit"),
+      entries: parseJson<readonly ReadableManifestEntry[]>(
+        value.entries_json,
+        "readable_manifests.entries_json",
+      ),
+    };
+    invariant(
+      readableManifestDigest(manifest) ===
+        text(value.manifest_sha256, "readable_manifests.manifest_sha256"),
+      "READ_MANIFEST_DRIFT",
+      "Persisted readable manifest does not match its recorded digest",
+    );
+    assertReadableManifest(manifest);
+    return manifest;
   }
 
   preflightEgressApproval(runId: string, digest: string, actor: string): RunRecord {
