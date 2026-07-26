@@ -48,15 +48,38 @@
       "repository": "repos/buggy",
       "task": "tasks/fix-bug.md",
       "target": "src/cart.py",
-      "expectedOutcome": "unsupported",
+      "expectedOutcome": "completed",
       "requiredCapability": "multi_file_edit",
-      "plannedMilestone": 7,
-      "supportStatus": "unsupported",
-      "evaluator": "unsupported_contract",
-      "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
-      "futureEvidence": ["multi_file_diff", "regression_check"],
-      "unsupportedReason": "The patch-set boundary permits this change; an executable multi-file evaluator and its recorded evidence remain outstanding",
-      "representativePaths": ["src/cart.py", "checks/test_cart.py"]
+      "plannedMilestone": null,
+      "supportStatus": "supported",
+      "evaluator": "multi_file_lifecycle",
+      "requiredEvidence": [
+        "full_run_completed",
+        "multi_file_diff",
+        "regression_check",
+        "exact_target_bytes",
+        "changed_paths_match_patch_set",
+        "source_unchanged",
+        "context_quality_measured",
+        "usage_measured",
+        "approval_history",
+        "rollback_success",
+        "restore_success"
+      ],
+      "representativePaths": ["src/cart.py", "checks/test_cart.py"],
+      "expectedContextPaths": ["src/cart.py", "checks/test_cart.py", "README.md"],
+      "files": [
+        {
+          "path": "src/cart.py",
+          "baseline": "def subtotal(cents: list[int]) -> int:\n    \"\"\"Return the cart subtotal in cents.\"\"\"\n    return sum(cents) - 1\n",
+          "approved": "def subtotal(cents: list[int]) -> int:\n    \"\"\"Return the cart subtotal in cents.\"\"\"\n    return sum(cents)\n"
+        },
+        {
+          "path": "checks/test_cart.py",
+          "baseline": "from src.cart import subtotal\n\nassert subtotal([100, 200]) == 300\n",
+          "approved": "from src.cart import subtotal\n\nassert subtotal([100, 200]) == 300\nassert subtotal([]) == 0\nassert subtotal([1]) == 1\n"
+        }
+      ]
     },
     {
       "id": "refactor-module",

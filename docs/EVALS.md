@@ -51,12 +51,25 @@ The catalog has all ten classes. Milestone 1 executes five outcomes:
 5. an approval subprocess killed during a real provider operation, followed by explicit resume.
 
 The schema case measures safe rejection; it does not claim schema-edit support.
-Five capabilities remain honestly unsupported: multi-file bug repair,
-behavior-preserving module refactor, failing-test diagnosis/target selection,
-read-only security findings, and read-only codebase explanation. The explanation
-capability is planned for M2; the broader repair/refactor/review contracts are
-planned as M7 dogfood gates. Unsupported contracts validate their fixtures and
-capability classification but are never converted into passes.
+
+Multi-file bug repair became executable with ADR 0023 and is now measured, not
+asserted: one approved patch set spanning a source file and its check file must
+apply transactionally, verify in the sandbox, roll back to a clean baseline,
+restore, and land, with the source checkout unchanged throughout. Its
+`regression_check` evidence is produced by a second contained run that applies
+only the check-file edit and leaves the defect in place — verification must
+fail there, or the added assertions pin nothing. Both runs use the same
+fail-closed sandbox; fixture code is never executed on the host.
+
+Four capabilities remain honestly unsupported: behavior-preserving module
+refactor, failing-test diagnosis/target selection, read-only security findings,
+and read-only codebase explanation. Note that the bounded repair loop of
+ADR 0024 does **not** supply diagnosis or target selection — it re-proposes
+against the operator's fixed approved target set and cannot widen it — so that
+capability is still genuinely outside the boundary. The explanation capability
+is planned for M2; the broader refactor/review contracts are planned as M7
+dogfood gates. Unsupported contracts validate their fixtures and capability
+classification but are never converted into passes.
 
 ## Measures
 
