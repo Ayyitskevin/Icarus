@@ -188,6 +188,59 @@ export interface PlanProposal {
    */
   readonly repairIterations: number;
   readonly checkIds: readonly string[];
+  /**
+   * Capabilities this plan requests (ADR 0026). Itemized, sorted, and covered
+   * by the plan approval digest, so approving the plan is the single operator
+   * decision that grants them. An empty list is a plan that requests no
+   * capability beyond the authority `targets` and `checkIds` already carry.
+   */
+  readonly grants: readonly CapabilityGrant[];
+}
+
+/**
+ * The capabilities a grant may name (ADR 0026). Deliberately closed: a
+ * capability that is not in this union cannot be requested, approved, or
+ * checked, so widening host authority requires editing this type and its ADR
+ * rather than passing a new string through from provider output.
+ */
+export type CapabilityKind = "read.manifest" | "read.checks" | "mutation.patchset" | "exec.check";
+
+/**
+ * One itemized capability request. `scope` is interpreted per kind — for
+ * `read.manifest` it is the requested read scope, resolved by the host into a
+ * `ReadableManifest` before approval. Limits are the grant's own ceilings and
+ * never widen a `SunCeiling`; the tighter of the two binds.
+ */
+export interface CapabilityGrant {
+  readonly kind: CapabilityKind;
+  readonly scope: readonly string[];
+  readonly maxCalls: number;
+}
+
+/**
+ * One file a `read.manifest` grant admits, pinned by the sha256 of its
+ * contents at the run's base commit. The operator approves these entries, so a
+ * read may only return bytes whose digest still matches.
+ */
+export interface ReadableManifestEntry {
+  readonly path: string;
+  readonly sha256: string;
+}
+
+/**
+ * The enumerated set of files a `read.manifest` grant admits, resolved against
+ * the pinned base commit. Approving the manifest digest is what keeps egress
+ * exact under a read tool: every byte a read can return was covered by a digest
+ * the operator approved, and the approval names the file it came from.
+ *
+ * Resolution is bounded rather than truncated — a scope admitting more than
+ * `MAX_READABLE_FILES` entries is refused, because a silently shortened
+ * manifest would make the model's view differ from the operator's with neither
+ * able to tell.
+ */
+export interface ReadableManifest {
+  readonly baseCommit: string;
+  readonly entries: readonly ReadableManifestEntry[];
 }
 
 /** Retained to decode runs persisted before ADR 0023 (schema v1). */

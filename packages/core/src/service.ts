@@ -1100,7 +1100,13 @@ export class IcarusService {
       plan.target,
       ...plan.targets,
       ...plan.checkIds,
+      // Grant scopes are provider-authored strings and get the same scan.
+      ...plan.grants.flatMap((grant) => grant.scope),
     ]);
+    // Resolution of a read.manifest grant lands with the tool registry
+    // (ADR 0026 slice 2b); until then no manifest can be produced, so the
+    // store refuses a plan that requests one rather than binding an
+    // unresolved scope into an approval.
     const digest = planApprovalDigest({
       task: run.task,
       baseCommit: run.baseCommit,
@@ -1111,8 +1117,9 @@ export class IcarusService {
       sandbox: project.sandbox,
       ceiling: project.ceiling,
       plan,
+      readableManifest: null,
     });
-    return this.#store.recordPlanAndAwaitApproval(runId, plan, digest);
+    return this.#store.recordPlanAndAwaitApproval(runId, plan, digest, null);
   }
 
   async #execute(runId: string, signal?: AbortSignal): Promise<RunRecord> {

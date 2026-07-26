@@ -8,6 +8,7 @@ import { digestJson, sha256 } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
 import {
   assertCheckProfiles,
+  assertReadableManifest,
   assertRepositoryRelativePath,
   assertSandboxProfile,
   assertSunCeiling,
@@ -19,6 +20,7 @@ import {
 import { assertTransition } from "./state-machine.js";
 import type {
   ApprovalRecord,
+  CapabilityGrant,
   CheckpointFile,
   CheckProfile,
   ContextManifest,
@@ -32,6 +34,7 @@ import type {
   PlanProposal,
   ProjectRecord,
   ProviderConfig,
+  ReadableManifest,
   RepositoryRecord,
   RunEventHistoryPage,
   RunEventPage,
@@ -458,6 +461,29 @@ function parseJson<T>(value: unknown, name: string): T {
 
 function nullableJson<T>(value: unknown, name: string): T | null {
   return value === null ? null : parseJson<T>(value, name);
+}
+
+/**
+ * Decodes a persisted plan without casting past its shape. Plans are stored as
+ * JSON, so a row written before a plan field existed decodes with that field
+ * absent while the type claims it is present — `plan.grants.length` then throws
+ * and `Math.min(plan.repairIterations, n)` yields NaN.
+ *
+ * Both fields normalize to the no-capability reading, which is what a plan
+ * authored before the field meant: no repair attempts and no granted
+ * capability. Neither default can widen authority, so an old row stays
+ * readable without becoming more permissive than it was approved to be.
+ */
+function decodeNullablePlan(value: unknown, name: string): PlanProposal | null {
+  const decoded = nullableJson<Record<string, unknown>>(value, name);
+  if (decoded === null) return null;
+  const repairIterations = decoded.repairIterations;
+  const grants = decoded.grants;
+  return {
+    ...(decoded as unknown as PlanProposal),
+    repairIterations: typeof repairIterations === "number" ? repairIterations : 0,
+    grants: Array.isArray(grants) ? (grants as readonly CapabilityGrant[]) : [],
+  };
 }
 
 function json(value: unknown): string {
@@ -1462,7 +1488,7 @@ export class IcarusStore {
       context: parseJson<ContextManifest>(value.context_json, "run.context_json"),
       contextArtifactPath: text(value.context_artifact_path, "run.context_artifact_path"),
       contextSha256: text(value.context_sha256, "run.context_sha256"),
-      plan: nullableJson<PlanProposal>(value.plan_json, "run.plan_json"),
+      plan: decodeNullablePlan(value.plan_json, "run.plan_json"),
       planSha256: nullableText(value.plan_sha256, "run.plan_sha256"),
       patchSet: this.#readPatchSet(id, value),
       cachePath: nullableText(value.cache_path, "run.cache_path"),
@@ -1626,10 +1652,36 @@ export class IcarusStore {
     return this.getRun(runId);
   }
 
-  recordPlanAndAwaitApproval(runId: string, plan: PlanProposal, planSha256: string): RunRecord {
+  /**
+   * `readableManifest` is the resolved enumeration backing a `read.manifest`
+   * grant (ADR 0026). The two must agree: a plan that requests the capability
+   * without a resolved manifest would put a glob in front of the operator
+   * instead of a file list, and a manifest with no grant asking for it would
+   * bind authority nobody requested.
+   */
+  recordPlanAndAwaitApproval(
+    runId: string,
+    plan: PlanProposal,
+    planSha256: string,
+    readableManifest: ReadableManifest | null = null,
+  ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
       invariant(current.state === "planned", "INVALID_STATE", "Run is not ready to store a plan");
+      const requestsRead = plan.grants.some((grant) => grant.kind === "read.manifest");
+      invariant(
+        requestsRead === (readableManifest !== null),
+        "READ_MANIFEST_UNRESOLVED",
+        "A read.manifest grant requires exactly one resolved readable manifest",
+      );
+      if (readableManifest !== null) {
+        assertReadableManifest(readableManifest);
+        invariant(
+          readableManifest.baseCommit === current.baseCommit,
+          "READ_MANIFEST_UNRESOLVED",
+          "Readable manifest was resolved against a different base commit",
+        );
+      }
       if (current.provider.capabilities.locality === "remote") {
         invariant(
           this.#hasApproval(runId, "egress", current.contextSha256, "approve"),
@@ -1649,6 +1701,7 @@ export class IcarusStore {
           sandbox: project.sandbox,
           ceiling: project.ceiling,
           plan,
+          readableManifest,
         }) === planSha256,
         "PLAN_DIGEST_MISMATCH",
         "Plan approval digest does not bind the complete persisted manifest",
