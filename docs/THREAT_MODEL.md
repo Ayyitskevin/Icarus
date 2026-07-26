@@ -165,19 +165,45 @@ exact-head hosted gates passed. ADR 0010 remains an independent release hold.
 ADR 0021 is Accepted after its fresh local, independent-review, merge, and exact
 published-head gates passed. ADR 0010 remains an independent release hold.
 
-## Inherited repository automation hold
+## Inherited repository automation, hardened
 
 `.github/workflows/opencode.yml` came from the pre-existing remote root and was
 preserved byte-for-byte during history reconciliation. That provenance prevents
 silent shared-state deletion; it does not establish safety.
 
-The public comment trigger begins a job before any repository-owned actor gate.
-The job grants OIDC write authority, passes the named OpenCode secret, invokes a
-mutable third-party action, and does not set `share: false`. The currently
-resolved upstream code later checks collaborator permission, but mutable
-bootstrap code runs first. Kevin must explicitly decide whether to disable the
-workflow or approve a hardened design. Until then, M0/M1 security release status
-is held. ADR 0010 records the options without changing the workflow.
+Before 2026-07-26 the public comment trigger began a job with no
+repository-owned actor gate: the condition tested only four substrings of the
+comment body, so on a public repository with issues enabled — verified
+`visibility: "public"`, `has_issues: true` — any authenticated GitHub user could
+start a job that minted an OIDC token and passed the named OpenCode secret into
+a mutable third-party action. The workflow never fired (`total_count: 0` runs,
+all time), so there is no evidence it was exercised, but the exposure was
+standing and left no in-repository audit trail.
+
+ADR 0025 resolves the ADR 0010 hold by hardening rather than removal. A
+repository-owned `authorize` job now gates on `author_association` of `OWNER`,
+`MEMBER`, or `COLLABORATOR` — never `CONTRIBUTOR`, which means a merged pull
+request rather than write access — holds no permissions and no secrets, and uses
+no third-party code. The privileged job declares `needs: authorize`. Both
+actions are pinned to commit SHAs, `share: false` is set, and top-level
+`permissions: {}` denies by default. Untrusted comment fields reach a shell only
+through `env:`, never through `${{ }}` inside `run:`.
+`inheritedWorkflowIsActorGatedAndPinned` in `scripts/security-check.mjs` fails
+the gate if any of that regresses.
+
+Two requirements ADR 0010 set are **not** met, so the release hold narrows
+rather than lifts: the pinned third-party commit has not been reviewed by this
+repository, and `OPENCODE_API_KEY` must be rotated because it was reachable
+under the previous condition. Pinning removes the silent-update path; it is not
+a review. Causing that unreviewed code to run now requires write access.
+
+| Threat | Boundary | Fails how |
+| --- | --- | --- |
+| Any internet user triggers privileged automation by commenting | Repository-owned `authorize` job evaluated before any third-party step | Non-collaborator comment skips the gate job, so `needs: authorize` skips the privileged job |
+| Mutable third-party action changes what executes with no commit here | Commit-SHA pins on every `uses:` | `inheritedWorkflowIsActorGatedAndPinned` rejects any non-40-hex ref or `@latest` |
+| Comment body evaluated as shell in the runner | Untrusted fields passed only via `env:` | Assertion rejects `${{ github.event.comment… }}` inside `run:` |
+| Session contents of a public repository shared upstream | `share: false` | Assertion requires the input to be present |
+| Pinned third-party code exfiltrates the injected secret | **Unmitigated** — pin is not review | Requires write access to reach; secret rotation and a supply-chain review remain outstanding under ADR 0025 |
 
 ## Residual risks
 
@@ -192,8 +218,11 @@ is held. ADR 0010 records the options without changing the workflow.
 - A configured loopback model service is trusted only as configured; another
   local process may impersonate it.
 - GitHub-hosted automation and third-party installers remain outside the local
-  runtime boundary. The inherited OpenCode workflow is not approved merely
-  because its current upstream implementation contains a late permission check.
+  runtime boundary. The inherited OpenCode workflow's upstream late permission
+  check is still not the boundary; the repository-owned gate added in ADR 0025
+  is. The pinned upstream commit remains unreviewed by this repository.
+- No branch is protected — `main` reports `protected: false` — so the hosted CI
+  gate is advisory rather than enforced. Tracked separately from ADR 0025.
 - Persistence uses synchronous `better-sqlite3` behind the store boundary; a
   future schema version still needs an explicit migration and recovery drill.
 - Redaction is defense in depth, not proof that arbitrary repository content has
