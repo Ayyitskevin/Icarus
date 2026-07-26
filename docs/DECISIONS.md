@@ -27,6 +27,7 @@ Decision records for the current milestone:
 | [0021](adr/0021-bounded-project-catalog-and-json-responses.md) | Bounded project catalog and JSON responses | Accepted |
 | [0022](adr/0022-native-macos-windows-acceptance.md) | Explicit native macOS and Windows acceptance | Proposed — native runs pending |
 | [0023](adr/0023-transactional-multi-file-patch-sets.md) | Transactional multi-file patch sets, superseding the ADR 0003 mutation boundary | Accepted |
+| [0024](adr/0024-bounded-repair-loop.md) | Bounded repair loop with a plan-carried repair grant | Accepted |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.

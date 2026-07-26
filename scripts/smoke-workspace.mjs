@@ -73,6 +73,7 @@ async function startProvider() {
               risks: ["This workspace smoke stops before execution"],
               target: "src/app.txt",
               targets: ["src/app.txt"],
+              repairIterations: 0,
               checkIds: ["verify"],
             }),
           },

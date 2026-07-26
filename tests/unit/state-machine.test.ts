@@ -27,7 +27,7 @@ const EXPECTED: Readonly<Record<RunState, readonly RunState[]>> = {
   awaiting_egress_approval: ["planned", "failed", "cancelling"],
   awaiting_approval: ["running", "failed", "cancelling"],
   running: ["verifying", "failed", "cancelling"],
-  verifying: ["awaiting_review", "failed", "cancelling"],
+  verifying: ["awaiting_review", "running", "failed", "cancelling"],
   awaiting_review: ["completed", "rolling_back", "failed", "cancelling"],
   completed: ["rolling_back"],
   rolling_back: ["rolled_back", "failed"],

@@ -32,6 +32,8 @@ export const POLICY_VERSION = "patch-set-v2";
 export const MAX_CHANGED_FILES = 64;
 /** Ordered exact replacements permitted inside one `modify` edit. */
 export const MAX_REPLACEMENTS_PER_FILE = 32;
+/** Host ceiling on repair attempts a plan may request (ADR 0024). */
+export const MAX_REPAIR_ITERATIONS = 3;
 const MAX_REPLACEMENT_TEXT_LENGTH = 262_144;
 
 export const DEFAULT_CEILING: SunCeiling = {
@@ -146,7 +148,7 @@ export function treeCheckpointDigest(input: {
 export const PLAN_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "steps", "risks", "target", "targets", "checkIds"],
+  required: ["summary", "steps", "risks", "target", "targets", "repairIterations", "checkIds"],
   properties: {
     summary: { type: "string", minLength: 1, maxLength: 1_000 },
     steps: {
@@ -168,6 +170,7 @@ export const PLAN_SCHEMA = {
       items: { type: "string", minLength: 1, maxLength: 1_024 },
       uniqueItems: true,
     },
+    repairIterations: { type: "integer", minimum: 0, maximum: MAX_REPAIR_ITERATIONS },
     checkIds: {
       type: "array",
       minItems: 1,
@@ -463,7 +466,15 @@ export function parsePlanProposal(
   checks: readonly CheckProfile[],
 ): PlanProposal {
   const object = asObject(value, "plan");
-  const allowedKeys = new Set(["summary", "steps", "risks", "target", "targets", "checkIds"]);
+  const allowedKeys = new Set([
+    "summary",
+    "steps",
+    "risks",
+    "target",
+    "targets",
+    "repairIterations",
+    "checkIds",
+  ]);
   invariant(
     Object.keys(object).every((key) => allowedKeys.has(key)),
     "INVALID_PROVIDER_OUTPUT",
@@ -493,6 +504,16 @@ export function parsePlanProposal(
   );
   const targets = [...proposalTargets].sort();
 
+  const repairIterations = object.repairIterations;
+  invariant(
+    typeof repairIterations === "number" &&
+      Number.isSafeInteger(repairIterations) &&
+      repairIterations >= 0 &&
+      repairIterations <= MAX_REPAIR_ITERATIONS,
+    "INVALID_PROVIDER_OUTPUT",
+    `repairIterations must be an integer between 0 and ${MAX_REPAIR_ITERATIONS}`,
+  );
+
   const checkIds = asStringArray(object.checkIds, "checkIds", 1, 8);
   const allowedChecks = new Set(checks.map((check) => check.id));
   invariant(
@@ -512,6 +533,7 @@ export function parsePlanProposal(
     risks: asStringArray(object.risks, "risks", 0, 6),
     target: proposalTarget,
     targets,
+    repairIterations,
     checkIds,
   };
 }

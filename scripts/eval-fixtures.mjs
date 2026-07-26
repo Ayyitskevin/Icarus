@@ -546,6 +546,7 @@ function planResponse(scenario) {
       risks: ["The exact preimage may have changed"],
       target: scenario.target,
       targets: [scenario.target],
+      repairIterations: 0,
       checkIds: ["verify"],
     },
   };

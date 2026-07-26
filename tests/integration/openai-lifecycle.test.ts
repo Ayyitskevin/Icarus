@@ -40,6 +40,7 @@ describe("OpenAI remote lifecycle", () => {
         risks: ["The exact preimage may have changed"],
         target: "src/greeting.txt",
         targets: ["src/greeting.txt"],
+        repairIterations: 0,
         checkIds: ["verify"],
       },
       {
