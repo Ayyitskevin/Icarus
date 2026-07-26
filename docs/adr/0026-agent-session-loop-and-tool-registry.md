@@ -1,6 +1,6 @@
 # ADR 0026: AgentSession loop and host-owned tool registry
 
-- Status: Accepted — implemented in slices; 2a-i and 2a-ii landed, 2a-iii/2b/2c outstanding
+- Status: Accepted — implemented in slices; 2a landed in full, 2b/2c outstanding
 - Date: 2026-07-26
 - Related: [ADR 0023](0023-transactional-multi-file-patch-sets.md) (patch sets),
   [ADR 0024](0024-bounded-repair-loop.md) (bounded repair loop — superseded by
@@ -173,8 +173,12 @@ grants, and browser approvals. That is too much for one reviewable change.
     pinned base commit, persistence behind an operator-gated migration, and
     wiring into the planning path — so the operator now approves an enumerated
     file list rather than the scope string the model asked for.
-  - **2a-iii.** The tool registry itself: typed schemas, output ceilings,
-    kernel-side grant checks, metered invocations, and fenced results.
+  - **2a-iii (landed).** The tool registry: a closed `ToolName` union, exact
+    argument validation, kernel-side grant checks with spend counting, read
+    executors bound to the approved manifest, output ceilings that report
+    truncation, and untrusted result fencing. The registry is callable-ready
+    but nothing calls it — the loop that does is 2b, which also supplies the
+    ledger-derived call counts and the per-call metered operation.
 - **2b — the loop and write tools.** `propose_patch`, `apply_patchset`,
   `run_checks`, the AgentSession entity, the `verifying → executing` edge, and
   resume at iteration boundaries. This is where ADR 0024's repair loop is
@@ -285,6 +289,28 @@ phase.
 **The persisted manifest is digest-verified on read.** The stored digest is
 recomputed from the stored entries, so a state file edited underneath Icarus
 fails closed instead of silently widening what a read may return.
+
+### Decided while implementing 2a-iii
+
+**Read tools are scoped by the manifest, not by the grant's scope strings.**
+A grant's scope is an input to resolution; the manifest is its enumerated
+result and the thing the operator actually approved. Checking a read against
+the scope string as well would be checking the question instead of the answer,
+and would drift the moment resolution excluded something.
+
+**Control flow is a property of the registered tool.** `report_done` and
+`request_human_input` carry their control signal in the registry, so what the
+loop does next is never read out of tool output. That keeps the injection
+boundary total: output is data, and data cannot end a session or pause one.
+
+**`get_check_catalog` returns ids and names only.** Check argv stays host-side.
+The model selects checks by id; it never learns the command line, so it cannot
+craft input against a specific runner.
+
+**Output ceilings cut at a code-point boundary.** Slicing mid-sequence and
+decoding substitutes a three-byte replacement character, which can push a
+result back over the ceiling meant to bound it. The boundary is found first, so
+the ceiling is a real bound rather than an approximate one.
 
 ### Two open questions for Kevin, both deliberately unresolved here:
 

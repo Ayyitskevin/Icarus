@@ -29,7 +29,7 @@ Decision records for the current milestone:
 | [0023](adr/0023-transactional-multi-file-patch-sets.md) | Transactional multi-file patch sets, superseding the ADR 0003 mutation boundary | Accepted |
 | [0024](adr/0024-bounded-repair-loop.md) | Bounded repair loop with a plan-carried repair grant | Accepted |
 | [0025](adr/0025-hardened-inherited-opencode-workflow.md) | Hardened inherited OpenCode workflow with a repository-owned actor gate, resolving ADR 0010 | Accepted — third-party review and secret rotation outstanding |
-| [0026](adr/0026-agent-session-loop-and-tool-registry.md) | AgentSession loop, host-owned tool registry, and manifest-bound capability grants | Accepted — slices 2a-i and 2a-ii landed; tool registry and loop outstanding |
+| [0026](adr/0026-agent-session-loop-and-tool-registry.md) | AgentSession loop, host-owned tool registry, and manifest-bound capability grants | Accepted — slice 2a landed in full; the session loop and browser approvals outstanding |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.
