@@ -453,8 +453,8 @@ const assertions = {
     // be widened by restating it.
     policySource.includes('"grants list a duplicate capability"'),
   grantsAreBoundByPlanApprovalDigest:
-    policySource.includes("schemaVersion: 3") &&
-    policySource.includes('export const POLICY_VERSION = "capability-grants-v3"') &&
+    policySource.includes("schemaVersion: 4") &&
+    policySource.includes('export const POLICY_VERSION = "session-iterations-v4"') &&
     policySource.includes("readableManifestSha256: input.readableManifest") &&
     // Grants travel inside the plan, which the digest already covers, and the
     // manifest is bound alongside it.
@@ -566,17 +566,21 @@ const assertions = {
     storeSource.includes("function decodeNullablePlan(") &&
     storeSource.includes("plan: decodeNullablePlan(value.plan_json") &&
     storeSource.includes("Array.isArray(grants) ? (grants as readonly CapabilityGrant[]) : []") &&
-    storeSource.includes('typeof repairIterations === "number" ? repairIterations : 0'),
-  repairLoopIsBoundedAndGateGranted:
-    policySource.includes("export const MAX_REPAIR_ITERATIONS = 3") &&
-    policySource.includes("repairIterations <= MAX_REPAIR_ITERATIONS") &&
-    storeSource.includes("beginRepairIteration(runId: string)") &&
-    storeSource.includes('"REPAIR_BUDGET_EXHAUSTED"') &&
+    storeSource.includes('typeof ceiling === "number" ? ceiling : 0') &&
+    // A pre-ADR 0026 row's repairIterations decodes to the same ceiling, so an
+    // old approval is neither widened to the new default nor discarded.
+    storeSource.includes("decoded.iterationCeiling ?? decoded.repairIterations"),
+  sessionLoopIsBoundedAndGateGranted:
+    policySource.includes("export const MAX_SESSION_ITERATIONS = 3") &&
+    policySource.includes("export const DEFAULT_SESSION_ITERATIONS = 3") &&
+    policySource.includes("iterationCeiling <= MAX_SESSION_ITERATIONS") &&
+    storeSource.includes("beginSessionIteration(runId: string)") &&
+    storeSource.includes('"ITERATION_BUDGET_EXHAUSTED"') &&
     storeSource.includes('this.#hasApproval(runId, "plan", current.planSha256, "approve")') &&
     storeSource.includes('current.verification.outcome === "failed"') &&
-    // The grant is spent from the durable operation ledger, never a mutable
-    // counter, and the counted kind is the named repair constant.
-    storeSource.includes('export const REPAIR_OPERATION_KIND = "provider.revise"') &&
+    // The budget is spent from the durable operation ledger, never a mutable
+    // counter, and the counted kind is the named session-iteration constant.
+    storeSource.includes('export const SESSION_ITERATION_OPERATION_KIND = "provider.revise"') &&
     storeSource.includes("FROM operations") &&
     storeSource.includes("WHERE run_id = ? AND kind = '") &&
     !storeSource.includes("repair_iterations_used") &&
@@ -585,15 +589,15 @@ const assertions = {
     storeSource.includes("this.#supersessionIsAuthorized(current)") &&
     storeSource.includes("if (charged < 1 || charged > granted) return false") &&
     storeSource.includes('this.#countEvents(run.id, "patch_set.superseded") < charged'),
-  repairLoopCannotWidenAuthority:
+  sessionLoopCannotWidenAuthority:
     serviceSource.includes("parsePatchSet(") &&
     serviceSource.includes("plan.targets,") &&
     // A repair returns the worktree to baseline before proposing a revision.
     serviceSource.includes('"baseline",') &&
     serviceSource.includes("Repair could not return the private worktree to its baseline") &&
     serviceSource.includes("Repair preserved unexpected worktree bytes for human inspection"),
-  repairLoopLandsExhaustionHonestly:
-    serviceSource.includes("this.#store.remainingRepairGrant(runId) > 0") &&
+  sessionLoopLandsExhaustionHonestly:
+    serviceSource.includes("this.#store.remainingIterationBudget(runId) > 0") &&
     serviceSource.includes(
       "return this.#store.recordVerificationAndAwaitReview(runId, diff, verification);",
     ) &&

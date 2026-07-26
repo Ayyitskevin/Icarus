@@ -194,7 +194,7 @@ describe("provider proposal policy", () => {
     risks: [],
     target,
     targets: [target],
-    repairIterations: 0,
+    iterationCeiling: 0,
     checkIds: ["unit"],
   };
   const preimageSha256 = sha256("hello\n");

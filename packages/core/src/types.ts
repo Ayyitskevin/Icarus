@@ -181,12 +181,12 @@ export interface PlanProposal {
    */
   readonly targets: readonly string[];
   /**
-   * Additional attempts this plan requests when registered checks fail
-   * (ADR 0024). Bound by the plan approval digest, so approving the plan is
-   * the operator decision that authorizes the loop. Zero preserves
-   * single-attempt behavior.
+   * Iterations this plan requests beyond its first attempt (ADR 0026, which
+   * supersedes the ADR 0024 repair grant). One budget, not two: approving the
+   * plan is the single operator decision that authorizes the loop, and the
+   * approval digest binds the number. Zero preserves single-attempt behavior.
    */
-  readonly repairIterations: number;
+  readonly iterationCeiling: number;
   readonly checkIds: readonly string[];
   /**
    * Capabilities this plan requests (ADR 0026). Itemized, sorted, and covered

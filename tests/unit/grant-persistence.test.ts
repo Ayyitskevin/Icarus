@@ -294,9 +294,9 @@ describe("plans persisted before a field existed stay readable", () => {
     seeded.store.close();
 
     // Rewrite the row the way an older Icarus wrote it: no `grants` (pre-ADR
-    // 0026) and no `repairIterations` (pre-ADR 0024). Casting past the absent
+    // 0026) and no `iterationCeiling` (pre-ADR 0024). Casting past the absent
     // fields is what makes `plan.grants.length` throw and
-    // `Math.min(plan.repairIterations, n)` yield NaN.
+    // `Math.min(plan.iterationCeiling, n)` yield NaN.
     const legacy = {
       summary: UNIT_PLAN.summary,
       steps: [...UNIT_PLAN.steps],
@@ -317,10 +317,43 @@ describe("plans persisted before a field existed stay readable", () => {
     });
     const run = reopened.getRun(UNIT_RUN_ID);
     expect(run.plan?.grants).toEqual([]);
-    expect(run.plan?.repairIterations).toBe(0);
+    expect(run.plan?.iterationCeiling).toBe(0);
     // The normalized zero keeps the repair grant at a real number rather than
     // the NaN an absent field would produce.
-    expect(reopened.remainingRepairGrant(UNIT_RUN_ID)).toBe(0);
+    expect(reopened.remainingIterationBudget(UNIT_RUN_ID)).toBe(0);
+    reopened.close();
+  });
+
+  it("preserves a pre-ADR 0026 repair allowance as the same iteration ceiling", () => {
+    const seeded = seedPlannedRun();
+    const digest = digestFor(seeded.store, UNIT_PLAN, null);
+    seeded.store.recordPlanAndAwaitApproval(UNIT_RUN_ID, UNIT_PLAN, digest, null);
+    seeded.store.close();
+
+    // An operator approved two repair attempts under the old field name. The
+    // allowance must survive as exactly two — neither widened to the new
+    // default nor discarded.
+    const legacy = {
+      summary: UNIT_PLAN.summary,
+      steps: [...UNIT_PLAN.steps],
+      risks: [...UNIT_PLAN.risks],
+      target: UNIT_PLAN.target,
+      targets: [...UNIT_PLAN.targets],
+      checkIds: [...UNIT_PLAN.checkIds],
+      repairIterations: 2,
+    };
+    const raw = new Database(seeded.databasePath);
+    raw
+      .prepare("UPDATE runs SET plan_json = ? WHERE id = ?")
+      .run(JSON.stringify(legacy), UNIT_RUN_ID);
+    raw.close();
+
+    const reopened = new IcarusStore(seeded.databasePath, {
+      now: () => "2026-07-19T12:06:00.000Z",
+      id: () => "unit-legacy-ceiling-id",
+    });
+    expect(reopened.getRun(UNIT_RUN_ID).plan?.iterationCeiling).toBe(2);
+    expect(reopened.remainingIterationBudget(UNIT_RUN_ID)).toBe(2);
     reopened.close();
   });
 });

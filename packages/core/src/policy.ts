@@ -30,18 +30,40 @@ const ENCODED_PATH_PATTERN = /%(?:2e|2f|5c)/i;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /**
- * Advanced by ADR 0026: the plan approval digest now binds the requested
- * capability grants and the readable manifest, so an approval recorded under
- * the previous policy cannot authorize a granted capability.
+ * Advanced by ADR 0026 slice 2b: the plan now carries one iteration budget
+ * (`iterationCeiling`) in place of the ADR 0024 repair grant, so an approval
+ * recorded under the previous policy cannot authorize a session iteration.
  */
-export const POLICY_VERSION = "capability-grants-v3";
+export const POLICY_VERSION = "session-iterations-v4";
 
 /** Hard host ceiling on operator-selected candidate paths and patch-set size. */
 export const MAX_CHANGED_FILES = 64;
 /** Ordered exact replacements permitted inside one `modify` edit. */
 export const MAX_REPLACEMENTS_PER_FILE = 32;
-/** Host ceiling on repair attempts a plan may request (ADR 0024). */
-export const MAX_REPAIR_ITERATIONS = 3;
+/**
+ * Host ceiling on session iterations a plan may request (ADR 0026, superseding
+ * the ADR 0024 repair grant).
+ *
+ * Three is the measured reachable maximum, not a preference. Under
+ * `DEFAULT_CEILING.maxToolCalls` a run costs 12 tool calls before its first
+ * iteration and 8 per iteration thereafter, so `12 + 8n <= 40` admits n = 3 and
+ * refuses n = 4 with `Tool-call ceiling exhausted`. A larger maximum would
+ * advertise headroom that does not exist and would make budget exhaustion —
+ * rather than the honest iteration-ceiling landing — the observed stop.
+ * `sessionIterationsFitTheToolCallCeiling` in the integration suite pins the
+ * arithmetic so the two cannot drift apart.
+ *
+ * The 8-per-iteration cost belongs to the reset-and-repropose round this slice
+ * inherits. When the interleaved session loop replaces it, re-measure before
+ * changing this number — do not raise it on argument.
+ */
+export const MAX_SESSION_ITERATIONS = 3;
+/**
+ * What a plan should request absent a reason to differ. Advisory: nothing
+ * enforces it yet, because no host code chooses a plan's ceiling — the provider
+ * proposes and the operator approves.
+ */
+export const DEFAULT_SESSION_ITERATIONS = 3;
 /**
  * Host ceiling on entries a `read.manifest` grant may admit (ADR 0026). A
  * scope resolving past this is refused at plan validation rather than
@@ -111,7 +133,7 @@ export function planApprovalDigest(input: {
 }): string {
   return digestJson(
     toJsonValue({
-      schemaVersion: 3,
+      schemaVersion: 4,
       policyVersion: POLICY_VERSION,
       task: input.task,
       baseCommit: input.baseCommit,
@@ -137,8 +159,11 @@ export function planApprovalDigest(input: {
 export function readableManifestDigest(manifest: ReadableManifest): string {
   return digestJson(
     toJsonValue({
+      // Deliberately not policy-versioned. A manifest digest identifies the
+      // manifest; the plan approval digest is where POLICY_VERSION binds. Mixing
+      // them would invalidate every persisted manifest on an unrelated policy
+      // bump and surface as spurious drift rather than as a stale approval.
       schemaVersion: 1,
-      policyVersion: POLICY_VERSION,
       baseCommit: manifest.baseCommit,
       entries: [...manifest.entries]
         .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
@@ -390,7 +415,7 @@ export function treeCheckpointDigest(input: {
 export const PLAN_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "steps", "risks", "target", "targets", "repairIterations", "checkIds"],
+  required: ["summary", "steps", "risks", "target", "targets", "iterationCeiling", "checkIds"],
   properties: {
     summary: { type: "string", minLength: 1, maxLength: 1_000 },
     steps: {
@@ -412,7 +437,7 @@ export const PLAN_SCHEMA = {
       items: { type: "string", minLength: 1, maxLength: 1_024 },
       uniqueItems: true,
     },
-    repairIterations: { type: "integer", minimum: 0, maximum: MAX_REPAIR_ITERATIONS },
+    iterationCeiling: { type: "integer", minimum: 0, maximum: MAX_SESSION_ITERATIONS },
     checkIds: {
       type: "array",
       minItems: 1,
@@ -714,7 +739,7 @@ export function parsePlanProposal(
     "risks",
     "target",
     "targets",
-    "repairIterations",
+    "iterationCeiling",
     "checkIds",
     "grants",
   ]);
@@ -747,14 +772,14 @@ export function parsePlanProposal(
   );
   const targets = [...proposalTargets].sort();
 
-  const repairIterations = object.repairIterations;
+  const iterationCeiling = object.iterationCeiling;
   invariant(
-    typeof repairIterations === "number" &&
-      Number.isSafeInteger(repairIterations) &&
-      repairIterations >= 0 &&
-      repairIterations <= MAX_REPAIR_ITERATIONS,
+    typeof iterationCeiling === "number" &&
+      Number.isSafeInteger(iterationCeiling) &&
+      iterationCeiling >= 0 &&
+      iterationCeiling <= MAX_SESSION_ITERATIONS,
     "INVALID_PROVIDER_OUTPUT",
-    `repairIterations must be an integer between 0 and ${MAX_REPAIR_ITERATIONS}`,
+    `iterationCeiling must be an integer between 0 and ${MAX_SESSION_ITERATIONS}`,
   );
 
   const checkIds = asStringArray(object.checkIds, "checkIds", 1, 8);
@@ -781,7 +806,7 @@ export function parsePlanProposal(
     risks: asStringArray(object.risks, "risks", 0, 6),
     target: proposalTarget,
     targets,
-    repairIterations,
+    iterationCeiling,
     checkIds,
     grants,
   };

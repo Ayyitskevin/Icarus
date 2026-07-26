@@ -553,7 +553,7 @@ function planResponse(scenario) {
       risks: ["The exact preimage may have changed"],
       target: scenario.target,
       targets: [scenario.target],
-      repairIterations: 0,
+      iterationCeiling: 0,
       checkIds: ["verify"],
     },
   };
@@ -607,7 +607,7 @@ function multiFilePlanResponse(scenario) {
       risks: ["An exact preimage may have changed"],
       target: targets[0],
       targets,
-      repairIterations: 0,
+      iterationCeiling: 0,
       checkIds: ["verify"],
     },
   };
@@ -1379,7 +1379,7 @@ async function assertRegressionCatchesDefect(scenario, environment, files) {
         risks: ["The exact preimage may have changed"],
         target: checkFile.path,
         targets,
-        repairIterations: 0,
+        iterationCeiling: 0,
         checkIds: ["verify"],
       },
     },

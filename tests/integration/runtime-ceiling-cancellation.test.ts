@@ -391,7 +391,7 @@ async function serviceFixture(
           risks: ["The preimage may differ."],
           target: TARGET,
           targets: [TARGET],
-          repairIterations: 0,
+          iterationCeiling: 0,
           checkIds: ["verify"],
         },
         {
@@ -522,7 +522,7 @@ describe("aggregate runtime ceilings and signal cancellation", () => {
             risks: ["The preimage may differ."],
             target: TARGET,
             targets: [TARGET],
-            repairIterations: 0,
+            iterationCeiling: 0,
             checkIds: ["verify"],
           }),
           usage: {
@@ -598,7 +598,7 @@ describe("aggregate runtime ceilings and signal cancellation", () => {
               risks: ["The preimage may differ."],
               target: TARGET,
               targets: [TARGET],
-              repairIterations: 0,
+              iterationCeiling: 0,
               checkIds: ["verify"],
             });
           },

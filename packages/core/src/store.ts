@@ -13,7 +13,7 @@ import {
   assertSandboxProfile,
   assertSunCeiling,
   checkpointDigest,
-  MAX_REPAIR_ITERATIONS,
+  MAX_SESSION_ITERATIONS,
   planApprovalDigest,
   readableManifestDigest,
   treeCheckpointDigest,
@@ -60,7 +60,13 @@ type Row = Record<string, unknown>;
 
 export const CANCELLATION_RECOVERY_OPERATION_KIND = "cancellation.recovery";
 /** Operation kind whose ledger rows count spent repair attempts (ADR 0024). */
-export const REPAIR_OPERATION_KIND = "provider.revise";
+/**
+ * The counted kind for a session iteration (ADR 0026, superseding the ADR 0024
+ * repair grant). The exported name changed with the concept; the string did
+ * not, because ledger rows already charged under it must keep counting. A
+ * rename here would silently reset every in-flight run's spent iterations.
+ */
+export const SESSION_ITERATION_OPERATION_KIND = "provider.revise";
 export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
 export const RUN_EVENT_PAGE_LIMIT = 64;
@@ -528,7 +534,11 @@ function nullableJson<T>(value: unknown, name: string): T | null {
  * Decodes a persisted plan without casting past its shape. Plans are stored as
  * JSON, so a row written before a plan field existed decodes with that field
  * absent while the type claims it is present — `plan.grants.length` then throws
- * and `Math.min(plan.repairIterations, n)` yields NaN.
+ * and `Math.min(plan.iterationCeiling, n)` yields NaN.
+ *
+ * A pre-ADR 0026 row carries `repairIterations`; it decodes to the same
+ * `iterationCeiling`, preserving exactly the allowance the operator approved
+ * rather than widening it to the new default or discarding it.
  *
  * Both fields normalize to the no-capability reading, which is what a plan
  * authored before the field meant: no repair attempts and no granted
@@ -538,11 +548,11 @@ function nullableJson<T>(value: unknown, name: string): T | null {
 function decodeNullablePlan(value: unknown, name: string): PlanProposal | null {
   const decoded = nullableJson<Record<string, unknown>>(value, name);
   if (decoded === null) return null;
-  const repairIterations = decoded.repairIterations;
+  const ceiling = decoded.iterationCeiling ?? decoded.repairIterations;
   const grants = decoded.grants;
   return {
     ...(decoded as unknown as PlanProposal),
-    repairIterations: typeof repairIterations === "number" ? repairIterations : 0,
+    iterationCeiling: typeof ceiling === "number" ? ceiling : 0,
     grants: Array.isArray(grants) ? (grants as readonly CapabilityGrant[]) : [],
   };
 }
@@ -2074,12 +2084,12 @@ export class IcarusStore {
    * (ADR 0024) so the count survives a crash and cannot drift from the work
    * actually charged.
    */
-  countRepairIterations(runId: string): number {
+  countSessionIterations(runId: string): number {
     const value = row(
       this.#database
         .prepare(
           `SELECT COUNT(*) AS used FROM operations
-           WHERE run_id = ? AND kind = '${REPAIR_OPERATION_KIND}'`,
+           WHERE run_id = ? AND kind = '${SESSION_ITERATION_OPERATION_KIND}'`,
         )
         .get(runId),
       "repair iteration count",
@@ -2088,14 +2098,14 @@ export class IcarusStore {
   }
 
   /** Remaining approved repair attempts for a run (ADR 0024). */
-  remainingRepairGrant(runId: string): number {
-    return this.#repairGrantRemaining(this.getRun(runId));
+  remainingIterationBudget(runId: string): number {
+    return this.#iterationBudgetRemaining(this.getRun(runId));
   }
 
-  #repairGrantRemaining(run: RunRecord): number {
+  #iterationBudgetRemaining(run: RunRecord): number {
     if (run.plan === null) return 0;
-    const granted = Math.min(run.plan.repairIterations, MAX_REPAIR_ITERATIONS);
-    return Math.max(0, granted - this.countRepairIterations(run.id));
+    const granted = Math.min(run.plan.iterationCeiling, MAX_SESSION_ITERATIONS);
+    return Math.max(0, granted - this.countSessionIterations(run.id));
   }
 
   /**
@@ -2108,8 +2118,8 @@ export class IcarusStore {
    */
   #supersessionIsAuthorized(run: RunRecord): boolean {
     if (run.plan === null) return false;
-    const granted = Math.min(run.plan.repairIterations, MAX_REPAIR_ITERATIONS);
-    const charged = this.countRepairIterations(run.id);
+    const granted = Math.min(run.plan.iterationCeiling, MAX_SESSION_ITERATIONS);
+    const charged = this.countSessionIterations(run.id);
     if (charged < 1 || charged > granted) return false;
     return this.#countEvents(run.id, "patch_set.superseded") < charged;
   }
@@ -2129,7 +2139,7 @@ export class IcarusStore {
    * carrying an unspent repair grant and a recorded failing verification; the
    * generic transition path stays closed to this edge.
    */
-  beginRepairIteration(runId: string): RunRecord {
+  beginSessionIteration(runId: string): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
       invariant(current.state === "verifying", "INVALID_STATE", "Run is not verifying");
@@ -2145,8 +2155,12 @@ export class IcarusStore {
         "VERIFICATION_NOT_PASSED",
         "Repair requires a recorded failing verification",
       );
-      const remaining = this.#repairGrantRemaining(current);
-      invariant(remaining > 0, "REPAIR_BUDGET_EXHAUSTED", "The approved repair grant is exhausted");
+      const remaining = this.#iterationBudgetRemaining(current);
+      invariant(
+        remaining > 0,
+        "ITERATION_BUDGET_EXHAUSTED",
+        "The approved iteration budget is exhausted",
+      );
       assertTransition(current.state, "running");
       const now = this.#now();
       const result = this.#database
@@ -2296,9 +2310,9 @@ export class IcarusStore {
           "Only a failing verification may be retained for repair",
         );
         invariant(
-          this.#repairGrantRemaining(current) > 0,
-          "REPAIR_BUDGET_EXHAUSTED",
-          "The approved repair grant is exhausted",
+          this.#iterationBudgetRemaining(current) > 0,
+          "ITERATION_BUDGET_EXHAUSTED",
+          "The approved iteration budget is exhausted",
         );
       }
       const now = this.#now();
