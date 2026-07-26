@@ -1,9 +1,15 @@
 import path from "node:path";
 
-import { containsSecretShapedContent, isProtectedEditPath } from "./context.js";
+import {
+  containsSecretShapedContent,
+  isIntrinsicallySecretPath,
+  isProtectedEditPath,
+} from "./context.js";
 import { digestJson, sha256 } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
 import type {
+  CapabilityGrant,
+  CapabilityKind,
   CheckpointFile,
   CheckProfile,
   EditProposal,
@@ -13,6 +19,7 @@ import type {
   PatchSet,
   PlanProposal,
   ProviderConfig,
+  ReadableManifest,
   SandboxProfile,
   SunCeiling,
 } from "./types.js";
@@ -23,10 +30,11 @@ const ENCODED_PATH_PATTERN = /%(?:2e|2f|5c)/i;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /**
- * Advanced by ADR 0023: the plan approval digest now binds a target set, so an
- * approval recorded under the previous policy cannot authorize a patch set.
+ * Advanced by ADR 0026: the plan approval digest now binds the requested
+ * capability grants and the readable manifest, so an approval recorded under
+ * the previous policy cannot authorize a granted capability.
  */
-export const POLICY_VERSION = "patch-set-v2";
+export const POLICY_VERSION = "capability-grants-v3";
 
 /** Hard host ceiling on operator-selected candidate paths and patch-set size. */
 export const MAX_CHANGED_FILES = 64;
@@ -34,6 +42,26 @@ export const MAX_CHANGED_FILES = 64;
 export const MAX_REPLACEMENTS_PER_FILE = 32;
 /** Host ceiling on repair attempts a plan may request (ADR 0024). */
 export const MAX_REPAIR_ITERATIONS = 3;
+/**
+ * Host ceiling on entries a `read.manifest` grant may admit (ADR 0026). A
+ * scope resolving past this is refused at plan validation rather than
+ * truncated: a shortened manifest would leave the model reading from a set the
+ * operator never saw.
+ */
+export const MAX_READABLE_FILES = 512;
+/** Itemized grants one plan may request. */
+export const MAX_GRANTS = 8;
+/** Scope entries one grant may name. */
+export const MAX_GRANT_SCOPE_ENTRIES = 64;
+/** Host ceiling on calls a single grant may authorize. */
+export const MAX_GRANT_CALLS = 64;
+
+const CAPABILITY_KINDS: readonly CapabilityKind[] = [
+  "read.manifest",
+  "read.checks",
+  "mutation.patchset",
+  "exec.check",
+];
 const MAX_REPLACEMENT_TEXT_LENGTH = 262_144;
 
 export const DEFAULT_CEILING: SunCeiling = {
@@ -73,10 +101,17 @@ export function planApprovalDigest(input: {
   readonly sandbox: SandboxProfile;
   readonly ceiling: SunCeiling;
   readonly plan: PlanProposal;
+  /**
+   * The resolved manifest for this run's `read.manifest` grant, or null when
+   * the plan requests no read capability. Null and an empty manifest digest to
+   * different values, so an approval that granted nothing cannot be replayed
+   * as one that granted an empty scope.
+   */
+  readonly readableManifest: ReadableManifest | null;
 }): string {
   return digestJson(
     toJsonValue({
-      schemaVersion: 2,
+      schemaVersion: 3,
       policyVersion: POLICY_VERSION,
       task: input.task,
       baseCommit: input.baseCommit,
@@ -87,7 +122,214 @@ export function planApprovalDigest(input: {
       sandbox: input.sandbox,
       ceiling: input.ceiling,
       plan: input.plan,
+      readableManifestSha256: input.readableManifest
+        ? readableManifestDigest(input.readableManifest)
+        : null,
     }),
+  );
+}
+
+/**
+ * Binds an enumerated readable set: the base commit it was resolved against
+ * and every admitted path with the sha256 of its contents there. Entries are
+ * sorted so an equal set always digests equally regardless of resolution order.
+ */
+export function readableManifestDigest(manifest: ReadableManifest): string {
+  return digestJson(
+    toJsonValue({
+      schemaVersion: 1,
+      policyVersion: POLICY_VERSION,
+      baseCommit: manifest.baseCommit,
+      entries: [...manifest.entries]
+        .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
+        .map((entry) => ({ path: entry.path, sha256: entry.sha256 })),
+    }),
+  );
+}
+
+/**
+ * Rejects a manifest the host would not be able to hold the operator to:
+ * unsorted or duplicated paths, malformed digests, a scope past the host
+ * ceiling, or a protected path. Called before the manifest reaches an approval
+ * digest, so an unapprovable manifest never becomes an approved one.
+ */
+export function assertReadableManifest(manifest: ReadableManifest): void {
+  invariant(
+    SHA256_PATTERN.test(manifest.baseCommit) || /^[a-f0-9]{40}$/.test(manifest.baseCommit),
+    "INVALID_READ_MANIFEST",
+    "Readable manifest base commit is invalid",
+  );
+  invariant(
+    manifest.entries.length <= MAX_READABLE_FILES,
+    "READ_SCOPE_TOO_LARGE",
+    `Readable manifest admits more than ${MAX_READABLE_FILES} files`,
+  );
+  const seen = new Set<string>();
+  for (const entry of manifest.entries) {
+    const entryPath = assertRepositoryRelativePath(entry.path);
+    invariant(
+      !isProtectedEditPath(entryPath),
+      "INVALID_READ_MANIFEST",
+      "Readable manifest admits a protected path",
+    );
+    // A read manifest sends bytes to a provider, so it refuses more than the
+    // edit guard does. Git internals are excluded by path rather than by
+    // trusting the resolver: `.git/config` carries remote URLs with embedded
+    // credentials, and a resolver walking a worktree sees `.git/` even though
+    // one reading `git ls-tree` never does.
+    invariant(
+      entryPath !== ".git" && !entryPath.startsWith(".git/"),
+      "INVALID_READ_MANIFEST",
+      "Readable manifest admits a git internal path",
+    );
+    invariant(
+      !isIntrinsicallySecretPath(entryPath),
+      "INVALID_READ_MANIFEST",
+      "Readable manifest admits an intrinsically secret path",
+    );
+    invariant(
+      SHA256_PATTERN.test(entry.sha256),
+      "INVALID_READ_MANIFEST",
+      "Readable manifest entry digest is invalid",
+    );
+    invariant(
+      !seen.has(entryPath),
+      "INVALID_READ_MANIFEST",
+      "Readable manifest lists a duplicate path",
+    );
+    seen.add(entryPath);
+  }
+}
+
+/**
+ * The read binding. Bytes may be returned only when their digest still matches
+ * this path's approved manifest entry, or when this session itself recorded
+ * writing them — those bytes originated from the model and are already covered
+ * by the patch set and tree checkpoint.
+ *
+ * Anything else is drift, not a fallback: it means the file changed under an
+ * approval that named its contents, so the operator approved a read of bytes
+ * that no longer exist.
+ */
+export function assertReadableBytes(input: {
+  readonly path: string;
+  readonly sha256: string;
+  readonly manifest: ReadableManifest;
+  readonly sessionWritten: ReadonlyMap<string, string>;
+}): void {
+  const requested = assertRepositoryRelativePath(input.path);
+  invariant(SHA256_PATTERN.test(input.sha256), "INVALID_READ_MANIFEST", "Read digest is malformed");
+
+  const sessionDigest = input.sessionWritten.get(requested);
+  if (sessionDigest !== undefined) {
+    invariant(
+      sessionDigest === input.sha256,
+      "READ_MANIFEST_DRIFT",
+      "Read returned bytes this session did not write",
+    );
+    return;
+  }
+
+  const entry = input.manifest.entries.find((candidate) => candidate.path === requested);
+  invariant(
+    entry !== undefined,
+    "READ_NOT_GRANTED",
+    "Read targeted a path outside the approved readable manifest",
+  );
+  invariant(
+    entry.sha256 === input.sha256,
+    "READ_MANIFEST_DRIFT",
+    "Read returned bytes whose digest does not match the approved manifest entry",
+  );
+}
+
+/**
+ * Validates itemized grants from provider output. Unknown kinds, duplicate
+ * kinds, unbounded call counts, and paths outside the run's authority are
+ * refused here rather than at call time, so an unapprovable grant never
+ * reaches an operator as if it were reviewable.
+ */
+export function parseCapabilityGrants(
+  value: unknown,
+  selection: readonly string[],
+  checks: readonly CheckProfile[],
+): CapabilityGrant[] {
+  invariant(Array.isArray(value), "INVALID_PROVIDER_OUTPUT", "grants must be an array");
+  invariant(
+    value.length <= MAX_GRANTS,
+    "INVALID_PROVIDER_OUTPUT",
+    `grants must not exceed ${MAX_GRANTS} entries`,
+  );
+
+  const selected = new Set(selection);
+  const registeredChecks = new Set(checks.map((check) => check.id));
+  const kinds = new Set<string>();
+  const grants: CapabilityGrant[] = [];
+
+  for (const raw of value) {
+    const object = asObject(raw, "grant");
+    const allowedKeys = new Set(["kind", "scope", "maxCalls"]);
+    invariant(
+      Object.keys(object).every((key) => allowedKeys.has(key)),
+      "INVALID_PROVIDER_OUTPUT",
+      "grant has unknown fields",
+    );
+
+    const kind = asBoundedString(object.kind, "grant.kind", 64);
+    invariant(
+      (CAPABILITY_KINDS as readonly string[]).includes(kind),
+      "UNKNOWN_CAPABILITY",
+      "grant names a capability the host does not define",
+    );
+    invariant(!kinds.has(kind), "INVALID_PROVIDER_OUTPUT", "grants list a duplicate capability");
+    kinds.add(kind);
+
+    const maxCalls = object.maxCalls;
+    invariant(
+      typeof maxCalls === "number" &&
+        Number.isSafeInteger(maxCalls) &&
+        maxCalls >= 1 &&
+        maxCalls <= MAX_GRANT_CALLS,
+      "INVALID_PROVIDER_OUTPUT",
+      `grant.maxCalls must be an integer between 1 and ${MAX_GRANT_CALLS}`,
+    );
+
+    const scope = asStringArray(object.scope, "grant.scope", 0, MAX_GRANT_SCOPE_ENTRIES, 1_024);
+    invariant(
+      new Set(scope).size === scope.length,
+      "INVALID_PROVIDER_OUTPUT",
+      "grant.scope lists a duplicate entry",
+    );
+
+    if (kind === "mutation.patchset") {
+      for (const entry of scope) {
+        invariant(
+          selected.has(assertRepositoryRelativePath(entry)),
+          "TARGET_MISMATCH",
+          "mutation.patchset grant names a path outside the operator-selected targets",
+        );
+      }
+    }
+    if (kind === "read.checks" || kind === "exec.check") {
+      for (const entry of scope) {
+        invariant(
+          registeredChecks.has(entry),
+          "CHECK_MISMATCH",
+          "check grant names an unregistered check",
+        );
+      }
+    }
+    if (kind === "read.manifest") {
+      for (const entry of scope) {
+        assertRepositoryRelativePath(entry.endsWith("/") ? entry.slice(0, -1) : entry);
+      }
+    }
+
+    grants.push({ kind: kind as CapabilityKind, scope: [...scope].sort(), maxCalls });
+  }
+
+  return grants.sort((left, right) =>
+    left.kind < right.kind ? -1 : left.kind > right.kind ? 1 : 0,
   );
 }
 
@@ -474,6 +716,7 @@ export function parsePlanProposal(
     "targets",
     "repairIterations",
     "checkIds",
+    "grants",
   ]);
   invariant(
     Object.keys(object).every((key) => allowedKeys.has(key)),
@@ -527,6 +770,11 @@ export function parsePlanProposal(
     "Provider selected duplicate checks",
   );
 
+  // Absent grants are an empty list, not a defaulted capability: a plan that
+  // does not ask for a capability must not receive one, and a plan authored
+  // before ADR 0026 asks for nothing.
+  const grants = parseCapabilityGrants(object.grants ?? [], selection, checks);
+
   return {
     summary: asBoundedString(object.summary, "summary", 1_000),
     steps: asStringArray(object.steps, "steps", 1, 8),
@@ -535,6 +783,7 @@ export function parsePlanProposal(
     targets,
     repairIterations,
     checkIds,
+    grants,
   };
 }
 

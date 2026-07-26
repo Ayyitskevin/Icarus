@@ -51,6 +51,7 @@ export const UNIT_PLAN: PlanProposal = {
   targets: ["src/greeting.txt"],
   repairIterations: 0,
   checkIds: ["unit"],
+  grants: [],
 };
 
 export function makeUnitIdGenerator(): () => string {

@@ -51,6 +51,7 @@ const policySource = await readFile("packages/core/src/policy.ts", "utf8");
 const serviceSource = await readFile("packages/core/src/service.ts", "utf8");
 const runtimeSource = await readFile("packages/core/src/runtime.ts", "utf8");
 const storeSource = await readFile("packages/core/src/store.ts", "utf8");
+const typesSource = await readFile("packages/core/src/types.ts", "utf8");
 const verificationProjectionSource = await readFile(
   "packages/core/src/verification-provenance.ts",
   "utf8",
@@ -438,6 +439,52 @@ const assertions = {
     serviceSource.includes("run = this.#store.recordPatchSetIntent(runId, patchSet, files)") &&
     serviceSource.indexOf("recordPatchSetIntent(runId, patchSet, files)") <
       serviceSource.indexOf("await this.#git.applyFileWrites(worktreePath, pending"),
+  // ADR 0026: a capability is only ever granted by an operator approving a
+  // plan whose digest covers the itemized grant list.
+  capabilityKindsAreClosed:
+    typesSource.includes(
+      'export type CapabilityKind = "read.manifest" | "read.checks" | "mutation.patchset" | "exec.check"',
+    ) &&
+    policySource.includes('"UNKNOWN_CAPABILITY"') &&
+    policySource.includes("(CAPABILITY_KINDS as readonly string[]).includes(kind)") &&
+    // Duplicate kinds are refused rather than merged, so a narrow grant cannot
+    // be widened by restating it.
+    policySource.includes('"grants list a duplicate capability"'),
+  grantsAreBoundByPlanApprovalDigest:
+    policySource.includes("schemaVersion: 3") &&
+    policySource.includes('export const POLICY_VERSION = "capability-grants-v3"') &&
+    policySource.includes("readableManifestSha256: input.readableManifest") &&
+    // Grants travel inside the plan, which the digest already covers, and the
+    // manifest is bound alongside it.
+    typesSource.includes("readonly grants: readonly CapabilityGrant[]"),
+  readGrantRequiresResolvedManifest:
+    storeSource.includes('grant.kind === "read.manifest"') &&
+    storeSource.includes("requestsRead === (readableManifest !== null)") &&
+    storeSource.includes('"READ_MANIFEST_UNRESOLVED"') &&
+    storeSource.includes("assertReadableManifest(readableManifest)") &&
+    storeSource.includes("readableManifest.baseCommit === current.baseCommit"),
+  readScopeIsBoundedNotTruncated:
+    policySource.includes("export const MAX_READABLE_FILES = 512") &&
+    policySource.includes('"READ_SCOPE_TOO_LARGE"') &&
+    // Refusal, never a slice: a shortened manifest would leave the model
+    // reading from a set the operator never approved.
+    !policySource.includes("entries.slice(0, MAX_READABLE_FILES)"),
+  readManifestExcludesSecretsAndGitInternals:
+    policySource.includes('entryPath !== ".git" && !entryPath.startsWith(".git/")') &&
+    policySource.includes("!isIntrinsicallySecretPath(entryPath)") &&
+    policySource.includes("!isProtectedEditPath(entryPath)"),
+  readsAreBoundToApprovedBytes:
+    policySource.includes("export function assertReadableBytes(") &&
+    policySource.includes('"READ_NOT_GRANTED"') &&
+    policySource.includes('"READ_MANIFEST_DRIFT"') &&
+    // Session-written bytes are the only alternative to a manifest match, and
+    // they must match what this session recorded writing.
+    policySource.includes("sessionDigest === input.sha256"),
+  persistedPlansNeverCastPastAbsentFields:
+    storeSource.includes("function decodeNullablePlan(") &&
+    storeSource.includes("plan: decodeNullablePlan(value.plan_json") &&
+    storeSource.includes("Array.isArray(grants) ? (grants as readonly CapabilityGrant[]) : []") &&
+    storeSource.includes('typeof repairIterations === "number" ? repairIterations : 0'),
   repairLoopIsBoundedAndGateGranted:
     policySource.includes("export const MAX_REPAIR_ITERATIONS = 3") &&
     policySource.includes("repairIterations <= MAX_REPAIR_ITERATIONS") &&

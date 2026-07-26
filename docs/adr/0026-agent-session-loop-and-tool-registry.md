@@ -1,6 +1,6 @@
 # ADR 0026: AgentSession loop and host-owned tool registry
 
-- Status: Proposed
+- Status: Accepted — implemented in slices; 2a-i landed, 2a-ii/2b/2c outstanding
 - Date: 2026-07-26
 - Related: [ADR 0023](0023-transactional-multi-file-patch-sets.md) (patch sets),
   [ADR 0024](0024-bounded-repair-loop.md) (bounded repair loop — superseded by
@@ -162,6 +162,15 @@ grants, and browser approvals. That is too much for one reviewable change.
   existing single-shot execution. No loop, no new mutation authority. Proves
   the grant kernel, the read binding, metering, fenced results, and injection
   containment while the blast radius is still read-only.
+  - **2a-i (landed).** The policy layer: `CapabilityKind` as a closed union,
+    grant validation, `MAX_READABLE_FILES`, `readableManifestDigest`,
+    `assertReadableManifest`, `assertReadableBytes`, and the approval-digest
+    extension. Pure functions over data, so the binding that makes a read tool
+    safe is reviewable before anything can call one. Nothing can resolve a
+    manifest yet, so the store refuses a plan requesting `read.manifest`
+    rather than binding an unresolved scope into an approval.
+  - **2a-ii.** Manifest resolution against the pinned base commit, its
+    persistence and migration, and the tool registry itself.
 - **2b — the loop and write tools.** `propose_patch`, `apply_patchset`,
   `run_checks`, the AgentSession entity, the `verifying → executing` edge, and
   resume at iteration boundaries. This is where ADR 0024's repair loop is
@@ -223,7 +232,31 @@ manifest produces a plausible, passing, wrong change. Checks and human review
 remain the control. This ADR does not claim to remove that risk, and no
 capability here should be described as making review optional.
 
-Two open questions for Kevin, both deliberately unresolved here:
+### Found while implementing 2a-i
+
+Two things the design did not anticipate, both now enforced:
+
+**A read manifest refuses more than the edit guard does.** `isProtectedEditPath`
+was written to stop the model *editing* `.env` and credential files. It does not
+exclude `.git/**`, and neither does the context-exclusion predicate. Today that
+is moot because context is assembled from `git ls-tree`, which never lists
+untracked `.git/`. But a manifest resolver walking a worktree does see it, and
+`.git/config` carries remote URLs with embedded credentials. The validator now
+refuses `.git/**` and intrinsically-secret paths by path, rather than relying on
+a resolver that does not exist yet to be careful — a read sends bytes to a
+provider, so it is held to a stricter test than an edit.
+
+**Persisted plans were cast past absent fields.** `plan_json` decoded through an
+unchecked `nullableJson<PlanProposal>`, so a row written before a plan field
+existed produced a value whose type claimed the field was present.
+`plan.grants.length` would have thrown, and `Math.min(plan.repairIterations, n)`
+already yielded NaN on a pre-ADR 0024 row. That NaN happened to fail closed, but
+only through a coincidence of comparison semantics across two functions rather
+than by design. Decoding now normalizes both fields to the no-capability
+reading, which is what a plan authored before the field meant. Neither default
+can widen authority.
+
+### Two open questions for Kevin, both deliberately unresolved here:
 
 1. **Default `iterationCeiling`.** The vision document proposes 8. Nothing has
    been measured. Recommend shipping 2b with a low default (3–4) and raising it
