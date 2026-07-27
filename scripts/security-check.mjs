@@ -486,7 +486,7 @@ const assertions = {
   // kernel, output-bounded, and fenced.
   toolRegistryIsClosed:
     toolsSource.includes(
-      'export type ToolName =\n  | "read_file"\n  | "list_tree"\n  | "search"\n  | "get_check_catalog"\n  | "report_done"\n  | "request_human_input"',
+      'export type ToolName =\n  | "read_file"\n  | "list_tree"\n  | "search"\n  | "get_check_catalog"\n  | "propose_patch"\n  | "apply_patchset"\n  | "run_checks"\n  | "report_done"\n  | "request_human_input"',
     ) &&
     toolsSource.includes('"UNKNOWN_TOOL"') &&
     toolsSource.includes("TOOL_REGISTRY.some((entry) => entry.name === name)") &&
@@ -522,6 +522,27 @@ const assertions = {
     toolsSource.includes("iteration ceilings") &&
     // Control flow is derived from the registered tool, never from output.
     toolsSource.includes("readonly control: ToolControl"),
+  writeToolsFailClosedWithoutHostOperations:
+    // Nullable rather than optional: a context that cannot perform an operation
+    // says so, and the executor refuses instead of appearing to offer the tool.
+    toolsSource.includes(
+      "readonly proposePatch: ((raw: unknown) => Promise<ProposePatchOutcome>) | null",
+    ) &&
+    toolsSource.includes('"TOOL_UNAVAILABLE"') &&
+    // A proposal is shape-checked at the call boundary and content-checked
+    // against approved targets in the executor, never self-approved.
+    toolsSource.includes("MAX_PROPOSED_PATCH_BYTES") &&
+    !toolsSource.includes("parsePatchSet("),
+  execCheckGrantNamesEveryCheckRun:
+    toolsSource.includes('input.call.name === "run_checks"') &&
+    toolsSource.includes("granted.has(checkId)") &&
+    toolsSource.includes("MAX_CHECKS_PER_CALL"),
+  failingCheckIsEvidenceNotControl:
+    // run_checks stays on `continue`: a failing check is evidence, and only the
+    // host decides whether a session ends.
+    toolsSource.includes(
+      '{ name: "run_checks", capability: "exec.check", outputCeilingBytes: 32_768, control: "continue" }',
+    ),
   toolCatalogNeverExposesCheckArgv:
     toolsSource.includes(".map((check) => ({ id: check.id, name: check.name }))") &&
     !toolsSource.includes("check.argv"),

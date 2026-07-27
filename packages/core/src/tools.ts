@@ -14,6 +14,9 @@ export type ToolName =
   | "list_tree"
   | "search"
   | "get_check_catalog"
+  | "propose_patch"
+  | "apply_patchset"
+  | "run_checks"
   | "report_done"
   | "request_human_input";
 
@@ -38,6 +41,10 @@ export const MAX_SEARCH_MATCHES = 50;
 export const MAX_SEARCH_MATCH_BYTES = 512;
 /** Host ceiling on a model-authored question or completion summary. */
 export const MAX_TOOL_TEXT_LENGTH = 2_000;
+/** Host ceiling on a proposed patch set's serialized size. */
+export const MAX_PROPOSED_PATCH_BYTES = 512 * 1024;
+/** Host ceiling on checks one `run_checks` call may name. */
+export const MAX_CHECKS_PER_CALL = 8;
 
 export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
@@ -59,6 +66,19 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
     outputCeilingBytes: 8_192,
     control: "continue",
   },
+  {
+    name: "propose_patch",
+    capability: "mutation.patchset",
+    outputCeilingBytes: 4_096,
+    control: "continue",
+  },
+  {
+    name: "apply_patchset",
+    capability: "mutation.patchset",
+    outputCeilingBytes: 32_768,
+    control: "continue",
+  },
+  { name: "run_checks", capability: "exec.check", outputCeilingBytes: 32_768, control: "continue" },
   { name: "report_done", capability: null, outputCeilingBytes: 4_096, control: "done" },
   {
     name: "request_human_input",
@@ -79,6 +99,9 @@ export type ToolCall =
   | { readonly name: "list_tree"; readonly prefix: string | null }
   | { readonly name: "search"; readonly query: string }
   | { readonly name: "get_check_catalog" }
+  | { readonly name: "propose_patch"; readonly patchSet: unknown }
+  | { readonly name: "apply_patchset" }
+  | { readonly name: "run_checks"; readonly checkIds: readonly string[] }
   | { readonly name: "report_done"; readonly summary: string }
   | { readonly name: "request_human_input"; readonly question: string };
 
@@ -150,6 +173,39 @@ export function parseToolCall(value: unknown): ToolCall {
     assertExactKeys(args, []);
     return { name };
   }
+  if (name === "propose_patch") {
+    assertExactKeys(args, ["patchSet"]);
+    // Shape only. The patch set's real validation needs the run's approved
+    // targets and worktree preimages, so `parsePatchSet` runs in the executor
+    // where those exist — a tool call cannot pre-approve its own contents.
+    const patchSet = asObject(args.patchSet, "patchSet");
+    invariant(
+      Buffer.byteLength(JSON.stringify(patchSet), "utf8") <= MAX_PROPOSED_PATCH_BYTES,
+      "INVALID_TOOL_CALL",
+      "patchSet exceeds the host proposal ceiling",
+    );
+    return { name, patchSet };
+  }
+  if (name === "apply_patchset") {
+    assertExactKeys(args, []);
+    return { name };
+  }
+  if (name === "run_checks") {
+    assertExactKeys(args, ["checkIds"]);
+    invariant(Array.isArray(args.checkIds), "INVALID_TOOL_CALL", "checkIds must be an array");
+    invariant(
+      args.checkIds.length > 0 && args.checkIds.length <= MAX_CHECKS_PER_CALL,
+      "INVALID_TOOL_CALL",
+      `checkIds must name between 1 and ${MAX_CHECKS_PER_CALL} checks`,
+    );
+    const checkIds = args.checkIds.map((entry) => asBoundedString(entry, "checkIds entry", 128));
+    invariant(
+      new Set(checkIds).size === checkIds.length,
+      "INVALID_TOOL_CALL",
+      "checkIds lists a duplicate check",
+    );
+    return { name, checkIds };
+  }
   if (name === "report_done") {
     assertExactKeys(args, ["summary"]);
     return { name, summary: asBoundedString(args.summary, "summary", MAX_TOOL_TEXT_LENGTH) };
@@ -196,6 +252,22 @@ export function assertToolCallGranted(input: {
   if (input.call.name === "get_check_catalog") {
     invariant(grant.scope.length > 0, "TOOL_NOT_GRANTED", "Check catalog grant names no checks");
   }
+  if (input.call.name === "run_checks") {
+    const granted = new Set(grant.scope);
+    for (const checkId of input.call.checkIds) {
+      invariant(
+        granted.has(checkId),
+        "TOOL_NOT_GRANTED",
+        `The exec.check grant does not name ${checkId}`,
+      );
+    }
+  }
+  if (input.call.name === "propose_patch" || input.call.name === "apply_patchset") {
+    // The grant's scope is the mutation authority the operator approved. Its
+    // per-path enforcement happens again in `parsePatchSet` against the run's
+    // approved targets, so a scope that somehow drifted cannot widen the set.
+    invariant(grant.scope.length > 0, "TOOL_NOT_GRANTED", "mutation.patchset grant names no paths");
+  }
 }
 
 export interface ToolContext {
@@ -210,6 +282,35 @@ export interface ToolContext {
   readonly sessionWritten: ReadonlyMap<string, string>;
   readonly checks: readonly CheckProfile[];
   readonly grants: readonly CapabilityGrant[];
+  /**
+   * The host operations the write tools delegate to. Explicitly nullable rather
+   * than optional: a context that cannot perform an operation says so, and the
+   * executor refuses the call with `TOOL_UNAVAILABLE`. A read-only context
+   * passes nulls and fails closed instead of appearing to offer a tool it has
+   * no way to carry out.
+   */
+  readonly hostOperations: {
+    readonly proposePatch: ((raw: unknown) => Promise<ProposePatchOutcome>) | null;
+    readonly applyPatchSet: (() => Promise<ApplyPatchSetOutcome>) | null;
+    readonly runChecks: ((checkIds: readonly string[]) => Promise<RunChecksOutcome>) | null;
+  };
+}
+
+export interface ProposePatchOutcome {
+  /** The approved paths the accepted proposal changes. */
+  readonly paths: readonly string[];
+}
+
+export interface ApplyPatchSetOutcome {
+  readonly changedPaths: readonly string[];
+  readonly diff: string;
+  /** Digests of the bytes now on disk, feeding the ADR 0026 read binding. */
+  readonly written: ReadonlyMap<string, string>;
+}
+
+export interface RunChecksOutcome {
+  readonly outcome: "passed" | "failed";
+  readonly evidence: string;
 }
 
 export interface ToolResult {
@@ -274,6 +375,39 @@ export async function executeToolCall(call: ToolCall, context: ToolContext): Pro
       .filter((check) => granted.has(check.id))
       .map((check) => ({ id: check.id, name: check.name }));
     const { content, truncated } = applyCeiling(call.name, JSON.stringify(catalog));
+    return { name: call.name, content, truncated, control: "continue" };
+  }
+
+  if (call.name === "propose_patch") {
+    const proposePatch = context.hostOperations.proposePatch;
+    invariant(proposePatch !== null, "TOOL_UNAVAILABLE", "This session cannot propose a patch set");
+    const outcome = await proposePatch(call.patchSet);
+    const { content, truncated } = applyCeiling(
+      call.name,
+      JSON.stringify({ accepted: true, paths: [...outcome.paths] }),
+    );
+    return { name: call.name, content, truncated, control: "continue" };
+  }
+
+  if (call.name === "apply_patchset") {
+    const applyPatchSet = context.hostOperations.applyPatchSet;
+    invariant(applyPatchSet !== null, "TOOL_UNAVAILABLE", "This session cannot apply a patch set");
+    const outcome = await applyPatchSet();
+    const { content, truncated } = applyCeiling(
+      call.name,
+      `changed: ${[...outcome.changedPaths].join(", ")}\n${outcome.diff}`,
+    );
+    return { name: call.name, content, truncated, control: "continue" };
+  }
+
+  if (call.name === "run_checks") {
+    const runChecks = context.hostOperations.runChecks;
+    invariant(runChecks !== null, "TOOL_UNAVAILABLE", "This session cannot run checks");
+    const outcome = await runChecks(call.checkIds);
+    const { content, truncated } = applyCeiling(
+      call.name,
+      `outcome: ${outcome.outcome}\n${outcome.evidence}`,
+    );
     return { name: call.name, content, truncated, control: "continue" };
   }
 

@@ -26,10 +26,13 @@ export {
 } from "./runtime.js";
 export { IcarusService, type PlanRunInput } from "./service.js";
 export {
+  type ApplyPatchSetOutcome,
   assertToolCallGranted,
   executeToolCall,
   parseToolCall,
+  type ProposePatchOutcome,
   renderToolResult,
+  type RunChecksOutcome,
   TOOL_REGISTRY,
   type ToolCall,
   type ToolContext,
