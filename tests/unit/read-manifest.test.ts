@@ -22,7 +22,11 @@ afterEach(async () => {
   const { rm } = await import("node:fs/promises");
   while (temporaryRoots.length > 0) {
     const root = temporaryRoots.pop();
-    if (root !== undefined) await rm(root, { recursive: true, force: true });
+    // `maxRetries` because removal can still race a git process finishing its
+    // writes under `.git/objects`; node does not retry ENOTEMPTY by default.
+    if (root !== undefined) {
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    }
   }
 });
 
@@ -41,6 +45,13 @@ async function repositoryWith(
   await run("git", ["init", "--quiet", "--initial-branch=main"], { cwd: repositoryPath });
   await run("git", ["config", "user.email", "unit@example.com"], { cwd: repositoryPath });
   await run("git", ["config", "user.name", "Unit"], { cwd: repositoryPath });
+  // `git commit` starts `git gc --auto` in the background, which keeps writing
+  // under `.git/objects` after the commit returns. The ceiling fixture commits
+  // hundreds of files, so that background write can outlive the test and make
+  // cleanup fail with ENOTEMPTY. Disabling auto-gc removes the writer rather
+  // than racing it.
+  await run("git", ["config", "gc.auto", "0"], { cwd: repositoryPath });
+  await run("git", ["config", "maintenance.auto", "false"], { cwd: repositoryPath });
   for (const [filePath, content] of Object.entries(files)) {
     const absolute = path.join(repositoryPath, filePath);
     await mkdir(path.dirname(absolute), { recursive: true });
