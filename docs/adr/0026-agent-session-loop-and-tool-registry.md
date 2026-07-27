@@ -1,6 +1,6 @@
 # ADR 0026: AgentSession loop and host-owned tool registry
 
-- Status: Accepted — implemented in slices; 2a and 2b-i landed, 2b-ii/2c outstanding
+- Status: Accepted — implemented in slices; 2a, 2b-i and 2b-ii(a) landed, the loop and 2c outstanding
 - Date: 2026-07-26
 - Related: [ADR 0023](0023-transactional-multi-file-patch-sets.md) (patch sets),
   [ADR 0024](0024-bounded-repair-loop.md) (bounded repair loop — superseded by
@@ -360,6 +360,31 @@ This does invalidate manifests written by the slice-2a-ii build: such a run fail
 its digest check and must be re-planned. That is fail-closed and, given 2a-ii
 landed the same day with no downstream users, proportionate — but it is a real
 break rather than a silent migration.
+
+### Decided while implementing 2b-ii(a)
+
+**Host operations are injected as explicitly nullable fields.** A `ToolContext`
+that cannot perform an operation says so with `null`, and the executor refuses
+the call with `TOOL_UNAVAILABLE`. Optional fields would let a read-only context
+appear to offer a write tool it has no way to carry out; nullable ones make the
+absence a stated fact and the refusal a decision.
+
+**A proposal is shape-checked at the call boundary and content-checked in the
+executor.** `parseToolCall` bounds the serialized size and requires an object;
+the real validation needs the run's approved targets and worktree preimages, so
+`parsePatchSet` runs where those exist. A tool call cannot pre-approve its own
+contents, and the mutation authority is re-checked per path at apply time
+exactly as ADR 0023 requires.
+
+**A failing check is evidence, not a control signal.** `run_checks` stays on
+`continue`. Whether a session ends is the host's decision, derived from which
+tool was called — never from what a check reported. That keeps the injection
+boundary intact for the one tool whose output is most likely to be attacker-
+influenced.
+
+**`exec.check` names every check that may run.** The grant's scope is checked
+per requested id, not merely for non-emptiness, so a grant for one check cannot
+run another.
 
 ### Two open questions for Kevin, both deliberately unresolved here:
 

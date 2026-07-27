@@ -67,9 +67,19 @@ function context(overrides: Partial<ToolContext> = {}): ToolContext {
     sessionWritten: new Map(),
     checks: CHECKS,
     grants: [READ_GRANT, CHECK_GRANT],
+    // A read-only context offers no write operations and must fail closed
+    // rather than appear to provide a tool it cannot carry out.
+    hostOperations: { proposePatch: null, applyPatchSet: null, runChecks: null },
     ...overrides,
   };
 }
+
+const MUTATION_GRANT: CapabilityGrant = {
+  kind: "mutation.patchset",
+  scope: ["src/greeting.txt"],
+  maxCalls: 4,
+};
+const EXEC_GRANT: CapabilityGrant = { kind: "exec.check", scope: ["unit"], maxCalls: 2 };
 
 describe("tool call validation", () => {
   it("accepts each registered tool's arguments", () => {
@@ -422,5 +432,141 @@ describe("results are fenced as untrusted", () => {
       control: "continue",
     });
     expect(rendered).toContain("truncated at the host output ceiling");
+  });
+});
+
+describe("write tools delegate to host operations and fail closed without them", () => {
+  it("validates a proposal's shape without pre-approving its contents", () => {
+    const call = parseToolCall({
+      name: "propose_patch",
+      arguments: { patchSet: { summary: "s", edits: [] } },
+    });
+    expect(call.name).toBe("propose_patch");
+    // Shape only — the executor runs parsePatchSet against approved targets.
+    expectIcarusCode(
+      () => parseToolCall({ name: "propose_patch", arguments: { patchSet: "not-an-object" } }),
+      "INVALID_TOOL_CALL",
+    );
+    expectIcarusCode(
+      () => parseToolCall({ name: "propose_patch", arguments: { patchSet: {}, apply: true } }),
+      "INVALID_TOOL_CALL",
+    );
+  });
+
+  it("refuses a write tool when the session cannot perform the operation", async () => {
+    const readOnly = context({ grants: [MUTATION_GRANT, EXEC_GRANT] });
+    await expectAsyncCode(
+      executeToolCall({ name: "propose_patch", patchSet: {} }, readOnly),
+      "TOOL_UNAVAILABLE",
+    );
+    await expectAsyncCode(
+      executeToolCall({ name: "apply_patchset" }, readOnly),
+      "TOOL_UNAVAILABLE",
+    );
+    await expectAsyncCode(
+      executeToolCall({ name: "run_checks", checkIds: ["unit"] }, readOnly),
+      "TOOL_UNAVAILABLE",
+    );
+  });
+
+  it("refuses a write tool with no mutation grant, and never reaches the host", async () => {
+    let hostCalls = 0;
+    const spied = context({
+      grants: [READ_GRANT],
+      hostOperations: {
+        proposePatch: null,
+        applyPatchSet: () => {
+          hostCalls += 1;
+          return Promise.resolve({ changedPaths: [], diff: "", written: new Map() });
+        },
+        runChecks: null,
+      },
+    });
+
+    // The loop checks the grant before executing, so an ungranted call is
+    // refused with the host operation still untouched.
+    expectIcarusCode(
+      () =>
+        assertToolCallGranted({
+          call: { name: "apply_patchset" },
+          grants: spied.grants,
+          callsSoFar: 0,
+        }),
+      "TOOL_NOT_GRANTED",
+    );
+    expect(hostCalls).toBe(0);
+
+    // And the host operation is only ever reached deliberately.
+    await executeToolCall({ name: "apply_patchset" }, spied);
+    expect(hostCalls).toBe(1);
+  });
+
+  it("refuses run_checks naming a check outside the exec.check grant", () => {
+    expectIcarusCode(
+      () =>
+        assertToolCallGranted({
+          call: { name: "run_checks", checkIds: ["unit", "lint"] },
+          grants: [EXEC_GRANT],
+          callsSoFar: 0,
+        }),
+      "TOOL_NOT_GRANTED",
+    );
+    expect(() =>
+      assertToolCallGranted({
+        call: { name: "run_checks", checkIds: ["unit"] },
+        grants: [EXEC_GRANT],
+        callsSoFar: 0,
+      }),
+    ).not.toThrow();
+  });
+
+  it("passes the host's outcome through, bounded and on continue", async () => {
+    const writable = context({
+      grants: [MUTATION_GRANT, EXEC_GRANT],
+      hostOperations: {
+        proposePatch: () => Promise.resolve({ paths: ["src/greeting.txt"] }),
+        applyPatchSet: () =>
+          Promise.resolve({
+            changedPaths: ["src/greeting.txt"],
+            diff: "+patched\n",
+            written: new Map([["src/greeting.txt", sha256("patched")]]),
+          }),
+        runChecks: () => Promise.resolve({ outcome: "failed" as const, evidence: "1 test failed" }),
+      },
+    });
+
+    const proposed = await executeToolCall({ name: "propose_patch", patchSet: {} }, writable);
+    expect(JSON.parse(proposed.content)).toEqual({ accepted: true, paths: ["src/greeting.txt"] });
+    expect(proposed.control).toBe("continue");
+
+    const applied = await executeToolCall({ name: "apply_patchset" }, writable);
+    expect(applied.content).toContain("src/greeting.txt");
+    expect(applied.content).toContain("+patched");
+
+    const checked = await executeToolCall({ name: "run_checks", checkIds: ["unit"] }, writable);
+    expect(checked.content).toContain("outcome: failed");
+    expect(checked.content).toContain("1 test failed");
+    // A failing check is evidence, not a control signal: only the host decides
+    // whether the session ends.
+    expect(checked.control).toBe("continue");
+  });
+
+  it("bounds an oversized proposal rather than forwarding it", () => {
+    const huge = { summary: "x".repeat(600 * 1024), edits: [] };
+    expectIcarusCode(
+      () => parseToolCall({ name: "propose_patch", arguments: { patchSet: huge } }),
+      "INVALID_TOOL_CALL",
+    );
+  });
+
+  it("bounds and deduplicates the checks one call may name", () => {
+    expectIcarusCode(
+      () => parseToolCall({ name: "run_checks", arguments: { checkIds: [] } }),
+      "INVALID_TOOL_CALL",
+    );
+    expectIcarusCode(
+      () => parseToolCall({ name: "run_checks", arguments: { checkIds: ["unit", "unit"] } }),
+      "INVALID_TOOL_CALL",
+    );
   });
 });
