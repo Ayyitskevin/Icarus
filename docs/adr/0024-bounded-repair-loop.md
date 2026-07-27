@@ -4,6 +4,22 @@
 - Date: 2026-07-25
 - Builds on: [ADR 0023](0023-transactional-multi-file-patch-sets.md)
 
+> The separate repair grant below is superseded by
+> [ADR 0026](0026-agent-session-loop-and-tool-registry.md), which replaces
+> `repairIterations` with one plan-carried `iterationCeiling` so a run has a
+> single iteration budget rather than two overlapping ones. Everything else here
+> remains in force and is unchanged by that record: the grant is carried in the
+> plan and bound by the approval digest, iterations are counted from the durable
+> operation ledger rather than a mutable counter, a recorded patch set may be
+> replaced only by an already-charged iteration and only once per charge,
+> re-entry requires a failing verification and a still-valid plan approval, and
+> exhaustion lands at `awaiting_review` with the failing evidence — reviewable
+> and not approvable. Exhaustion is not success.
+>
+> The ceiling value 3 chosen here also survives, and is now measured rather than
+> asserted: a run costs 12 tool calls before its first iteration and 8 per
+> iteration, so `DEFAULT_CEILING.maxToolCalls` of 40 admits exactly three.
+
 ## Context
 
 A run gets exactly one attempt. When registered checks fail, the run stops at

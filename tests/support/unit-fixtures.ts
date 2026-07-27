@@ -49,7 +49,7 @@ export const UNIT_PLAN: PlanProposal = {
   risks: ["The expected text may have changed."],
   target: "src/greeting.txt",
   targets: ["src/greeting.txt"],
-  repairIterations: 0,
+  iterationCeiling: 0,
   checkIds: ["unit"],
   grants: [],
 };

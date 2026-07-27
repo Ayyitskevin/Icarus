@@ -5,12 +5,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { sha256 } from "../../packages/core/src/digest.js";
 import { IcarusError } from "../../packages/core/src/errors.js";
 import {
-  MAX_REPAIR_ITERATIONS,
+  MAX_SESSION_ITERATIONS,
   parsePlanProposal,
   planApprovalDigest,
   treeCheckpointDigest,
 } from "../../packages/core/src/policy.js";
-import { REPAIR_OPERATION_KIND } from "../../packages/core/src/store.js";
+import { SESSION_ITERATION_OPERATION_KIND } from "../../packages/core/src/store.js";
 import type {
   CheckEvidence,
   CheckpointFile,
@@ -83,7 +83,7 @@ function checkEvidence(outcome: CheckEvidence["outcome"]): CheckEvidence {
 }
 
 /** Drives a run to `verifying` with a recorded patch set and checkpoint. */
-function seedVerifyingRun(repairIterations: number): {
+function seedVerifyingRun(iterationCeiling: number): {
   readonly store: ReturnType<typeof createUnitStore>["store"];
   readonly diff: string;
   verificationFor(outcome: "passed" | "failed", approved: string): VerificationEvidence;
@@ -104,7 +104,7 @@ function seedVerifyingRun(repairIterations: number): {
   const context = unitContextManifest();
   store.completePreparation(RUN_ID, context, "artifacts/context.json", unitContextDigest(context));
 
-  const plan = { ...UNIT_PLAN, repairIterations };
+  const plan = { ...UNIT_PLAN, iterationCeiling };
   const planSha256 = planApprovalDigest({
     task: "Repair the greeting.",
     baseCommit: UNIT_BASE_COMMIT,
@@ -151,7 +151,7 @@ function seedVerifyingRun(repairIterations: number): {
 
 /** Charges one `provider.revise` operation, as a real repair iteration does. */
 function chargeRepairIteration(store: ReturnType<typeof createUnitStore>["store"]): void {
-  const operation = store.beginOperation(RUN_ID, REPAIR_OPERATION_KIND, 0, 16, 1_000);
+  const operation = store.beginOperation(RUN_ID, SESSION_ITERATION_OPERATION_KIND, 0, 16, 1_000);
   store.finishOperation(operation, {
     outcome: "succeeded",
     activeRuntimeMs: 1,
@@ -175,8 +175,8 @@ function expectCode(action: () => unknown, code: string): void {
 
 describe("repair grant", () => {
   it("is carried by the plan and bound by its approval digest", () => {
-    const withGrant = { ...UNIT_PLAN, repairIterations: 2 };
-    const withoutGrant = { ...UNIT_PLAN, repairIterations: 0 };
+    const withGrant = { ...UNIT_PLAN, iterationCeiling: 2 };
+    const withoutGrant = { ...UNIT_PLAN, iterationCeiling: 0 };
     const base = {
       task: "Repair the greeting.",
       baseCommit: UNIT_BASE_COMMIT,
@@ -202,15 +202,18 @@ describe("repair grant", () => {
       risks: [],
       target: TARGET,
       targets: [TARGET],
-      repairIterations: MAX_REPAIR_ITERATIONS + 1,
+      iterationCeiling: MAX_SESSION_ITERATIONS + 1,
       checkIds: ["unit"],
     };
 
     expectCode(() => parsePlanProposal(proposal, selection, checks), "INVALID_PROVIDER_OUTPUT");
     expect(
-      parsePlanProposal({ ...proposal, repairIterations: MAX_REPAIR_ITERATIONS }, selection, checks)
-        .repairIterations,
-    ).toBe(MAX_REPAIR_ITERATIONS);
+      parsePlanProposal(
+        { ...proposal, iterationCeiling: MAX_SESSION_ITERATIONS },
+        selection,
+        checks,
+      ).iterationCeiling,
+    ).toBe(MAX_SESSION_ITERATIONS);
   });
 
   it("refuses a plan with a fractional or negative repair grant", () => {
@@ -222,12 +225,12 @@ describe("repair grant", () => {
       risks: [],
       target: TARGET,
       targets: [TARGET],
-      repairIterations: 0,
+      iterationCeiling: 0,
       checkIds: ["unit"],
     };
     for (const invalid of [-1, 1.5, Number.NaN, "2"]) {
       expectCode(
-        () => parsePlanProposal({ ...proposal, repairIterations: invalid }, selection, checks),
+        () => parsePlanProposal({ ...proposal, iterationCeiling: invalid }, selection, checks),
         "INVALID_PROVIDER_OUTPUT",
       );
     }
@@ -239,7 +242,7 @@ describe("bounded repair transition", () => {
     const seeded = seedVerifyingRun(2);
     const failing = seeded.verificationFor("failed", APPROVED);
 
-    expect(seeded.store.remainingRepairGrant(RUN_ID)).toBe(2);
+    expect(seeded.store.remainingIterationBudget(RUN_ID)).toBe(2);
     const held = seeded.store.recordVerificationAndAwaitReview(
       RUN_ID,
       seeded.diff,
@@ -249,7 +252,7 @@ describe("bounded repair transition", () => {
     expect(held.state).toBe("verifying");
     expect(held.verification?.outcome).toBe("failed");
 
-    const repairing = seeded.store.beginRepairIteration(RUN_ID);
+    const repairing = seeded.store.beginSessionIteration(RUN_ID);
     expect(repairing.state).toBe("running");
     const events = seeded.store.listEvents(RUN_ID).map((event) => event.type);
     expect(events).toContain("verification.completed");
@@ -261,7 +264,7 @@ describe("bounded repair transition", () => {
     const passing = seeded.verificationFor("passed", APPROVED);
     seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing);
 
-    expectCode(() => seeded.store.beginRepairIteration(RUN_ID), "INVALID_STATE");
+    expectCode(() => seeded.store.beginSessionIteration(RUN_ID), "INVALID_STATE");
   });
 
   it("refuses to retain a passing verification for repair", () => {
@@ -279,37 +282,37 @@ describe("bounded repair transition", () => {
     const seeded = seedVerifyingRun(0);
     const failing = seeded.verificationFor("failed", APPROVED);
 
-    expect(seeded.store.remainingRepairGrant(RUN_ID)).toBe(0);
+    expect(seeded.store.remainingIterationBudget(RUN_ID)).toBe(0);
     expectCode(
       () =>
         seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying"),
-      "REPAIR_BUDGET_EXHAUSTED",
+      "ITERATION_BUDGET_EXHAUSTED",
     );
 
     const landed = seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing);
     expect(landed.state).toBe("awaiting_review");
     expect(landed.verification?.outcome).toBe("failed");
-    expectCode(() => seeded.store.beginRepairIteration(RUN_ID), "INVALID_STATE");
+    expectCode(() => seeded.store.beginSessionIteration(RUN_ID), "INVALID_STATE");
   });
 
   it("spends the grant from the durable operation ledger", () => {
     const seeded = seedVerifyingRun(1);
     const failing = seeded.verificationFor("failed", APPROVED);
     seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying");
-    seeded.store.beginRepairIteration(RUN_ID);
+    seeded.store.beginSessionIteration(RUN_ID);
 
-    expect(seeded.store.countRepairIterations(RUN_ID)).toBe(0);
+    expect(seeded.store.countSessionIterations(RUN_ID)).toBe(0);
     chargeRepairIteration(seeded.store);
 
-    expect(seeded.store.countRepairIterations(RUN_ID)).toBe(1);
-    expect(seeded.store.remainingRepairGrant(RUN_ID)).toBe(0);
+    expect(seeded.store.countSessionIterations(RUN_ID)).toBe(1);
+    expect(seeded.store.remainingIterationBudget(RUN_ID)).toBe(0);
   });
 
   it("supersedes the prior patch set and records the superseded digest", () => {
     const seeded = seedVerifyingRun(2);
     const failing = seeded.verificationFor("failed", APPROVED);
     seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying");
-    seeded.store.beginRepairIteration(RUN_ID);
+    seeded.store.beginSessionIteration(RUN_ID);
     chargeRepairIteration(seeded.store);
 
     const revised = "hello, repaired\n";
@@ -332,7 +335,7 @@ describe("bounded repair transition", () => {
     const seeded = seedVerifyingRun(2);
     const failing = seeded.verificationFor("failed", APPROVED);
     seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying");
-    seeded.store.beginRepairIteration(RUN_ID);
+    seeded.store.beginSessionIteration(RUN_ID);
     chargeRepairIteration(seeded.store);
     seeded.store.recordPatchSetIntent(
       RUN_ID,
@@ -341,7 +344,7 @@ describe("bounded repair transition", () => {
     );
 
     // The grant still has one iteration left, but this one is already spent.
-    expect(seeded.store.remainingRepairGrant(RUN_ID)).toBe(1);
+    expect(seeded.store.remainingIterationBudget(RUN_ID)).toBe(1);
     expectCode(
       () =>
         seeded.store.recordPatchSetIntent(
@@ -357,9 +360,9 @@ describe("bounded repair transition", () => {
     const seeded = seedVerifyingRun(2);
     const failing = seeded.verificationFor("failed", APPROVED);
     seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying");
-    seeded.store.beginRepairIteration(RUN_ID);
+    seeded.store.beginSessionIteration(RUN_ID);
 
-    expect(seeded.store.countRepairIterations(RUN_ID)).toBe(0);
+    expect(seeded.store.countSessionIterations(RUN_ID)).toBe(0);
     expectCode(
       () =>
         seeded.store.recordPatchSetIntent(

@@ -193,7 +193,7 @@ export function planResponse(
       risks: ["The exact preimage may have changed"],
       target: targets[0] ?? "src/greeting.txt",
       targets: [...targets],
-      repairIterations: 0,
+      iterationCeiling: 0,
       checkIds: ["verify"],
     },
   };

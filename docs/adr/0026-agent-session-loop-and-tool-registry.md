@@ -1,6 +1,6 @@
 # ADR 0026: AgentSession loop and host-owned tool registry
 
-- Status: Accepted — implemented in slices; 2a landed in full, 2b/2c outstanding
+- Status: Accepted — implemented in slices; 2a and 2b-i landed, 2b-ii/2c outstanding
 - Date: 2026-07-26
 - Related: [ADR 0023](0023-transactional-multi-file-patch-sets.md) (patch sets),
   [ADR 0024](0024-bounded-repair-loop.md) (bounded repair loop — superseded by
@@ -180,7 +180,7 @@ grants, and browser approvals. That is too much for one reviewable change.
     but nothing calls it — the loop that does is 2b, which also supplies the
     ledger-derived call counts and the per-call metered operation.
 - **2b — the loop and write tools.** `propose_patch`, `apply_patchset`,
-  `run_checks`, the AgentSession entity, the `verifying → executing` edge, and
+  `run_checks`, the AgentSession entity, the `verifying → running` edge (the state is `running`; no `executing` state exists), and
   resume at iteration boundaries. This is where ADR 0024's repair loop is
   superseded.
 - **2c — browser approvals.** Its own record: session token bound at server
@@ -311,6 +311,55 @@ craft input against a specific runner.
 decoding substitutes a three-byte replacement character, which can push a
 result back over the ceiling meant to bound it. The boundary is found first, so
 the ceiling is a real bound rather than an approximate one.
+
+### Measured while implementing 2b-i, and it changed the answer
+
+The default and maximum iteration counts proposed above (8, with 16 as a host
+maximum) do not survive measurement, and neither did the 4/8 pair that replaced
+them. Under `DEFAULT_CEILING` a run costs **12 tool calls before its first
+iteration and 8 per iteration thereafter**, so `12 + 8n <= 40` admits `n = 3`
+and refuses `n = 4` with `Tool-call ceiling exhausted`.
+
+So the binding constraint is `maxToolCalls`, not the token budget this record
+reasoned about. `MAX_SESSION_ITERATIONS` is therefore **3** — the same value
+ADR 0024 shipped, now with arithmetic behind it rather than judgement.
+`sessionIterationsFitTheToolCallCeiling` in the integration suite asserts both
+directions: spending the whole budget stays inside `maxToolCalls`, and one more
+iteration would not fit. The ceiling cannot silently become decorative.
+
+Two things follow. Raising `maxToolCalls` to make a preferred number fit would
+be fitting the budget to the conclusion, so it was not done. And the
+8-per-iteration cost belongs to the **reset-and-repropose round** this slice
+inherits from ADR 0024 — an interleaved session loop should cost less per
+iteration, so the number must be re-measured against the new loop rather than
+argued upward.
+
+### One iteration budget, not two
+
+`repairIterations` is replaced by `iterationCeiling`. Two overlapping iteration
+budgets in one plan is the kind of ambiguity that produces a fail-open seam, so
+the supersession unifies them rather than adding alongside. The counted
+operation kind keeps its stored string (`provider.revise`) even though its
+exported name changed, because ledger rows already charged under it must keep
+counting — renaming the value would silently reset every in-flight run's spend.
+
+A plan persisted before this slice decodes its `repairIterations` into the same
+`iterationCeiling`, preserving exactly the allowance the operator approved
+rather than widening it to the new default or discarding it.
+
+### The manifest digest is no longer policy-versioned
+
+Bumping `POLICY_VERSION` for this slice would have invalidated every persisted
+readable manifest, because `readableManifestDigest` mixed the policy version
+into a content digest. That is the wrong binding: a manifest digest identifies
+the manifest, and the plan approval digest is where `POLICY_VERSION` belongs.
+Mixing them surfaces a stale approval as spurious read drift. The policy version
+is removed from the manifest digest.
+
+This does invalidate manifests written by the slice-2a-ii build: such a run fails
+its digest check and must be re-planned. That is fail-closed and, given 2a-ii
+landed the same day with no downstream users, proportionate — but it is a real
+break rather than a silent migration.
 
 ### Two open questions for Kevin, both deliberately unresolved here:
 

@@ -16,12 +16,12 @@ import type {
 import {
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
-  MAX_REPAIR_ITERATIONS,
+  MAX_SESSION_ITERATIONS,
 } from "../../packages/core/src/policy.js";
 import { createProviderConfig, type ModelGateway } from "../../packages/core/src/provider.js";
 import type { CheckRunInput, CheckRunner } from "../../packages/core/src/sandbox.js";
 import { IcarusService } from "../../packages/core/src/service.js";
-import { IcarusStore, REPAIR_OPERATION_KIND } from "../../packages/core/src/store.js";
+import { IcarusStore, SESSION_ITERATION_OPERATION_KIND } from "../../packages/core/src/store.js";
 import type {
   CheckEvidence,
   JsonValue,
@@ -213,14 +213,14 @@ function patchSetProducing(replaceText: string): JsonValue {
   };
 }
 
-function planProposal(repairIterations: number): JsonValue {
+function planProposal(iterationCeiling: number): JsonValue {
   return {
     summary: "Replace the greeting.",
     steps: ["Apply one exact replacement.", "Run verification."],
     risks: ["The preimage may differ."],
     target: TARGET,
     targets: [TARGET],
-    repairIterations,
+    iterationCeiling,
     checkIds: ["verify"],
   };
 }
@@ -299,7 +299,7 @@ describe("bounded repair loop end to end", () => {
         provider: fixture.provider,
       });
       expect(planned.state).toBe("awaiting_approval");
-      expect(planned.plan?.repairIterations).toBe(2);
+      expect(planned.plan?.iterationCeiling).toBe(2);
 
       const settled = await fixture.service.approvePlan(
         planned.id,
@@ -314,8 +314,8 @@ describe("bounded repair loop end to end", () => {
       expect(await readFile(path.join(settled.worktreePath ?? "", TARGET), "utf8")).toBe(FIXED);
 
       // Exactly one grant was spent, from the durable operation ledger.
-      expect(fixture.store.countRepairIterations(planned.id)).toBe(1);
-      expect(fixture.store.remainingRepairGrant(planned.id)).toBe(1);
+      expect(fixture.store.countSessionIterations(planned.id)).toBe(1);
+      expect(fixture.store.remainingIterationBudget(planned.id)).toBe(1);
 
       const events = fixture.store.listEvents(planned.id);
       const types = events.map((event) => event.type);
@@ -327,7 +327,7 @@ describe("bounded repair loop end to end", () => {
         events.some(
           (event) =>
             event.type === "operation.finished" &&
-            (event.payload as Record<string, unknown>).kind === REPAIR_OPERATION_KIND &&
+            (event.payload as Record<string, unknown>).kind === SESSION_ITERATION_OPERATION_KIND &&
             (event.payload as Record<string, unknown>).outcome === "succeeded",
         ),
       ).toBe(true);
@@ -360,8 +360,8 @@ describe("bounded repair loop end to end", () => {
       expect(settled.state).toBe("awaiting_review");
       expect(settled.verification?.outcome).toBe("failed");
       expect(fixture.checks.observed).toHaveLength(2);
-      expect(fixture.store.countRepairIterations(planned.id)).toBe(1);
-      expect(fixture.store.remainingRepairGrant(planned.id)).toBe(0);
+      expect(fixture.store.countSessionIterations(planned.id)).toBe(1);
+      expect(fixture.store.remainingIterationBudget(planned.id)).toBe(0);
       expect(
         fixture.store
           .listEvents(planned.id)
@@ -373,11 +373,15 @@ describe("bounded repair loop end to end", () => {
   }, 60_000);
 
   test("spending the whole grant, then rolling back, fits inside the shipped ceiling", async () => {
+    // Derived from the constant so raising the host ceiling cannot leave this
+    // test quietly spending less than the whole budget it claims to spend:
+    // one initial attempt, then a failing revision per iteration, then a fix.
     const fixture = await fixtureWith([
-      planProposal(MAX_REPAIR_ITERATIONS),
+      planProposal(MAX_SESSION_ITERATIONS),
       patchSetProducing(BROKEN),
-      patchSetProducing("Hello, Icrus2!\n"),
-      patchSetProducing("Hello, Icrus3!\n"),
+      ...Array.from({ length: MAX_SESSION_ITERATIONS - 1 }, (_unused, index) =>
+        patchSetProducing(`Hello, Icrus${index + 2}!\n`),
+      ),
       patchSetProducing(FIXED),
     ]);
     try {
@@ -394,7 +398,7 @@ describe("bounded repair loop end to end", () => {
       );
 
       expect(settled.verification?.outcome).toBe("passed");
-      expect(fixture.store.countRepairIterations(planned.id)).toBe(MAX_REPAIR_ITERATIONS);
+      expect(fixture.store.countSessionIterations(planned.id)).toBe(MAX_SESSION_ITERATIONS);
       expect(settled.usage.toolCalls).toBeLessThanOrEqual(CEILING.maxToolCalls);
 
       // Recovery must still be affordable after the grant is fully spent —
@@ -431,10 +435,47 @@ describe("bounded repair loop end to end", () => {
       expect(settled.verification?.outcome).toBe("failed");
       // The provider was never asked for a revision, so the queue still holds none.
       expect(fixture.checks.observed).toEqual([BROKEN]);
-      expect(fixture.store.countRepairIterations(planned.id)).toBe(0);
+      expect(fixture.store.countSessionIterations(planned.id)).toBe(0);
       expect(
         fixture.store.listEvents(planned.id).some((event) => event.type === "repair.requested"),
       ).toBe(false);
+    } finally {
+      fixture.close();
+    }
+  }, 60_000);
+});
+
+describe("the iteration ceiling is reachable, not decorative", () => {
+  test("sessionIterationsFitTheToolCallCeiling", async () => {
+    // A ceiling the tool-call budget cannot reach would make budget exhaustion
+    // the observed stop instead of the honest iteration landing. This pins the
+    // arithmetic behind MAX_SESSION_ITERATIONS: spending the whole budget must
+    // stay inside maxToolCalls, and one more iteration must not fit.
+    const fixture = await fixtureWith([
+      planProposal(MAX_SESSION_ITERATIONS),
+      patchSetProducing(BROKEN),
+      ...Array.from({ length: MAX_SESSION_ITERATIONS - 1 }, (_unused, index) =>
+        patchSetProducing(`Hello, Icrus${index + 2}!\n`),
+      ),
+      patchSetProducing(FIXED),
+    ]);
+    try {
+      const planned = await fixture.service.planRun({
+        projectName: "repair-test",
+        task: "Replace the greeting.",
+        targets: [TARGET],
+        provider: fixture.provider,
+      });
+      const settled = await fixture.service.approvePlan(
+        planned.id,
+        planned.planSha256 ?? "",
+        "integration-test",
+      );
+      expect(fixture.store.countSessionIterations(planned.id)).toBe(MAX_SESSION_ITERATIONS);
+      expect(settled.usage.toolCalls).toBeLessThanOrEqual(CEILING.maxToolCalls);
+      // The measured per-iteration cost: one more iteration would not fit, which
+      // is why the ceiling sits where it does.
+      expect(settled.usage.toolCalls + 8).toBeGreaterThan(CEILING.maxToolCalls);
     } finally {
       fixture.close();
     }

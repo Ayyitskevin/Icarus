@@ -34,7 +34,7 @@ import {
 import { createGateway } from "./providers.js";
 import { sanitizeText } from "./redaction.js";
 import type { CheckRunner } from "./sandbox.js";
-import { REPAIR_OPERATION_KIND } from "./store.js";
+import { SESSION_ITERATION_OPERATION_KIND } from "./store.js";
 import type { IcarusStore } from "./store.js";
 import type {
   CheckEvidence,
@@ -1593,7 +1593,7 @@ export class IcarusService {
     // run's budgets both remain (ADR 0024). The attempt is recorded either way,
     // so every iteration stays inspectable in verification provenance.
     const repairable =
-      verification.outcome === "failed" && this.#store.remainingRepairGrant(runId) > 0;
+      verification.outcome === "failed" && this.#store.remainingIterationBudget(runId) > 0;
     if (!repairable) {
       return this.#store.recordVerificationAndAwaitReview(runId, diff, verification);
     }
@@ -1618,7 +1618,7 @@ export class IcarusService {
     const failedVerification = failing.verification;
     const plan = failing.plan;
     const project = this.#store.getProject(failing.projectId);
-    let run = this.#store.beginRepairIteration(runId);
+    let run = this.#store.beginSessionIteration(runId);
     const worktreePath = run.worktreePath;
     invariant(worktreePath !== null, "MISSING_WORKSPACE", "Repair lost its private worktree");
 
@@ -1723,7 +1723,7 @@ export class IcarusService {
       maxOutputTokens: project.ceiling.maxOutputTokensPerCall,
       timeoutMs: project.ceiling.providerTimeoutMs,
     };
-    const text = await this.#providerCall(runId, REPAIR_OPERATION_KIND, request, signal);
+    const text = await this.#providerCall(runId, SESSION_ITERATION_OPERATION_KIND, request, signal);
     const patchSet = parsePatchSet(
       parseProviderJson(text, project.ceiling.maxFileBytes * 3),
       plan.targets,
