@@ -54,6 +54,7 @@ const storeSource = await readFile("packages/core/src/store.ts", "utf8");
 const typesSource = await readFile("packages/core/src/types.ts", "utf8");
 const readManifestSource = await readFile("packages/core/src/read-manifest.ts", "utf8");
 const toolsSource = await readFile("packages/core/src/tools.ts", "utf8");
+const sessionLoopSource = await readFile("packages/core/src/session-loop.ts", "utf8");
 const verificationProjectionSource = await readFile(
   "packages/core/src/verification-provenance.ts",
   "utf8",
@@ -543,6 +544,34 @@ const assertions = {
     toolsSource.includes(
       '{ name: "run_checks", capability: "exec.check", outputCeilingBytes: 32_768, control: "continue" }',
     ),
+  sessionLoopSpendsFromTheDurableLedger:
+    // The ceiling and the spend both come from injected ledger reads, never a
+    // counter the loop owns, so a restart cannot restore a spent budget.
+    sessionLoopSource.includes("deps.spentIterations() < deps.iterationCeiling") &&
+    // Charged before the provider call it pays for: a crash mid-iteration
+    // cannot buy a free retry.
+    sessionLoopSource.indexOf("deps.beginIteration()") <
+      sessionLoopSource.indexOf("await deps.callProvider(") &&
+    !sessionLoopSource.includes("let spent") &&
+    !sessionLoopSource.includes("iterations += 1"),
+  sessionLoopCountsSpendPerCapability:
+    sessionLoopSource.includes("toolDefinition(call.name).capability") &&
+    sessionLoopSource.includes("capability === null ? 0 : deps.callsSoFar(capability)"),
+  sessionLoopControlComesFromTheHost:
+    // The loop reads the executed result's control signal, which the registry
+    // fixes per tool; nothing parses provider text for an exit.
+    sessionLoopSource.includes('result.control === "done"') &&
+    sessionLoopSource.includes('result.control === "await_human"') &&
+    !sessionLoopSource.includes("toolCalls[0].control") &&
+    // The provider envelope carries tool calls only — no budget, permission, or
+    // state field for a model to set.
+    sessionLoopSource.includes('required: ["toolCalls"]') &&
+    sessionLoopSource.includes("additionalProperties: false"),
+  sessionLoopFencesRefusalsAndBoundsBatches:
+    sessionLoopSource.includes("BEGIN UNTRUSTED TOOL ERROR") &&
+    sessionLoopSource.includes("cannot be argued with") &&
+    sessionLoopSource.includes("export const MAX_TOOL_CALLS_PER_ITERATION = 8") &&
+    sessionLoopSource.includes("toolCalls.length <= MAX_TOOL_CALLS_PER_ITERATION"),
   toolCatalogNeverExposesCheckArgv:
     toolsSource.includes(".map((check) => ({ id: check.id, name: check.name }))") &&
     !toolsSource.includes("check.argv"),

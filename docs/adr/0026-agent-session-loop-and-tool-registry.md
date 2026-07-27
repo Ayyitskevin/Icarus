@@ -1,6 +1,6 @@
 # ADR 0026: AgentSession loop and host-owned tool registry
 
-- Status: Accepted — implemented in slices; 2a, 2b-i and 2b-ii(a) landed, the loop and 2c outstanding
+- Status: Accepted — implemented in slices; 2a, 2b-i, 2b-ii(a) and the loop executor landed, its wiring and 2c outstanding
 - Date: 2026-07-26
 - Related: [ADR 0023](0023-transactional-multi-file-patch-sets.md) (patch sets),
   [ADR 0024](0024-bounded-repair-loop.md) (bounded repair loop — superseded by
@@ -385,6 +385,36 @@ influenced.
 **`exec.check` names every check that may run.** The grant's scope is checked
 per requested id, not merely for non-emptiness, so a grant for one check cannot
 run another.
+
+### Decided while implementing the loop executor
+
+**The iteration is charged before the provider call it pays for.** A crash
+between the charge and the response therefore costs an iteration rather than
+yielding a free retry. The ledger is the record; the loop owns no counter of
+its own, so a restart resumes against real spend and cannot restore a spent
+budget.
+
+**Spend is counted per capability.** The loop reads the tool's capability from
+the registry and asks for that capability's charged count, so a mutation tool
+cannot be admitted on a read grant's remaining budget. The first draft of this
+loop hardcoded `read.manifest` for every tool — a latent authority bug caught
+before it ran.
+
+**A refused call is returned to the model, fenced, and still costs the
+iteration.** A refusal is information the model needs in order to try something
+else, so throwing it away would make the loop worse at its job. But it arrives
+as untrusted data with an explicit note that host policy cannot be argued with,
+and the iteration is spent either way — so probing the grant boundary is never
+free.
+
+**The provider envelope carries tool calls only.** `TOOL_CALL_SCHEMA` has
+`additionalProperties: false` and exactly one field. There is nowhere in the
+shape for a model to place a budget, a permission, an iteration count, or a
+state transition, so widening authority is not expressible in the channel
+rather than merely rejected after the fact.
+
+**A `done` signal stops the batch.** Later calls in the same iteration are not
+executed, so a model cannot append work after declaring itself finished.
 
 ### Two open questions for Kevin, both deliberately unresolved here:
 

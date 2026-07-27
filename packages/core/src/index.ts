@@ -26,6 +26,13 @@ export {
 } from "./runtime.js";
 export { IcarusService, type PlanRunInput } from "./service.js";
 export {
+  MAX_TOOL_CALLS_PER_ITERATION,
+  runSessionLoop,
+  type SessionLoopDeps,
+  type SessionOutcome,
+  TOOL_CALL_SCHEMA,
+} from "./session-loop.js";
+export {
   type ApplyPatchSetOutcome,
   assertToolCallGranted,
   executeToolCall,
