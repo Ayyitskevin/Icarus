@@ -17,9 +17,12 @@ boundary is part of the product, not an optional wrapper.
   by the operator may run.
 - Never mutate or attach a worktree to the registered source checkout. Copy the
   pinned commit into an Icarus-private Git cache first.
-- Keep Milestone 1 changes to one exact replacement in one operator-selected,
-  existing tracked text file. Creates, deletes, symlinks, binaries, mode
-  changes, commits, pushes, deployments, and production access are out of scope.
+- Keep current code mutation inside one transactional PatchSet over the
+  plan's exact approved subset of operator-selected paths. Modify/create/delete
+  of bounded UTF-8 text files is supported under ADR 0023; symlinks, binaries,
+  hardlinks, and mode changes remain denied. Commits, pushes, deployments, and
+  production access remain unavailable until their own accepted ADR, typed
+  grant, recovery contract, and executable evidence land.
 - Never execute repository code on the host. Checks use the fail-closed sandbox
   backend with no network; unavailable sandbox means unavailable verification.
 

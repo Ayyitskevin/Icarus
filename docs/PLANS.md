@@ -1,5 +1,169 @@
 # Implementation plans
 
+## Current product execution program
+
+The dependency-ordered plan for making Icarus a trustworthy Cursor rival with
+a Buzz-inspired multi-agent mission room is
+[`ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md`](ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md).
+It preserves the current ADR 0026 release hold, makes Gate 1 browser authority
+plus reversible Git landing the first product slice, places a thin VS Code
+workbench in the center, introduces a bounded read-only Council before
+write-capable collaboration, and requires isolated child runs plus deterministic
+integration for the later Crew.
+
+The immediate sequence is:
+
+1. close and publish the exact Gate 0 candidate with hosted/native/review
+   evidence;
+2. accept ADR 0029 browser approval authority and ADR 0027 Git landing
+   authority;
+3. implement browser parity, a separate landing ledger, private
+   branch/commit, allowlisted push, draft PR, and metadata-only receipt;
+4. prove deterministic retrieval and typed read-only outcomes;
+5. ship the shared client and VS Code workbench; and
+6. accept ADR 0037, then prove read-only Council lift before ADR 0033/0038
+   executable Crew work.
+
+## Current candidate: ADR 0026 slice 2b production wiring
+
+Status: **LOCAL CORRECTIONS PASS; PUBLICATION HOLD**. Explicit human approval
+authorized the High remote-egress and Medium
+mutation-scope/worktree-consistency corrections. Both now fail closed under
+adversarial regression, and the complete local gate passes. The tree remains
+uncommitted and unpublished; exact implementation-head hosted CI, native
+acceptance, and the remaining release reviews are unrecorded.
+
+### Corrective release gate
+
+- [x] Keep complete check stdout/stderr in local SQLite/operator evidence while
+      projecting only host-owned metadata into remote session prompts and
+      rehydrated tool results; prove a safe canary outside context and the
+      readable manifest never reaches any remote request
+- [x] Validate `mutation.patchset` grants against the plan's exact target set,
+      recheck the invariant before worktree restoration, and prove a malformed
+      broader grant changes no private-worktree bytes
+- [x] Replace the synthetic tight-margin ledger setup with an actual CheckRunner
+      interruption and failed settlement; add exact check subset/order refusal,
+      durable service cancellation, whole-fence compaction, and persisted
+      truncation evidence
+- [x] Add transaction-abort atomicity and direct Docker reconciliation evidence
+- [x] Add a true process-level reopen/restart after a completed session
+      iteration boundary; prove the fresh process does not replay provider,
+      mutation, or check effects and does not duplicate charges
+- [x] Synchronize README, roadmap, ADR, evaluator sequencing, and manifest SHA
+      after the runtime corrections
+- [x] On the held pre-correction tree, rerun focused suites, `pnpm check`,
+      evaluator, production and full dependency audits, and `git diff --check`
+- [x] After the two runtime corrections, rerun the local gates plus cold
+      security-boundary review on one tree
+- [ ] Commit/publish one candidate, pass exact-head hosted CI and native
+      acceptance, and persist the final role-neutral architecture/release
+      review artifact with exact tree, reviewed surfaces, rerunnable evidence,
+      findings, and disposition. Fleet guard or independent agent lanes may
+      supply review artifacts, but no named reviewer is a repository-level
+      dependency
+
+Fresh corrected-tree local evidence on 2026-07-30 (this is not publication or
+release clearance):
+
+- Focused ADR 0026/store/grant/tool/state/Docker verification: 8 files and
+  213 tests passed.
+- Full unit/provider verification: 29 files and 391 tests passed; full
+  integration verification: 9 files and 78 tests passed.
+- `pnpm check`: exit 0, including workflow validation, formatting, lint,
+  typecheck, both test groups, evaluation, 133 security tests, static security
+  assertions, and the production build.
+- `pnpm eval`: schema v2, 7 passed, 0 failed, and 3 honestly unsupported;
+  manifest SHA-256
+  `f395b0eb2bc953f60d58719039ce2418caaa6d1cf64261e5462dd8915c2da6b0`.
+- `pnpm audit --audit-level high` and
+  `pnpm audit --prod --audit-level high`: no known vulnerabilities.
+- Remote roomy/live, compacted, and legacy-resume canaries prove no raw
+  stdout/stderr or keys reach a remote request; loopback and raw SQLite retain
+  the exact output. The persisted-resume test rewrites a completed tool
+  transcript to raw malformed truncated evidence and still reconstructs only
+  host metadata from the atomic verification event.
+- A fresh-plan unit regression rejects broader mutation authority; a mutually
+  consistent legacy plan/digest/approval regression reaches zero provider,
+  reconcile, or session operations and leaves both selected files plus durable
+  patch/checkpoint intent byte-exact.
+- `git diff --check`, Biome formatting, local Markdown targets, and two
+  independent read-only security reviews pass.
+
+[ADR 0036](adr/0036-proof-carrying-software-factory-product-direction.md)
+records the product plan beyond release closure: Verified Change Gate
+(browser approval plus Git landing), context/agent quality, a VS Code
+workbench, Replit-class environments, Supabase change packs, then delivery and
+scale. It supersedes current Fable sequencing without weakening any accepted
+authority boundary.
+
+Phase 1's transactional multi-file PatchSet boundary is complete under ADR
+0023. This continuation wires the already landed ADR 0026 registry and loop into
+the guarded CLI repair path without adding browser authority or a live schema
+migration:
+
+- [x] Keep the approved initial provider patch-set attempt; enter the session
+      only after failed formal verification, with `iterationCeiling: 0` still
+      single-shot
+- [x] Require explicit plan grants and bind their readable-manifest digest into
+      approval; retain `plan_json` plus approval digest as the sole grant source
+- [x] Admit `provider.revise` before provider I/O and every tool operation before
+      grant check/host action; charge refusal, failure, interruption, and cancel
+- [x] Wire the closed read/patch/check/control tools through existing manifest,
+      PatchSet, guarded write, checkpoint, and sandbox primitives
+- [x] Keep `propose_patch` advisory; require `apply_patchset` to carry and
+      independently revalidate its own bounded PatchSet, then persist exact
+      patch intent before writes
+- [x] Resume interrupted apply from persisted intent with `unavailable`,
+      non-approvable verification; require complete approved checks and
+      host-gate `report_done` on current passing checkpoint/diff evidence
+- [x] Persist human-input and exhaustion blockers in `awaiting_review`, where
+      ordinary review approval refuses them
+- [x] Reconcile interrupted private checkpoints, retain conservative charges,
+      rehydrate only completed boundaries, and preserve cancellation recovery
+- [x] Reserve one ordinary operation plus `commandTimeoutMs` across session
+      entry and every provider/tool admission, and prove a genuinely interrupted
+      check can still reconcile under tight custom ceilings
+- [x] Set the measured default/host maximum to two: local fresh, remote fresh,
+      and remote resumed worst cases consume 30, 31, and 32 of 40 ordinary
+      operations, retaining at least eight for settlement/retries
+- [x] Add no `capability_grants`, `agent_sessions`, or `tool_invocations` table;
+      operations/events remain the sole session record
+- [x] Settle tool-operation finish with verification/terminal evidence, and
+      `review.validate`/rollback/restore finish with state transition, in one
+      SQLite transaction
+- [x] Make `repair-failing-test` an executable deterministic two-turn lifecycle
+      over the operator-selected target, without claiming diagnostic target
+      selection
+- [x] Fresh `pnpm eval` reports 7 passed, 0 failed, and 3 honestly unsupported
+- [x] Focused unit/integration session and policy tests pass from fresh output
+- [x] `pnpm check`, dependency audit, and `git diff --check` pass from fresh output
+- [x] The later cold audit's remote-egress and mutation-scope blockers are
+      corrected and independently re-reviewed
+- [ ] Exact implementation-head hosted `ci` passes after publication
+
+Historical pre-hold evaluator and local-gate evidence on 2026-07-30:
+
+- `pnpm eval`: exit 0; build and production-sandbox evaluation completed with
+  7 passed, 0 failed, and 3 honestly unsupported scenarios; manifest SHA-256
+  `4571bd3cf4d8fddcf04e6c6c098cae6a3ff7b9d32c7c02fe24322f0e3cb837f7`;
+  all 7 measured scenarios reported zero incorrect edits.
+- Focused ADR 0026 verification: 161/161 unit tests and 24/24 repair
+  convergence integration tests passed.
+- `pnpm check`: exit 0; workflow validation, formatting, lint, typecheck, 383
+  unit/provider tests, 68 integration tests, evaluation, 133 security tests,
+  static security assertions, and the production build passed.
+- `pnpm audit --audit-level high`: no known vulnerabilities; `git diff
+  --check`: no errors.
+- An earlier adversarial re-review passed the context, evaluator, and
+  single-crash reconciliation policy. A later cold audit found the two blockers
+  in the corrective gate above, so this evidence does not clear the candidate.
+  Publication and exact-head hosted CI remain deliberately unclaimed.
+
+Deferred beyond this slice: browser approval/execution (2c), capability-aware
+provider routing, richer retrieval, package installation, previews, landing,
+backend primitives, multi-agent orchestration, and distributed workers.
+
 ## Most recently accepted reliability slice: approval preflight and workflow startup diagnostics
 
 Status values are evidence claims. The candidate implementation, full local
@@ -53,7 +217,8 @@ the reliability slice without claiming a broader milestone is complete.
 - [x] Run a real failing registered check in the production Docker sandbox,
       refuse review approval, preserve evidence, reject phantom approvals, and
       roll the isolated worktree back to a clean baseline
-- [x] Leave the inherited OpenCode workflow and ADR 0010 security hold unchanged
+- [x] At this historical slice, leave the inherited OpenCode workflow and ADR
+      0010 hold unchanged; ADR 0025 later chose and implemented hardening
 
 ### Acceptance checklist
 
@@ -113,7 +278,8 @@ workflow run exists. This does not claim native acceptance.
 
 ADR 0021 and its implementation are merged. The recorded combined local gate,
 independent review, and exact implementation-head hosted CI passed. This accepts
-only this bounded observation slice; it does not complete M3 or clear ADR 0010.
+only this bounded observation slice; it does not complete M3 or close ADR
+0025's residual release work.
 
 ### Pinned joined project pages
 
@@ -164,7 +330,8 @@ only this bounded observation slice; it does not complete M3 or clear ADR 0010.
 
 ADR 0020 and its implementation are merged. The recorded combined local gate,
 independent review, and exact implementation-head hosted CI passed. This accepts
-only this bounded observation slice; it does not complete M3 or clear ADR 0010.
+only this bounded observation slice; it does not complete M3 or close ADR
+0025's residual release work.
 
 ### Bounded presentation and truthful status
 
@@ -210,7 +377,8 @@ only this bounded observation slice; it does not complete M3 or clear ADR 0010.
 
 ADR 0019 and its implementation are merged. The recorded combined local gate,
 independent review, and exact implementation-head hosted CI passed. This accepts
-only this bounded observation slice; it does not complete M3 or clear ADR 0010.
+only this bounded observation slice; it does not complete M3 or close ADR
+0025's residual release work.
 
 ### Bounded projection and truthful browser copy
 
@@ -337,7 +505,7 @@ This accepts only the fifth bounded slice, not full M3.
       authority
 - [x] Preserve the payload-free existing event routes, loopback/same-origin/CSP
       boundary, guarded CLI, workspace-run page, older-activity behavior, and
-      unresolved ADR 0010 security hold
+      ADR 0025 residual third-party review and secret-rotation holds
 - [x] Prove 0/1/8/9 attempts, both truncation modes, exact snapshot conflict,
       concurrent append, save-before-attempt ordering/checkpoint states, gaps,
       TEXT-only storage, strict RFC-8259 acceptance, relevant JSON5 and duplicate
@@ -403,7 +571,7 @@ claim that full M3 is complete.
       database maintenance route, Git/source read, new data disclosure, stream,
       watcher, daemon, or browser action authority
 - [x] Preserve loopback Host/Origin, same-origin/CSP, fixed presenter, React text,
-      source isolation, portability, guarded CLI, and ADR 0010 boundaries
+      source isolation, portability, guarded CLI, and ADR 0025 release boundaries
 - [x] Leave project/repository enumeration, selected-run approvals, file/status,
       richer diff or payload-bearing history, patch materialization, browser
       approval, and execution explicitly deferred
@@ -503,7 +671,7 @@ that full M3 is complete.
       dirty-path/file-content disclosure, diff/check/event payload presentation,
       stream, watcher, daemon, or browser action authority
 - [x] Preserve loopback Host/Origin, same-origin/CSP, fixed presenter, React-text,
-      guarded CLI, source-isolation, portability, and ADR 0010 boundaries
+      guarded CLI, source-isolation, portability, and ADR 0025 release boundaries
 - [x] Leave workspace-wide run and approval pagination, file/status views, richer
       diff/history payloads, patch materialization, browser approval, and
       execution explicitly deferred
@@ -619,8 +787,9 @@ M3 is complete.
       deployment, and patch materialization out of the slice
 - [x] Keep richer file/status, diff, and history navigation, including dirty
       filenames/counts and event payload presentation, explicitly deferred
-- [x] Preserve the inherited ADR 0010 operator security hold without changing or
-      blessing `.github/workflows/opencode.yml`
+- [x] At this historical slice, preserve the inherited ADR 0010 operator hold
+      without changing or blessing `.github/workflows/opencode.yml`; ADR 0025
+      later chose and implemented hardening
 
 ### Acceptance coverage and commands
 
@@ -759,12 +928,13 @@ part of this no-network local slice.
 Status values are evidence claims. A checked item must be backed by a command or
 test named below.
 
-Status: final-adversarial-audit repairs are implemented; the fresh local gate
-and exact implementation-head hosted CI passed. The separate security release
-hold remains in force on 2026-07-19.
+Status: final-adversarial-audit repairs were implemented; the fresh local gate
+and exact implementation-head hosted CI passed. This is historical M1 evidence;
+ADR 0023 later superseded its one-file mutation boundary and ADR 0025 resolved
+its pending workflow decision by hardening.
 
-M0/M1 must not be called complete until Kevin makes the security decision
-recorded in ADR 0010 for the inherited OpenCode workflow.
+ADR 0025 records Kevin's hardening decision. Its third-party action review and
+secret rotation remain release work; the decision itself is no longer open.
 
 ### Phase A — foundation
 
@@ -782,7 +952,8 @@ recorded in ADR 0010 for the inherited OpenCode workflow.
       context budget
 - [x] Provider-neutral port and capability metadata
 - [x] Real Ollama and OpenAI Responses HTTP adapters
-- [x] Strict one-file proposal validation and `awaiting_approval` stop
+- [x] Strict one-file proposal validation and `awaiting_approval` stop for this
+      historical slice; ADR 0023 later superseded the mutation boundary
 
 ### Phase C — controlled execution
 
@@ -809,7 +980,8 @@ recorded in ADR 0010 for the inherited OpenCode workflow.
       test targets
 - [x] Full repaired candidate gate and adversarial targets pass
 - [x] Hosted `ci` succeeds at the exact repaired candidate commit
-- [ ] Kevin decides whether to disable or harden the inherited OpenCode workflow
+- [x] Kevin chose hardening in ADR 0025; third-party action review and secret
+      rotation remain separate release holds
 
 ### Repair continuation
 
@@ -850,8 +1022,8 @@ added only after the fresh full gate and exact-head CI complete:
 
 The milestone release gate is `pnpm check`, followed by `pnpm audit --audit-level
 high`, the schema-v2 production-lifecycle evaluator, the named adversarial tests,
-and `git diff --check`. Hosted CI and the OpenCode decision are separate mandatory
-release evidence; neither can be inferred from a local pass.
+and `git diff --check`. Hosted CI and ADR 0025's residual security work are
+separate mandatory release evidence; neither can be inferred from a local pass.
 
 Baseline local evidence at published commit `2b0c14f` on 2026-07-19:
 
@@ -916,12 +1088,15 @@ Final adversarial candidate local evidence on 2026-07-20:
 
 ## Deferred plan
 
-The inherited ADR 0010 security hold remains separate from local feature work.
+ADR 0025 resolved ADR 0010 by hardening; its third-party review and secret
+rotation remain separate from local feature work.
 ADR 0016 implements only bounded older event metadata for the third M3 slice.
 ADR 0017 implements only bounded workspace-wide run summaries for the fourth.
 ADR 0019 bounds only the ordinary newest approval suffix. ADR 0020 presents only
-the already persisted one-file diff. ADR 0021 bounds the project/repository
-catalog and aggregate JSON transport. Older approval pagination, current
-file/status views, multi-file or payload-bearing diff/history, patch
-materialization, browser approval, and execution remain
-later, explicitly reviewed expansions. See `docs/ROADMAP.md`.
+the legacy browser projection of an already persisted one-file diff. ADR 0021
+bounds the project/repository catalog and aggregate JSON transport. ADR 0023's
+CLI transactional PatchSets and ADR 0026's failed-verification session are now
+implemented in the current candidate. Older approval pagination, current
+file/status views, multi-file or payload-bearing browser diff/history, browser
+approval, and browser execution remain later, explicitly reviewed expansions.
+See `docs/ROADMAP.md`.

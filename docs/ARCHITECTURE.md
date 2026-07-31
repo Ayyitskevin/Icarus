@@ -25,7 +25,7 @@ CLI ------------------------\
 React workspace -> HTTP API/                          |-- SQLite run store
                                                      |-- artifact/Git controllers
                                                      |-- deterministic context
-                                                     |-- Ollama/OpenAI adapters
+                                                     |-- Ollama/OpenAI/Anthropic adapters
                                                      `-- Docker check runner
 ```
 
@@ -79,6 +79,27 @@ Authoritative control state lives in one SQLite database under `ICARUS_HOME`
 (default: the platform-local state directory). The database stores projects,
 runs, append-only events, check evidence, provider usage, and checkpoints. It
 does not store credentials or environment snapshots.
+
+Session authority adds no second persistence model. The approved `plan_json`
+and its approval digest are the sole grant source; there is no
+`capability_grants` table. Existing admitted operations plus bounded
+boundary/terminal events are the sole session source; there is no
+`agent_sessions` or `tool_invocations` table. Interrupted operations remain
+charged, while only completed boundary events are eligible for evidence
+rehydration after restart.
+
+Session entry and every provider or tool admission preserve one
+ordinary-operation slot and `commandTimeoutMs` of active runtime for
+`session.reconcile`. A hard-margin refusal admits no effect and lands exhaustion
+from persisted evidence; a started operation is charged conservatively before
+that reserved recovery runs.
+
+Settlement preserves that single source of truth. A tool operation's finish and
+the verification or session-terminal event it produces commit in one SQLite
+transaction. `review.validate`, rollback, and restore operation finishes commit
+with their corresponding state transition. A crash therefore cannot leave a
+settled operation without its boundary or a boundary whose operation still
+appears started.
 
 The run row retains the latest verification for efficient status reads. Every
 completed verification also appends its complete bounded evidence and diff to
@@ -157,6 +178,14 @@ re-enters only a persisted safe stage. Exact writes are replay-safe: a retry may
 accept baseline or identical approved bytes, but unexpected bytes are preserved
 and fail closed.
 
+The ordinary first patch attempt follows `running → verifying`. A failed
+verification may take the dedicated, plan-gated `verifying → running` session
+edge while iterations and all ordinary budgets remain. Inside that session,
+`run_checks` records formal evidence and returns to `running`; only a
+host-validated `report_done` may land an approvable `awaiting_review`. A human
+question or exhaustion also lands `awaiting_review`, but records a blocker that
+review approval must refuse.
+
 ## Guarded CLI golden-path sequence
 
 1. State-root initialization first rejects a location inside any Git checkout,
@@ -175,23 +204,38 @@ and fail closed.
 4. Context persistence atomically lands a non-loopback run at
    `awaiting_egress_approval`; every remote provider call independently checks
    approval of that exact digest before any bytes leave the host.
-5. The provider returns a strict JSON plan. Icarus hashes the full run manifest
-   and stops at `awaiting_approval`.
+5. The provider returns a strict JSON plan with an explicit grant array and
+   iteration ceiling. Icarus resolves any readable scope into an exact
+   base-commit path/digest manifest, hashes the full run manifest, and stops at
+   `awaiting_approval`.
 6. Icarus revalidates source HEAD before recording approval, then copies a private
    Git cache without hardlinks, creates its detached worktree, and captures the
-   approved target preimage.
-7. The provider returns one strict path/hash/find/replace edit. Icarus discards
-   recognizable credential material before persistence, then validates a
-   unique match and atomically applies it. The pre-rename temporary is created
-   in the Icarus-private run directory outside the Git worktree, so a process
-   death cannot strand an extra changed path inside the review surface.
+   approved target preimages.
+7. The provider returns one strict transactional patch set over approved
+   targets. Icarus discards recognizable credential material before persistence,
+   validates every modify/create/delete operation, persists tree intent, and
+   applies the set through private temporaries outside the Git worktree. A
+   partial apply compensates earlier paths and fails closed.
 8. Icarus exports only tracked worktree files to a private snapshot and runs
    exact registered checks in a digest-pinned Docker container with network
    disabled. A timeout or cancellation cannot pass even when the child traps the
    signal and exits zero. Icarus verifies the changed-file set, stores a
    binary-capable Git diff and checkpoint, appends the full bounded verification
-   attempt to history, and stops at `awaiting_review`.
-9. Review approval rereads the live target, changed-path set, diff, source HEAD,
+   attempt to history. Passing evidence stops at `awaiting_review`. Failed
+   evidence enters the approved ADR 0026 session only when
+   `iterationCeiling > 0`; zero remains single-shot.
+9. Each session turn admits `provider.revise` before network I/O and at most
+   eight closed tool operations before grant checks or host actions. Read tools
+   see manifest-pinned base bytes or current session-written bytes;
+   `list_tree`/`search` stay on the enumerated base manifest. `propose_patch` is
+   advisory preview/validation only. `apply_patchset` carries and independently
+   revalidates its own bounded PatchSet, then records exact intent before writes.
+   Interrupted materialization resumes from persisted intent with `unavailable`,
+   non-approvable verification. `run_checks` records a current full-plan
+   verification. `report_done` must revalidate the live checkpoint/diff and
+   passing evidence. Human input or exhaustion records a non-approvable review
+   blocker.
+10. Review approval rereads the live targets, changed-path set, diff, source HEAD,
    and checkpoint binding; it is refused unless those still match passing
    evidence. It then marks the run complete without committing, pushing, or
    deploying. Rejection enters
@@ -417,8 +461,8 @@ honest copy, and a defined focus fallback.
 Complete private evidence remains in CLI run history.
 
 This implementation adds no schema, dependency, write, event append, Git/source
-read, raw evidence disclosure, browser mutation, or release authority. ADR 0010
-remains independently unresolved.
+read, raw evidence disclosure, browser mutation, or release authority. ADR
+0025's residual third-party review and secret-rotation work remains independent.
 
 ## Sixth and seventh M3 selected-run presentation bounds
 
@@ -498,20 +542,33 @@ Milestone 1 adapters:
   explicit pricing, and context-egress approval.
 - OpenAI: official `POST /v1/responses` with environment bearer token,
   `store: false`, bounded output, and text extracted from response output items.
+- Anthropic: official `POST /v1/messages`, an origin-pinned `x-api-key`, fixed
+  API version, bounded output, and one forced schema tool whose input is treated
+  only as structured response transport. It does not grant provider-native tool
+  authority to a run.
 
 The browser narrows that provider contract: draft planning accepts only an
 explicitly configured Ollama endpoint that classifies as loopback. Remote, LAN,
 Tailscale, public, OpenAI, and other cloud planning endpoints are rejected by
 the workspace route before a draft is persisted; CLI egress policy is unchanged.
 
+The CLI session loop continues to use typed structured generation rather than
+provider-native tool authority. Its response schema is a closed batch of at most
+eight registered calls with exact per-tool arguments. Every repeated remote
+turn rechecks the exact approved context egress digest; the approved readable
+manifest is the only additional file authority. Completed tool results and
+errors are bounded, secret-scanned, and fenced as untrusted before reuse.
+
 OpenAI request shape follows the official [Responses API reference](https://developers.openai.com/api/reference/resources/responses/methods/create).
-No provider SDK is required for this narrow contract. Tests exercise both
-adapters against deterministic HTTP contracts; an OpenAI lifecycle test uses
-the production adapter from exact egress approval through review without making
-a paid request. Known credentials are supplied to transport-error sanitization,
-so a thrown HTTP transport error cannot copy a bearer value into durable state
-or CLI output. Non-success HTTP bodies are not retained in surfaced errors.
-Tests do not substitute a fake production adapter.
+No provider SDK is required for this narrow contract. Provider contract tests
+exercise all three adapters against deterministic HTTP servers. Separate
+lifecycle coverage currently exists for Ollama and OpenAI; the OpenAI lifecycle
+uses the production adapter from exact egress approval through review without
+making a paid request. An equivalent Anthropic lifecycle is not yet claimed.
+Known credentials are supplied to transport-error sanitization, so a thrown
+HTTP transport error cannot copy a credential into durable state or CLI output.
+Non-success HTTP bodies are not retained in surfaced errors. Tests do not
+substitute a fake production adapter.
 
 ## Context boundary
 
@@ -549,14 +606,16 @@ fail-closed audit or make imported repositories writable.
 - Provider output with recognizable credential material fails before plan/edit
   persistence; known credentials, including credentials reflected by thrown
   transport errors, and command/error output are redacted.
-- A failed verification may re-enter execution while an approved repair grant
-  and the run's budgets both remain (ADR 0024). The grant is carried by the plan,
-  so the operator authorizes the loop with the approval they already give; it is
-  capped at three attempts, spent from the durable operation ledger, and each
-  re-entry passes a dedicated gated transition. A revision returns the worktree
-  to its baseline, is validated against the same approved targets and ceilings,
-  and supersedes its predecessor with the append-only event stream as history.
-  Exhaustion lands failing evidence at `awaiting_review`, never a pass.
+- A failed first verification may re-enter execution only under explicit,
+  digest-bound plan grants and a positive `iterationCeiling` (ADR 0026). The
+  host maximum is two. `provider.revise` is admitted before provider I/O and
+  each tool operation before grant check or host action; interruption, refusal,
+  and failure remain charged. A patch revision returns the worktree to its
+  immutable baseline, is validated against the same approved target scope and
+  ceilings, persists intent before writes, and supersedes its predecessor in
+  append-only history. Only current full-plan passing evidence plus a
+  host-validated `report_done` is approvable. Human input and exhaustion land
+  `awaiting_review` with a blocker, never a pass.
 - A proposal is a patch set over the operator-approved target subset (ADR 0023):
   ordered exact replacements in existing tracked UTF-8 text files, complete
   content for a created path, and preimage-bound removal for a deleted path.

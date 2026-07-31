@@ -47,13 +47,16 @@ approval commands are authoritative; the browser is review-only.
 | Repository/provider text executes in the browser | React renders values as text under a restrictive content-security policy; no raw HTML injection contract exists | presenter allowlist test carrying adversarial strings plus package-wide static no-raw-HTML-sink scan |
 | Browser widens execution authority | no approval, edit, check, arbitrary-command, commit, push, or deploy route exists | route inventory/static assertions and negative HTTP tests |
 | Filtered context or provider repository map exposes secret/generated data | preview reads committed Git objects, returns metadata only, and shares its path classifier with the real model repository map; every `.env*`, dependency/generated, symlink, binary/invalid-UTF-8, model-hidden/intrinsic-secret, and secret-content entry is omitted or planning fails closed | deterministic filter tests, captured provider request, hidden-blob test, and source fingerprint |
-| Prompt injection expands authority | Host policy is outside prompts; model can only return one typed proposal | malicious `AGENTS.md` instruction reaches the real prompt but an expanded target is rejected |
+| Prompt injection expands authority | Host policy is outside prompts; the model can return only strict plans/patch sets or calls from the closed registry, and every call is independently grant-checked against approved scope | malicious repository/tool evidence reaches the real prompt but cannot expand targets, reads, checks, network, budgets, or state transitions |
 | Path traversal or absolute write | lexical containment plus protected-path policy | traversal tests |
 | A patch set changes a path the operator did not approve | the plan approval digest binds the approved target set; every patch-set path must be in that set, must pass protected-path policy independently, and verification requires the changed-path set to equal the patch-set paths exactly | patch-set path-gate tests, plan-digest binding test, and verification set-equality tests |
-| A repair loop runs unbounded or without authority | the grant lives in the plan and is bound by its approval digest, is capped at three by host policy, is spent from the durable operation ledger, and each re-entry requires an approved plan, a recorded failing verification, and remaining budget through a dedicated gated transition | repair-grant digest, ceiling, ledger-accounting, and refusal tests |
-| A repair widens what the run may change | a revision is validated against the same approved target set, path policy, and ceilings as the first patch set, and the worktree is returned to its baseline and proved clean before a revision is proposed | repair reset and revision path-gate tests |
-| Exhausted repairs are presented as success | only a failing verification may be retained for repair; when the grant is spent the run lands in `awaiting_review` with the failing evidence and cannot be approved | exhaustion and passing-verification refusal tests |
-| Check output returned to a provider leaks credential material | the evidence sent to a repair iteration is the same bounded, redacted text the operator reviews, and no repository content beyond the approved context manifest is added | existing redaction and truncation coverage on check evidence |
+| A session loop runs unbounded, consumes settlement/recovery headroom, or lacks authority | only a failed first verification may enter; explicit plan grants and `iterationCeiling` are bound by the approval digest; the host maximum is two; admitted `provider.revise` and tool work is charged before effects, while session entry and every later admission retain one ordinary slot plus `commandTimeoutMs` for `session.reconcile`; local/remote/resumed worst cases consume 30/31/32 of 40 ordinary operations | grant-digest, zero-iteration single-shot, local/remote/resume accounting, tight slot/runtime margin, true interrupted-ledger reconciliation, refusal, budget-exhaustion, and non-approvable landing tests |
+| A session read or check diagnostic widens context egress | read scopes resolve to an approved base-commit path/digest manifest; `read_file` accepts only matching base bytes or current session-written bytes, while list/search enumerate base-manifest paths only; every remote repeat call rechecks exact context egress approval; remote verification and `run_checks` reuse project only host-owned check ID/outcome/exit/truncation metadata plus an output-omitted marker, while full stdout/stderr remains local; resume reconstructs that projection from the atomically adjacent verification event rather than a legacy tool transcript | manifest drift, session create/read, list/search exclusion, remote repeat-egress, and grant-scope tests plus initial/live/compacted/resumed check-output canaries and loopback/raw-SQLite retention |
+| A revision widens what the run may change or leaves partial bytes | plan parsing bounds mutation grants by the plan's narrowed target ceiling, and session entry canonically revalidates persisted grants before iteration admission, provider I/O, reconciliation, or any worktree restore; `propose_patch` is advisory and persists no authority; `apply_patchset` carries its own bounded PatchSet and independently revalidates the approved grant, paths, preimages, secrets, and ceilings, then restores the immutable baseline, persists exact intent before writes, and uses guarded atomic file operations. Interrupted materialization resumes from persisted intent with `unavailable`, non-approvable verification | narrowed-plan grant unit tests; mutually consistent legacy broad-grant resume with zero provider/reconcile/session effects and byte-exact unchanged files; independent-apply validation, no-proposal-authority, intent-before-write, compensation, crash-reconcile, and source-fingerprint tests |
+| Model copy or exhausted turns are presented as success | `run_checks` records only a complete approved check set; `report_done` revalidates the current checkpoint/diff/passing evidence; human input and exhaustion persist blockers in `awaiting_review` that approval refuses | report-before-check, stale-evidence, human-input, exhaustion, and review-refusal tests |
+| Tool results or errors leak credentials or become authority | every result/error is bounded, secret-scanned, and fenced as untrusted before persistence/provider reuse; registered tool control flow, never returned content, determines host state | result/error secret fixtures, output ceilings, injection fixtures, and fixed-control assertions |
+| Session persistence becomes a second mutable authority | approved `plan_json` plus approval digest is the sole grant source; existing operations and bounded boundary/terminal events are the sole session source; no `capability_grants`, `agent_sessions`, or `tool_invocations` tables are introduced | schema-stability, digest binding, operation/event reconstruction, and interrupted-operation charging tests |
+| A crash splits a settled operation from the evidence or state it claims | tool operation finish plus verification/session-terminal event commit atomically; `review.validate`, rollback, and restore operation finish plus corresponding state transition commit atomically | transaction-failure injection proves neither half can persist alone; resume observes started work or one complete settled boundary |
 | A partially applied multi-file change is presented as a result | every path is validated and every replacement staged outside the worktree before the first visible change; a failure part-way through compensates the applied paths and fails closed; a crash resumes into drift detection with the persisted tree checkpoint as the recovery path | multi-file apply tests asserting no write on any unsafe path, staging location, idempotent replay, and byte-exact reversal |
 | A created or deleted path is confused with empty content | tree checkpoints record an absent side as null rather than empty bytes, and the checkpoint digest distinguishes the two | tree-checkpoint digest tests |
 | Patch-set storage migrates live operator state without consent | the ADR 0023 tables are additive and created only after a read-only shape inspection that fails closed, gated by its own exact one-shot approval token distinct from the approval-index token | migration-gate assertions and refusal tests |
@@ -87,8 +90,8 @@ approval commands are authoritative; the browser is review-only.
 
 The slice adds no Server-Sent Events, WebSocket, watcher, schema migration,
 runtime dependency, background daemon, or browser action route. Existing
-loopback and guarded CLI boundaries remain authoritative, and the ADR 0010 hold
-remains unresolved.
+loopback and guarded CLI boundaries remain authoritative, and ADR 0025's
+third-party review and secret-rotation release holds remain open.
 
 ## Third M3 older-activity threats
 
@@ -101,8 +104,8 @@ remains unresolved.
 | A historical page is mistaken for the current evidence snapshot | pin and display the page revision; preserve the coherent recent timeline separately; describe any fixed anchor as current evidence rather than historical payload detail | UI copy and browser navigation tests distinguish the pinned metadata page from current evidence |
 
 ADR 0016 adds no write, event append, Git/source read, filename/content/diff/check
-disclosure, schema/dependency, stream, daemon, or browser action route. ADR 0010
-remains an independent release hold.
+disclosure, schema/dependency, stream, daemon, or browser action route. ADR
+0025's residual release holds remain independent.
 
 ## Fourth M3 workspace-run summary threats
 
@@ -119,7 +122,7 @@ route, Git/source read, provider/context/plan/edit/diff/check/output/error/usage
 approval/event disclosure, stream, daemon, or browser action route. Project and
 repository enumeration remained unpaginated at that stage; ADR 0021 now bounds
 it, while ADR 0019 independently bounds the ordinary selected-run approval
-response. ADR 0010 remains an independent release hold.
+response. ADR 0025's residual release holds remain independent.
 
 ## Implemented fifth M3 verification-attempt threats
 
@@ -136,7 +139,8 @@ response. ADR 0010 remains an independent release hold.
 | The view widens browser authority | GET-only route and text-only inline region; no approval, rerun, restore, command, Git, or mutation path | method negatives, zero SQLite logical writes/events, unchanged source/Git fingerprints, and static route/raw-HTML/workflow assertions |
 
 ADR 0018's controls are implemented, locally evidenced, independently reviewed,
-and exact-head hosted-CI verified. ADR 0010 remains an independent release hold.
+and exact-head hosted-CI verified. ADR 0025's residual release holds remain
+independent.
 
 ## Implemented seventh M3 persisted-diff review threats
 
@@ -149,7 +153,8 @@ and exact-head hosted-CI verified. ADR 0010 remains an independent release hold.
 | The review surface widens authority or timing | reuse the existing coherent selected-run response; add no route, query, Git/source read, request, poller, write, or action | unchanged SQLite and repository fingerprints plus static no-read-authority and fixed-anchor assertions |
 
 ADR 0020 is Accepted after its combined local, independent-review, merge, and
-exact-head hosted gates passed. ADR 0010 remains an independent release hold.
+exact-head hosted gates passed. ADR 0025's residual release holds remain
+independent.
 
 ## Implemented eighth M3 project-catalog and transport threats
 
@@ -163,7 +168,8 @@ exact-head hosted gates passed. ADR 0010 remains an independent release hold.
 | The catalog widens browser authority or reads the source checkout | keep the route GET-only and the view text-only; add no Git/source, provider, approval, execution, command, commit, push, deployment, or release path | method/static guards, zero logical SQLite writes, unchanged action routes, and explicit ADR scope |
 
 ADR 0021 is Accepted after its fresh local, independent-review, merge, and exact
-published-head gates passed. ADR 0010 remains an independent release hold.
+published-head gates passed. ADR 0025's residual release holds remain
+independent.
 
 ## Inherited repository automation, hardened
 

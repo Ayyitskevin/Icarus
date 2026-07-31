@@ -15,6 +15,15 @@ as history. It changes no source code. Every claim below is labeled **verified**
 (observed in the repository at HEAD), **inferred** (my judgment from evidence),
 or **proposed** (a decision this document makes).
 
+> **Current-direction note (2026-07-30):**
+> [ADR 0036](adr/0036-proof-carrying-software-factory-product-direction.md)
+> supersedes this document's current product positioning and sequence. This
+> remains the point-in-time Fable audit at its named base commit; its historical
+> evidence, accepted-ADR references, and reserved ADR numbers are not rewritten.
+> Icarus now intentionally targets competitive Cursor/VS Code, Replit, and
+> Supabase outcomes through its proof-carrying authority kernel and integrated
+> surfaces rather than by rebuilding editor or backend engines.
+
 ---
 
 ## 1. Executive verdict

@@ -6,7 +6,10 @@ import {
   assertReadableBytes,
   assertReadableManifest,
   MAX_GRANT_CALLS,
+  MAX_GRANT_SCOPE_ENTRIES,
+  MAX_GRANTS,
   MAX_READABLE_FILES,
+  PLAN_SCHEMA,
   parseCapabilityGrants,
   parsePlanProposal,
   planApprovalDigest,
@@ -35,6 +38,35 @@ const SELECTION = ["src/greeting.txt", "README.md"] as const;
 const CHECKS: readonly CheckProfile[] = [
   { id: "unit", name: "Unit check", argv: ["node", "-e", ""] },
 ];
+
+describe("plan capability grant schema", () => {
+  it("requires a strict, closed, bounded grant list from new provider plans", () => {
+    expect(PLAN_SCHEMA.required).toContain("grants");
+    expect(PLAN_SCHEMA.properties.grants).toEqual({
+      type: "array",
+      maxItems: MAX_GRANTS,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "scope", "maxCalls"],
+        properties: {
+          kind: {
+            type: "string",
+            enum: ["read.manifest", "read.checks", "mutation.patchset", "exec.check"],
+          },
+          scope: {
+            type: "array",
+            minItems: 1,
+            maxItems: MAX_GRANT_SCOPE_ENTRIES,
+            items: { type: "string", minLength: 1, maxLength: 1_024 },
+            uniqueItems: true,
+          },
+          maxCalls: { type: "integer", minimum: 1, maximum: MAX_GRANT_CALLS },
+        },
+      },
+    });
+  });
+});
 
 function manifest(overrides: Partial<ReadableManifest> = {}): ReadableManifest {
   return {
@@ -66,6 +98,17 @@ describe("capability grant validation", () => {
       () =>
         parseCapabilityGrants([{ kind: "exec.shell", scope: [], maxCalls: 1 }], SELECTION, CHECKS),
       "UNKNOWN_CAPABILITY",
+    );
+  });
+  it("refuses unknown grant fields at the host boundary", () => {
+    expectIcarusCode(
+      () =>
+        parseCapabilityGrants(
+          [{ kind: "exec.check", scope: ["unit"], maxCalls: 1, command: "node --test" }],
+          SELECTION,
+          CHECKS,
+        ),
+      "INVALID_PROVIDER_OUTPUT",
     );
   });
 
@@ -140,6 +183,13 @@ describe("capability grant validation", () => {
       "INVALID_PATH",
     );
   });
+  it("refuses an empty scope rather than treating it as unbounded authority", () => {
+    expectIcarusCode(
+      () =>
+        parseCapabilityGrants([{ kind: "exec.check", scope: [], maxCalls: 1 }], SELECTION, CHECKS),
+      "INVALID_PROVIDER_OUTPUT",
+    );
+  });
 
   it("treats an absent grant list as requesting no capability", () => {
     const plan = parsePlanProposal(
@@ -157,8 +207,7 @@ describe("capability grant validation", () => {
     );
     expect(plan.grants).toEqual([]);
   });
-
-  it("carries requested grants through plan parsing", () => {
+  it("allows a new provider plan to request an explicit empty grant list", () => {
     const plan = parsePlanProposal(
       {
         summary: "Replace the greeting.",
@@ -168,13 +217,93 @@ describe("capability grant validation", () => {
         targets: ["src/greeting.txt"],
         iterationCeiling: 0,
         checkIds: ["unit"],
-        grants: [{ kind: "exec.check", scope: ["unit"], maxCalls: 2 }],
+        grants: [],
       },
       SELECTION,
       CHECKS,
     );
-    expect(plan.grants).toHaveLength(1);
-    expect(plan.grants[0]?.kind).toBe("exec.check");
+    expect(plan.grants).toEqual([]);
+  });
+
+  it("carries every closed capability through grantful provider plan parsing", () => {
+    const plan = parsePlanProposal(
+      {
+        summary: "Replace the greeting.",
+        steps: ["Replace one exact string."],
+        risks: [],
+        target: "src/greeting.txt",
+        targets: ["src/greeting.txt"],
+        iterationCeiling: 0,
+        checkIds: ["unit"],
+        grants: [
+          { kind: "read.manifest", scope: ["src/"], maxCalls: 4 },
+          { kind: "read.checks", scope: ["unit"], maxCalls: 1 },
+          { kind: "mutation.patchset", scope: ["src/greeting.txt"], maxCalls: 2 },
+          { kind: "exec.check", scope: ["unit"], maxCalls: 2 },
+        ],
+      },
+      SELECTION,
+      CHECKS,
+    );
+    expect(plan.grants.map((grant) => grant.kind)).toEqual([
+      "exec.check",
+      "mutation.patchset",
+      "read.checks",
+      "read.manifest",
+    ]);
+  });
+
+  it("binds mutation authority to the plan targets rather than the broader selection", () => {
+    expectIcarusCode(
+      () =>
+        parsePlanProposal(
+          {
+            summary: "Replace only the greeting.",
+            steps: ["Replace one exact string."],
+            risks: [],
+            target: "src/greeting.txt",
+            targets: ["src/greeting.txt"],
+            iterationCeiling: 1,
+            checkIds: ["unit"],
+            grants: [
+              {
+                kind: "mutation.patchset",
+                scope: ["src/greeting.txt", "README.md"],
+                maxCalls: 1,
+              },
+            ],
+          },
+          SELECTION,
+          CHECKS,
+        ),
+      "TARGET_MISMATCH",
+    );
+  });
+
+  it("allows a least-privilege mutation grant narrower than the plan target ceiling", () => {
+    const plan = parsePlanProposal(
+      {
+        summary: "Inspect both targets and replace only the greeting.",
+        steps: ["Replace one exact string."],
+        risks: [],
+        target: "src/greeting.txt",
+        targets: ["src/greeting.txt", "README.md"],
+        iterationCeiling: 1,
+        checkIds: ["unit"],
+        grants: [
+          {
+            kind: "mutation.patchset",
+            scope: ["src/greeting.txt"],
+            maxCalls: 1,
+          },
+        ],
+      },
+      SELECTION,
+      CHECKS,
+    );
+    expect(plan.grants.find((grant) => grant.kind === "mutation.patchset")?.scope).toEqual([
+      "src/greeting.txt",
+    ]);
   });
 });
 

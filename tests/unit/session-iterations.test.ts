@@ -1,4 +1,5 @@
 import { rmSync } from "node:fs";
+import { createRequire } from "node:module";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -14,6 +15,7 @@ import { SESSION_ITERATION_OPERATION_KIND } from "../../packages/core/src/store.
 import type {
   CheckEvidence,
   CheckpointFile,
+  OperationFinish,
   PatchSet,
   VerificationEvidence,
 } from "../../packages/core/src/types.js";
@@ -33,6 +35,18 @@ const RUN_ID = "00000000-0000-4000-8000-0000000000f1";
 const TARGET = "src/greeting.txt";
 const BASELINE = "hello\n";
 const APPROVED = "hello, icarus\n";
+
+interface TestDatabase {
+  exec(sql: string): void;
+  prepare(sql: string): { run(...parameters: unknown[]): unknown };
+  close(): void;
+}
+
+const Database = createRequire(new URL("../../packages/core/package.json", import.meta.url))(
+  "better-sqlite3",
+) as new (
+  filename: string,
+) => TestDatabase;
 
 const roots: string[] = [];
 afterEach(() => {
@@ -72,19 +86,31 @@ function checkEvidence(outcome: CheckEvidence["outcome"]): CheckEvidence {
   return {
     checkId: "unit",
     argv: ["node", "--test"],
-    exitCode: outcome === "passed" ? 0 : 1,
+    exitCode: outcome === "passed" ? 0 : outcome === "failed" ? 1 : null,
     signal: null,
     durationMs: 5,
-    stdout: outcome === "passed" ? "ok\n" : "assertion failed\n",
-    stderr: "",
+    stdout: outcome === "passed" ? "ok\n" : "",
+    stderr: outcome === "failed" ? "assertion failed\n" : "",
     truncated: false,
     outcome,
+  };
+}
+
+function succeededFinish(detail: OperationFinish["detail"] = {}): OperationFinish {
+  return {
+    outcome: "succeeded",
+    activeRuntimeMs: 1,
+    inputTokens: 0,
+    outputTokens: 0,
+    estimatedCostUsd: 0,
+    detail,
   };
 }
 
 /** Drives a run to `verifying` with a recorded patch set and checkpoint. */
 function seedVerifyingRun(iterationCeiling: number): {
   readonly store: ReturnType<typeof createUnitStore>["store"];
+  readonly databasePath: string;
   readonly diff: string;
   verificationFor(outcome: "passed" | "failed", approved: string): VerificationEvidence;
 } {
@@ -128,6 +154,7 @@ function seedVerifyingRun(iterationCeiling: number): {
   const diff = "diff --git a/src/greeting.txt b/src/greeting.txt\n";
   return {
     store,
+    databasePath: fixture.databasePath,
     diff,
     verificationFor(outcome, approved) {
       store.saveTreeCheckpoint(
@@ -323,6 +350,8 @@ describe("bounded repair transition", () => {
     );
 
     expect(updated.patchSet?.edits[0]?.op).toBe("modify");
+    expect(updated.diff).toBeNull();
+    expect(updated.verification).toBeNull();
     expect(seeded.store.listCheckpointFiles(RUN_ID)).toEqual(checkpointFilesFor(revised));
     const events = seeded.store.listEvents(RUN_ID);
     const superseded = events.filter((event) => event.type === "patch_set.superseded");
@@ -386,5 +415,908 @@ describe("bounded repair transition", () => {
         ),
       "INVALID_STATE",
     );
+  });
+});
+
+describe("durable agent-session disposition", () => {
+  function enterRunningSession(store: ReturnType<typeof createUnitStore>["store"]): void {
+    const diff = "diff --git a/src/greeting.txt b/src/greeting.txt\n";
+    const checkpointSha256 = store.getCheckpoint(RUN_ID).checkpointSha256;
+    store.recordVerificationAndAwaitReview(
+      RUN_ID,
+      diff,
+      {
+        outcome: "failed",
+        checks: [checkEvidence("failed")],
+        changedPaths: [TARGET],
+        diffSha256: sha256(diff),
+        checkpointSha256,
+      },
+      "verifying",
+    );
+    store.beginSessionIteration(RUN_ID);
+    chargeRepairIteration(store);
+  }
+
+  function recordPassingSessionVerification(
+    seeded: ReturnType<typeof seedVerifyingRun>,
+  ): VerificationEvidence {
+    const passing = seeded.verificationFor("passed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing, "running");
+    return passing;
+  }
+
+  it("records a settled iteration boundary as resumable evidence", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+
+    const updated = seeded.store.recordSessionIterationBoundary(RUN_ID, 1);
+    expect(updated.state).toBe("running");
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .filter((event) => event.type === "session.iteration_completed"),
+    ).toEqual([
+      expect.objectContaining({
+        payload: { iterations: 1 },
+      }),
+    ]);
+    expectCode(
+      () => seeded.store.recordSessionIterationBoundary(RUN_ID, 0),
+      "INVALID_SESSION_ITERATION",
+    );
+    expectCode(
+      () => seeded.store.recordSessionIterationBoundary(RUN_ID, 1),
+      "INVALID_SESSION_ITERATION",
+    );
+    expectCode(
+      () => seeded.store.recordSessionIterationBoundary(RUN_ID, 2),
+      "INVALID_SESSION_ITERATION",
+    );
+  });
+
+  it("records the compatibility completion API but does not treat it as atomic report_done", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+    const passing = recordPassingSessionVerification(seeded);
+
+    const awaitingReview = seeded.store.recordSessionOutcome(
+      RUN_ID,
+      "completed",
+      "The registered check passes.",
+      1,
+    );
+    expect(awaitingReview.state).toBe("awaiting_review");
+    expect(awaitingReview.verification).toEqual(passing);
+    expect(
+      seeded.store.listEvents(RUN_ID).filter((event) => event.type === "session.completed"),
+    ).toEqual([
+      expect.objectContaining({
+        payload: {
+          iterations: 1,
+          summary: "The registered check passes.",
+        },
+      }),
+    ]);
+    expectCode(
+      () => seeded.store.decideReview(RUN_ID, passing.diffSha256, "unit-operator", "approve"),
+      "SESSION_NOT_COMPLETED",
+    );
+  });
+
+  it("refuses completion when the current verification is not passing", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+
+    expectCode(
+      () =>
+        seeded.store.recordSessionOutcome(
+          RUN_ID,
+          "completed",
+          "This must not override failed evidence.",
+          1,
+        ),
+      "VERIFICATION_NOT_PASSED",
+    );
+    expect(seeded.store.getRun(RUN_ID).state).toBe("running");
+  });
+
+  it("refuses completion when passing evidence names a stale checkpoint", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+    recordPassingSessionVerification(seeded);
+    const database = new Database(seeded.databasePath);
+    try {
+      database
+        .prepare("UPDATE checkpoints SET checkpoint_sha256 = ? WHERE run_id = ?")
+        .run("f".repeat(64), RUN_ID);
+    } finally {
+      database.close();
+    }
+
+    expectCode(
+      () =>
+        seeded.store.recordSessionOutcome(
+          RUN_ID,
+          "completed",
+          "This must not bless stale evidence.",
+          1,
+        ),
+      "CHECKPOINT_MISMATCH",
+    );
+    expect(seeded.store.getRun(RUN_ID).state).toBe("running");
+  });
+
+  it.each([
+    ["awaiting_human", "Which implementation should I use?"],
+    ["exhausted", null],
+  ] as const)("makes a %s disposition non-approvable", (kind, textValue) => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+    const passing = recordPassingSessionVerification(seeded);
+    seeded.store.recordSessionOutcome(RUN_ID, kind, textValue, 1);
+
+    expectCode(
+      () => seeded.store.decideReview(RUN_ID, passing.diffSha256, "unit-operator", "approve"),
+      "SESSION_NOT_COMPLETED",
+    );
+    expect(seeded.store.getRun(RUN_ID).state).toBe("awaiting_review");
+  });
+
+  it("blocks approval when a charged session has no terminal disposition", () => {
+    const seeded = seedVerifyingRun(1);
+    const failing = seeded.verificationFor("failed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying");
+    seeded.store.beginSessionIteration(RUN_ID);
+    chargeRepairIteration(seeded.store);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    seeded.store.transition(RUN_ID, "verifying", "session.verification_requested");
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing);
+
+    expectCode(
+      () => seeded.store.decideReview(RUN_ID, passing.diffSha256, "unit-operator", "approve"),
+      "SESSION_NOT_COMPLETED",
+    );
+    expect(seeded.store.getRun(RUN_ID).state).toBe("awaiting_review");
+  });
+
+  it("preserves the legacy successful review path when no session was charged", () => {
+    const seeded = seedVerifyingRun(0);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing);
+
+    const completed = seeded.store.decideReview(
+      RUN_ID,
+      passing.diffSha256,
+      "unit-operator",
+      "approve",
+    );
+    expect(completed.state).toBe("completed");
+  });
+
+  it.each([
+    ["session.tool.exec.check", "passed"],
+    ["session.tool.mutation.patchset", "unavailable"],
+  ] as const)("atomically settles %s with its current verification", (operationKind, outcome) => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    const verification: VerificationEvidence =
+      outcome === "passed"
+        ? passing
+        : { ...passing, outcome, checks: [checkEvidence("unavailable")] };
+    const operation = seeded.store.beginOperation(RUN_ID, operationKind, 0, 0, 1_000, "running");
+
+    const updated = seeded.store.finishSessionVerificationOperation(
+      operation,
+      succeededFinish({ tool: operationKind }),
+      seeded.diff,
+      verification,
+    );
+
+    expect(updated.state).toBe("running");
+    expect(updated.verification).toEqual(verification);
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .slice(-2)
+        .map((event) => event.type),
+    ).toEqual(["operation.finished", "verification.completed"]);
+  });
+
+  it("rolls operation settlement back when current verification validation fails", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    const operation = seeded.store.beginOperation(
+      RUN_ID,
+      "session.tool.exec.check",
+      0,
+      0,
+      1_000,
+      "running",
+    );
+    const admitted = seeded.store.getRun(RUN_ID);
+
+    expectCode(
+      () =>
+        seeded.store.finishSessionVerificationOperation(operation, succeededFinish(), seeded.diff, {
+          ...passing,
+          diffSha256: "f".repeat(64),
+        }),
+      "VERIFICATION_DIGEST_MISMATCH",
+    );
+
+    expect(seeded.store.getRun(RUN_ID)).toMatchObject({
+      state: "running",
+      usage: admitted.usage,
+      verification: { outcome: "failed" },
+    });
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .some(
+          (event) =>
+            event.type === "operation.finished" &&
+            (event.payload as Record<string, unknown>).operationId === operation.id,
+        ),
+    ).toBe(false);
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it("rolls session verification settlement back when its evidence event cannot persist", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    const operation = seeded.store.beginOperation(
+      RUN_ID,
+      "session.tool.exec.check",
+      0,
+      0,
+      1_000,
+      "running",
+    );
+    const admitted = seeded.store.getRun(RUN_ID);
+    const approvalsBefore = seeded.store.listApprovals(RUN_ID);
+    const eventsBefore = seeded.store.listEvents(RUN_ID);
+    const database = new Database(seeded.databasePath);
+    try {
+      database.exec(`CREATE TRIGGER reject_session_verification_completion
+        BEFORE INSERT ON run_events
+        WHEN NEW.type = 'verification.completed'
+        BEGIN SELECT RAISE(ABORT, 'synthetic verification event failure'); END`);
+    } finally {
+      database.close();
+    }
+
+    expect(() =>
+      seeded.store.finishSessionVerificationOperation(
+        operation,
+        succeededFinish(),
+        seeded.diff,
+        passing,
+      ),
+    ).toThrow("synthetic verification event failure");
+    expect(seeded.store.getRun(RUN_ID)).toMatchObject({
+      state: "running",
+      usage: admitted.usage,
+      diff: admitted.diff,
+      verification: admitted.verification,
+    });
+    expect(seeded.store.listApprovals(RUN_ID)).toEqual(approvalsBefore);
+    expect(seeded.store.listEvents(RUN_ID)).toEqual(eventsBefore);
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .some(
+          (event) =>
+            event.type === "operation.finished" &&
+            (event.payload as Record<string, unknown>).operationId === operation.id,
+        ),
+    ).toBe(false);
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it("accepts only the exact session verification operation kinds", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    const operation = seeded.store.beginOperation(
+      RUN_ID,
+      "session.tool.read.manifest",
+      0,
+      0,
+      1_000,
+      "running",
+    );
+
+    expectCode(
+      () =>
+        seeded.store.finishSessionVerificationOperation(
+          operation,
+          succeededFinish(),
+          seeded.diff,
+          passing,
+        ),
+      "OPERATION_TOKEN_MISMATCH",
+    );
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it("atomically pairs succeeded report_done settlement with an approvable completion", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+    const passing = recordPassingSessionVerification(seeded);
+    const operation = seeded.store.beginOperation(
+      RUN_ID,
+      "session.control.report_done",
+      0,
+      0,
+      1_000,
+      "running",
+    );
+
+    const awaitingReview = seeded.store.finishSessionControlOperation(
+      operation,
+      succeededFinish({ tool: "report_done" }),
+      "completed",
+      "The registered check passes.",
+      1,
+    );
+
+    expect(awaitingReview.state).toBe("awaiting_review");
+    const terminal = seeded.store.listEvents(RUN_ID).slice(-2);
+    expect(terminal.map((event) => event.type)).toEqual([
+      "operation.finished",
+      "session.completed",
+    ]);
+    expect(terminal[1]?.payload).toEqual({
+      iterations: 1,
+      operationId: operation.id,
+      summary: "The registered check passes.",
+    });
+    seeded.store.recordSessionIterationBoundary(RUN_ID, 1);
+    expect(
+      seeded.store.decideReview(RUN_ID, passing.diffSha256, "unit-operator", "approve").state,
+    ).toBe("completed");
+  });
+
+  it("rolls report_done settlement back when completion evidence is not passing", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+    const operation = seeded.store.beginOperation(
+      RUN_ID,
+      "session.control.report_done",
+      0,
+      0,
+      1_000,
+      "running",
+    );
+    const admitted = seeded.store.getRun(RUN_ID);
+
+    expectCode(
+      () =>
+        seeded.store.finishSessionControlOperation(
+          operation,
+          succeededFinish(),
+          "completed",
+          "This must not override failed evidence.",
+          1,
+        ),
+      "VERIFICATION_NOT_PASSED",
+    );
+    expect(seeded.store.getRun(RUN_ID)).toMatchObject({ state: "running", usage: admitted.usage });
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .some(
+          (event) =>
+            event.type === "operation.finished" &&
+            (event.payload as Record<string, unknown>).operationId === operation.id,
+        ),
+    ).toBe(false);
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it("rolls report_done settlement back when its session event cannot persist", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+    const passing = recordPassingSessionVerification(seeded);
+    const operation = seeded.store.beginOperation(
+      RUN_ID,
+      "session.control.report_done",
+      0,
+      0,
+      1_000,
+      "running",
+    );
+    const admitted = seeded.store.getRun(RUN_ID);
+    const approvalsBefore = seeded.store.listApprovals(RUN_ID);
+    const eventsBefore = seeded.store.listEvents(RUN_ID);
+    const database = new Database(seeded.databasePath);
+    try {
+      database.exec(`CREATE TRIGGER reject_session_completion
+        BEFORE INSERT ON run_events
+        WHEN NEW.type = 'session.completed'
+        BEGIN SELECT RAISE(ABORT, 'synthetic session event failure'); END`);
+    } finally {
+      database.close();
+    }
+
+    expect(() =>
+      seeded.store.finishSessionControlOperation(
+        operation,
+        succeededFinish(),
+        "completed",
+        "The registered check passes.",
+        1,
+      ),
+    ).toThrow("synthetic session event failure");
+    expect(seeded.store.getRun(RUN_ID)).toMatchObject({
+      state: "running",
+      usage: admitted.usage,
+      verification: passing,
+    });
+    expect(seeded.store.listApprovals(RUN_ID)).toEqual(approvalsBefore);
+    expect(seeded.store.listEvents(RUN_ID)).toEqual(eventsBefore);
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .some(
+          (event) =>
+            event.type === "operation.finished" &&
+            (event.payload as Record<string, unknown>).operationId === operation.id,
+        ),
+    ).toBe(false);
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it("atomically settles request_human_input with a non-approvable disposition", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+    const operation = seeded.store.beginOperation(
+      RUN_ID,
+      "session.control.request_human_input",
+      0,
+      0,
+      1_000,
+      "running",
+    );
+
+    const updated = seeded.store.finishSessionControlOperation(
+      operation,
+      succeededFinish(),
+      "awaiting_human",
+      "Which implementation should I use?",
+      1,
+    );
+
+    expect(updated.state).toBe("awaiting_review");
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .slice(-2)
+        .map((event) => event.type),
+    ).toEqual(["operation.finished", "session.awaiting_human"]);
+    expectCode(
+      () => seeded.store.decideReview(RUN_ID, sha256(seeded.diff), "unit-operator", "approve"),
+      "SESSION_NOT_COMPLETED",
+    );
+  });
+
+  it("requires terminal outcome counts to equal durable provider admission", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+
+    expectCode(
+      () => seeded.store.recordSessionOutcome(RUN_ID, "exhausted", null, 0),
+      "INVALID_SESSION_ITERATION",
+    );
+    expect(seeded.store.getRun(RUN_ID).state).toBe("running");
+  });
+
+  it("bounds session outcome text by UTF-8 bytes", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+
+    expectCode(
+      () => seeded.store.recordSessionOutcome(RUN_ID, "awaiting_human", "é".repeat(1_001), 1),
+      "INVALID_SESSION_OUTCOME",
+    );
+    expect(seeded.store.getRun(RUN_ID).state).toBe("running");
+  });
+
+  it("atomically settles review.validate with the review approval", () => {
+    const seeded = seedVerifyingRun(0);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing);
+    const operation = seeded.store.beginOperation(
+      RUN_ID,
+      "review.validate",
+      0,
+      0,
+      1_000,
+      "awaiting_review",
+    );
+
+    const completed = seeded.store.finishReviewValidationAndApprove(
+      operation,
+      succeededFinish(),
+      passing.diffSha256,
+      "unit-operator",
+    );
+
+    expect(completed.state).toBe("completed");
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .slice(-2)
+        .map((event) => event.type),
+    ).toEqual(["operation.finished", "review.accepted"]);
+  });
+
+  it("rolls review.validate settlement back when approval validation fails", () => {
+    const seeded = seedVerifyingRun(0);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing);
+    const operation = seeded.store.beginOperation(
+      RUN_ID,
+      "review.validate",
+      0,
+      0,
+      1_000,
+      "awaiting_review",
+    );
+    const admitted = seeded.store.getRun(RUN_ID);
+
+    expectCode(
+      () =>
+        seeded.store.finishReviewValidationAndApprove(
+          operation,
+          succeededFinish(),
+          "f".repeat(64),
+          "unit-operator",
+        ),
+      "STALE_APPROVAL",
+    );
+    expect(seeded.store.getRun(RUN_ID)).toMatchObject({
+      state: "awaiting_review",
+      usage: admitted.usage,
+    });
+    expect(
+      seeded.store.listApprovals(RUN_ID).filter((approval) => approval.kind === "review"),
+    ).toEqual([]);
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .some(
+          (event) =>
+            event.type === "operation.finished" &&
+            (event.payload as Record<string, unknown>).operationId === operation.id,
+        ),
+    ).toBe(false);
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it("rolls review validation settlement back when its acceptance event cannot persist", () => {
+    const seeded = seedVerifyingRun(0);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing);
+    const operation = seeded.store.beginOperation(
+      RUN_ID,
+      "review.validate",
+      0,
+      0,
+      1_000,
+      "awaiting_review",
+    );
+    const admitted = seeded.store.getRun(RUN_ID);
+    const approvalsBefore = seeded.store.listApprovals(RUN_ID);
+    const eventsBefore = seeded.store.listEvents(RUN_ID);
+    const database = new Database(seeded.databasePath);
+    try {
+      database.exec(`CREATE TRIGGER reject_review_acceptance
+        BEFORE INSERT ON run_events
+        WHEN NEW.type = 'review.accepted'
+        BEGIN SELECT RAISE(ABORT, 'synthetic review event failure'); END`);
+    } finally {
+      database.close();
+    }
+
+    expect(() =>
+      seeded.store.finishReviewValidationAndApprove(
+        operation,
+        succeededFinish(),
+        passing.diffSha256,
+        "unit-operator",
+      ),
+    ).toThrow("synthetic review event failure");
+    expect(seeded.store.getRun(RUN_ID)).toMatchObject({
+      state: "awaiting_review",
+      usage: admitted.usage,
+      verification: passing,
+    });
+    expect(seeded.store.listApprovals(RUN_ID)).toEqual(approvalsBefore);
+    expect(
+      seeded.store.listApprovals(RUN_ID).filter((approval) => approval.kind === "review"),
+    ).toEqual([]);
+    expect(seeded.store.listEvents(RUN_ID)).toEqual(eventsBefore);
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .some(
+          (event) =>
+            event.type === "operation.finished" &&
+            (event.payload as Record<string, unknown>).operationId === operation.id,
+        ),
+    ).toBe(false);
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it("atomically settles checkpoint rollback and restore transitions", () => {
+    const seeded = seedVerifyingRun(0);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing);
+    seeded.store.approveRollback(RUN_ID, passing.diffSha256, "unit-operator");
+    const rollback = seeded.store.beginOperation(
+      RUN_ID,
+      "checkpoint.rollback",
+      0,
+      0,
+      1_000,
+      "rolling_back",
+    );
+    expect(seeded.store.finishCheckpointRecoveryOperation(rollback, succeededFinish()).state).toBe(
+      "rolled_back",
+    );
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .slice(-2)
+        .map((event) => event.type),
+    ).toEqual(["operation.finished", "rollback.completed"]);
+
+    seeded.store.approveRestore(
+      RUN_ID,
+      seeded.store.getCheckpoint(RUN_ID).checkpointSha256,
+      "unit-operator",
+    );
+    const restore = seeded.store.beginOperation(
+      RUN_ID,
+      "checkpoint.restore",
+      0,
+      0,
+      1_000,
+      "restoring",
+    );
+    expect(seeded.store.finishCheckpointRecoveryOperation(restore, succeededFinish()).state).toBe(
+      "verifying",
+    );
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .slice(-2)
+        .map((event) => event.type),
+    ).toEqual(["operation.finished", "restore.completed"]);
+  });
+
+  it("rolls checkpoint operation settlement back when its transition cannot persist", () => {
+    const seeded = seedVerifyingRun(0);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing);
+    seeded.store.approveRollback(RUN_ID, passing.diffSha256, "unit-operator");
+    const rollback = seeded.store.beginOperation(
+      RUN_ID,
+      "checkpoint.rollback",
+      0,
+      0,
+      1_000,
+      "rolling_back",
+    );
+    const admitted = seeded.store.getRun(RUN_ID);
+    const database = new Database(seeded.databasePath);
+    try {
+      database.exec(`CREATE TRIGGER reject_rollback_completion
+        BEFORE INSERT ON run_events
+        WHEN NEW.type = 'rollback.completed'
+        BEGIN SELECT RAISE(ABORT, 'synthetic transition failure'); END`);
+    } finally {
+      database.close();
+    }
+
+    expect(() =>
+      seeded.store.finishCheckpointRecoveryOperation(rollback, succeededFinish()),
+    ).toThrow("synthetic transition failure");
+    expect(seeded.store.getRun(RUN_ID)).toMatchObject({
+      state: "rolling_back",
+      usage: admitted.usage,
+    });
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .some(
+          (event) =>
+            event.type === "operation.finished" &&
+            (event.payload as Record<string, unknown>).operationId === rollback.id,
+        ),
+    ).toBe(false);
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it("rolls restore operation settlement back when its transition event cannot persist", () => {
+    const seeded = seedVerifyingRun(0);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing);
+    seeded.store.approveRollback(RUN_ID, passing.diffSha256, "unit-operator");
+    const rollback = seeded.store.beginOperation(
+      RUN_ID,
+      "checkpoint.rollback",
+      0,
+      0,
+      1_000,
+      "rolling_back",
+    );
+    seeded.store.finishCheckpointRecoveryOperation(rollback, succeededFinish());
+    seeded.store.approveRestore(
+      RUN_ID,
+      seeded.store.getCheckpoint(RUN_ID).checkpointSha256,
+      "unit-operator",
+    );
+    const restore = seeded.store.beginOperation(
+      RUN_ID,
+      "checkpoint.restore",
+      0,
+      0,
+      1_000,
+      "restoring",
+    );
+    const admitted = seeded.store.getRun(RUN_ID);
+    const approvalsBefore = seeded.store.listApprovals(RUN_ID);
+    const eventsBefore = seeded.store.listEvents(RUN_ID);
+    const database = new Database(seeded.databasePath);
+    try {
+      database.exec(`CREATE TRIGGER reject_restore_completion
+        BEFORE INSERT ON run_events
+        WHEN NEW.type = 'restore.completed'
+        BEGIN SELECT RAISE(ABORT, 'synthetic restore event failure'); END`);
+    } finally {
+      database.close();
+    }
+
+    expect(() =>
+      seeded.store.finishCheckpointRecoveryOperation(restore, succeededFinish()),
+    ).toThrow("synthetic restore event failure");
+    expect(seeded.store.getRun(RUN_ID)).toMatchObject({
+      state: "restoring",
+      usage: admitted.usage,
+      verification: admitted.verification,
+    });
+    expect(seeded.store.listApprovals(RUN_ID)).toEqual(approvalsBefore);
+    expect(seeded.store.listEvents(RUN_ID)).toEqual(eventsBefore);
+    expect(
+      seeded.store
+        .listEvents(RUN_ID)
+        .some(
+          (event) =>
+            event.type === "operation.finished" &&
+            (event.payload as Record<string, unknown>).operationId === restore.id,
+        ),
+    ).toBe(false);
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it("enforces the checkpoint operation kind's expected recovery state", () => {
+    const seeded = seedVerifyingRun(0);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing);
+    seeded.store.approveRollback(RUN_ID, passing.diffSha256, "unit-operator");
+    const wrong = seeded.store.beginOperation(
+      RUN_ID,
+      "checkpoint.restore",
+      0,
+      0,
+      1_000,
+      "rolling_back",
+    );
+
+    expectCode(
+      () => seeded.store.finishCheckpointRecoveryOperation(wrong, succeededFinish()),
+      "INVALID_STATE",
+    );
+    expect(seeded.store.getRun(RUN_ID).state).toBe("rolling_back");
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it("resumes a modern patch-set verification before a checkpoint row exists", () => {
+    const seeded = seedVerifyingRun(0);
+    seeded.store.failRun(
+      RUN_ID,
+      "verifying",
+      new IcarusError("INTERRUPTED", "Synthetic verification interruption"),
+    );
+
+    expect(seeded.store.resumeFailed(RUN_ID).state).toBe("verifying");
+  });
+
+  it.each(["rolling_back", "restoring"] as const)(
+    "resumes a modern patch-set %s recovery state",
+    (resumeState) => {
+      const seeded = seedVerifyingRun(0);
+      const passing = seeded.verificationFor("passed", APPROVED);
+      seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing);
+      seeded.store.approveRollback(RUN_ID, passing.diffSha256, "unit-operator");
+      if (resumeState === "restoring") {
+        seeded.store.finishRollback(RUN_ID);
+        seeded.store.approveRestore(
+          RUN_ID,
+          seeded.store.getCheckpoint(RUN_ID).checkpointSha256,
+          "unit-operator",
+        );
+      }
+      seeded.store.failRun(
+        RUN_ID,
+        resumeState,
+        new IcarusError("INTERRUPTED", "Synthetic recovery interruption"),
+      );
+
+      expect(seeded.store.resumeFailed(RUN_ID).state).toBe(resumeState);
+    },
+  );
+
+  it("does not accept legacy byte columns in place of modern checkpoint files", () => {
+    const seeded = seedVerifyingRun(0);
+    seeded.store.failRun(
+      RUN_ID,
+      "verifying",
+      new IcarusError("INTERRUPTED", "Synthetic verification interruption"),
+    );
+    const database = new Database(seeded.databasePath);
+    try {
+      database
+        .prepare(
+          "UPDATE runs SET baseline_base64 = 'YmFzZQ==', approved_base64 = 'YXBwcm92ZWQ=' WHERE id = ?",
+        )
+        .run(RUN_ID);
+      database.prepare("DELETE FROM checkpoint_files WHERE run_id = ?").run(RUN_ID);
+    } finally {
+      database.close();
+    }
+
+    expectCode(() => seeded.store.resumeFailed(RUN_ID), "MISSING_CHECKPOINT");
+  });
+
+  it("requires the immutable checkpoint when resuming modern rollback", () => {
+    const seeded = seedVerifyingRun(0);
+    const passing = seeded.verificationFor("passed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing);
+    seeded.store.approveRollback(RUN_ID, passing.diffSha256, "unit-operator");
+    seeded.store.failRun(
+      RUN_ID,
+      "rolling_back",
+      new IcarusError("INTERRUPTED", "Synthetic rollback interruption"),
+    );
+    const database = new Database(seeded.databasePath);
+    try {
+      database.prepare("DELETE FROM checkpoints WHERE run_id = ?").run(RUN_ID);
+    } finally {
+      database.close();
+    }
+
+    expectCode(() => seeded.store.resumeFailed(RUN_ID), "MISSING_CHECKPOINT");
   });
 });

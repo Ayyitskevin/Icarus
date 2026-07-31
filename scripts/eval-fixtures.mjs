@@ -47,6 +47,9 @@ const m1Capabilities = new Set([
   "single_file_exact_replacement",
   // ADR 0023 moved transactional multi-file patch sets inside the boundary.
   "multi_file_edit",
+  // ADR 0026 adds a bounded failed-verification session over an
+  // operator-selected target; it does not claim autonomous target selection.
+  "failed_check_session_repair",
   "protected_target_rejection",
   "unsafe_target_rejection",
   "provider_failure_resume",
@@ -55,6 +58,7 @@ const m1Capabilities = new Set([
 const allowedEvaluators = new Set([
   "production_lifecycle",
   "multi_file_lifecycle",
+  "session_repair_lifecycle",
   "service_rejection",
   "provider_recovery",
   "interrupted_resume",
@@ -93,6 +97,7 @@ const representativeFixtureContracts = new Map([
       files: {
         "README.md": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee",
         "checks/test_parser.py": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e",
+        "checks/verify.py": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc",
         "src/parser.py": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e",
       },
     },
@@ -577,6 +582,103 @@ function editResponse(scenario) {
   };
 }
 
+function repairScenarioBytes(scenario) {
+  assertCondition(
+    typeof scenario.baseline === "string" &&
+      typeof scenario.initial === "string" &&
+      typeof scenario.approved === "string" &&
+      scenario.baseline !== scenario.initial &&
+      scenario.initial !== scenario.approved &&
+      scenario.baseline !== scenario.approved,
+    "Session-repair fixture bytes are incomplete: " + scenario.id,
+  );
+  return { baseline: scenario.baseline, initial: scenario.initial, approved: scenario.approved };
+}
+
+function repairPatchSet(scenario, replaceText, summary) {
+  const { baseline } = repairScenarioBytes(scenario);
+  return {
+    summary,
+    edits: [
+      {
+        op: "modify",
+        path: scenario.target,
+        expectedPreimageSha256: sha256(baseline),
+        replacements: [{ findText: baseline, replaceText }],
+        content: null,
+        rationale: summary,
+      },
+    ],
+  };
+}
+
+function sessionRepairPlanResponse(scenario) {
+  return {
+    content: {
+      summary: "Reproduce the registered failure and repair the operator-selected parser.",
+      steps: [
+        "Apply the initial bounded attempt",
+        "Inspect the approved failing check if verification fails",
+        "Repair and rerun the complete registered check set",
+      ],
+      risks: ["The first attempt may not distinguish explicit false from other non-empty text"],
+      target: scenario.target,
+      targets: [scenario.target],
+      iterationCeiling: 2,
+      checkIds: ["verify"],
+      grants: [
+        { kind: "read.manifest", scope: ["checks/test_parser.py"], maxCalls: 1 },
+        { kind: "mutation.patchset", scope: [scenario.target], maxCalls: 1 },
+        { kind: "exec.check", scope: ["verify"], maxCalls: 1 },
+      ],
+    },
+  };
+}
+
+function sessionRepairInitialResponse(scenario) {
+  const { initial } = repairScenarioBytes(scenario);
+  return {
+    content: repairPatchSet(
+      scenario,
+      initial,
+      "Normalize input, but preserve the fixture defect in the first bounded attempt.",
+    ),
+  };
+}
+
+function sessionRepairReadResponse() {
+  return {
+    content: {
+      toolCalls: [{ name: "read_file", arguments: { path: "checks/test_parser.py" } }],
+    },
+  };
+}
+
+function sessionRepairApplyResponse(scenario) {
+  const { approved } = repairScenarioBytes(scenario);
+  return {
+    content: {
+      toolCalls: [
+        {
+          name: "apply_patchset",
+          arguments: {
+            patchSet: repairPatchSet(
+              scenario,
+              approved,
+              "Handle explicit true and false values without weakening the registered assertions.",
+            ),
+          },
+        },
+        { name: "run_checks", arguments: { checkIds: ["verify"] } },
+        {
+          name: "report_done",
+          arguments: { summary: "The complete approved registered check now passes." },
+        },
+      ],
+    },
+  };
+}
+
 function scenarioFiles(scenario) {
   assertCondition(
     Array.isArray(scenario.files) && scenario.files.length >= 2,
@@ -845,7 +947,8 @@ function measureToolFailures(history, checks) {
 
 function measuredIncorrectEdits(run, targetMatches, sourceChangedPaths) {
   const changedPaths = run.verification?.changedPaths ?? [];
-  const unexpectedWorktreePaths = changedPaths.filter((filePath) => filePath !== run.target);
+  const approvedPaths = new Set(run.plan?.targets ?? [run.target]);
+  const unexpectedWorktreePaths = changedPaths.filter((filePath) => !approvedPaths.has(filePath));
   return {
     status: "measured",
     count: unexpectedWorktreePaths.length + sourceChangedPaths.length + (targetMatches ? 0 : 1),
@@ -1451,6 +1554,288 @@ async function assertRegressionCatchesDefect(scenario, environment, files) {
     runtime?.close();
     await providerServer.close();
   }
+}
+
+/**
+ * Exercises ADR 0026 through production service/provider/sandbox boundaries:
+ * one operator-selected target fails its initial registered check, two charged
+ * session turns inspect the approved test and repair/reverify it, then the
+ * ordinary human review gate completes the run. This deliberately measures
+ * bounded repair, not autonomous target selection.
+ */
+async function evaluateSessionRepairLifecycle(scenario, contract) {
+  return withFixtureEnvironment(scenario, contract, async (environment) => {
+    const startedAt = performance.now();
+    const { approved } = repairScenarioBytes(scenario);
+    const providerServer = await startOllamaQueue([
+      sessionRepairPlanResponse(scenario),
+      sessionRepairInitialResponse(scenario),
+      sessionRepairReadResponse(),
+      sessionRepairApplyResponse(scenario),
+    ]);
+    let runtime;
+    let manifestStore;
+    try {
+      const configured = await configureRuntime(environment, providerServer.baseUrl);
+      runtime = configured.runtime;
+      const planned = await runtime.service.planRun({
+        projectName: "golden",
+        task: contract.task,
+        targets: [scenario.target],
+        provider: configured.provider,
+      });
+      assertCondition(
+        planned.state === "awaiting_approval" && planned.planSha256 !== null,
+        "Session-repair run did not reach plan approval",
+      );
+      assertCondition(
+        planned.plan?.iterationCeiling === 2 &&
+          JSON.stringify(planned.plan.targets) === JSON.stringify([scenario.target]),
+        "Session-repair plan did not retain the operator-selected target and two-turn ceiling",
+      );
+      const expectedGrants = [
+        { kind: "exec.check", scope: ["verify"], maxCalls: 1 },
+        { kind: "mutation.patchset", scope: [scenario.target], maxCalls: 1 },
+        { kind: "read.manifest", scope: ["checks/test_parser.py"], maxCalls: 1 },
+      ];
+      assertCondition(
+        JSON.stringify(planned.plan.grants) === JSON.stringify(expectedGrants),
+        "Session-repair plan grants were not normalized to the exact approved scopes",
+      );
+      const contextQuality = await measureContextQuality(planned, scenario, environment.workspace);
+
+      manifestStore = new IcarusStore(path.join(configured.stateRoot, "icarus.sqlite3"));
+      const readableManifest = manifestStore.readableManifest(planned.id);
+      manifestStore.close();
+      manifestStore = undefined;
+      assertCondition(
+        readableManifest !== null &&
+          readableManifest.baseCommit === planned.baseCommit &&
+          readableManifest.entries.length === 1 &&
+          readableManifest.entries[0].path === "checks/test_parser.py" &&
+          readableManifest.entries[0].sha256 ===
+            sha256(await readFile(path.join(environment.workspace, "checks/test_parser.py"))),
+        "Session read scope was not resolved to the exact approved fixture bytes",
+      );
+
+      const repaired = await runtime.service.approvePlan(
+        planned.id,
+        planned.planSha256,
+        "eval-operator",
+      );
+      assertCondition(
+        repaired.state === "awaiting_review" &&
+          repaired.verification?.outcome === "passed" &&
+          repaired.verification.checks.length === 1 &&
+          repaired.verification.checks[0].outcome === "passed",
+        "Bounded session did not land current passing review evidence",
+      );
+      assertCondition(repaired.worktreePath !== null, "Session-repair run lost its worktree");
+      const targetPath = path.join(repaired.worktreePath, scenario.target);
+      assertCondition(
+        (await readFile(targetPath, "utf8")) === approved,
+        "Session repair did not materialize the expected final target bytes",
+      );
+      assertCondition(
+        JSON.stringify(repaired.verification.changedPaths) === JSON.stringify([scenario.target]) &&
+          JSON.stringify((repaired.patchSet?.edits ?? []).map((edit) => edit.path)) ===
+            JSON.stringify([scenario.target]),
+        "Session repair widened beyond the operator-selected target",
+      );
+
+      const preReviewHistory = runtime.service.history(planned.id);
+      const verificationEvents = preReviewHistory.events.filter(
+        (event) => event.type === "verification.completed",
+      );
+      const verificationOutcomes = verificationEvents.map((event) => eventPayload(event).outcome);
+      assertCondition(
+        JSON.stringify(verificationOutcomes) ===
+          JSON.stringify(["failed", "unavailable", "passed"]),
+        "Session repair did not retain failed, applied-unchecked, and passing evidence in order",
+      );
+      const eventTypes = preReviewHistory.events.map((event) => event.type);
+      const chargedSessionOperations = preReviewHistory.events.filter(
+        (event) =>
+          event.type === "operation.started" && eventPayload(event).kind === "provider.revise",
+      );
+      const completedSessionBoundaries = preReviewHistory.events.filter(
+        (event) => event.type === "session.iteration_completed",
+      );
+      assertCondition(
+        chargedSessionOperations.length === 2 && completedSessionBoundaries.length === 2,
+        "Session repair did not charge and complete exactly two durable iterations",
+      );
+      assertCondition(
+        eventTypes.filter((type) => type === "repair.requested").length === 1 &&
+          eventTypes.filter((type) => type === "patch_set.superseded").length === 1 &&
+          eventTypes.filter((type) => type === "session.completed").length === 1,
+        "Session lifecycle events did not record one repair, supersession, and terminal outcome",
+      );
+      const completedToolOperations = preReviewHistory.events
+        .filter((event) => event.type === "operation.finished")
+        .map((event) => eventPayload(event))
+        .filter((payload) => payload.outcome === "succeeded");
+      const readOperations = completedToolOperations.filter(
+        (payload) => payload.kind === "session.tool.read.manifest",
+      );
+      const mutationOperations = completedToolOperations.filter(
+        (payload) => payload.kind === "session.tool.mutation.patchset",
+      );
+      const checkOperations = completedToolOperations.filter(
+        (payload) => payload.kind === "session.tool.exec.check",
+      );
+      assertCondition(
+        readOperations.length === 1 &&
+          mutationOperations.length === 1 &&
+          checkOperations.length === 1,
+        "Session repair did not complete exactly one granted read, mutation, and check operation",
+      );
+      assertCondition(
+        repaired.usage.toolCalls === 18 && repaired.usage.toolCalls <= DEFAULT_CEILING.maxToolCalls,
+        "Session repair did not stay at the measured 18-operation pre-review bound",
+      );
+
+      const completed = await runtime.service.review(
+        planned.id,
+        "approve",
+        repaired.verification.diffSha256,
+        "eval-operator",
+      );
+      assertCondition(
+        completed.state === "completed" &&
+          completed.verification?.outcome === "passed" &&
+          completed.verification.checks.every((check) => check.outcome === "passed"),
+        "Final human review did not complete the repaired run with passing evidence",
+      );
+      assertCondition(
+        completed.usage.toolCalls === 19 &&
+          completed.usage.toolCalls <= DEFAULT_CEILING.maxToolCalls,
+        "Completed session repair did not preserve the measured review-operation headroom",
+      );
+      assertProviderContract(providerServer, 4);
+
+      const sourceAfter = await snapshotTree(environment.workspace);
+      const fingerprintAfter = await repositoryFingerprint(
+        environment.workspace,
+        environment.controlHome,
+      );
+      const sourceEvidence = assertSourceUnchanged(environment, sourceAfter, fingerprintAfter);
+      const history = runtime.service.history(planned.id);
+      const approvalHistory = history.approvals.map(
+        (approval) => approval.kind + ":" + approval.decision,
+      );
+      assertCondition(
+        JSON.stringify(approvalHistory) === JSON.stringify(["plan:approve", "review:approve"]),
+        "Session repair introduced an unapproved intermediate authority gate",
+      );
+
+      const measuredEvidence = [
+        evidence("full_run_completed", { state: completed.state }),
+        evidence("production_ollama_adapter_http", {
+          deterministicContractRequests: providerServer.requests.length,
+        }),
+        evidence("reproduced_failure", {
+          verificationOutcomes,
+          initialVerification: eventPayload(verificationEvents[0]).verification,
+        }),
+        evidence("approved_manifest_read", {
+          baseCommit: readableManifest.baseCommit,
+          entries: readableManifest.entries,
+          completedOperations: readOperations.length,
+        }),
+        evidence("two_charged_session_iterations", {
+          charged: chargedSessionOperations.length,
+          completedBoundaries: completedSessionBoundaries.length,
+          ceiling: planned.plan.iterationCeiling,
+        }),
+        evidence("session_patch_applied", {
+          changedPaths: repaired.verification.changedPaths,
+          targetSha256: sha256(await readFile(targetPath)),
+          supersededPatchSets: eventTypes.filter((type) => type === "patch_set.superseded").length,
+        }),
+        evidence("passing_recheck", {
+          outcome: completed.verification.outcome,
+          checks: completed.verification.checks.map((check) => ({
+            checkId: check.checkId,
+            outcome: check.outcome,
+            exitCode: check.exitCode,
+          })),
+        }),
+        evidence("operator_selected_target_preserved", {
+          selected: [scenario.target],
+          planned: completed.plan?.targets,
+          changed: completed.verification.changedPaths,
+        }),
+        evidence("bounded_operation_usage", {
+          beforeReview: repaired.usage.toolCalls,
+          completed: completed.usage.toolCalls,
+          ceiling: DEFAULT_CEILING.maxToolCalls,
+          remaining: DEFAULT_CEILING.maxToolCalls - completed.usage.toolCalls,
+        }),
+        evidence("source_unchanged", sourceEvidence),
+        evidence("approval_history", { decisions: approvalHistory }),
+      ];
+      assertEvidenceNames(scenario, measuredEvidence);
+
+      const measurements = runMeasurements({
+        run: completed,
+        history,
+        observedOutcome: "completed",
+        checksAttempted: 2,
+        checksPassed: 1,
+        incorrectEdits: measuredIncorrectEdits(
+          completed,
+          (await readFile(targetPath, "utf8")) === approved,
+          changedPaths(environment.sourceBefore, sourceAfter),
+        ),
+        contextQuality,
+        wallMs: Math.round(performance.now() - startedAt),
+        runtimeAccounting: "persisted_metered_operations_with_two_session_turns",
+        tokenAccounting: "provider_reported_across_plan_edit_and_two_session_turns",
+        rollback: notApplicable("Successful bounded repair completed without a rollback attempt"),
+      });
+      measurements.testSuccess = {
+        ...measurements.testSuccess,
+        value:
+          completed.verification.outcome === "passed" &&
+          completed.verification.checks.every((check) => check.outcome === "passed"),
+      };
+      const operationFailures = measurements.toolFailures;
+      const failedChecks = verificationOutcomes.filter((outcome) => outcome === "failed").length;
+      const unavailableChecks = verificationOutcomes.filter(
+        (outcome) => outcome === "unavailable",
+      ).length;
+      measurements.toolFailures = {
+        ...operationFailures,
+        failedChecks,
+        unavailableChecks,
+        total:
+          operationFailures.failedOperations +
+          operationFailures.interruptedOperations +
+          operationFailures.cancelledOperations +
+          failedChecks +
+          unavailableChecks,
+      };
+      validateMeasurements(measurements, scenario.id);
+      return {
+        id: scenario.id,
+        class: scenario.class,
+        expectedOutcome: scenario.expectedOutcome,
+        observedOutcome: "completed",
+        assessment: "passed",
+        fixture: {
+          repositorySha256: contract.repositorySha256,
+          taskSha256: contract.taskSha256,
+        },
+        evidence: measuredEvidence,
+        measurements,
+      };
+    } finally {
+      manifestStore?.close();
+      runtime?.close();
+      await providerServer.close();
+    }
+  });
 }
 
 async function evaluateServiceRejection(scenario, contract) {
@@ -2097,6 +2482,8 @@ for (const scenario of manifest.cases) {
       result = await evaluateProductionLifecycle(scenario, contract);
     } else if (scenario.evaluator === "multi_file_lifecycle") {
       result = await evaluateMultiFileLifecycle(scenario, contract);
+    } else if (scenario.evaluator === "session_repair_lifecycle") {
+      result = await evaluateSessionRepairLifecycle(scenario, contract);
     } else if (scenario.evaluator === "service_rejection") {
       result = await evaluateServiceRejection(scenario, contract);
     } else if (scenario.evaluator === "provider_recovery") {

@@ -87,6 +87,15 @@ const workflowLintIndex = ciWorkflowSource.indexOf("run: pnpm workflow:lint");
 const frozenInstallIndex = ciWorkflowSource.indexOf("run: pnpm install --frozen-lockfile");
 const ignore = await readFile(".gitignore", "utf8");
 const testSources = await collectSources("tests", (name) => name.endsWith(".test.ts"));
+const repairSessionStart = serviceSource.indexOf("  async #runRepairSession(");
+const repairSessionEnd = serviceSource.indexOf(
+  "\n  async #recoverUnsettledSessionPatch(",
+  repairSessionStart,
+);
+const repairSessionSource =
+  repairSessionStart >= 0 && repairSessionEnd > repairSessionStart
+    ? serviceSource.slice(repairSessionStart, repairSessionEnd)
+    : "";
 const eventPageMethodStart = storeSource.indexOf("  listEventPage(");
 const historyMethodStart = storeSource.indexOf("  listEventHistoryPage(");
 const historyMethodEnd = storeSource.indexOf("\n  #appendEvent(", historyMethodStart);
@@ -455,7 +464,7 @@ const assertions = {
     policySource.includes('"grants list a duplicate capability"'),
   grantsAreBoundByPlanApprovalDigest:
     policySource.includes("schemaVersion: 4") &&
-    policySource.includes('export const POLICY_VERSION = "session-iterations-v4"') &&
+    policySource.includes('export const POLICY_VERSION = "session-loop-wiring-v5"') &&
     policySource.includes("readableManifestSha256: input.readableManifest") &&
     // Grants travel inside the plan, which the digest already covers, and the
     // manifest is bound alongside it.
@@ -526,9 +535,15 @@ const assertions = {
   writeToolsFailClosedWithoutHostOperations:
     // Nullable rather than optional: a context that cannot perform an operation
     // says so, and the executor refuses instead of appearing to offer the tool.
+    toolsSource.includes("readonly proposePatch:") &&
     toolsSource.includes(
-      "readonly proposePatch: ((raw: unknown) => Promise<ProposePatchOutcome>) | null",
+      "((raw: unknown, signal?: AbortSignal) => Promise<ProposePatchOutcome>)",
     ) &&
+    toolsSource.includes(
+      "| ((raw: unknown, signal?: AbortSignal) => Promise<ApplyPatchSetOutcome>)",
+    ) &&
+    toolsSource.includes("readonly reportDone:") &&
+    toolsSource.includes("readonly requestHumanInput:") &&
     toolsSource.includes('"TOOL_UNAVAILABLE"') &&
     // A proposal is shape-checked at the call boundary and content-checked
     // against approved targets in the executor, never self-approved.
@@ -548,10 +563,17 @@ const assertions = {
     // The ceiling and the spend both come from injected ledger reads, never a
     // counter the loop owns, so a restart cannot restore a spent budget.
     sessionLoopSource.includes("deps.spentIterations() < deps.iterationCeiling") &&
-    // Charged before the provider call it pays for: a crash mid-iteration
-    // cannot buy a free retry.
-    sessionLoopSource.indexOf("deps.beginIteration()") <
+    sessionLoopSource.includes("const beforeProvider = deps.spentIterations()") &&
+    sessionLoopSource.indexOf("const beforeProvider = deps.spentIterations()") <
       sessionLoopSource.indexOf("await deps.callProvider(") &&
+    sessionLoopSource.indexOf("await deps.callProvider(") <
+      sessionLoopSource.indexOf("const iterations = deps.spentIterations()") &&
+    sessionLoopSource.includes("iterations === beforeProvider + 1") &&
+    // The live callback delegates to #providerCall, which durably begins the
+    // named provider.revise operation before gateway I/O.
+    serviceSource.includes("SESSION_ITERATION_OPERATION_KIND,") &&
+    serviceSource.indexOf("const operation = this.#store.beginOperation(") <
+      serviceSource.indexOf("await gateway.generateStructured(") &&
     !sessionLoopSource.includes("let spent") &&
     !sessionLoopSource.includes("iterations += 1"),
   sessionLoopCountsSpendPerCapability:
@@ -621,8 +643,8 @@ const assertions = {
     // old approval is neither widened to the new default nor discarded.
     storeSource.includes("decoded.iterationCeiling ?? decoded.repairIterations"),
   sessionLoopIsBoundedAndGateGranted:
-    policySource.includes("export const MAX_SESSION_ITERATIONS = 3") &&
-    policySource.includes("export const DEFAULT_SESSION_ITERATIONS = 3") &&
+    policySource.includes("export const MAX_SESSION_ITERATIONS = 2") &&
+    policySource.includes("export const DEFAULT_SESSION_ITERATIONS = 2") &&
     policySource.includes("iterationCeiling <= MAX_SESSION_ITERATIONS") &&
     storeSource.includes("beginSessionIteration(runId: string)") &&
     storeSource.includes('"ITERATION_BUDGET_EXHAUSTED"') &&
@@ -640,12 +662,51 @@ const assertions = {
     storeSource.includes("if (charged < 1 || charged > granted) return false") &&
     storeSource.includes('this.#countEvents(run.id, "patch_set.superseded") < charged'),
   sessionLoopCannotWidenAuthority:
+    // Every revision is parsed against the approved mutation grant and the
+    // immutable baseline, then rechecked against the resulting path set.
+    policySource.includes("parseCapabilityGrants(object.grants ?? [], targets, checks)") &&
+    repairSessionSource.includes(
+      "parseCapabilityGrants(plan.grants, plan.targets, project.checks)",
+    ) &&
+    serviceSource.includes("mutationGrant.scope,") &&
     serviceSource.includes("parsePatchSet(") &&
-    serviceSource.includes("plan.targets,") &&
-    // A repair returns the worktree to baseline before proposing a revision.
-    serviceSource.includes('"baseline",') &&
-    serviceSource.includes("Repair could not return the private worktree to its baseline") &&
-    serviceSource.includes("Repair preserved unexpected worktree bytes for human inspection"),
+    serviceSource.includes('"Session could not restore the immutable baseline before applying"') &&
+    serviceSource.includes("this.#store.recordPatchSetIntent(") &&
+    serviceSource.includes("samePathSet(changedPaths, patchPaths)") &&
+    // Checks remain the exact approved list; tool output cannot add one.
+    serviceSource.includes('"run_checks must name the complete approved check list in plan order"'),
+  sessionRepairRechecksCurrentContextPolicy:
+    repairSessionSource.includes("this.#assertCurrentContextPolicy(run);") &&
+    repairSessionSource.indexOf("this.#assertCurrentContextPolicy(run);") <
+      repairSessionSource.indexOf("this.#store.beginSessionIteration(runId)") &&
+    repairSessionSource.indexOf("this.#assertCurrentContextPolicy(run);") <
+      repairSessionSource.indexOf("const readableManifest"),
+  sessionTerminalSettlementSurvivesBoundaryFailure:
+    serviceSource.includes('current.state !== "awaiting_review"') &&
+    testSources.some((source) =>
+      source.includes(
+        "keeps a terminal human pause authoritative when its iteration boundary write fails",
+      ),
+    ),
+  sessionResumeEvidencePreservesFencing:
+    serviceSource.includes("function renderPersistedRemoteRunChecks(") &&
+    serviceSource.includes('remote && definition.name === "run_checks"') &&
+    serviceSource.includes('events[index + 1]?.type === "verification.completed"') &&
+    serviceSource.includes(
+      '"Remote run_checks result is missing its atomic verification evidence"',
+    ) &&
+    serviceSource.includes("renderToolResult({") &&
+    serviceSource.includes("truncated: detail.truncated === true") &&
+    serviceSource.includes("renderToolFailure(toolName, detail.code, message)") &&
+    serviceSource.includes("tool: call.name,") &&
+    testSources.some(
+      (source) =>
+        source.includes(
+          "reprojects legacy truncated check transcripts from atomic evidence on remote resume",
+        ) &&
+        source.includes("not.toContain('\"stdout\":')") &&
+        source.includes("not.toContain('\"stderr\":')"),
+    ),
   sessionLoopLandsExhaustionHonestly:
     serviceSource.includes("this.#store.remainingIterationBudget(runId) > 0") &&
     serviceSource.includes(

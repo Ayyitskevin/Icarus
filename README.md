@@ -6,14 +6,22 @@ The name comes from the Greek story of Icarus: the product is designed for
 ambitious capability with an explicit ceiling and a safe landing path.
 
 Icarus is a local-first, self-hosted, model-agnostic AI software factory. The
-current foundation deliberately implements one narrow workflow well: plan one
-controlled replacement in an operator-selected tracked text file, obtain human
-approval, apply it in a private Git worktree, run operator-registered checks in
-a no-network sandbox, present evidence, and retain enough history to review,
-resume, roll back, or restore the run.
+current foundation deliberately implements one bounded workflow well: plan a
+transactional PatchSet over operator-selected paths, obtain human approval,
+apply it in a private Git worktree, run operator-registered checks in a
+no-network sandbox, present evidence, and retain enough history to review,
+resume, roll back, or restore the run. A failed first verification may enter a
+separately approved, two-turn maximum session with a closed host-owned tool
+registry; it never becomes arbitrary shell or deployment authority.
 
 Icarus is not a chatbot shell, an autonomous production deployer, or a claim
 that later roadmap features already exist.
+
+> **Candidate status:** LOCAL CORRECTIONS PASS; PUBLICATION HOLD. The
+> uncommitted ADR 0026 candidate now closes the remote check-output and
+> mutation-scope defects and passes the complete local gate. It is not release
+> evidence until an exact candidate commit, hosted CI, native acceptance, and
+> the remaining release reviews are recorded.
 
 ## Current scope
 
@@ -23,13 +31,16 @@ roadmap contracts plus repeatable quality gates. The Milestone 1 slice supplies:
 - local repository registration and project metadata;
 - deterministic pinned-tree maps and target-applicable `AGENTS.md` context;
 - an explicit persisted run state machine;
-- Ollama and OpenAI Responses planning adapters;
+- Ollama, OpenAI Responses, and Anthropic Messages planning adapters;
 - explicit cloud-context approval before remote egress;
 - a plan-digest approval step before private workspace creation or code mutation;
 - an Icarus-private Git cache and detached worktree;
-- one bounded exact-match replacement in an existing tracked text file;
+- transactional modify/create/delete PatchSets over an approved target subset,
+  with guarded atomic writes, compensation, and tree checkpoints;
 - exact operator-registered verification commands in a no-network Docker
   sandbox with no host fallback;
+- explicit digest-bound capability grants, an enumerated readable manifest, and
+  a bounded failed-verification session using only host-registered tools;
 - diff, event, usage, and checkpoint persistence in SQLite;
 - run resume, review, rollback, and checkpoint restoration.
 
@@ -104,14 +115,33 @@ copy and a fixed non-recursive fallback.
 
 These bounded observation slices are merged and exact implementation-head
 hosted CI verified. They do not complete full M3, establish native macOS or
-Windows acceptance, clear ADR 0010, authorize a live approval-index migration,
-or make Icarus production-ready.
+Windows acceptance, close ADR 0025's third-party review/secret-rotation work,
+authorize a live approval-index migration, or make Icarus production-ready.
 
-Not yet included: browser approval or execution, arbitrary agent tool use,
-model-written shell commands, semantic search, commits or pushes, application
-previews, current file/status or multi-file and payload-bearing diff/history
-navigation, deployment, backend platform primitives, multi-agent orchestration,
-and distributed workers.
+ADR 0026 slice 2b is implemented in the current candidate: the initial approved
+PatchSet attempt remains, only failed formal verification enters the session,
+and `iterationCeiling: 0` remains single-shot. Provider turns and tool calls are
+durably admitted before effects; completion is host-gated on current passing
+full-plan evidence. The corrected local candidate now projects only host-owned
+check metadata to remote session prompts while retaining full raw output in
+local evidence, and it revalidates mutation grants against the plan's narrowed
+targets before session admission or worktree effects. Roomy, compacted, live
+tool, loopback, legacy-resume, and malformed-grant regressions pass with the
+complete local gate. Publication, exact-head hosted CI, native acceptance, and
+the remaining release reviews are still pending; no final release claim is made
+here.
+
+[ADR 0036](docs/adr/0036-proof-carrying-software-factory-product-direction.md)
+sets the next product direction: Verified Change Gate, browser and VS Code
+surfaces, reversible Git landing, governed preview environments, and Supabase
+change packs. Icarus will own the authority/evidence kernel and integrate editor,
+environment, and backend primitives rather than rebuild them.
+
+Not yet included: browser approval or execution, arbitrary/provider-native
+tools, model-written shell commands, semantic search, commits or pushes,
+application previews, current file/status or multi-file and payload-bearing
+browser diff/history navigation, deployment, backend platform primitives,
+multi-agent orchestration, and distributed workers.
 
 ## Requirements
 
