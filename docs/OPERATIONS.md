@@ -11,12 +11,15 @@ fleet/homelab/cloud services, or touch production systems.
 The HTTP server and explicit-port review UI support Linux, macOS, and Windows
 using platform-neutral Node/browser primitives. Candidate mutation-capable
 repository import, context preview, draft persistence, and loopback planning
-are limited to a supported Chromium-family browser and remain held until ADR
-0040 passes exact-head real Chrome acceptance on macOS and Windows. Planning
-creates no private worktree and executes no project code. SQLite atomically
-admits one started operation per run before bounded context/provider work and
-rejects a concurrent planner. Approval and execution remain Linux-only because
-they require the stronger kernel lease through `/usr/bin/flock` and `/proc`;
+are limited to a supported Chromium-family browser. ADR 0040's implementation
+and exact-head technical evidence are complete at `eb01b640...` in Linux CI
+`30618041483` and native real-Chrome run `30618043377`; Candidate release
+support remains held pending explicit human acceptance of the
+operator-controlled browser/resolver/proxy residual risk. Planning creates no
+private worktree and executes no project code. SQLite atomically admits one
+started operation per run before bounded context/provider work and rejects a
+concurrent planner. Approval and execution remain Linux-only because they
+require the stronger kernel lease through `/usr/bin/flock` and `/proc`;
 execution checks also require a local Docker daemon.
 
 Default state layout:
@@ -80,8 +83,11 @@ Chromium-family browser and do not copy it into logs. Icarus performs no
 Node/operating-system lookup, hosts-file edit, or browser resolver injection;
 the browser's built-in reserved-name handling must navigate the public origin.
 The client removes the fragment before render and retains the bearer only in
-that origin's `sessionStorage`. This is candidate behavior, not an accepted
-portability claim.
+that origin's `sessionStorage`. Its implementation and native evidence are
+complete, but this remains candidate behavior rather than an accepted
+portability claim because production does not own or attest the browser and the
+operator-controlled browser/resolver/proxy risk still requires explicit human
+acceptance.
 
 Setting `ICARUS_PORT` to an explicit integer from 1 through 65535 instead starts
 `http://127.0.0.1:<port>` in stable review-only mode: it emits no bearer and
@@ -133,11 +139,12 @@ With `ICARUS_CHROMIUM_EXECUTABLE` set to an explicit local Chromium binary,
 in real headless Chromium. It proves fragment removal before render,
 session-scoped reload, tokenless GETs, authenticated POSTs, stale/malformed
 revocation, stable review-only suppression, token non-disclosure, and an
-unchanged source fingerprint without a resolver override. Candidate acceptance
-also requires the same exact-origin composition in real Chrome at one exact
-commit on macOS 15 arm64 and Windows Server 2025 x64; a Node HTTP client,
-resolver injection, hosts-file edit, or review-only run is not substitute
-evidence.
+unchanged source fingerprint without a resolver override. That exact-origin
+composition passed at implementation commit `eb01b640...` in native run
+`30618043377`: both macOS 15 arm64 and Windows Server 2025 x64 used
+`Chrome/150.0.7871.187` with CDP `1.3` at the pinned Google Chrome paths. A
+Node HTTP client, resolver injection, hosts-file edit, review-only run, or
+mocked browser is not substitute evidence.
 
 Treat the loopback server and launch URL as same-user local authority. The
 per-start bearer authenticates POST transport but is not a remote-service or

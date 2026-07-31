@@ -37,8 +37,11 @@ output, Host/Origin/authorization values, URLs, and JSON bodies are untrusted.
 Fixed host policy plus the operator's exact project
 checks/sandbox/ceilings and digest-bound CLI approval commands are
 authoritative. Candidate ADR 0040 gives real-accepted Chromium-family browsers
-an authenticated mutation transport; it is not yet an accepted portable
-boundary and still has no guarded approval/execution action route.
+an authenticated mutation transport. Its implementation and exact-head native
+evidence passed at `eb01b640...`, but it is not yet an accepted portable
+boundary: explicit human acceptance of the operator-controlled
+browser/resolver/proxy residual risk remains required, and no guarded
+approval/execution action route exists.
 
 ## Primary threats and controls
 
@@ -256,10 +259,11 @@ a review. Causing that unreviewed code to run now requires write access.
 - The HTTP server and explicit-port review UI support Linux, macOS, and Windows.
   Candidate mutation-capable import, preview, draft persistence, and
   loopback-planning additionally require a supported Chromium-family browser.
-  ADR 0040's exact-head real Chrome macOS/Windows acceptance remains pending;
-  ADR 0022's Gate 0 native record does not satisfy it. The server cannot detect
-  or downgrade a browser that fails before resolving the random `.localhost`
-  hostname.
+  ADR 0040's exact-head real-Chrome macOS/Windows technical evidence passed at
+  `eb01b640...` in native run `30618043377`. ADR 0040 remains Candidate pending
+  explicit human acceptance of the operator-controlled browser/resolver/proxy
+  residual risk. The server cannot detect or downgrade a browser that fails
+  before resolving the random `.localhost` hostname.
 - Guarded approval and execution remain Linux-only through `/usr/bin/flock` and
   `/proc`; execution also depends on a local Docker daemon.
 - Repository status is an unlocked, point-in-time observation, not proof

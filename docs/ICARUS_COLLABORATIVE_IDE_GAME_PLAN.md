@@ -10,8 +10,10 @@
   successful exact-head Linux, macOS, and Windows evidence
 - Current Gate 1 portability state: ADR 0039 rejected after native run
   `30613980911` passed Windows and failed macOS; candidate ADR 0040's
-  Chromium-only mutation boundary and exact-head real Chrome native acceptance
-  remain pending
+  Chromium-only mutation boundary and exact-head technical evidence passed at
+  `eb01b640...` in Linux CI `30618041483` and native real-Chrome run
+  `30618043377`; explicit human acceptance of the operator-controlled
+  browser/resolver/proxy residual risk remains pending
 
 This plan turns the product direction in ADR 0036 into a dependency-ordered
 build program. It incorporates the requested Buzz-style experience where
@@ -283,7 +285,7 @@ Exit evidence, not dates, controls progression.
 | Earliest runtime start | Gate | Outcome | Effort | Dependency |
 | --- | --- | --- | ---: | --- |
 | Completed 2026-07-31 | G0 | Released ADR 0026 at exact `main` `802b91e6...` with Linux and native evidence | complete | historical gate |
-| Now | G1 | Verified Change Gate: browser authority, deterministic candidate commit, isolated create-only branch, draft PR, reconciliation receipt | 8–12 weeks | G0 complete; ADRs 0029 and 0027 accepted; ADR 0040 browser transport candidate must pass |
+| Now | G1 | Verified Change Gate: browser authority, deterministic candidate commit, isolated create-only branch, draft PR, reconciliation receipt | 8–12 weeks | G0 complete; ADRs 0029 and 0027 accepted; ADR 0040 technical transport gate passed, but human residual-risk acceptance and remaining G1 runtime slices are still required |
 | After G1 | G2 | Context quality: local search, repository map, symbols, rules, typed read-only outcomes, fixed evals | 6–8 weeks | G1 benchmark contract |
 | After G2 | G3 | Thin VS Code workbench with the IDE in the center | 6–8 weeks | G1 API, G2 context, topology decision |
 | After G3 | C1 | Read-only agent Council in the mission-room pane | 4–6 weeks | G2 retrieval, G3 shared client, ADR 0037 |
@@ -321,13 +323,15 @@ continue to build only on an identified and reviewed base. Recorded outcome:
 
 ADR 0029 browser approval authority and ADR 0027 Git landing authority are
 accepted. ADR 0039's random numeric `127/8` portability experiment is rejected.
-Before admitting browser mutations into the Gate 1 release, candidate ADR 0040
-must pass real Chrome at one exact commit on macOS 15 arm64 and Windows Server
-2025 x64. Its interim boundary binds exact `127.0.0.1`, uses a fresh 16-byte
-`.localhost` public-origin nonce with no Node/OS lookup or resolver injection,
-supports mutation only in tested Chromium-family browsers, and leaves
-explicit-port sessions bearer-free and review-only for Safari and every
-unverified browser. Complete these slices:
+Candidate ADR 0040 passed real Chrome at exact implementation commit
+`eb01b640...` on macOS 15 arm64 and Windows Server 2025 x64 in native run
+`30618043377`. Its interim boundary binds exact `127.0.0.1`, uses a fresh
+16-byte `.localhost` public-origin nonce with no Node/OS lookup or resolver
+injection, supports mutation only in tested Chromium-family browsers, and
+leaves explicit-port sessions bearer-free and review-only for Safari and every
+unverified browser. Before admitting that boundary into a Gate 1 release, the
+operator-controlled browser/resolver/proxy residual risk still requires
+explicit human acceptance. Complete these remaining slices:
 
 1. server-start browser action session, fixed actor, same-origin/CSRF boundary,
    digest/revision-bound action request, and negative security matrix;
@@ -537,9 +541,10 @@ implementation.
 
 Checkpoint: ADRs 0029 and 0027 plus the latter's normative v1 record companion
 are accepted after independent P0/P1 reviews. ADR 0039 is rejected and ADR 0040
-is a candidate; its exact-head real Chrome macOS/Windows evidence is still
-outstanding. The versioned Gate 1 benchmark manifest is also outstanding, so
-Packet 1 is not complete.
+is a candidate with technical evidence complete at `eb01b640...`; explicit
+human acceptance of its operator-controlled browser/resolver/proxy residual
+risk is outstanding. The versioned Gate 1 benchmark manifest is also
+outstanding, so Packet 1 is not complete.
 
 ### Packet 2 — browser authority without Git effects
 
@@ -559,10 +564,11 @@ at the exact head on both native platforms. Git behavior remains unchanged.
 
 Checkpoint: the candidate origin/session transport, strict-JSON boundary, and
 truthful client capability state are implemented locally and cold-reviewed.
-ADR 0040 remains unaccepted until exact-head native real Chrome evidence
-passes. The durable action request ledger, guarded routes, restart
-reconciliation, and graceful shutdown settlement are not implemented;
-therefore Packet 2 remains partial.
+Exact-head native real-Chrome evidence passed at `eb01b640...` in run
+`30618043377`. ADR 0040 remains unaccepted pending explicit human acceptance of
+the operator-controlled browser/resolver/proxy residual risk. The durable
+action request ledger, guarded routes, restart reconciliation, and graceful
+shutdown settlement are not implemented; therefore Packet 2 remains partial.
 
 ### Packet 3 — durable local landing
 

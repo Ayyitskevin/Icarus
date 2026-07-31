@@ -66,8 +66,11 @@ authorization check. Candidate ADR 0040 supports only Chromium-family versions
 covered by real-browser acceptance. Safari and every unverified browser must
 use the explicit-port review-only mode; Icarus cannot automatically downgrade a
 random `.localhost` navigation that never reaches the server. Exact-head real
-Chrome composition on macOS and Windows remains pending, so this candidate is
-not an accepted release boundary.
+Chrome composition passed at implementation commit `eb01b640...` in Linux CI
+`30618041483` and native run `30618043377` on macOS and Windows. ADR 0040
+remains Candidate, rather than an accepted release boundary, pending explicit
+human acceptance of the operator-controlled browser/resolver/proxy residual
+risk.
 
 The API projects server-side mutation/planning availability separately from
 the client-held session. React combines only those booleans, never the bearer,
@@ -100,10 +103,13 @@ approval/recovery state is never flattened into completion.
 The HTTP server and explicit-port review shell support Linux, macOS, and Windows
 with no fleet or cloud dependency. Candidate repository import, context preview,
 draft persistence, and loopback planning mutations require a supported
-Chromium-family browser and remain held pending ADR 0040's exact-head native
-Chrome gate. Planning creates no private worktree and executes no project code.
-Before each bounded context/provider operation, SQLite atomically admits one
-`started` operation per run; a concurrent planner receives `RUN_BUSY`.
+Chromium-family browser covered by the acceptance record. ADR 0040's exact-head
+native technical gate passed at `eb01b640...`; release support remains held
+pending explicit human acceptance of its operator-controlled
+browser/resolver/proxy residual risk. Planning creates no private worktree and
+executes no project code. Before each bounded context/provider operation,
+SQLite atomically admits one `started` operation per run; a concurrent planner
+receives `RUN_BUSY`.
 Approval and execution remain Linux-only and use the stronger kernel lease
 through `/usr/bin/flock` and `/proc`; execution checks also require a local
 Docker daemon.

@@ -150,10 +150,13 @@ The first browser path is intentionally narrower than the guarded CLI lifecycle:
    separate request and accepts only an explicitly configured loopback Ollama
    endpoint. The server and review-only UI support Linux, macOS, and Windows.
    Mutation-capable registration, context preview, draft persistence, and
-   loopback planning require a supported Chromium-family browser and remain held
-   pending exact-head real Chrome acceptance on macOS and Windows. An atomic
-   SQLite started-operation admission prevents concurrent planning work for the
-   same run on every platform.
+   loopback planning require a supported Chromium-family browser. ADR 0040's
+   exact-head technical gate passed at `eb01b640...` in Linux CI `30618041483`
+   and native real-Chrome run `30618043377`; Candidate release support remains
+   held pending explicit human acceptance of the operator-controlled
+   browser/resolver/proxy residual risk. An atomic SQLite started-operation
+   admission prevents concurrent planning work for the same run on every
+   platform.
 5. The workspace presents the exact internal state and derives only these product
    phases: `draft`, `planned`, `awaiting_approval`, `running`, `completed`,
    `failed`, and `cancelled`. The mapping never turns an approval, recovery, or
@@ -415,10 +418,12 @@ additional tool calls and runtime remain visible.
 - The HTTP server and explicit-port review UI support Linux, macOS, and Windows.
   Candidate mutation-capable repository import, context preview, draft
   persistence, and loopback planning additionally require a supported
-  Chromium-family browser. Release support remains held until ADR 0040's real
-  Chrome exact-head macOS and Windows composition passes. Planning is read-only
-  with respect to the imported checkout, and SQLite atomically admits one
-  started operation per run before provider work.
+  Chromium-family browser. ADR 0040's real-Chrome exact-head macOS and Windows
+  composition has passed; Candidate release support remains held pending
+  explicit human acceptance of the operator-controlled browser/resolver/proxy
+  residual risk. Planning is read-only with respect to the imported checkout,
+  and SQLite atomically admits one started operation per run before provider
+  work.
 - Approval and execution are supported only on Linux because they inherit the
   kernel lease through `/usr/bin/flock` and `/proc`; execution also inherits
   the Docker sandbox requirements.
@@ -498,9 +503,11 @@ exist in Milestone 1:
 - Project import, context preview, draft, and planning leave the source checkout
   content and Git metadata unchanged.
 - A production-asset smoke drives the golden path in real Chromium through a
-  draft reload, planning, and truthful evidence. Candidate ADR 0040 additionally
-  requires that composition in real Chrome at one exact commit on macOS 15
-  arm64 and Windows Server 2025 x64 before portable mutation is accepted.
+  draft reload, planning, and truthful evidence. The required ADR 0040
+  composition passed in real Chrome at exact implementation commit
+  `eb01b640...` on macOS 15 arm64 and Windows Server 2025 x64 in native run
+  `30618043377`. This completes technical evidence, not human acceptance of ADR
+  0040's residual risk.
 - The HTTP presenter exposes populated, bounded plan, action, file, verification,
   check-output, approval, usage, and timestamp evidence for a completed CLI run
   without exposing private runtime paths.

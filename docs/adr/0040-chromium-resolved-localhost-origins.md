@@ -1,7 +1,8 @@
 # ADR 0040: Chromium-resolved `.localhost` mutation origins
 
-- Status: Candidate — implementation and exact-head native Chrome acceptance
-  pending
+- Status: Candidate — implementation and exact-head technical evidence
+  complete; explicit human acceptance of the operator-controlled
+  browser/resolver/proxy residual risk pending
 - Date: 2026-07-31
 - Proposes to supersede in part upon acceptance:
   [ADR 0029](0029-browser-approval-authority.md)'s operating-system lookup
@@ -118,9 +119,9 @@ attach/start handshake remain Gate 3 work. A later accepted desktop topology
 may replace this browser support boundary without weakening the request,
 authority, recovery, or evidence contracts.
 
-## Required acceptance evidence
+## Required technical acceptance evidence
 
-This decision remains a candidate until one exact commit has all of:
+Before this ADR may be accepted, one exact commit must have all of:
 
 1. the complete Linux `pnpm check` gate;
 2. source-preserving API and production-asset browser smokes in a real
@@ -149,6 +150,32 @@ The acceptance record must name the exact Chrome binary/version selected on
 each native host and link the exact-head workflow run. Passing on only one
 native host rejects the portability claim rather than narrowing the evidence
 silently.
+
+## Technical evidence record
+
+Exact implementation commit
+`eb01b6406c12126c60add7ac83800f8eba8ffdc9` satisfies that technical gate:
+
+- Linux CI
+  [30618041483](https://github.com/Ayyitskevin/Icarus/actions/runs/30618041483)
+  passed the complete deterministic release gate at that exact head.
+- Native acceptance
+  [30618043377](https://github.com/Ayyitskevin/Icarus/actions/runs/30618043377)
+  passed both macOS 15 arm64 and Windows Server 2025 x64 at the same head.
+- macOS used
+  `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`; Windows used
+  `C:\Program Files\Google\Chrome\Application\chrome.exe`. Both reported
+  `Chrome/150.0.7871.187` and CDP protocol `1.3`.
+- Both browser compositions navigated an independently generated random
+  `.localhost` origin without resolver injection, stripped the fragment before
+  render, survived reload, completed seven protected POSTs through planning,
+  stopped truthfully at `awaiting_approval`, emitted zero browser errors and
+  zero external requests, and left the source checkout unchanged.
+
+These results complete the technical evidence only. Production still prints
+the fragment-bearing URL and does not own or attest the browser, resolver
+configuration, or proxy. ADR 0040 therefore remains Candidate until a human
+explicitly accepts that interim operator contract.
 
 ## Consequences
 

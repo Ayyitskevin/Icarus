@@ -1,6 +1,7 @@
 # ADR 0029: Browser approval authority
 
-- Status: Accepted — origin portability is held by candidate ADR 0040
+- Status: Accepted — ADR 0040 technical evidence is complete; origin
+  portability remains held pending ADR 0040 human residual-risk acceptance
 - Date: 2026-07-31
 - Depends on: [ADR 0014](0014-loopback-api-react-workspace.md),
   [ADR 0022](0022-native-macos-windows-acceptance.md),
@@ -21,8 +22,14 @@
 ADR 0039's random numeric `127/8` alternative was rejected after exact-head
 native run
 [30613980911](https://github.com/Ayyitskevin/Icarus/actions/runs/30613980911)
-passed on Windows Server 2025 x64 and failed on macOS 15 arm64. ADR 0040 is not
-yet accepted. Until it is, this record remains the authority contract and its
+passed on Windows Server 2025 x64 and failed on macOS 15 arm64. ADR 0040's
+technical exact-head gate later passed at `eb01b64` in Linux CI
+[30618041483](https://github.com/Ayyitskevin/Icarus/actions/runs/30618041483)
+and native real-Chrome run
+[30618043377](https://github.com/Ayyitskevin/Icarus/actions/runs/30618043377).
+ADR 0040 is still not accepted because its operator-controlled
+browser/resolver/proxy residual risk requires explicit human acceptance. Until
+that acceptance occurs, this record remains the authority contract and its
 portable mutation claim remains held rather than released.
 
 ## Context
