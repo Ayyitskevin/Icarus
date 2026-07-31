@@ -465,6 +465,41 @@ function workspaceStateSnapshot(databasePath) {
   }
 }
 
+function insertResumeRequestedFixture(stateRoot, runId) {
+  const database = new Database(path.join(stateRoot, "icarus.sqlite3"));
+  try {
+    const transaction = database.transaction(() => {
+      const run = database.prepare("SELECT state, resume_state FROM runs WHERE id = ?").get(runId);
+      assert.equal(typeof run?.state, "string", "the live-refresh fixture requires a valid run");
+      const nextSequence = database
+        .prepare(
+          "SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM run_events WHERE run_id = ?",
+        )
+        .get(runId)?.sequence;
+      assert.equal(
+        Number.isSafeInteger(nextSequence) && nextSequence > 0,
+        true,
+        "the live-refresh fixture requires a valid next event sequence",
+      );
+      const inserted = database
+        .prepare(
+          `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+           VALUES (?, ?, 'resume.requested', ?, ?)`,
+        )
+        .run(
+          runId,
+          nextSequence,
+          JSON.stringify({ state: run.state, resumeState: run.resume_state }),
+          "2026-07-22T12:00:01.000Z",
+        );
+      assert.equal(inserted.changes, 1, "the live-refresh fixture must append one event");
+    });
+    transaction();
+  } finally {
+    database.close();
+  }
+}
+
 async function startProvider() {
   const requests = [];
   let responseGate = null;
@@ -666,7 +701,7 @@ async function waitForDevToolsEndpoint(profile, child, stderr) {
         return `ws://127.0.0.1:${port}${browserPath}`;
       }
     } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+      if (!["ENOENT", "EBUSY", "EACCES", "EPERM"].includes(error?.code)) throw error;
     }
     await delay(25);
   }
@@ -4596,7 +4631,7 @@ try {
   const automaticEventResponseBaseline = networkResponses.length;
   const automaticRunReadBaseline = networkRequests.length;
   const automaticRefreshStartedAt = Date.now();
-  await runtime.service.resume(browserRunId);
+  insertResumeRequestedFixture(stateRoot, browserRunId);
   await page.waitFor(
     (eventLabel) =>
       Array.from(document.querySelectorAll("#run-activity .timeline__evidence-link")).some(

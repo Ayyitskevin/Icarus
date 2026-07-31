@@ -359,6 +359,12 @@ const assertions = {
     browserSmokeSource.includes("product: chromiumVersion.product") &&
     browserSmokeSource.includes("protocolVersion: chromiumVersion.protocolVersion") &&
     browserSmokeSource.includes("userAgent: chromiumVersion.userAgent"),
+  browserSmokeRetriesTransientDevToolsPortLocks:
+    browserSmokeSource.includes('["ENOENT", "EBUSY", "EACCES", "EPERM"].includes(error?.code)') &&
+    browserSmokeSource.includes("Timed out waiting for Chromium CDP"),
+  browserSmokeDoesNotCrossLinuxExecutionLease:
+    browserSmokeSource.includes("insertResumeRequestedFixture(stateRoot, browserRunId)") &&
+    !browserSmokeSource.includes("runtime.service.resume("),
   workspaceNoCorsGrant: !workspaceServerSource
     .toLowerCase()
     .includes("access-control-allow-origin"),
