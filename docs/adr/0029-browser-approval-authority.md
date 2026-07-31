@@ -1,7 +1,8 @@
 # ADR 0029: Browser approval authority
 
-- Status: Accepted — ADR 0040 technical evidence is complete; origin
-  portability remains held pending ADR 0040 human residual-risk acceptance
+- Status: Accepted — partially superseded by accepted ADR 0040 for the
+  browser-origin transport clauses identified below; the remaining authority
+  contract stays in force
 - Date: 2026-07-31
 - Depends on: [ADR 0014](0014-loopback-api-react-workspace.md),
   [ADR 0022](0022-native-macos-windows-acceptance.md),
@@ -13,24 +14,25 @@
   [ADR 0027](0027-git-landing-authority.md),
   [ADR 0036](0036-proof-carrying-software-factory-product-direction.md), and
   rejected [ADR 0039](0039-portable-numeric-loopback-origins.md)
-- Proposed partial supersession:
-  candidate [ADR 0040](0040-chromium-resolved-localhost-origins.md) would
-  replace only this record's operating-system lookup proof, arbitrary-browser
-  portability claim, and corresponding origin-acceptance clauses upon
-  acceptance
+- Partially superseded by:
+  accepted [ADR 0040](0040-chromium-resolved-localhost-origins.md), which
+  replaces only this record's operating-system lookup proof, arbitrary-browser
+  portability claim, and corresponding origin-acceptance clauses
 
 ADR 0039's random numeric `127/8` alternative was rejected after exact-head
 native run
 [30613980911](https://github.com/Ayyitskevin/Icarus/actions/runs/30613980911)
 passed on Windows Server 2025 x64 and failed on macOS 15 arm64. ADR 0040's
-technical exact-head gate later passed at `eb01b64` in Linux CI
+technical exact-head gate later passed at
+`eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI
 [30618041483](https://github.com/Ayyitskevin/Icarus/actions/runs/30618041483)
 and native real-Chrome run
 [30618043377](https://github.com/Ayyitskevin/Icarus/actions/runs/30618043377).
-ADR 0040 is still not accepted because its operator-controlled
-browser/resolver/proxy residual risk requires explicit human acceptance. Until
-that acceptance occurs, this record remains the authority contract and its
-portable mutation claim remains held rather than released.
+Explicit human acceptance of ADR 0040's interim operator-controlled
+browser/resolver/proxy residual risk was recorded on 2026-07-31. That acceptance
+does not complete Gate 1's remaining runtime slices. No live migration, merge,
+deployment, or public release was authorized or performed as part of that
+acceptance.
 
 ## Context
 
@@ -156,11 +158,11 @@ attacker-controlled startup code that reads the new fragment. The CSP adds
 worker, shared worker, or background sync. Stable-origin browser mutation
 authority requires a future superseding design.
 
-Candidate ADR 0040 retains the 16-byte `.localhost` origin nonce and exact
+Accepted ADR 0040 retains the 16-byte `.localhost` origin nonce and exact
 `127.0.0.1` socket bind but removes this Node/operating-system lookup proof. It
-would support mutation only in real-accepted Chromium-family browsers using
-their built-in reserved-name handling, with no resolver injection. Safari and
-other unverified browsers would use an operator-selected explicit-port,
+supports mutation only in real-accepted Chromium-family browsers using their
+built-in reserved-name handling, with no resolver injection. Safari and other
+unverified browsers use an operator-selected explicit-port,
 bearer-free review-only session; the server cannot infer browser support or
 automatically downgrade a navigation that never reaches it.
 
@@ -574,6 +576,13 @@ write. Wrong, missing, combined, or reused migration authorization and every
 partial/lookalike schema fail before write. Restoring the verified complete
 backup is the schema rollback.
 
+The source SQLite family is never opened by SQLite during that preflight.
+Icarus fingerprints owned regular main/WAL/SHM files, copies main and WAL (not
+transient SHM) into a private `0700` snapshot with `0600` files, inspects the
+copy, and then proves source membership, identity, and bytes are unchanged.
+SQLite reconstructs SHM only inside the snapshot. Unknown journal/sibling files
+and detected races fail closed, and the snapshot is removed in `finally`.
+
 Gate 1 migration order is exact:
 `browser-action-ledger-v1` precedes ADR 0027's `landing-ledger-v1`. One
 migration invocation is a CLI-only maintenance process that applies and
@@ -696,9 +705,9 @@ tree:
    `.localhost` hostname and ephemeral port, stable/plain origins reject every
    protected POST, failed/empty/IPv6-only/alternate-loopback/non-loopback
    resolution downgrades to a bearer-free review-only origin, the workspace
-   has no service-worker registration, and CSP forbids workers; candidate ADR
-   0040 would replace the resolver cases with exact-bind/no-lookup assertions
-   and real Chrome native composition upon acceptance;
+   has no service-worker registration, and CSP forbids workers; accepted ADR
+   0040 replaces the resolver cases with exact-bind/no-lookup assertions and
+   real Chrome native composition;
 9. ledger tests proving same ID/same identity tuple reconciliation, same
    ID/different tuple conflict, the separate non-cancel/cancel uniqueness
    rules, exact DDL and validator truth table, parent/run/domain-anchor

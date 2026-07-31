@@ -1,7 +1,10 @@
 import { spawn } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 
 import { IcarusError } from "./errors.js";
 import { sanitizeText } from "./redaction.js";
+
+export const MAX_CONTROLLER_STDIN_BYTES = 8 * 1024 * 1024;
 
 export interface ControllerProcessOptions {
   readonly cwd: string;
@@ -11,6 +14,8 @@ export interface ControllerProcessOptions {
   readonly maxRawOutputBytes: number;
   readonly signal: AbortSignal | undefined;
   readonly knownSecrets?: readonly string[];
+  readonly stdinBytes?: Uint8Array;
+  readonly maxStdinBytes?: number;
 }
 
 export interface ControllerProcessResult {
@@ -42,11 +47,86 @@ function terminateProcess(pid: number | undefined, signal: NodeJS.Signals): void
   }
 }
 
+function validateStdin(options: ControllerProcessOptions): void {
+  if (options.stdinBytes === undefined) {
+    return;
+  }
+
+  const maximumBytes = options.maxStdinBytes ?? MAX_CONTROLLER_STDIN_BYTES;
+  if (
+    !Number.isSafeInteger(maximumBytes) ||
+    maximumBytes < 0 ||
+    maximumBytes > MAX_CONTROLLER_STDIN_BYTES
+  ) {
+    throw new IcarusError(
+      "INVALID_PROCESS_STDIN_LIMIT",
+      "Controller process stdin limit is invalid",
+      { maximumBytes: MAX_CONTROLLER_STDIN_BYTES },
+    );
+  }
+  if (options.stdinBytes.byteLength > maximumBytes) {
+    throw new IcarusError(
+      "PROCESS_STDIN_TOO_LARGE",
+      "Controller process stdin exceeds its byte ceiling",
+      {
+        actualBytes: options.stdinBytes.byteLength,
+        maximumBytes,
+      },
+    );
+  }
+}
+
+function writeStdin(stream: Writable, bytes: Uint8Array, onFailure: () => void): Promise<boolean> {
+  const payload = Buffer.from(bytes);
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const settle = (delivered: boolean): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      payload.fill(0);
+      resolve(delivered);
+    };
+    const fail = (): void => {
+      if (settled) {
+        return;
+      }
+      onFailure();
+      settle(false);
+    };
+    const onError = (): void => fail();
+    const onClose = (): void => {
+      stream.off("error", onError);
+      fail();
+    };
+
+    stream.on("error", onError);
+    stream.once("close", onClose);
+    try {
+      // The completion callback fires only after the bounded payload has been
+      // flushed or the stream has failed, so a full pipe applies backpressure
+      // without creating an unbounded controller-side queue.
+      stream.end(payload, (error?: Error | null) => {
+        if (error !== undefined && error !== null) {
+          fail();
+          return;
+        }
+        settle(true);
+      });
+    } catch {
+      fail();
+    }
+  });
+}
+
 export async function runControllerProcess(
   executable: string,
   args: readonly string[],
   options: ControllerProcessOptions,
 ): Promise<ControllerProcessResult> {
+  validateStdin(options);
   if (options.signal?.aborted) {
     throw new IcarusError("CANCELLED", "Operation was cancelled before process start");
   }
@@ -57,7 +137,7 @@ export async function runControllerProcess(
     env: { ...options.env },
     shell: false,
     detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [options.stdinBytes === undefined ? "ignore" : "pipe", "pipe", "pipe"] as const,
   });
 
   let retainedBytes = 0;
@@ -66,6 +146,8 @@ export async function runControllerProcess(
   let rawLimitExceeded = false;
   const stdoutChunks: Buffer[] = [];
   const stderrChunks: Buffer[] = [];
+  const stdout = child.stdout as Readable;
+  const stderr = child.stderr as Readable;
 
   const capture = (chunk: Buffer, destination: Buffer[]): void => {
     rawBytes += chunk.length;
@@ -88,10 +170,10 @@ export async function runControllerProcess(
     retainedBytes += chunk.length;
   };
 
-  child.stdout.on("data", (chunk: Buffer) => {
+  stdout.on("data", (chunk: Buffer) => {
     capture(chunk, stdoutChunks);
   });
-  child.stderr.on("data", (chunk: Buffer) => {
+  stderr.on("data", (chunk: Buffer) => {
     capture(chunk, stderrChunks);
   });
 
@@ -110,17 +192,38 @@ export async function runControllerProcess(
   };
   const onAbort = (): void => requestTermination("cancelled");
   options.signal?.addEventListener("abort", onAbort, { once: true });
+  if (options.signal?.aborted) {
+    requestTermination("cancelled");
+  }
 
   const timeout = setTimeout(() => requestTermination("timeout"), options.timeoutMs);
   timeout.unref();
 
+  const processResult = new Promise<{
+    exitCode: number | null;
+    signal: NodeJS.Signals | null;
+  }>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (exitCode, signal) => resolve({ exitCode, signal }));
+  });
+  const stdinDelivery =
+    options.stdinBytes === undefined
+      ? undefined
+      : writeStdin(child.stdin as Writable, options.stdinBytes, () => {
+          if (!terminationStarted && !rawLimitExceeded) {
+            terminateProcess(child.pid, "SIGKILL");
+          }
+        });
+
   try {
-    const result = await new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>(
-      (resolve, reject) => {
-        child.once("error", reject);
-        child.once("close", (exitCode, signal) => resolve({ exitCode, signal }));
-      },
-    );
+    const result = await processResult;
+    const stdinDelivered = (await stdinDelivery) ?? true;
+    if (!stdinDelivered && terminationCause === null && !rawLimitExceeded) {
+      throw new IcarusError(
+        "PROCESS_STDIN_FAILED",
+        "Controller process did not accept its bounded stdin",
+      );
+    }
     const knownSecrets = options.knownSecrets ?? [];
     const stdoutBuffer = Buffer.concat(stdoutChunks);
     const stderrBuffer = Buffer.concat(stderrChunks);

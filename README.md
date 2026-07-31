@@ -19,16 +19,20 @@ that later roadmap features already exist.
 
 > **Release status:** Gate 0 is released at exact `main`
 > `802b91e6f6c9b392f56c9ee3660be818a0f74a62` with Linux, macOS, and Windows
-> evidence. The current Gate 1 branch carries an implemented candidate
+> evidence. The current Gate 1 branch carries an implemented interim
 > authenticated browser-mutation session and its client capability state.
 > Random numeric `127/8` origins were rejected after native run `30613980911`
 > passed Windows and failed macOS. ADR 0040's technical gate subsequently
-> passed at exact implementation commit `eb01b640...` in Linux CI
+> passed at exact implementation commit
+> `eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI
 > `30618041483` and native real-Chrome run `30618043377` on both platforms.
-> ADR 0040 remains Candidate pending explicit human acceptance of the
-> operator-controlled browser/resolver/proxy residual risk. This is not a Gate
-> 1 release: the durable guarded-action ledger and Git landing runtime do not
-> yet exist.
+> Explicit human acceptance of the interim operator-controlled
+> browser/resolver/proxy residual risk was recorded on 2026-07-31. This is not
+> a Gate 1 release: the branch has repository-only ledger, shutdown, landing
+> record, and local Git foundations, but guarded browser actions, admitted-row
+> reconciliation, durable landing coordination, and the GitHub gateway remain
+> incomplete. No live migration, merge, deployment, or public release was
+> authorized or performed.
 
 ## Current scope
 
@@ -66,12 +70,13 @@ after restart. The current Gate 1 candidate binds exact `127.0.0.1` while using
 a fresh 128-bit `.localhost` public origin and an independent authenticated
 mutation session. That mutation path is supported only in real-accepted
 Chromium-family browsers. Its exact-head technical evidence now passes; release
-support remains held pending explicit human acceptance of the
-operator-controlled browser/resolver/proxy residual risk. Explicit-port
-sessions remain bearer-free and review-only for Safari and every unverified
-browser. The guarded lifecycle remains review-only in the browser: it cannot
-approve a plan, create a worktree, execute checks, mutate the imported
-repository, or claim that unrun work completed.
+support remains held because the remaining Gate 1 slices are incomplete, while
+the operator-controlled browser/resolver/proxy residual risk was explicitly
+accepted on 2026-07-31. Explicit-port sessions remain bearer-free and
+review-only for Safari and every unverified browser. The guarded lifecycle
+remains review-only in the browser: it cannot approve a plan, create a worktree,
+execute checks, mutate the imported repository, or claim that unrun work
+completed.
 The workspace reports mutation and planning capability from both the server
 mode and the tab's live session; stable or revoked sessions become visibly
 review-only and disable the corresponding controls.
@@ -171,14 +176,15 @@ multi-agent orchestration, and distributed workers.
 
 The loopback server and explicit-port review UI support Linux, macOS, and
 Windows and require no homelab, cloud service, account, telemetry, or global
-install. Candidate browser registration, context preview, draft persistence,
-and loopback planning mutations additionally require a supported
-Chromium-family browser. The required real-Chrome composition passed at exact
-implementation commit `eb01b640...` in native run `30618043377`; ADR 0040
-remains Candidate pending explicit human acceptance of its operator-controlled
-browser/resolver/proxy residual risk. Planning is read-only with respect to the
-imported checkout and uses an atomic SQLite operation admission record to
-reject concurrent provider work. Approval and execution remain Linux-only:
+install. Browser registration, context preview, draft persistence, and
+loopback planning mutations additionally require a supported Chromium-family
+browser. The required real-Chrome composition passed at exact implementation
+commit `eb01b6406c12126c60add7ac83800f8eba8ffdc9` in native run
+`30618043377`; explicit human acceptance of ADR 0040's interim
+operator-controlled browser/resolver/proxy risk was recorded on 2026-07-31.
+That acceptance does not complete Gate 1. Planning is read-only with respect
+to the imported checkout and uses an atomic SQLite operation admission record
+to reject concurrent provider work. Approval and execution remain Linux-only:
 they use the Milestone 1 kernel lease through util-linux `flock` at
 `/usr/bin/flock`, and execution additionally requires Docker with seccomp
 support and a locally present digest-pinned check image.
@@ -218,9 +224,9 @@ fragment-only mutation bearer. It performs no Node/operating-system lookup,
 hosts-file edit, or browser resolver injection. The client removes the
 fragment before render, every non-GET/HEAD request requires the exact session
 headers, and no cross-origin access is enabled. The native technical gate has
-passed, but this remains a Candidate boundary pending explicit human acceptance
-of the residual operator-controlled browser/resolver/proxy risk. Importing and
-previewing a repository reads its committed Git objects;
+passed, and the residual operator-controlled browser/resolver/proxy risk was
+accepted as an interim boundary on 2026-07-31. Gate 1 remains incomplete and
+unreleased. Importing and previewing a repository reads its committed Git objects;
 it does not copy, edit, check, commit, or push the source. Planning is available
 through the candidate mutation session only when the chosen model is served by
 loopback Ollama. Until an endpoint and model are entered, the workspace clearly
@@ -265,7 +271,7 @@ Set `ICARUS_CHROMIUM_EXECUTABLE` to an explicit local Chromium binary, then
 `pnpm smoke:workspace:browser` builds the production assets and drives the
 project → context → draft → browser reload → plan → evidence path in real
 headless Chromium without a resolver override. The technical acceptance record
-at exact implementation commit `eb01b640...` used real
+at exact implementation commit `eb01b6406c12126c60add7ac83800f8eba8ffdc9` used real
 `Chrome/150.0.7871.187` with CDP `1.3` at
 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` and
 `C:\Program Files\Google\Chrome\Application\chrome.exe`; both native jobs

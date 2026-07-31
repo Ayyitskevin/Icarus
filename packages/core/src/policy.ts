@@ -81,6 +81,7 @@ export const MAX_GRANTS = 8;
 export const MAX_GRANT_SCOPE_ENTRIES = 64;
 /** Host ceiling on calls a single grant may authorize. */
 export const MAX_GRANT_CALLS = 64;
+export const OPERATOR_ACTOR_MAX_BYTES = 200;
 
 const CAPABILITY_KINDS: readonly CapabilityKind[] = [
   "read.manifest",
@@ -89,6 +90,21 @@ const CAPABILITY_KINDS: readonly CapabilityKind[] = [
   "exec.check",
 ];
 const MAX_REPLACEMENT_TEXT_LENGTH = 262_144;
+
+export function assertOperatorActor(actor: string, invalidCode = "INVALID_ACTOR"): void {
+  invariant(
+    actor.trim().length > 0 &&
+      Buffer.byteLength(actor, "utf8") <= OPERATOR_ACTOR_MAX_BYTES &&
+      !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(actor),
+    invalidCode,
+    "Operator actor is invalid",
+  );
+  invariant(
+    !containsSecretShapedContent(Buffer.from(actor, "utf8")),
+    "SECRET_INPUT_DETECTED",
+    "Operator actor contains recognizable credential material",
+  );
+}
 
 export const DEFAULT_CEILING: SunCeiling = {
   maxToolCalls: 40,

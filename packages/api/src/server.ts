@@ -13,6 +13,7 @@ import {
   parseProviderBaseUrl,
 } from "@icarus/core";
 
+import { ActionCoordinator } from "./action-coordinator.js";
 import {
   contextPreviewRequest,
   projectRequest,
@@ -111,6 +112,7 @@ function errorStatus(error: IcarusError): number {
   if (error.code === "ACTION_SESSION_REQUIRED") return 401;
   if (error.code === "WORKSPACE_REVIEW_ONLY") return 403;
   if (error.code === "NOT_FOUND") return 404;
+  if (error.code === "SHUTTING_DOWN") return 503;
   if (error.code === "REQUEST_TOO_LARGE") return 413;
   if (error.code === "RESPONSE_TOO_LARGE") return 500;
   if (error.code === "UNSUPPORTED_MEDIA_TYPE") return 415;
@@ -522,48 +524,103 @@ async function serveWorkspace(
   response.end(request.method === "HEAD" ? undefined : bytes);
 }
 
+async function handleWorkspaceRequest(
+  options: WorkspaceServerOptions,
+  session: WorkspaceSession,
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  try {
+    session.assertExactHost(request);
+    const url = new URL(request.url ?? "/", session.url);
+    if (request.method === "GET" || request.method === "HEAD") {
+      session.assertOptionalExactOrigin(request);
+    } else {
+      session.assertProtectedMutation(request);
+    }
+    if (url.pathname.startsWith(API_PREFIX)) {
+      const handled = await routeApi(
+        options,
+        session,
+        request,
+        response,
+        url.pathname,
+        url.searchParams,
+      );
+      if (!handled) {
+        json(response, 404, { error: { code: "NOT_FOUND", message: "API route was not found" } });
+      }
+      return;
+    }
+    await serveWorkspace(options, request, response, url.pathname);
+  } catch (error) {
+    if (response.destroyed || response.headersSent) {
+      if (!response.destroyed) {
+        response.end();
+      }
+      return;
+    }
+    const safe = safeError(error);
+    try {
+      json(response, safe.status, safe.body);
+    } catch {
+      if (!response.headersSent) internalError(response);
+    }
+  }
+}
+
+function trackShutdownResponse(
+  response: ServerResponse,
+  shutdownResponses: Set<Promise<void>>,
+): void {
+  let responseSettlement: Promise<void>;
+  responseSettlement = new Promise<void>((resolve) => {
+    const settle = (): void => {
+      response.off("finish", settle);
+      response.off("close", settle);
+      resolve();
+    };
+    response.once("finish", settle);
+    response.once("close", settle);
+    if (response.writableFinished || response.destroyed) settle();
+  }).finally(() => {
+    shutdownResponses.delete(responseSettlement);
+  });
+  shutdownResponses.add(responseSettlement);
+}
+
 function workspaceRequestListener(
   options: WorkspaceServerOptions,
   session: WorkspaceSession,
-): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
-  return async (request, response) => {
+  coordinator: ActionCoordinator,
+  shutdownResponses: Set<Promise<void>>,
+): (request: IncomingMessage, response: ServerResponse) => void {
+  return (request, response) => {
+    // Track transport settlement for every accepted socket before action
+    // admission. Handler completion alone does not prove that response bytes
+    // reached Node's finished/closed boundary.
+    trackShutdownResponse(response, shutdownResponses);
+    let work: Promise<void>;
     try {
-      session.assertExactHost(request);
-      const url = new URL(request.url ?? "/", session.url);
-      if (request.method === "GET" || request.method === "HEAD") {
-        session.assertOptionalExactOrigin(request);
-      } else {
-        session.assertProtectedMutation(request);
-      }
-      if (url.pathname.startsWith(API_PREFIX)) {
-        const handled = await routeApi(
-          options,
-          session,
-          request,
-          response,
-          url.pathname,
-          url.searchParams,
-        );
-        if (!handled) {
-          json(response, 404, { error: { code: "NOT_FOUND", message: "API route was not found" } });
-        }
-        return;
-      }
-      await serveWorkspace(options, request, response, url.pathname);
+      // `track` registers synchronously before the async handler reaches its
+      // first await. A request is therefore either in the fixed drain set or
+      // rejected before it can read a body or call the service.
+      work = coordinator.track(() => handleWorkspaceRequest(options, session, request, response));
     } catch (error) {
-      if (response.destroyed || response.headersSent) {
-        if (!response.destroyed) {
-          response.end();
-        }
-        return;
-      }
       const safe = safeError(error);
       try {
         json(response, safe.status, safe.body);
       } catch {
-        if (!response.headersSent) internalError(response);
+        if (!response.destroyed) response.destroy();
       }
+      return;
     }
+    // Node's request event does not observe returned promises. The coordinator
+    // retains the rejection for shutdown; this handler only prevents an
+    // unhandled rejection and closes a response whose fallback also failed.
+    void work.catch(() => {
+      if (!response.destroyed) response.destroy();
+    });
   };
 }
 
@@ -590,6 +647,8 @@ export async function startWorkspaceServerWithBindingHooks(
   const reviewOnlyReason: WorkspaceReviewOnlyReason | null =
     mode === "review-only" ? "explicit-port" : null;
   const server = createServer();
+  const coordinator = new ActionCoordinator();
+  const shutdownResponses = new Set<Promise<void>>();
   try {
     await binding.listen(server, port, REVIEW_ONLY_WORKSPACE_HOST);
   } catch (error) {
@@ -614,12 +673,15 @@ export async function startWorkspaceServerWithBindingHooks(
       throw new IcarusError("INVALID_ORIGIN", "Workspace mutation origin is invalid");
     }
     session = createBoundWorkspaceSession(mode, address.port, originHostname, reviewOnlyReason);
-    server.on("request", workspaceRequestListener(options, session));
+    server.on(
+      "request",
+      workspaceRequestListener(options, session, coordinator, shutdownResponses),
+    );
   } catch (error) {
     await closeListeningServer(server);
     throw error;
   }
-  let closed = false;
+  let closePromise: Promise<void> | undefined;
   return {
     server,
     host: REVIEW_ONLY_WORKSPACE_HOST,
@@ -628,13 +690,43 @@ export async function startWorkspaceServerWithBindingHooks(
     launchUrl: session.launchUrl,
     mode: session.mode,
     reviewOnlyReason: session.reviewOnlyReason,
-    close: async () => {
-      if (closed) return;
-      closed = true;
-      await new Promise<void>((resolve, reject) => {
+    close: () => {
+      if (closePromise !== undefined) return closePromise;
+
+      // Close admission before any asynchronous shutdown step. Existing
+      // handlers remain live and are never aborted by this first close.
+      const drainPromise = coordinator.drain();
+      const listenerClosePromise = new Promise<void>((resolve, reject) => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));
-        server.closeAllConnections();
       });
+      server.closeIdleConnections();
+
+      closePromise = (async () => {
+        const drain = await drainPromise;
+        const failures: unknown[] = drain.failures.map((failure) => failure.error);
+        while (shutdownResponses.size > 0) {
+          await Promise.all([...shutdownResponses]);
+        }
+        try {
+          // Every tracked handler has settled, so residual sockets can no
+          // longer own service or store work.
+          server.closeAllConnections();
+        } catch (error) {
+          failures.push(error);
+        }
+        try {
+          await listenerClosePromise;
+        } catch (error) {
+          failures.push(error);
+        }
+        if (failures.length > 0) {
+          throw new AggregateError(
+            failures,
+            "Workspace shutdown did not settle all active requests cleanly",
+          );
+        }
+      })();
+      return closePromise;
     },
   };
 }

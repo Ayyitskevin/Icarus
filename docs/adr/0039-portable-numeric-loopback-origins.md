@@ -138,7 +138,7 @@ until a later accepted record supersedes specific clauses.
 ## Consequences
 
 Icarus must not describe random numeric `127/8` binding as portable or accept a
-Windows-only result. Candidate ADR 0040 returns to a 128-bit `.localhost`
+Windows-only result. Accepted-risk ADR 0040 returns to a 128-bit `.localhost`
 origin, removes the Node/operating-system lookup proof, and narrows mutation
 support to browser families whose own reserved-name handling passes real
 native acceptance. It owns that browser support and evidence boundary without
