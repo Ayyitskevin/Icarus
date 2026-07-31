@@ -1,6 +1,6 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -226,7 +226,7 @@ async function captureWorkspaceStartup(stateRoot) {
   return { startup, stdout, stderr };
 }
 
-const root = await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-smoke-"));
+const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-smoke-")));
 let runtime;
 let workspace;
 let provider;

@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import http from "node:http";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -1992,7 +2001,9 @@ if (chromiumExecutable === undefined || chromiumExecutable.trim().length === 0) 
 }
 const selectedChromiumExecutable = path.resolve(chromiumExecutable);
 
-const root = await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-browser-smoke-"));
+const root = await realpath(
+  await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-browser-smoke-")),
+);
 let runtime;
 let workspace;
 let reviewWorkspace;

@@ -341,6 +341,14 @@ const assertions = {
     browserSmokeSource.includes('"Page.navigate", { url: launchUrl }') &&
     !browserSmokeSource.includes("fetch(") &&
     !browserSmokeSource.includes("--host-resolver-rules"),
+  workspaceSmokesCanonicalizeStateRoot:
+    workspaceSmokeSource.includes(
+      'realpath(await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-smoke-")))',
+    ) &&
+    browserSmokeSource.includes(
+      'await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-browser-smoke-"))',
+    ) &&
+    browserSmokeSource.includes("const root = await realpath("),
   browserSmokeFlagsAreTestOnly:
     browserSmokeSource.includes("const SMOKE_ONLY_CHROMIUM_FLAGS = Object.freeze([") &&
     browserSmokeSource.includes("Product launches must never inherit this test-only flag set") &&
