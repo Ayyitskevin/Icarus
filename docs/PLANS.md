@@ -1,5 +1,29 @@
 # Implementation plans
 
+## Current product execution program
+
+The dependency-ordered plan for making Icarus a trustworthy Cursor rival with
+a Buzz-inspired multi-agent mission room is
+[`ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md`](ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md).
+It preserves the current ADR 0026 release hold, makes Gate 1 browser authority
+plus reversible Git landing the first product slice, places a thin VS Code
+workbench in the center, introduces a bounded read-only Council before
+write-capable collaboration, and requires isolated child runs plus deterministic
+integration for the later Crew.
+
+The immediate sequence is:
+
+1. close and publish the exact Gate 0 candidate with hosted/native/review
+   evidence;
+2. accept ADR 0029 browser approval authority and ADR 0027 Git landing
+   authority;
+3. implement browser parity, a separate landing ledger, private
+   branch/commit, allowlisted push, draft PR, and metadata-only receipt;
+4. prove deterministic retrieval and typed read-only outcomes;
+5. ship the shared client and VS Code workbench; and
+6. accept ADR 0037, then prove read-only Council lift before ADR 0033/0038
+   executable Crew work.
+
 ## Current candidate: ADR 0026 slice 2b production wiring
 
 Status: **LOCAL CORRECTIONS PASS; PUBLICATION HOLD**. Explicit human approval
@@ -35,8 +59,9 @@ acceptance, and the remaining release reviews are unrecorded.
 - [ ] Commit/publish one candidate, pass exact-head hosted CI and native
       acceptance, and persist the final role-neutral architecture/release
       review artifact with exact tree, reviewed surfaces, rerunnable evidence,
-      findings, and disposition. Fleet guard and Sonnet lanes may supply review
-      artifacts, but neither named reviewer is a repository-level dependency
+      findings, and disposition. Fleet guard or independent agent lanes may
+      supply review artifacts, but no named reviewer is a repository-level
+      dependency
 
 Fresh corrected-tree local evidence on 2026-07-30 (this is not publication or
 release clearance):

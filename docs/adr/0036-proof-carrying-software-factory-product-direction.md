@@ -12,8 +12,9 @@
   [ADR 0023](0023-transactional-multi-file-patch-sets.md) (transactional
   PatchSets),
   [ADR 0026](0026-agent-session-loop-and-tool-registry.md) (bounded agent
-  session), and [ADR 0022](0022-native-macos-windows-acceptance.md) (native
-  acceptance)
+  session), [ADR 0022](0022-native-macos-windows-acceptance.md) (native
+  acceptance), and the
+  [collaborative IDE game plan](../ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md)
 
 ## Context
 
@@ -34,6 +35,13 @@ his AI software factory and compete directly for the outcomes served by Cursor,
 VS Code, Replit, and Supabase. That goal conflicts with the historical wording
 that Icarus is “not a browser IDE” and “not a hosted platform” if those phrases
 are interpreted as permanent product limits.
+
+The operator has also made multi-agent collaboration a product requirement:
+agents should be visible participants in a shared mission room where they can
+investigate, disagree, propose a task graph, and then execute through the IDE.
+That interaction may resemble Block's Buzz, but Icarus retains host-owned
+authority: conversation is not permission, child writes remain isolated, and
+only verified PatchSets may enter deterministic integration.
 
 It does not require Icarus to reimplement an editor engine, Postgres, Auth,
 Storage, Realtime, or cloud infrastructure. Current category leaders already
@@ -132,6 +140,8 @@ Icarus will build and own:
 - provider-neutral, resumable agent-session orchestration;
 - transactional code, schema, service, and deployment change contracts;
 - browser and IDE review, approval, exception, and recovery experience;
+- the mission-room, agent-identity, task-graph, write-isolation, and
+  proof-preserving integration contracts;
 - Git landing plus CI-result ingestion;
 - regression evals, provider comparisons, and signed evidence exports;
 - cross-resource receipts tying code, migrations, services, and deployment to
@@ -174,8 +184,10 @@ ADR numbers reserved by the Fable plan remain stable:
 | 0031 | environments and service catalog |
 | 0032 | database migration ledger |
 | 0033 | concurrency and branch-pinned base authority |
-| 0034 | worker/task-envelope boundary |
+| 0034 | Athena task-envelope API and standing-policy pre-approval boundary |
 | 0035 | signed evidence-bundle export |
+| 0037 | Mission Rooms, agent identities, membership, transcript projection, and bounded deliberation |
+| 0038 | local child-run and task-envelope authority |
 
 ## Delivery sequence and exit gates
 
@@ -203,8 +215,8 @@ worktree bytes; all local gates pass on one tree; exact-head hosted CI and
 native acceptance are recorded honestly. Two role-neutral review artifacts must
 name the exact tree, reviewer lane, reviewed surfaces, rerunnable commands,
 findings, and disposition: one security-boundary review and one final
-architecture/release review. Fleet guard and Sonnet lanes may produce those
-artifacts, but the repository gate does not depend on a named proprietary
+architecture/release review. Fleet guard or independent agent lanes may produce
+those artifacts, but the repository gate does not depend on a named proprietary
 reviewer.
 
 ### Gate 1 — Verified Change Gate
@@ -251,7 +263,10 @@ cost per success by at least 30% without lowering the success count.
 
 Ship a thin extension over the headless API: selection/task submission,
 plan/grant review, session activity, diff/check evidence, recovery, and landing.
-Do not fork Code-OSS until this extension proves product demand.
+Place the IDE in the center of a three-surface workbench with reserved agent
+mission-room and authority/evidence containers. Gate 3 does not admit
+participant provider calls or room-state migrations. Do not fork Code-OSS until
+this extension proves product demand.
 
 Exit gate: Linux, macOS, and Windows installation; three language stacks;
 selection/task → verified draft PR; session survives window reload. A versioned
@@ -260,6 +275,56 @@ tasks across repair, refactor, and scaffold classes. Completion means registered
 checks pass and a reviewable draft PR is produced. “No manual file edit” means
 the operator changes no repository content between plan approval and landing;
 at least 21 of 30 tasks must meet that definition.
+
+### Collaboration track C1 — read-only Council
+
+Draft and accept ADR 0037 before the first participant provider call or
+collaboration schema change. It governs identity, membership, per-participant
+egress authority, exact transcript/context projection digests, provider-
+operation intent and reconciliation, cancellation/replay, payload bounds and
+retention, and additive migration backup/rollback.
+
+Council then provides independent read-only proposals, comparison, dissent,
+synthesis, and operator approval that may create one ordinary Icarus run. No
+participant receives mutation authority.
+
+Exit gate: a versioned 30-task planning/review benchmark runs across three fixed
+seeds with predeclared primary outcomes, defect denominator/severity, and
+per-class success non-inferiority. Council must produce at least three
+additional primary-outcome successes or at least 25% fewer actionable review
+defects at non-inferior success versus the same-model single-agent baseline.
+Require no security-task regression, zero unapproved access, 100% replay and
+recovery under injected interruption, median cost per success at most 1.75×
+baseline, and median latency at most 2×. Failure keeps Council optional and
+blocks write-capable collaboration.
+
+### Collaboration track — executable Crew and branch rooms
+
+After Gates 1–3 and the read-only Council exit evidence, draft and accept ADR
+0033 concurrency/branch-pinned base authority and ADR 0038 local child-run and
+task-envelope authority. ADR 0034 retains the Fable plan's Athena delegation
+boundary for Gate 6. ADR 0037 separately governs room identity, membership,
+transcript projection, and bounded deliberation.
+
+Add a host-scheduled task graph, explicit write sets, isolated branch-pinned
+child worktrees, per-child grants and budgets, PatchSet-plus-evidence return,
+deterministic integration, combined-tree verification, and a branch room
+joining decisions, patches, checks, review, and landing receipts. Every
+dependent task pins an immutable input tree materialized from the root plus
+ordered accepted ancestor PatchSets; independent nodes alone may share the root
+and run concurrently.
+
+Exit gate: 30 fixed multi-module tasks run across three fixed seeds with
+predeclared primary outcomes, defect rubric, and per-class success
+non-inferiority. At least 24 of 30 succeed per seed with passing combined
+checks. Crew must add at least three primary-outcome successes or reduce
+actionable review defects by at least 25% at non-inferior success against the
+strongest single-agent baseline. Adversarial write-collision, egress,
+stale-lineage, cancellation, and restart fixtures are mandatory. There are zero
+write races, authority widenings, duplicate external effects, or source-
+checkout mutations; median cost per success stays below three times baseline
+and median latency below 2.5×. Public effects, background fleet execution, and
+team identity remain Gate 6.
 
 ### Gate 4 — Replit-class environments
 
@@ -328,6 +393,7 @@ The roadmap is governed by outcomes rather than feature count:
 - first-pass plan acceptance and first-pass check pass rate;
 - recovery success after injected crashes and cancellations;
 - provider cost and tokens per successful task;
+- Council/Crew quality lift, duplicate-work ratio, and cost/latency multiplier;
 - approval count per successful application;
 - zero unapproved reads, writes, egress, pushes, migrations, deployments, or
   secret persistence.
@@ -341,10 +407,10 @@ The roadmap is governed by outcomes rather than feature count:
   infrastructure; adoption and benchmark evidence must prove that consequence.
 - The strategy increases product scope substantially, so each external effect
   requires an ADR, typed grant, recovery contract, and executable evidence.
-- The single-operator local-first path remains the proving ground. Hosted
-  multi-tenancy, collaboration, Kubernetes, an editor fork, and proprietary
-  backend primitives remain non-goals until measured demand changes the
-  decision.
+- The single-operator local-first path remains the proving ground. Bounded
+  multi-agent collaboration is now a differentiated product track; hosted
+  multi-tenancy, Kubernetes, an editor fork, and proprietary backend primitives
+  remain non-goals until measured demand changes the decision.
 - This ADR authorizes product direction only. It does not authorize a commit,
   push, PR, schema migration, provider egress, service creation, deployment, or
   other live mutation.

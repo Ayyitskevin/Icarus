@@ -6,7 +6,9 @@ supersedes the current product positioning and sequencing in
 task-to-running-application outcome: a proof-carrying authority kernel with
 browser and VS Code surfaces, reversible Git landing, isolated Replit-class
 environments, and Supabase integration. It will integrate editor and backend
-primitives instead of reimplementing them.
+primitives instead of reimplementing them. The executable program, including
+the Buzz-inspired agent mission room and center-IDE layout, is in the
+[Icarus collaborative IDE game plan](ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md).
 
 The current sequence is:
 
@@ -15,10 +17,19 @@ The current sequence is:
 | 0 | Restore release truth for ADR 0026 | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green |
 | 1 | Verified Change Gate | browser digest approvals plus branch/commit/allowlisted push/draft PR on three repositories; no force-push, merge, deployment, or source-checkout mutation |
 | 2 | Context and agent quality | measured explanation/security/refactor evals, retrieval recall ≥0.90 and precision ≥0.60, first-pass plan acceptance ≥80% |
-| 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 dogfood tasks with ≥70% completed without manual file editing |
+| 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
+| C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
+| C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
+| C3 | Branch rooms | one searchable record joins accepted decisions, patches, combined checks, review, draft PR, and landing receipt |
 | 4 | Replit-class environments | three preview templates, cold <60s and warm <10s, bounded logs/processes/package egress, proven restart cleanup |
 | 5 | Supabase change packs | isolated migrations/RLS/Auth/Storage/Realtime/functions, rollback/restore and smoke evidence, separate production approval |
 | 6 | Delivery and scale | five concurrent branch-pinned tasks, idempotent worker recovery, signed evidence, explicit public-effect approvals |
+
+Gate C2 begins only after Gates 1–3 and the read-only Council evidence. It pulls
+the single-operator collaboration contracts in ADR 0033 and ADR 0038 forward.
+ADR 0034 retains Athena task envelopes and standing-policy pre-approvals for
+Gate 6, which also retains durable background/fleet workers, hosted team
+identity, automation, and public-effect scale.
 
 Phase 1's transactional PatchSet boundary is implemented under ADR 0023. Phase
 2a's grants, readable manifest, and registry are present. The ADR 0026 slice 2b
