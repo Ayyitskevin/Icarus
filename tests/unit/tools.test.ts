@@ -5,7 +5,9 @@ import { IcarusError } from "../../packages/core/src/errors.js";
 import {
   assertToolCallGranted,
   executeToolCall,
+  MAX_SEARCH_MATCH_BYTES,
   MAX_SEARCH_MATCHES,
+  MAX_TOOL_TEXT_BYTES,
   parseToolCall,
   renderToolResult,
   TOOL_REGISTRY,
@@ -69,7 +71,13 @@ function context(overrides: Partial<ToolContext> = {}): ToolContext {
     grants: [READ_GRANT, CHECK_GRANT],
     // A read-only context offers no write operations and must fail closed
     // rather than appear to provide a tool it cannot carry out.
-    hostOperations: { proposePatch: null, applyPatchSet: null, runChecks: null },
+    hostOperations: {
+      proposePatch: null,
+      applyPatchSet: null,
+      runChecks: null,
+      reportDone: null,
+      requestHumanInput: null,
+    },
     ...overrides,
   };
 }
@@ -80,6 +88,7 @@ const MUTATION_GRANT: CapabilityGrant = {
   maxCalls: 4,
 };
 const EXEC_GRANT: CapabilityGrant = { kind: "exec.check", scope: ["unit"], maxCalls: 2 };
+const PATCH_SET = { summary: "update greeting", edits: [] };
 
 describe("tool call validation", () => {
   it("accepts each registered tool's arguments", () => {
@@ -87,7 +96,7 @@ describe("tool call validation", () => {
       name: "read_file",
       path: "src/a.ts",
     });
-    expect(parseToolCall({ name: "list_tree", arguments: {} })).toEqual({
+    expect(parseToolCall({ name: "list_tree", arguments: { prefix: null } })).toEqual({
       name: "list_tree",
       prefix: null,
     });
@@ -132,6 +141,60 @@ describe("tool call validation", () => {
     );
     expectIcarusCode(
       () => parseToolCall({ name: "report_done", arguments: { summary: "" } }),
+      "INVALID_TOOL_CALL",
+    );
+  });
+
+  it("requires an explicit null or canonical repository prefix", () => {
+    expect(parseToolCall({ name: "list_tree", arguments: { prefix: null } })).toEqual({
+      name: "list_tree",
+      prefix: null,
+    });
+    expect(parseToolCall({ name: "list_tree", arguments: { prefix: "src/" } })).toEqual({
+      name: "list_tree",
+      prefix: "src/",
+    });
+    expectIcarusCode(
+      () => parseToolCall({ name: "list_tree", arguments: {} }),
+      "INVALID_TOOL_CALL",
+    );
+    expectIcarusCode(
+      () => parseToolCall({ name: "list_tree", arguments: { prefix: "" } }),
+      "INVALID_TOOL_CALL",
+    );
+    for (const prefix of ["/", "../src", "src//nested"]) {
+      expectIcarusCode(
+        () => parseToolCall({ name: "list_tree", arguments: { prefix } }),
+        "INVALID_PATH",
+      );
+    }
+    expectIcarusCode(
+      () =>
+        parseToolCall({
+          name: "list_tree",
+          arguments: { prefix: "雪".repeat(342) },
+        }),
+      "INVALID_TOOL_CALL",
+    );
+  });
+
+  it("measures model-authored string ceilings in UTF-8 bytes", () => {
+    const exact = "雪".repeat(Math.floor(MAX_TOOL_TEXT_BYTES / 3));
+    expect(parseToolCall({ name: "report_done", arguments: { summary: exact } })).toMatchObject({
+      summary: exact,
+    });
+
+    const tooWide = `${exact}雪`;
+    expectIcarusCode(
+      () => parseToolCall({ name: "report_done", arguments: { summary: tooWide } }),
+      "INVALID_TOOL_CALL",
+    );
+    expectIcarusCode(
+      () => parseToolCall({ name: "request_human_input", arguments: { question: tooWide } }),
+      "INVALID_TOOL_CALL",
+    );
+    expectIcarusCode(
+      () => parseToolCall({ name: "search", arguments: { query: "雪".repeat(171) } }),
       "INVALID_TOOL_CALL",
     );
   });
@@ -189,9 +252,17 @@ describe("kernel-side grant checks", () => {
 
 describe("read tools stay inside the approved set", () => {
   it("returns bytes whose digest matches the approved entry", async () => {
+    const controller = new AbortController();
+    const readable = context({
+      readAtBase: (_path, signal) => {
+        expect(signal).toBe(controller.signal);
+        return Promise.resolve(Buffer.from(GREETING, "utf8"));
+      },
+    });
     const result = await executeToolCall(
       { name: "read_file", path: "src/greeting.txt" },
-      context(),
+      readable,
+      controller.signal,
     );
     expect(result.content).toBe(GREETING);
     expect(result.truncated).toBe(false);
@@ -257,6 +328,22 @@ describe("read tools stay inside the approved set", () => {
     expect(result.truncated).toBe(true);
     expect(result.content.split("\n")).toHaveLength(MAX_SEARCH_MATCHES);
   });
+
+  it("caps each rendered search match in UTF-8 bytes", async () => {
+    const line = `needle${"雪".repeat(300)}`;
+    const wide = context({
+      manifest: {
+        baseCommit: "a".repeat(40),
+        entries: [{ path: "src/wide.txt", sha256: sha256(line) }],
+      },
+      readAtBase: () => Promise.resolve(Buffer.from(line, "utf8")),
+    });
+
+    const result = await executeToolCall({ name: "search", query: "needle" }, wide);
+    expect(result.truncated).toBe(true);
+    expect(Buffer.byteLength(result.content, "utf8")).toBeLessThanOrEqual(MAX_SEARCH_MATCH_BYTES);
+    expect(result.content).not.toContain("�");
+  });
 });
 
 describe("check catalog is limited to granted checks", () => {
@@ -273,14 +360,39 @@ describe("check catalog is limited to granted checks", () => {
 });
 
 describe("control signals come from the host, not from tool output", () => {
-  it("maps report_done and request_human_input to their registered control", async () => {
-    const done = await executeToolCall({ name: "report_done", summary: "all green" }, context());
+  it("runs host gates before mapping report_done and request_human_input to control", async () => {
+    const controller = new AbortController();
+    const gated: string[] = [];
+    const controlled = context({
+      hostOperations: {
+        proposePatch: null,
+        applyPatchSet: null,
+        runChecks: null,
+        reportDone: (summary, signal) => {
+          expect(signal).toBe(controller.signal);
+          gated.push(`done:${summary}`);
+          return Promise.resolve();
+        },
+        requestHumanInput: (question, signal) => {
+          expect(signal).toBe(controller.signal);
+          gated.push(`human:${question}`);
+          return Promise.resolve();
+        },
+      },
+    });
+    const done = await executeToolCall(
+      { name: "report_done", summary: "all green" },
+      controlled,
+      controller.signal,
+    );
     expect(done.control).toBe("done");
     const ask = await executeToolCall(
       { name: "request_human_input", question: "which module?" },
-      context(),
+      controlled,
+      controller.signal,
     );
     expect(ask.control).toBe("await_human");
+    expect(gated).toEqual(["done:all green", "human:which module?"]);
   });
 
   it("keeps every registered read tool on continue", () => {
@@ -408,6 +520,24 @@ describe("output ceilings truncate visibly", () => {
     // A mid-sequence cut would decode to U+FFFD; a boundary cut never does.
     expect(result.content).not.toContain("�");
   });
+
+  it("keeps control output within the parser byte ceiling", async () => {
+    const summary = "雪".repeat(MAX_TOOL_TEXT_BYTES);
+    const controlled = context({
+      hostOperations: {
+        proposePatch: null,
+        applyPatchSet: null,
+        runChecks: null,
+        reportDone: () => Promise.resolve(),
+        requestHumanInput: null,
+      },
+    });
+
+    const result = await executeToolCall({ name: "report_done", summary }, controlled);
+    expect(result.truncated).toBe(true);
+    expect(Buffer.byteLength(result.content, "utf8")).toBeLessThanOrEqual(MAX_TOOL_TEXT_BYTES);
+    expect(result.content).not.toContain("�");
+  });
 });
 
 describe("results are fenced as untrusted", () => {
@@ -436,12 +566,16 @@ describe("results are fenced as untrusted", () => {
 });
 
 describe("write tools delegate to host operations and fail closed without them", () => {
-  it("validates a proposal's shape without pre-approving its contents", () => {
+  it("validates proposal and apply payloads without pre-approving contents", () => {
     const call = parseToolCall({
       name: "propose_patch",
       arguments: { patchSet: { summary: "s", edits: [] } },
     });
     expect(call.name).toBe("propose_patch");
+    expect(parseToolCall({ name: "apply_patchset", arguments: { patchSet: PATCH_SET } })).toEqual({
+      name: "apply_patchset",
+      patchSet: PATCH_SET,
+    });
     // Shape only — the executor runs parsePatchSet against approved targets.
     expectIcarusCode(
       () => parseToolCall({ name: "propose_patch", arguments: { patchSet: "not-an-object" } }),
@@ -449,6 +583,14 @@ describe("write tools delegate to host operations and fail closed without them",
     );
     expectIcarusCode(
       () => parseToolCall({ name: "propose_patch", arguments: { patchSet: {}, apply: true } }),
+      "INVALID_TOOL_CALL",
+    );
+    expectIcarusCode(
+      () => parseToolCall({ name: "apply_patchset", arguments: {} }),
+      "INVALID_TOOL_CALL",
+    );
+    expectIcarusCode(
+      () => parseToolCall({ name: "apply_patchset", arguments: { patchSet: "invalid" } }),
       "INVALID_TOOL_CALL",
     );
   });
@@ -460,11 +602,19 @@ describe("write tools delegate to host operations and fail closed without them",
       "TOOL_UNAVAILABLE",
     );
     await expectAsyncCode(
-      executeToolCall({ name: "apply_patchset" }, readOnly),
+      executeToolCall({ name: "apply_patchset", patchSet: PATCH_SET }, readOnly),
       "TOOL_UNAVAILABLE",
     );
     await expectAsyncCode(
       executeToolCall({ name: "run_checks", checkIds: ["unit"] }, readOnly),
+      "TOOL_UNAVAILABLE",
+    );
+    await expectAsyncCode(
+      executeToolCall({ name: "report_done", summary: "finished" }, readOnly),
+      "TOOL_UNAVAILABLE",
+    );
+    await expectAsyncCode(
+      executeToolCall({ name: "request_human_input", question: "which target?" }, readOnly),
       "TOOL_UNAVAILABLE",
     );
   });
@@ -475,11 +625,14 @@ describe("write tools delegate to host operations and fail closed without them",
       grants: [READ_GRANT],
       hostOperations: {
         proposePatch: null,
-        applyPatchSet: () => {
+        applyPatchSet: (raw) => {
+          expect(raw).toBe(PATCH_SET);
           hostCalls += 1;
           return Promise.resolve({ changedPaths: [], diff: "", written: new Map() });
         },
         runChecks: null,
+        reportDone: null,
+        requestHumanInput: null,
       },
     });
 
@@ -488,7 +641,7 @@ describe("write tools delegate to host operations and fail closed without them",
     expectIcarusCode(
       () =>
         assertToolCallGranted({
-          call: { name: "apply_patchset" },
+          call: { name: "apply_patchset", patchSet: PATCH_SET },
           grants: spied.grants,
           callsSoFar: 0,
         }),
@@ -497,7 +650,7 @@ describe("write tools delegate to host operations and fail closed without them",
     expect(hostCalls).toBe(0);
 
     // And the host operation is only ever reached deliberately.
-    await executeToolCall({ name: "apply_patchset" }, spied);
+    await executeToolCall({ name: "apply_patchset", patchSet: PATCH_SET }, spied);
     expect(hostCalls).toBe(1);
   });
 
@@ -525,13 +678,17 @@ describe("write tools delegate to host operations and fail closed without them",
       grants: [MUTATION_GRANT, EXEC_GRANT],
       hostOperations: {
         proposePatch: () => Promise.resolve({ paths: ["src/greeting.txt"] }),
-        applyPatchSet: () =>
-          Promise.resolve({
+        applyPatchSet: (raw) => {
+          expect(raw).toBe(PATCH_SET);
+          return Promise.resolve({
             changedPaths: ["src/greeting.txt"],
             diff: "+patched\n",
             written: new Map([["src/greeting.txt", sha256("patched")]]),
-          }),
+          });
+        },
         runChecks: () => Promise.resolve({ outcome: "failed" as const, evidence: "1 test failed" }),
+        reportDone: null,
+        requestHumanInput: null,
       },
     });
 
@@ -539,7 +696,10 @@ describe("write tools delegate to host operations and fail closed without them",
     expect(JSON.parse(proposed.content)).toEqual({ accepted: true, paths: ["src/greeting.txt"] });
     expect(proposed.control).toBe("continue");
 
-    const applied = await executeToolCall({ name: "apply_patchset" }, writable);
+    const applied = await executeToolCall(
+      { name: "apply_patchset", patchSet: PATCH_SET },
+      writable,
+    );
     expect(applied.content).toContain("src/greeting.txt");
     expect(applied.content).toContain("+patched");
 
@@ -555,6 +715,10 @@ describe("write tools delegate to host operations and fail closed without them",
     const huge = { summary: "x".repeat(600 * 1024), edits: [] };
     expectIcarusCode(
       () => parseToolCall({ name: "propose_patch", arguments: { patchSet: huge } }),
+      "INVALID_TOOL_CALL",
+    );
+    expectIcarusCode(
+      () => parseToolCall({ name: "apply_patchset", arguments: { patchSet: huge } }),
       "INVALID_TOOL_CALL",
     );
   });

@@ -204,7 +204,8 @@ these observation slices add no table/column migration, dependency install,
 daemon, watcher, Server-Sent Events, or WebSocket setup. They add no browser
 approval, mutation, execution, command, commit, push, or deployment authority.
 Current file/status, multi-file or payload-bearing diff/history, and action
-controls remain deferred, and the ADR 0010 release hold remains in force.
+controls remain deferred, and ADR 0025's third-party review and secret-rotation
+release holds remain in force.
 
 ## Fifth M3 verification-attempt view
 
@@ -245,7 +246,7 @@ uses the verification section as a focus fallback when the launcher is disabled.
 
 This implementation adds one GET-only read and inline presentation. It does not
 alter the payload-free event APIs, schema, dependencies, source repository,
-browser action authority, guarded CLI, or ADR 0010 hold.
+browser action authority, guarded CLI, or ADR 0025's residual release holds.
 
 ## Seventh M3 persisted diff review
 
@@ -349,13 +350,18 @@ preserve the state and require explicit operator recovery.
   LAN, Tailscale, and public endpoints are remote: they require HTTPS, explicit
   pricing, and exact context-egress approval.
 - OpenAI defaults to `https://api.openai.com/v1`, reads `OPENAI_API_KEY`, and
-  sends `POST /responses` with `store: false`, no tools, and no redirects.
+  sends `POST /responses` with `store: false`, no provider-native tools, and no
+  redirects. Session call batches remain Icarus-owned structured JSON.
   Remote OpenAI credentials are restricted to `api.openai.com:443`.
 - Provider transport exceptions are converted to bounded Icarus errors and
   sanitized with the adapter's known credential before they can reach state or
   CLI output. Non-success HTTP response bodies are not copied into surfaced or
   durable errors.
 - Model identifiers are explicit. Icarus never silently substitutes a model.
+- A non-loopback session turn is a fresh remote provider call and requires the
+  exact approved context egress digest again. The approved readable-manifest
+  digest is the only additional context authority; a prior provider response
+  cannot widen it.
 - The workspace accepts only an explicit loopback Ollama model/base URL. It
   rejects remote, LAN, Tailscale, public, OpenAI, and other cloud endpoints
   before persisting the draft; the broader CLI provider contract is unchanged.
@@ -391,6 +397,61 @@ preserve the state and require explicit operator recovery.
   performs the same bounded rollback. Review approval uses the same diff digest
   and is refused unless verification passed and the live source/worktree,
   changed-path set, diff, and checkpoint still match the reviewed evidence.
+
+The approved first execution remains a single strict patch-set proposal and
+formal verification. Only a failure enters the ADR 0026 session, and only when
+the approved plan has explicit grants and `iterationCeiling > 0`; zero is a
+single-shot run. The plan JSON and approval digest are the sole durable grant
+source. No session/grant table or migration is introduced.
+
+A session turn admits `provider.revise` before provider I/O and at most eight
+closed tool operations before their grant checks or host actions. Refused,
+failed, interrupted, and cancelled operations remain charged. The registry is
+limited to `read_file`, `list_tree`, `search`, `get_check_catalog`,
+`propose_patch`, `apply_patchset`, `run_checks`, `report_done`, and
+`request_human_input`; it accepts no shell text or provider-defined tool.
+`read_file` may return exact base-manifest bytes or current bytes recorded as
+written by this session, including a created file. `list_tree` and `search`
+enumerate only the approved base manifest.
+
+`propose_patch` only previews and validates the bounded PatchSet supplied to
+that call. It persists no authority, and a later apply never depends on an
+in-memory proposal. `apply_patchset` carries its own exact PatchSet,
+independently repeats grant, path, preimage, secret, and ceiling validation,
+restores the private baseline, persists the exact new patch/checkpoint intent,
+and only then materializes through the guarded file-write path. If apply is
+interrupted after intent persistence, resume reconciles from that persisted
+intent and records `unavailable`, non-approvable verification rather than
+claiming that checks completed.
+`run_checks` must name the complete approved check list in order and records the
+current formal verification. `report_done` rechecks live bytes, changed paths,
+diff, checkpoint, and passing evidence. A bounded secret-scanned human question
+or iteration exhaustion lands `awaiting_review` with a blocker, so ordinary
+review approval refuses it.
+
+Tool-operation finish and any verification/session-terminal event it produces
+commit in one SQLite transaction. `review.validate`, rollback, and restore
+operation finishes commit with their corresponding state transition. A crash
+cannot leave a successful operation detached from its evidence or state.
+
+On resume, unfinished operations are conservatively charged, the private
+checkpoint is reconciled, and only completed session boundaries are rehydrated.
+Cancellation propagates into provider/tool/check work, then follows the existing
+`cancelling` reconciliation, baseline restore, and emergency-recovery path.
+The default and maximum session budget is two turns. Under the default
+40-operation ceiling, two full turns cost 18 operations: local fresh execution
+tops out at `12 + 18 = 30`, remote fresh execution at `13 + 18 = 31` because
+`egress.validate` is metered, and a remote resumed session at
+`13 + 18 + 1 session.reconcile = 32`. At least eight ordinary operations remain
+for atomic review/rollback settlement and bounded retries. A global
+tool-call/runtime/token/cost ceiling still binds first; admission failure lands
+the session exhausted and non-approvable. The ordinary operation and
+active-runtime ceilings must also retain one `session.reconcile` slot plus
+`commandTimeoutMs` at session entry and after every provider or tool admission.
+If that margin is absent, no new operation is admitted and the session
+exhausts against its persisted evidence. Do not raise
+`MAX_SESSION_ITERATIONS` above 2 without re-measuring every path and
+settlement reserve.
 
 Egress, plan, and review requests validate actor, digest, persisted gate, active
 run ownership, and any verification prerequisite under the run lease before
@@ -461,6 +522,13 @@ timeout message, truncation, and redacted stdout/stderr. Empty output is never
 proof; exit status, containment, changed-path, diff, and checkpoint assertions
 are required.
 
+Session observability uses those same operations/events rather than a parallel
+session row. Provider turns, per-capability/control tool calls, completed
+boundaries, human questions, exhaustion, and done outcomes are explicit.
+Only settled, bounded, secret-scanned tool evidence is eligible for a resumed
+prompt; a started/interrupted operation is visible and charged but never
+presented as a successful result.
+
 A check is failed if it timed out or was cancelled, even if it traps termination
 and eventually exits zero. The historical event evidence and the latest run
 snapshot should agree on the current attempt while preserving earlier attempts.
@@ -468,11 +536,17 @@ snapshot should agree on the current attempt while preserving earlier attempts.
 ## Repository automation and release hold
 
 The inherited `.github/workflows/opencode.yml` is outside the local runtime but
-inside the repository's security posture. It was preserved from remote commit
-`0fb3476787573c1285974c2d53cfa28ec2233fc0`; see ADR 0010. Do not change,
-disable, or bless it without Kevin's explicit decision. Do not treat its current
-upstream collaborator check as a repository-owned gate, and do not claim M0/M1
-security completion while the decision remains pending.
+inside the repository's security posture. ADR 0025 resolved ADR 0010 by choosing
+hardening: a repository-owned `authorize` job admits only `OWNER`, `MEMBER`, or
+`COLLABORATOR`, the privileged job depends on it, permissions default to none,
+third-party actions are commit-SHA pinned, untrusted comment fields enter shell
+only through `env:`, and upstream session sharing is disabled. Do not weaken
+that gate or treat a pin as a supply-chain review.
+
+Two release holds remain: review the exact pinned third-party action and rotate
+the named OpenCode secret that was reachable under the former trigger. Branch
+protection is tracked separately. The hardening decision itself is no longer
+pending.
 
 The deterministic release gate pins actionlint v1.7.12 by the official release
 archive SHA-256 plus an independently recorded extracted-executable SHA-256.
@@ -497,8 +571,8 @@ least one regular `.yml` or `.yaml` workflow, validates every such file, and
 requires the exact binary to reject a generated known-invalid workflow. Missing
 or modified tool state therefore fails `pnpm check`. Hosted `ci` bootstraps
 and runs workflow lint before dependency installation; the later release gate
-repeats it. Syntax-checking the inherited OpenCode workflow does not alter or
-satisfy its separate ADR 0010 security hold.
+repeats it. Syntax-checking the inherited OpenCode workflow does not satisfy ADR
+0025's remaining third-party review or secret-rotation work.
 
 Hosted CI is separate evidence. Workflow lint and a local `pnpm check` do not
 prove that GitHub accepted or executed the workflow. For every candidate release,

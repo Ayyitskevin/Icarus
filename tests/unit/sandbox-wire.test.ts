@@ -21,6 +21,7 @@ import {
 } from "../support/sandbox-git.js";
 
 const RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const ORPHANED_CONTAINER_ID = "d".repeat(64);
 const IMAGE = `python:3.12-slim@sha256:${"c".repeat(64)}`;
 const CHECK: CheckProfile = {
   id: "safe",
@@ -111,6 +112,80 @@ afterEach(async () => {
 });
 
 describe("Docker sandbox wire contract", () => {
+  it("directly reconciles a managed container owned by the exact run", async () => {
+    const root = await makeRoot();
+    const docker = await createRecordingDocker(root, {
+      listedContainerIds: [ORPHANED_CONTAINER_ID],
+      initialContainers: {
+        [ORPHANED_CONTAINER_ID]: {
+          labels: {
+            "icarus.managed": "true",
+            "icarus.run_id": RUN_ID,
+          },
+        },
+      },
+    });
+    const git = createSandboxGitFixture();
+    const runner = new DockerSandboxRunner(root, git.git, docker.binary);
+
+    await runner.reconcile(RUN_ID);
+
+    const calls = await docker.calls();
+    expect(calls.map((call) => call.argv)).toEqual([
+      [
+        "container",
+        "list",
+        "--all",
+        "--filter",
+        "label=icarus.managed=true",
+        "--filter",
+        `label=icarus.run_id=${RUN_ID}`,
+        "--format",
+        "{{.ID}}",
+      ],
+      ["container", "inspect", "--format", "{{json .Config.Labels}}", ORPHANED_CONTAINER_ID],
+      ["container", "rm", "--force", "--volumes", ORPHANED_CONTAINER_ID],
+      ["container", "inspect", "--format", "{{json .Config.Labels}}", ORPHANED_CONTAINER_ID],
+    ]);
+    for (const call of calls) {
+      expectExactControllerEnvironment(call, path.join(root, "snapshots"));
+    }
+    expect(await docker.containers()).toEqual({});
+  });
+
+  it("refuses direct reconciliation when the listed container labels collide", async () => {
+    const root = await makeRoot();
+    const docker = await createRecordingDocker(root, {
+      listedContainerIds: [ORPHANED_CONTAINER_ID],
+      initialContainers: {
+        [ORPHANED_CONTAINER_ID]: {
+          labels: {
+            "icarus.managed": "true",
+            "icarus.run_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          },
+        },
+      },
+    });
+    const git = createSandboxGitFixture();
+    const runner = new DockerSandboxRunner(root, git.git, docker.binary);
+
+    await expect(runner.reconcile(RUN_ID)).rejects.toThrow(
+      "Refusing to remove a container not owned by this Icarus run",
+    );
+
+    const calls = await docker.calls();
+    expect(calls.map((call) => call.argv[0])).toEqual(["container", "container"]);
+    expect(calls.every((call) => call.argv[1] !== "rm")).toBe(true);
+    expect(await docker.containers()).toEqual({
+      [ORPHANED_CONTAINER_ID]: {
+        labels: {
+          "icarus.managed": "true",
+          "icarus.run_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        },
+      },
+    });
+  });
+
   it("uses the exact fail-closed Docker argv and a sealed controller environment", async () => {
     const { root, docker, git, evidence, worktreePath } = await runScenario({
       imageConfig: {},

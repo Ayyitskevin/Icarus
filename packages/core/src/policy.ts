@@ -10,8 +10,8 @@ import { IcarusError, invariant } from "./errors.js";
 import type {
   CapabilityGrant,
   CapabilityKind,
-  CheckpointFile,
   CheckProfile,
+  CheckpointFile,
   EditProposal,
   FileEdit,
   FileReplacement,
@@ -30,11 +30,11 @@ const ENCODED_PATH_PATTERN = /%(?:2e|2f|5c)/i;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /**
- * Advanced by ADR 0026 slice 2b: the plan now carries one iteration budget
- * (`iterationCeiling`) in place of the ADR 0024 repair grant, so an approval
- * recorded under the previous policy cannot authorize a session iteration.
+ * Advanced by ADR 0026 slice 2b-ii(b2): explicit grants now drive the wired
+ * production session tools, so newly planned approvals bind the production
+ * authority contract rather than the earlier callable-only surface.
  */
-export const POLICY_VERSION = "session-iterations-v4";
+export const POLICY_VERSION = "session-loop-wiring-v5";
 
 /** Hard host ceiling on operator-selected candidate paths and patch-set size. */
 export const MAX_CHANGED_FILES = 64;
@@ -44,26 +44,30 @@ export const MAX_REPLACEMENTS_PER_FILE = 32;
  * Host ceiling on session iterations a plan may request (ADR 0026, superseding
  * the ADR 0024 repair grant).
  *
- * Three is the measured reachable maximum, not a preference. Under
- * `DEFAULT_CEILING.maxToolCalls` a run costs 12 tool calls before its first
- * iteration and 8 per iteration thereafter, so `12 + 8n <= 40` admits n = 3 and
- * refuses n = 4 with `Tool-call ceiling exhausted`. A larger maximum would
- * advertise headroom that does not exist and would make budget exhaustion —
- * rather than the honest iteration-ceiling landing — the observed stop.
- * `sessionIterationsFitTheToolCallCeiling` in the integration suite pins the
- * arithmetic so the two cannot drift apart.
+ * Two is the measured production maximum, not a preference. A local run costs
+ * 12 tool calls before its first session turn and a remote run costs 13 because
+ * exact egress validation is itself metered. Each full turn then admits one
+ * provider operation plus at most eight tool operations. Two turns therefore
+ * land at 30 locally or 31 remotely under the default ceiling of 40. That
+ * leaves room for restart reconciliation and an operator's atomic review or
+ * rollback; the former three-turn bound did not, so its claimed recovery slot
+ * disappeared on the remote and resumed paths.
  *
- * The 8-per-iteration cost belongs to the reset-and-repropose round this slice
- * inherits. When the interleaved session loop replaces it, re-measure before
- * changing this number — do not raise it on argument.
+ * Raising the global ceiling to fit a preferred iteration count would make the
+ * budget decorative. The integration suite pins local, remote, and resumed
+ * arithmetic so later admission changes cannot silently spend recovery room.
+ *
+ * This arithmetic is the wired interleaved-session worst case. Re-measure it
+ * whenever provider/tool admission changes; do not raise the global ceiling on
+ * argument.
  */
-export const MAX_SESSION_ITERATIONS = 3;
+export const MAX_SESSION_ITERATIONS = 2;
 /**
  * What a plan should request absent a reason to differ. Advisory: nothing
  * enforces it yet, because no host code chooses a plan's ceiling — the provider
  * proposes and the operator approves.
  */
-export const DEFAULT_SESSION_ITERATIONS = 3;
+export const DEFAULT_SESSION_ITERATIONS = 2;
 /**
  * Host ceiling on entries a `read.manifest` grant may admit (ADR 0026). A
  * scope resolving past this is refused at plan validation rather than
@@ -319,7 +323,7 @@ export function parseCapabilityGrants(
       `grant.maxCalls must be an integer between 1 and ${MAX_GRANT_CALLS}`,
     );
 
-    const scope = asStringArray(object.scope, "grant.scope", 0, MAX_GRANT_SCOPE_ENTRIES, 1_024);
+    const scope = asStringArray(object.scope, "grant.scope", 1, MAX_GRANT_SCOPE_ENTRIES, 1_024);
     invariant(
       new Set(scope).size === scope.length,
       "INVALID_PROVIDER_OUTPUT",
@@ -331,7 +335,7 @@ export function parseCapabilityGrants(
         invariant(
           selected.has(assertRepositoryRelativePath(entry)),
           "TARGET_MISMATCH",
-          "mutation.patchset grant names a path outside the operator-selected targets",
+          "mutation.patchset grant names a path outside the approved plan targets",
         );
       }
     }
@@ -415,7 +419,16 @@ export function treeCheckpointDigest(input: {
 export const PLAN_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "steps", "risks", "target", "targets", "iterationCeiling", "checkIds"],
+  required: [
+    "summary",
+    "steps",
+    "risks",
+    "target",
+    "targets",
+    "iterationCeiling",
+    "checkIds",
+    "grants",
+  ],
   properties: {
     summary: { type: "string", minLength: 1, maxLength: 1_000 },
     steps: {
@@ -444,6 +457,26 @@ export const PLAN_SCHEMA = {
       maxItems: 8,
       items: { type: "string", minLength: 1, maxLength: 128 },
       uniqueItems: true,
+    },
+    grants: {
+      type: "array",
+      maxItems: MAX_GRANTS,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "scope", "maxCalls"],
+        properties: {
+          kind: { type: "string", enum: [...CAPABILITY_KINDS] },
+          scope: {
+            type: "array",
+            minItems: 1,
+            maxItems: MAX_GRANT_SCOPE_ENTRIES,
+            items: { type: "string", minLength: 1, maxLength: 1_024 },
+            uniqueItems: true,
+          },
+          maxCalls: { type: "integer", minimum: 1, maximum: MAX_GRANT_CALLS },
+        },
+      },
     },
   },
 } satisfies JsonValue;
@@ -798,7 +831,10 @@ export function parsePlanProposal(
   // Absent grants are an empty list, not a defaulted capability: a plan that
   // does not ask for a capability must not receive one, and a plan authored
   // before ADR 0026 asks for nothing.
-  const grants = parseCapabilityGrants(object.grants ?? [], selection, checks);
+  // Mutation authority is bounded by the paths this plan actually proposes,
+  // not by the broader operator selection from which the provider narrowed
+  // its plan. Read/check grants keep their own independently closed scopes.
+  const grants = parseCapabilityGrants(object.grants ?? [], targets, checks);
 
   return {
     summary: asBoundedString(object.summary, "summary", 1_000),

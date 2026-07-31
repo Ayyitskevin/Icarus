@@ -631,6 +631,38 @@ describe("SQLite run persistence", () => {
     fixture.store.close();
   });
 
+  it("counts every admitted operation kind across failed, refused, and interrupted outcomes", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+    const kind = "tool.read.manifest";
+
+    const failed = fixture.store.beginOperation(UNIT_RUN_ID, kind, 0, 0, 1);
+    fixture.store.finishOperation(failed, {
+      outcome: "failed",
+      activeRuntimeMs: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostUsd: 0,
+      detail: { code: "READ_FAILED" },
+    });
+    const refused = fixture.store.beginOperation(UNIT_RUN_ID, kind, 0, 0, 1);
+    fixture.store.finishOperation(refused, {
+      outcome: "failed",
+      activeRuntimeMs: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostUsd: 0,
+      detail: { code: "CAPABILITY_NOT_GRANTED" },
+    });
+    fixture.store.beginOperation(UNIT_RUN_ID, kind, 0, 0, 1);
+    fixture.store.markStartedOperationsInterrupted(UNIT_RUN_ID);
+
+    expect(fixture.store.countOperationsByKind(UNIT_RUN_ID, kind)).toBe(3);
+    expect(fixture.store.getRun(UNIT_RUN_ID).usage.toolCalls).toBe(3);
+    fixture.store.close();
+  });
+
   it("enforces the token ceiling before reserving provider work", () => {
     const fixture = createUnitStore();
     cleanupRoots.push(fixture.root);
@@ -770,6 +802,43 @@ describe("SQLite run persistence", () => {
     });
     expect(reopened.resumeFailed(UNIT_RUN_ID).state).toBe("running");
     reopened.close();
+  });
+
+  it("uses legacy checkpoint columns only for a legacy edit row", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+    approvePreparedRun(fixture.store);
+    const baselineBase64 = Buffer.from("hello\n", "utf8").toString("base64");
+    const approvedBase64 = Buffer.from("hello, legacy\n", "utf8").toString("base64");
+    fixture.store.recordWorkspace(
+      UNIT_RUN_ID,
+      "/tmp/legacy-cache.git",
+      "/tmp/legacy-worktree",
+      baselineBase64,
+    );
+    const mutator = new Database(fixture.databasePath);
+    mutator.prepare("UPDATE runs SET edit_json = ?, approved_base64 = ? WHERE id = ?").run(
+      JSON.stringify({
+        path: UNIT_PLAN.target,
+        expectedPreimageSha256: sha256("hello\n"),
+        findText: "hello\n",
+        replaceText: "hello, legacy\n",
+        rationale: "Exercise legacy resume compatibility.",
+      }),
+      approvedBase64,
+      UNIT_RUN_ID,
+    );
+    mutator.close();
+    fixture.store.transition(UNIT_RUN_ID, "verifying", "edit.materialized");
+    fixture.store.failRun(
+      UNIT_RUN_ID,
+      "verifying",
+      new IcarusError("INTERRUPTED", "Synthetic legacy verification interruption"),
+    );
+
+    expect(fixture.store.resumeFailed(UNIT_RUN_ID).state).toBe("verifying");
+    fixture.store.close();
   });
 
   it("pages metadata-only contiguous events across reopen and rejects invalid cursors", () => {

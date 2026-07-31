@@ -9,6 +9,9 @@ export interface FakeDockerScenario {
   readonly imageInspectStdout?: string;
   readonly imageInspectExitCode?: number;
   readonly listedContainerIds?: readonly string[];
+  readonly initialContainers?: Readonly<
+    Record<string, { readonly labels: Readonly<Record<string, string>> }>
+  >;
   readonly cleanupFails?: boolean;
   readonly cleanupLeavesContainer?: boolean;
   readonly run?: {
@@ -37,6 +40,9 @@ export interface RecordingDocker {
   readonly binary: string;
   readonly callsPath: string;
   calls(): Promise<readonly FakeDockerCall[]>;
+  containers(): Promise<
+    Readonly<Record<string, { readonly labels: Readonly<Record<string, string>> }>>
+  >;
   waitForCall(predicate: (call: FakeDockerCall) => boolean): Promise<FakeDockerCall>;
 }
 
@@ -49,7 +55,11 @@ export async function createRecordingDocker(
   const callsPath = path.join(root, "fake-docker-calls.jsonl");
   const binary = path.join(root, "fake-docker");
   await writeFile(controlPath, `${JSON.stringify(scenario)}\n`, { mode: 0o600 });
-  await writeFile(statePath, '{"containers":{}}\n', { mode: 0o600 });
+  await writeFile(
+    statePath,
+    `${JSON.stringify({ containers: scenario.initialContainers ?? {} })}\n`,
+    { mode: 0o600 },
+  );
   await writeFile(callsPath, "", { mode: 0o600 });
 
   const source = `#!${process.execPath}
@@ -178,6 +188,14 @@ process.exit(97);
     binary,
     callsPath,
     calls,
+    async containers() {
+      const state = JSON.parse(await readFile(statePath, "utf8")) as {
+        readonly containers: Readonly<
+          Record<string, { readonly labels: Readonly<Record<string, string>> }>
+        >;
+      };
+      return state.containers;
+    },
     async waitForCall(predicate: (call: FakeDockerCall) => boolean): Promise<FakeDockerCall> {
       const deadline = Date.now() + 5_000;
       while (Date.now() < deadline) {

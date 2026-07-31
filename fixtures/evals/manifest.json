@@ -89,12 +89,12 @@
       "target": "src/format_name.py",
       "expectedOutcome": "unsupported",
       "requiredCapability": "multi_file_behavior_preserving_refactor",
-      "plannedMilestone": 7,
+      "plannedMilestone": 2,
       "supportStatus": "unsupported",
       "evaluator": "unsupported_contract",
       "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
       "futureEvidence": ["behavior_equivalence", "multi_file_diff"],
-      "unsupportedReason": "Module-scale refactors need behavior-equivalence evidence beyond the patch-set boundary",
+      "unsupportedReason": "Module-scale refactors need the behavior-equivalence evidence planned for ADR 0036 Gate 2",
       "representativePaths": ["src/format_name.py", "src/profile.py", "checks/test_profile.py"]
     },
     {
@@ -128,15 +128,29 @@
       "repository": "repos/failing",
       "task": "tasks/repair-test.md",
       "target": "src/parser.py",
-      "expectedOutcome": "unsupported",
-      "requiredCapability": "diagnostic_target_selection",
-      "plannedMilestone": 7,
-      "supportStatus": "unsupported",
-      "evaluator": "unsupported_contract",
-      "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
-      "futureEvidence": ["reproduced_failure", "passing_regression"],
-      "unsupportedReason": "Milestone 1 does not diagnose or select a repair target",
-      "representativePaths": ["src/parser.py", "checks/test_parser.py"]
+      "expectedOutcome": "completed",
+      "requiredCapability": "failed_check_session_repair",
+      "plannedMilestone": 1,
+      "supportStatus": "supported",
+      "evaluator": "session_repair_lifecycle",
+      "requiredEvidence": [
+        "full_run_completed",
+        "production_ollama_adapter_http",
+        "reproduced_failure",
+        "approved_manifest_read",
+        "two_charged_session_iterations",
+        "session_patch_applied",
+        "passing_recheck",
+        "operator_selected_target_preserved",
+        "bounded_operation_usage",
+        "source_unchanged",
+        "approval_history"
+      ],
+      "representativePaths": ["src/parser.py", "checks/test_parser.py", "checks/verify.py"],
+      "expectedContextPaths": ["src/parser.py", "README.md"],
+      "baseline": "def parse_enabled(value: str) -> bool:\n    return bool(value)\n",
+      "initial": "def parse_enabled(value: str) -> bool:\n    normalized = value.strip().lower()\n    return normalized in {\"true\", \"false\"}\n",
+      "approved": "def parse_enabled(value: str) -> bool:\n    normalized = value.strip().lower()\n    if normalized == \"true\":\n        return True\n    if normalized == \"false\":\n        return False\n    raise ValueError(f\"unsupported boolean value: {value}\")\n"
     },
     {
       "id": "review-security-issue",
@@ -146,12 +160,12 @@
       "target": "src/files.py",
       "expectedOutcome": "unsupported",
       "requiredCapability": "read_only_security_findings",
-      "plannedMilestone": 7,
+      "plannedMilestone": 2,
       "supportStatus": "unsupported",
       "evaluator": "unsupported_contract",
       "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
       "futureEvidence": ["finding", "severity", "source_location"],
-      "unsupportedReason": "Read-only review runs are deferred",
+      "unsupportedReason": "Read-only security findings are planned for ADR 0036 Gate 2",
       "representativePaths": ["src/files.py", "checks/expected_finding.md"]
     },
     {
@@ -167,7 +181,7 @@
       "evaluator": "unsupported_contract",
       "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
       "futureEvidence": ["provenance", "source_citations"],
-      "unsupportedReason": "Read-only explanation runs are the next planned slice",
+      "unsupportedReason": "Read-only explanation runs are planned for ADR 0036 Gate 2",
       "representativePaths": ["README.md", "config/app.json", "src/main.py", "src/greeting.py"]
     },
     {

@@ -6,7 +6,8 @@ const transitions: Readonly<Record<RunState, ReadonlySet<RunState>>> = {
   planned: new Set(["awaiting_approval", "failed", "cancelling"]),
   awaiting_egress_approval: new Set(["planned", "failed", "cancelling"]),
   awaiting_approval: new Set(["running", "failed", "cancelling"]),
-  running: new Set(["verifying", "failed", "cancelling"]),
+  // Sessions may pause or exhaust at a deliberately non-approvable review.
+  running: new Set(["verifying", "awaiting_review", "failed", "cancelling"]),
   // `running` is the ADR 0024 repair edge: a failed verification may re-enter
   // execution while an approved repair grant and the run's budgets both remain.
   verifying: new Set(["awaiting_review", "running", "failed", "cancelling"]),

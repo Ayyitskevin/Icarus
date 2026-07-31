@@ -7,6 +7,14 @@ task into an auditable sequence of context, plan, approval, isolated change,
 verification, review, and landing or rollback. Ambitious capability is bounded
 by an explicit "sun ceiling" and human decisions.
 
+The accepted product direction in ADR 0036 is to compete for the
+task-to-running-application outcome served by Cursor/VS Code, Replit, and
+Supabase while owning a different center of gravity: proof-carrying authority,
+execution, evidence, and recovery. Icarus will expose that kernel through a
+browser and VS Code extension, land reversible Git changes, orchestrate bounded
+preview environments, and drive isolated Supabase change packs. It will not
+reimplement an editor engine, Postgres, Auth, Storage, or Realtime.
+
 ## First user
 
 Kevin operates multiple Git repositories, local hosts, and explicitly configured
@@ -28,12 +36,14 @@ sandbox, records evidence, and leaves the source checkout untouched. Kevin can
 approve the result, reject it, resume an interrupted stage, roll it back, or
 restore the recorded checkpoint.
 
-When registered checks fail, a plan that requested a repair grant may retry
-within it (ADR 0024): Icarus returns the private worktree to its baseline, asks
-the provider for a corrected patch set using the bounded check evidence, and
-re-verifies. The grant is capped, spent from the durable operation ledger, and
-approved as part of the plan. A run whose grant is exhausted still lands its
-failing evidence for review and cannot be approved.
+The initial approved execution remains one strict provider patch-set attempt.
+When its registered checks fail, a plan with explicit capability grants and a
+positive `iterationCeiling` may enter the bounded session loop (ADR 0026).
+Within at most two charged turns the provider may use only the closed,
+grant-checked read, patch-set, registered-check, done, and human-input tools.
+An `iterationCeiling` of zero remains single-shot. Exhaustion or a human-input
+request lands reviewable evidence with a blocker and cannot be approved;
+completion still requires current passing full-plan checks and human review.
 
 Patch sets may modify existing tracked UTF-8 text files, create paths that do
 not exist, and delete paths that do (ADR 0023). Rename is expressed as a delete
@@ -57,7 +67,8 @@ policy, and the number of changed files is bounded by the project ceiling.
 6. For non-loopback providers, stop before context egress and bind approval to
    the exact context manifest digest.
 7. Generate and persist a concise plan whose digest includes base, context,
-   target, provider/model, checks, sandbox, ceilings, and policy version.
+   targets, the resolved readable-manifest digest, explicit capability grants,
+   provider/model, checks, sandbox, ceilings, and policy version.
 8. Stop in `awaiting_approval`; no private cache, worktree, edit call, or code
    mutation may precede matching plan approval. Durable database/context
    artifacts are required before this gate.
@@ -65,13 +76,20 @@ policy, and the number of changed files is bounded by the project ceiling.
    record the approving actor, timestamp, and exact digest.
 10. Copy the pinned repository into an Icarus-private Git cache without hardlinks
     and create a detached worktree from that cache.
-11. Ask the approved provider for one typed exact replacement against the target
-    path and preimage hash.
+11. Ask the approved provider for one strict transactional patch set over a
+    subset of approved targets. If its formal verification fails, admit only
+    plan-granted session turns and closed tool calls within the remaining run
+    ceilings.
 12. Reject absolute paths, traversal, symlink/hardlink targets, protected paths,
-    binaries, non-unique matches, creates/deletes/mode changes, stale hashes, and
-    proposals over the configured byte ceiling.
-13. Apply the replacement atomically from a private temporary outside the Git
-    worktree, so an interrupted pre-rename write cannot add an unreviewed path.
+    binaries, non-unique replacements, stale preimage hashes, mode changes, and
+    patch sets over configured file/replacement/byte ceilings. Create and delete
+    are explicit patch-set operations; rename is delete plus create.
+13. Persist patch/checkpoint intent before materialization, then apply every file
+    through guarded private temporaries outside the Git worktree. In a session,
+    `propose_patch` is advisory preview/validation only and persists no authority;
+    `apply_patchset` carries and independently revalidates its own exact bounded
+    PatchSet before persisting intent. A partially failed set compensates already
+    applied paths and fails closed.
 14. Run only exact project checks inside a digest-pinned, no-network, read-only
     Docker sandbox with no capabilities, no host secrets, a timeout,
     cancellation, resource limits, and bounded/redacted output. A timed-out or
@@ -83,12 +101,21 @@ policy, and the number of changed files is bounded by the project ceiling.
     restorable checkpoint. Retain every completed bounded verification and its
     diff in append-only history even when the latest run snapshot is replaced;
     interrupted intervals retain only their explicit lifecycle transitions.
-17. Stop in `awaiting_review`; failed checks remain reviewable but cannot be
-    accepted. Completion requires a second human decision, passing checks, and
-    a fresh match between live worktree bytes/path set/diff and the reviewed
-    evidence.
+    A tool operation's finish and any verification/session-terminal evidence it
+    produces must commit atomically.
+17. Stop in `awaiting_review`; failed checks and session human-input/exhaustion
+    blockers remain reviewable but cannot be accepted. Completion requires a
+    second human decision, current passing full-plan checks, no current blocker,
+    and a fresh match between live worktree bytes/path set/diff/checkpoint and
+    the reviewed evidence.
 18. Support status/history, explicit retry after a recoverable interruption,
     rollback, checkpoint restoration, and persisted cancellation recovery.
+    Interrupted provider/tool operations stay charged; session resume reconciles
+    the private checkpoint and reuses only completed-boundary evidence. An apply
+    interrupted after intent persistence resumes from that persisted intent with
+    `unavailable`, non-approvable verification. Finish
+    `review.validate`, rollback, and restore operations in the same transaction
+    as their corresponding state transition.
 19. Support one real local adapter (Ollama HTTP) and one real cloud adapter
     (OpenAI Responses HTTP) without persisting credentials.
 
@@ -164,7 +191,8 @@ ADR 0015 implements this bounded observation contract:
 7. Add no Server-Sent Events, WebSocket, filesystem watcher, schema migration,
    runtime dependency, background daemon, approval, mutation, execution,
    arbitrary-command, commit, push, or deployment authority. The guarded CLI
-   lifecycle and ADR 0010 hold remain unchanged.
+   lifecycle and ADR 0025's residual third-party review/secret-rotation holds
+   remain unchanged.
 
 ## Third M3 bounded older-activity slice
 
@@ -193,7 +221,7 @@ ADR 0016 defines this metadata-only navigation contract:
 7. Add no schema/migration, dependency, write, event append, Git/source read,
    filename/content/diff/check disclosure, stream, watcher, daemon, browser
    approval, execution, command, commit, push, or deployment authority. Preserve
-   portable read-only support and the unresolved ADR 0010 hold.
+   portable read-only support and ADR 0025's residual release holds.
 
 ## Fourth M3 bounded workspace-run slice
 
@@ -227,7 +255,7 @@ ADR 0017 defines this summary-only navigation contract:
 7. Add no schema/migration, dependency, write, event append, deletion, database
    maintenance, Git/source read, new disclosure class, stream, watcher, daemon,
    browser approval, execution, command, commit, push, or deployment authority.
-   Preserve the unresolved ADR 0010 hold.
+   Preserve ADR 0025's residual release holds.
 
 ## Implemented fifth M3 bounded verification-attempt slice
 
@@ -279,7 +307,7 @@ is to:
     creation/rehash, Git/source read, private content disclosure, total count,
     older-attempt navigation, stream, watcher, daemon, browser approval,
     rerun/restore/execution, command, commit, push, deployment, or workflow
-    authority. Preserve ADR 0010.
+    authority. Preserve ADR 0025's residual release holds.
 
 ## Implemented sixth and seventh M3 selected-run presentation slices
 
@@ -331,10 +359,11 @@ ADR 0021 closes the remaining unbounded workspace catalog/transport path:
    `RESPONSE_TOO_LARGE` error. Never return partial JSON or rejected content.
 8. Add no schema/migration, dependency, deletion, Git/source read, provider
    call, browser approval/execution, command, commit, push, deployment, or
-   release authority. Preserve ADR 0010.
+   release authority. Preserve ADR 0025's residual release holds.
 
-These merged read-only observation slices do not complete M3, resolve ADR 0010,
-establish native acceptance, or add browser action authority.
+These merged read-only observation slices do not complete M3, close ADR 0025's
+residual release work, establish native acceptance, or add browser action
+authority.
 
 ## Sun ceiling
 
@@ -355,6 +384,8 @@ additional tool calls and runtime remain visible.
 - Source checkout content, refs, config, index, and worktree metadata remain
   unchanged; private caches own Icarus worktrees.
 - Durable, queryable SQLite state with foreign keys and WAL mode.
+- Capability grants remain in approved `plan_json`; operations and events remain
+  the session record. This session slice adds no table or live schema migration.
 - Crash-safe exact replacement and explicit resume from persisted safe stages.
   An interrupted external operation is charged its full conservative
   reservation before a fresh retry; resume may therefore stop at a ceiling.
@@ -375,13 +406,24 @@ additional tool calls and runtime remain visible.
   kernel lease through `/usr/bin/flock` and `/proc`; execution also inherits
   the Docker sandbox requirements.
 
-## Explicit non-goals
+## Current-slice exclusions and durable non-goals
 
-Public signup, billing, teams, browser-held provider keys, Kubernetes, semantic
-retrieval, arbitrary commands, creates/deletes, binary patches, commits, pushes,
-deployments, application previews, remote API exposure, database migrations,
-customer data, production access, backend-as-a-service primitives, distributed
-execution, accounts, and telemetry.
+The current candidate has no public signup, billing, teams, browser-held
+provider keys, semantic retrieval, commits, pushes, deployments, application
+previews, remote API exposure, customer-data access, production access,
+distributed execution, accounts, telemetry, browser approval/execution, or
+arbitrary provider-native tool path. No roadmap statement implies that any of
+those capabilities exists now.
+
+ADR 0036 deliberately moves semantic retrieval, browser/VS Code actions, gated
+Git landing, previews, deployment adapters, isolated database migrations,
+Supabase integration, and distributed workers into later evidence-gated
+delivery phases. They are deferred capabilities, not permanent non-goals.
+
+Durable non-goals are browser-held provider credentials, model-authored shell
+commands, binary patches, implicit production authority, a proprietary editor
+engine, a proprietary Postgres/Auth/Storage/Realtime replacement, and
+Kubernetes before measured demand justifies a superseding decision.
 
 ## Preserved future contracts
 
@@ -394,10 +436,10 @@ exist in Milestone 1:
 - The first local-workspace slice exposes persisted projects, context metadata,
   task drafts, loopback planning, run state, and allowlisted evidence. The
   accepted second- and third-slice designs add only the bounded observation and
-  metadata-only older-activity contracts above. Later M3 slices may add sessions,
-  current file/status plus multi-file and payload-bearing diff/history
-  navigation, application previews, approvals, checkpoints, prompt history, and
-  token/cost telemetry without placing provider keys in a browser.
+  metadata-only older-activity contracts above. Later M3 slices may add browser
+  action sessions, current file/status plus multi-file and payload-bearing
+  diff/history navigation, application previews, approvals, checkpoints, prompt
+  history, and token/cost telemetry without placing provider keys in a browser.
 - Application-factory templates may add an application starter, API layer,
   database, authentication, storage, realtime events, jobs, vector search,
   environment references, local preview, and deployment configuration only as

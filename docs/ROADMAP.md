@@ -1,36 +1,67 @@
 # Roadmap
 
-`docs/FABLE_ICARUS_VISION.md` supersedes the sequencing of M2-M7 below. Its
-phase 1 — transactional multi-file patch sets — is implemented under ADR 0023,
-which supersedes the ADR 0003 mutation boundary. The milestone records below are
-retained as history and as the source of the release holds that remain open.
+[ADR 0036](adr/0036-proof-carrying-software-factory-product-direction.md)
+supersedes the current product positioning and sequencing in
+`docs/FABLE_ICARUS_VISION.md`. Icarus now targets the governed
+task-to-running-application outcome: a proof-carrying authority kernel with
+browser and VS Code surfaces, reversible Git landing, isolated Replit-class
+environments, and Supabase integration. It will integrate editor and backend
+primitives instead of reimplementing them.
+
+The current sequence is:
+
+| Gate | Product outcome | Exit evidence |
+| --- | --- | --- |
+| 0 | Restore release truth for ADR 0026 | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green |
+| 1 | Verified Change Gate | browser digest approvals plus branch/commit/allowlisted push/draft PR on three repositories; no force-push, merge, deployment, or source-checkout mutation |
+| 2 | Context and agent quality | measured explanation/security/refactor evals, retrieval recall ≥0.90 and precision ≥0.60, first-pass plan acceptance ≥80% |
+| 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 dogfood tasks with ≥70% completed without manual file editing |
+| 4 | Replit-class environments | three preview templates, cold <60s and warm <10s, bounded logs/processes/package egress, proven restart cleanup |
+| 5 | Supabase change packs | isolated migrations/RLS/Auth/Storage/Realtime/functions, rollback/restore and smoke evidence, separate production approval |
+| 6 | Delivery and scale | five concurrent branch-pinned tasks, idempotent worker recovery, signed evidence, explicit public-effect approvals |
+
+Phase 1's transactional PatchSet boundary is implemented under ADR 0023. Phase
+2a's grants, readable manifest, and registry are present. The ADR 0026 slice 2b
+candidate has closed the cold review's remote check-output egress and
+mutation-grant/plan-target defects on the local tree. The full local gate and
+adversarial regressions pass. It remains **HOLD**, not release-ready, because it
+is uncommitted/unpublished and exact-head hosted CI, native acceptance, and the
+remaining release reviews are not yet recorded.
+
+The milestone records below are retained as history and as the source of release
+holds that remain open. Where their order conflicts with ADR 0036, ADR 0036
+governs current sequencing.
 
 ## M0 — Foundation
 
-Status: fresh local and exact implementation-head hosted gates passed; security
-release hold remains (2026-07-19).
+Status: historical foundation gates passed. ADR 0025 later resolved the
+inherited workflow decision by hardening; third-party action review and secret
+rotation remain release work.
 
 Deliver documentation contracts, workspace tooling, CI, security checks, and
 the versioned evaluation fixture catalog.
 
-Release requires Kevin's explicit decision on the inherited OpenCode workflow
-in ADR 0010.
+Release still requires ADR 0025's exact third-party action review and secret
+rotation; the disable-versus-harden decision is closed.
 
 ## M1 — Golden path
 
-Status: fresh local and exact implementation-head hosted gates passed; security
-release hold remains (2026-07-19).
+Status: historical golden-path gates passed; its one-file mutation boundary was
+superseded by ADR 0023's transactional PatchSets and its fixed repair by ADR
+0026's failed-verification session.
 
 Deliver one planned, approved, isolated, verified, reviewable, resumable, and
-reversible one-file change with Ollama and OpenAI adapters.
+reversible transactional PatchSet with Ollama and OpenAI adapters. A failed
+initial attempt may use the separately approved, bounded ADR 0026 session; its
+operator-selected-target lifecycle is covered by the executable fixture eval.
 
 Exit gate: every item in `docs/PLANS.md` Phase A-D, Repair continuation, and
 Final adversarial continuation is checked with evidence, hosted `ci` is green
-at the exact candidate commit, and the ADR 0010 security hold is resolved.
+at the exact candidate commit, and ADR 0025's residual release work is closed.
 
 ## M2 — Context intelligence
 
-Status: planned.
+Status: historical planning record — superseded by ADR 0036 Gate 2.
 
 Add syntax-aware maps, deterministic task/file matching, LSP diagnostics,
 language/framework detection, project rules and skills, `rg`-based search,
@@ -39,11 +70,12 @@ evals, context budget allocation, and retrieval-quality fixtures.
 
 ## M3 — Workspace UI
 
-Status: eight bounded observation slices are merged with recorded local,
-independent-review, and exact implementation-head hosted evidence. Native macOS
-and Windows host acceptance remains pending, the approval-index rollout against
-existing state remains operator-gated, and ADR 0010 independently blocks
-release. Full M3 remains open.
+Status: historical implementation record. Eight bounded observation slices were
+merged with recorded local, independent-review, and exact implementation-head
+hosted evidence. Native macOS and Windows host acceptance remained pending, the
+approval-index rollout against existing state remained operator-gated, and ADR
+0025's residual work independently blocked release. The unclosed browser
+authority and execution outcome is now governed by ADR 0036 Gate 1.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
@@ -161,21 +193,20 @@ copy. The slice adds no schema, source read, provider call, or browser action.
 
 ## M4 — Runtime and previews
 
-Status: planned.
+Status: historical planning record — superseded by ADR 0036 Gates 2 and 4.
 
 Add stronger sandbox profiles, declared application commands, local preview,
 environment references, resource limits, and crash recovery drills.
 
-Add capability-aware provider routing only after task/context evaluation has a
-measured baseline. Route private/routine work to local models, ordinary reasoning
-to configured mid-cost APIs, and difficult planning/review to explicitly
-approved frontier models. Add Anthropic, xAI, GLM, and other adapters one at a
-time with capability metadata, pricing/privacy policy, and production-adapter
-contract tests; never silently substitute providers.
+The retained routing direction requires a measured task/context baseline.
+Anthropic is already implemented in the current candidate. Any xAI, GLM, or
+other adapter must arrive one at a time with capability metadata,
+pricing/privacy policy, and production-adapter contract tests; providers are
+never silently substituted.
 
 ## M5 — Backend platform
 
-Status: planned.
+Status: historical planning record — superseded by ADR 0036 Gate 5.
 
 Add only primitives demanded by an Icarus-managed application: PostgreSQL,
 authentication, storage, realtime events, vector search, and background jobs.
@@ -186,7 +217,7 @@ local orchestration; Kubernetes remains out of scope.
 
 ## M6 — Multi-agent and fleet workers
 
-Status: planned.
+Status: historical planning record — superseded by ADR 0036 Gate 6.
 
 Add isolated parallel sessions, role specialization, job envelopes, Mickey/Flow
 worker scheduling, Highwind capability routing, heartbeats, retries,
@@ -195,24 +226,28 @@ separate node and retain Zenbook as an operator client rather than a worker.
 
 ## M7 — Dogfood and hardening
 
-Status: planned.
+Status: historical planning record — its measurable continuation is distributed
+across ADR 0036 Gates 0–6.
 
 Use safe clones/worktrees of the fixture app and, only with explicit scope,
-Mise, Kleephotography, Athena, and Chronos. Add the deferred repair, refactor,
-diagnostic, and review capability gates before widening autonomy. Live
-production, customer data, deployment targets, schema changes, and secrets
-remain human-gated and outside automatic dogfood.
+Mise, Kleephotography, Athena, and Chronos. Use the landed bounded
+`repair-failing-test` evaluator as the fixture baseline, then add the
+still-deferred autonomous diagnostic, refactor, and review capability gates
+before widening autonomy. Live production, customer data, deployment targets,
+schema changes, and secrets remain human-gated and outside automatic dogfood.
 
 ## Current release and acceptance gates
 
-The merged observation slices do not complete M3 or authorize release. Preserve
-the ADR 0010 security hold. Native acceptance requires successful exact-commit
-macOS and Windows jobs under ADR 0022. Existing non-test state requires a
-verified backup and explicit operator approval before the approval-index
-migration. Every future release candidate still requires fresh local evidence,
-independent review, and exact published-head hosted CI.
+The merged observation slices and current session candidate do not complete M3
+or authorize release. Preserve ADR 0025's third-party action review and secret
+rotation holds. Native acceptance requires successful exact-commit macOS and
+Windows jobs under ADR 0022. Existing non-test state requires a verified backup
+and explicit operator approval before the approval-index migration. Every
+future release candidate still requires fresh local evidence, independent
+review, and exact published-head hosted CI.
 
 Older approval pagination, current file/status views, multi-file or raw payload
-diff/history, complete checkpoint inspection, patch materialization, browser
-approval, rerun/restore, and execution remain separate expansions until
-explicitly designed and evidenced.
+browser diff/history, complete browser checkpoint inspection, browser approval,
+rerun/restore, and execution remain separate expansions until explicitly
+designed and evidenced. CLI PatchSet materialization and the failed-verification
+session are no longer deferred.

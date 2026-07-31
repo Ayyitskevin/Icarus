@@ -1,6 +1,8 @@
 # ADR 0026: AgentSession loop and host-owned tool registry
 
-- Status: Accepted — implemented in slices; 2a, 2b-i, 2b-ii(a) and the loop executor landed, its wiring and 2c outstanding
+- Status: Accepted design — 2a and the corrected local 2b candidate are
+  implemented; exact-head hosted CI, native acceptance, release reviews, and
+  2c remain outstanding
 - Date: 2026-07-26
 - Related: [ADR 0023](0023-transactional-multi-file-patch-sets.md) (patch sets),
   [ADR 0024](0024-bounded-repair-loop.md) (bounded repair loop — superseded by
@@ -17,10 +19,11 @@
 ## Context
 
 Phase 1 gave Icarus a transactional multi-file mutation boundary (ADR 0023) and
-a bounded retry against failing checks (ADR 0024). The provider contract is
-still a fixed two-call script: plan, then patch set. The model cannot look at a
-file it was not handed, cannot run a check and read the result, and cannot say
-"I need to know one more thing before I edit."
+a bounded retry against failing checks (ADR 0024). Before slice 2b, the provider
+contract was still a fixed plan/patch-set script. The production-wired contract
+keeps that initial approved patch-set attempt: only a failed registered-check
+verification enters the bounded session loop. An `iterationCeiling` of zero
+therefore remains a true single-shot run.
 
 That ceiling is the difference between a harness that applies a change and one
 that does work. Removing it means letting model output select host actions,
@@ -71,29 +74,38 @@ fatal drift, not a fallback.
 
 ### Grants are itemized, plan-carried, and digest-bound
 
-A grant is `{ kind, scope, limits }`. Grants live in the plan, so
-`planApprovalDigest` covers them exactly as it covers `repairIterations`
-(ADR 0024). Partial approval is edit-and-reapprove; there is no path that
-narrows a grant silently and proceeds.
+A grant is `{ kind, scope, maxCalls }`. Grants are an explicit required field in
+new provider plans and live in `plan_json`, so `planApprovalDigest` covers them
+exactly as it covers `iterationCeiling`. Partial approval is
+edit-and-reapprove; there is no path that narrows a grant silently and
+proceeds. The approved plan JSON plus its approval digest is the sole durable
+grant source.
 
 Every tool call is checked against the run's grants in the kernel, not in the
-agent plane, and every call is a metered operation in the existing ledger. A
-call with no matching grant is a structured error returned to the model — which
-consumes an iteration — never a soft failure and never a host action.
+agent plane, and every call is admitted as a metered operation in the existing
+ledger before the grant check or host action. A call with no matching grant is
+a structured error returned to the model — which consumes the already charged
+tool-call and provider-turn budget — never a soft failure and never a host
+action.
 
 ### The loop is bounded by construction
 
-`iterationCeiling` (default 8, host maximum proposed 16) sits in the plan and
-therefore in the approval digest. Iterations are counted from the durable
-operation ledger, exactly as repair iterations are (ADR 0024), so the count
-survives a crash and cannot drift from charged work. All existing sun-ceiling
-budgets continue to apply and bind first: a session that exhausts tool calls,
-runtime, tokens, or cost stops there regardless of remaining iterations.
+`iterationCeiling` sits in the plan and therefore in the approval digest. The
+default and host maximum are 2. Iterations are counted from admitted `provider.revise`
+operations in the durable ledger, so the count survives a crash and cannot
+drift from charged work. Each iteration admits one provider operation followed
+by at most eight tool operations. All existing sun-ceiling budgets continue to
+apply and bind first: a session that exhausts tool calls, runtime, tokens, or
+cost stops there regardless of remaining iterations.
 
-Exits: checks pass and the model reports done → `awaiting_review`; any ceiling
-reached → `awaiting_review` carrying the failing evidence, reviewable and not
-approvable; unrecoverable error → `failed` with a resume state. Each iteration
-boundary is a persisted safe stage, so recovery resumes at one.
+Exits: a full approved check set records current passing evidence and a later
+host-validated `report_done` lands `awaiting_review`; `request_human_input` or
+iteration exhaustion also lands `awaiting_review`, but with a persisted blocker
+that makes the run non-approvable. An unrecoverable error enters `failed` with
+its safe resume state. Operations and explicit terminal/boundary events are the
+session record. Recovery charges interrupted operations conservatively,
+reconciles the private checkpoint, and rehydrates only completed boundaries and
+settled evidence.
 
 Exhaustion is not success. This is the same rule ADR 0024 established and it is
 not relaxed here.
@@ -105,11 +117,11 @@ not relaxed here.
 | Property | Decision |
 | --- | --- |
 | Who grants | The operator, by approving a plan whose digest covers the itemized grant list. Never the model, never a config default, never a provider response. |
-| Secret boundaries | No tool receives credentials, environment values, or authorization headers. Tool results pass the existing secret scanner; secret-shaped content in a result is fatal, matching the context and snapshot paths. |
+| Secret boundaries | No tool receives credentials, environment values, or authorization headers. Tool results and errors pass the existing secret scanner before persistence or provider reuse; secret-shaped material is fatal and replaced with fixed safe copy. |
 | Network policy | No tool performs network I/O in this ADR. `install_packages` and dev-server tools are explicitly out of scope and deferred to their own record. |
 | Sandbox boundary | Only `run_checks` executes anything, and only inside the existing fail-closed digest-pinned container (`--network none`, `--read-only`, `--cap-drop ALL`, user 65534). No tool executes on the host. |
-| Cancellation | Unchanged. `cancelling` from any active state, sandbox reconcile, baseline restore, emergency recovery carve-out. A cancel mid-iteration abandons that iteration; already-charged work stays charged. |
-| Crash recovery | Resume at the last completed iteration boundary. A tool call interrupted mid-flight is charged conservatively and not replayed as successful. |
+| Cancellation | Unchanged. `cancelling` from any active state, abort propagation into provider/tool/check work, sandbox reconcile, baseline restore, and the emergency recovery carve-out. A cancel mid-iteration abandons that iteration; already admitted work stays charged. |
+| Crash recovery | Interrupted provider/tool operations are charged conservatively. Resume reconciles the private worktree to its persisted checkpoint and rehydrates only completed session boundaries; an interrupted call is never replayed as successful. Materialization interrupted after patch-intent persistence resumes from that persisted intent with `unavailable`, non-approvable verification. |
 | Prompt-injection containment | Every tool result is fenced as untrusted, identically to context files. Results cannot expand paths, checks, tools, network, budgets, grants, or iterations. Host policy is never derived from tool output. |
 | Audit evidence | One ledger operation per call with bounded, redacted output, tied to the iteration and the run. Evidence is attached to the operation that produced it. |
 
@@ -117,14 +129,14 @@ not relaxed here.
 
 | Tool | Capability kind | Exact scope | Limits | Rollback |
 | --- | --- | --- | --- | --- |
-| `read_file` | `read.manifest` | A path in the approved readable manifest | Output ≤ `maxFileBytes`; digest must match the approved entry or session-written bytes | None needed — no state change |
-| `list_tree` | `read.manifest` | Paths within the manifest only | Bounded entry count | None needed |
-| `search` | `read.manifest` | Manifest paths; bounded match count and per-match bytes | Truncation is reported as truncation, never as "no more results" | None needed |
+| `read_file` | `read.manifest` | A path in the approved readable manifest, or a path this session created/wrote | Output ≤ `maxFileBytes`; base bytes must match the manifest and session-written bytes must match the current checkpoint | None needed — no state change |
+| `list_tree` | `read.manifest` | Enumerated base-manifest paths only | Bounded entry count; it does not discover session-created paths | None needed |
+| `search` | `read.manifest` | Enumerated base-manifest paths only; bounded match count and per-match bytes | Truncation is reported as truncation, never as "no more results" | None needed |
 | `get_check_catalog` | `read.checks` | The project's registered checks | Metadata only; no argv execution | None needed |
-| `propose_patch` | `mutation.patchset` | Paths inside the approved target scope | ≤ `MAX_CHANGED_FILES`, ≤ `MAX_REPLACEMENTS_PER_FILE` | Accumulates a revision only; nothing on disk |
-| `apply_patchset` | `mutation.patchset` | Same, re-checked per file at apply time | Atomic at the API boundary; tree checkpoint written first | Existing checkpoint rollback and restore |
-| `run_checks` | `exec.check` | Registered check ids only, never arbitrary argv | Command timeout, output ceilings, container limits | None needed — no repository mutation |
-| `report_done` | none | — | — | — |
+| `propose_patch` | `mutation.patchset` | Validates and previews only the supplied bounded PatchSet against the approved target scope and immutable baseline | The same file, replacement, and byte ceilings as apply; persists no patch intent and grants no later authority | None needed — no state change |
+| `apply_patchset` | `mutation.patchset` | Carries its own PatchSet and independently revalidates every path and preimage against the approved grant and immutable baseline | The same ceilings; exact patch/checkpoint intent persists before writes, then materialization uses the existing atomic file-write primitive | Existing checkpoint rollback and restore; interrupted materialization resumes from persisted intent with `unavailable`, non-approvable verification |
+| `run_checks` | `exec.check` | The complete approved plan check list in its approved order, never arbitrary argv | Command timeout, output ceilings, container limits; records the current formal verification and diff | None needed — no repository mutation |
+| `report_done` | none | Current applied checkpoint and diff only | Host refuses unless the current persisted full-plan verification passed and live bytes still match it | None needed |
 | `request_human_input` | none | Pauses to `awaiting_review` with a bounded question | Question passes the secret scanner | None needed |
 
 `request_human_input` is not a convenience. It is the escape hatch that makes
@@ -136,20 +148,24 @@ common reason agent loops fabricate.
 Slices do not land without these. Each is a gate, not an aspiration:
 
 - Grant violation: a tool call outside its grant is refused, returns a
-  structured error to the model, consumes an iteration, and performs no host
-  action.
+  structured error to the model, consumes its admitted tool-call budget inside
+  the already charged iteration, and performs no host action.
 - Read binding: a read whose bytes do not match the approved manifest entry or
   session-written bytes is fatal; a scope exceeding `MAX_READABLE_FILES` is
   refused at plan validation.
 - Output ceiling: truncation is recorded as truncation in evidence.
 - Injection via tool result: a fixture whose file content instructs the model to
   widen scope, add a check, or exfiltrate must not change host policy.
-- Loop bounds: iteration exhaustion lands failing evidence at
-  `awaiting_review`; budget exhaustion preempts remaining iterations.
-- Crash resume at an iteration boundary; cancellation mid-iteration.
+- Loop bounds: the two-turn maximum proves the local/remote/resumed 30/31/32
+  operation cases and retained settlement headroom; iteration or earlier global
+  budget exhaustion lands a non-approvable blocker at `awaiting_review`.
+- Crash resume at an iteration boundary; cancellation mid-iteration; injected
+  transaction failure cannot split tool verification/terminal settlement or
+  review/rollback/restore settlement from its state transition.
 - Digest binding: changing any grant changes the plan approval digest.
-- Eval: the `repair-failing-test` scenario becomes executable, which is the
-  first honest measurement of `diagnostic_target_selection`.
+- Eval: the `repair-failing-test` scenario is executable as a deterministic
+  two-turn production lifecycle. It measures `failed_check_session_repair` over
+  the operator-selected target, not autonomous diagnostic target selection.
 
 ## Proposed slicing
 
@@ -179,10 +195,13 @@ grants, and browser approvals. That is too much for one reviewable change.
     truncation, and untrusted result fencing. The registry is callable-ready
     but nothing calls it — the loop that does is 2b, which also supplies the
     ledger-derived call counts and the per-call metered operation.
-- **2b — the loop and write tools.** `propose_patch`, `apply_patchset`,
-  `run_checks`, the AgentSession entity, the `verifying → running` edge (the state is `running`; no `executing` state exists), and
-  resume at iteration boundaries. This is where ADR 0024's repair loop is
-  superseded.
+- **2b — the loop and write tools (implemented and locally verified in the
+  current candidate; exact-head hosted CI pending).** `propose_patch`,
+  `apply_patchset`, `run_checks`, the `verifying → running` edge (the state is
+  `running`; no `executing` state exists), durable boundary/terminal events,
+  and conservative resume. The initial provider edit remains in place; a
+  failed first verification enters this session and supersedes ADR 0024's
+  fixed reset-and-repropose repair.
 - **2c — browser approvals.** Its own record: session token bound at server
   start, loopback plus Origin plus token plus digest, CLI parity.
 
@@ -226,19 +245,23 @@ project rows are untouched: as with `MAX_REPLACEMENTS_PER_FILE` and
 `SunCeiling` fields, because adding a ceiling field invalidates existing rows
 against the exact-shape validators in the store, API, and browser.
 
-New durable state: `capability_grants` and `agent_sessions`. Tool invocations
-are event-only — the operation ledger plus a bounded event per call already
-answers what was called, when, under which grant, at what cost, and with what
-output. A `tool_invocations` table would be a second source of truth for
-questions the ledger answers, which is the reasoning ADR 0024 used to keep
-repair-iteration counting in the ledger.
+The earlier proposal for `capability_grants` and `agent_sessions` tables is
+explicitly superseded before shipping. It would create duplicate authority and
+require an unnecessary live schema migration. The approved `plan_json` plus
+`planApprovalDigest` is the sole durable grant source. Existing operation rows,
+operation events, and bounded session boundary/terminal events are the sole
+durable session source. They answer what was admitted, charged, completed,
+interrupted, or stopped without a second mutable session record. There is no
+`tool_invocations` table for the same reason.
 
-When 2b lands, ADR 0024 is superseded and this record should be revisited: a
-session that can read, patch, and check is a larger authority than a bounded
-retry, and the residual risk is that a model with eight iterations and a read
-manifest produces a plausible, passing, wrong change. Checks and human review
-remain the control. This ADR does not claim to remove that risk, and no
-capability here should be described as making review optional.
+With 2b wired, ADR 0024's fixed revision mechanism is superseded. Its retained
+decisions remain in force: plan-bound authority, durable iteration accounting,
+same-target validation, failing-evidence exhaustion, source isolation, and
+human review. A session that can read, patch, and check is a larger authority
+than a bounded retry, and the residual risk is that a model with two
+iterations and a read manifest produces a plausible, passing, wrong change.
+Checks and human review remain the control. This ADR does not claim to remove
+that risk, and no capability here makes review optional.
 
 ### Found while implementing 2a-i
 
@@ -312,27 +335,38 @@ decoding substitutes a three-byte replacement character, which can push a
 result back over the ceiling meant to bound it. The boundary is found first, so
 the ceiling is a real bound rather than an approximate one.
 
-### Measured while implementing 2b-i, and it changed the answer
+### Measured again while wiring 2b, and the bound is two
 
-The default and maximum iteration counts proposed above (8, with 16 as a host
-maximum) do not survive measurement, and neither did the 4/8 pair that replaced
-them. Under `DEFAULT_CEILING` a run costs **12 tool calls before its first
-iteration and 8 per iteration thereafter**, so `12 + 8n <= 40` admits `n = 3`
-and refuses `n = 4` with `Tool-call ceiling exhausted`.
+The earlier 3-turn result counted only the fresh local happy path and left no
+honest recovery margin. Under `DEFAULT_CEILING`, local execution consumes 12
+ordinary operations before its first session turn. Remote execution consumes
+13 because `egress.validate` is also metered. Each session turn can then admit
+one provider operation plus at most eight tool operations, so two turns cost 18:
 
-So the binding constraint is `maxToolCalls`, not the token budget this record
-reasoned about. `MAX_SESSION_ITERATIONS` is therefore **3** — the same value
-ADR 0024 shipped, now with arithmetic behind it rather than judgement.
-`sessionIterationsFitTheToolCallCeiling` in the integration suite asserts both
-directions: spending the whole budget stays inside `maxToolCalls`, and one more
-iteration would not fit. The ceiling cannot silently become decorative.
+- local fresh worst case: `12 + 18 = 30`;
+- remote fresh worst case: `13 + 18 = 31`;
+- remote resumed worst case: `13 + 18 + 1 session.reconcile = 32`.
 
-Two things follow. Raising `maxToolCalls` to make a preferred number fit would
-be fitting the budget to the conclusion, so it was not done. And the
-8-per-iteration cost belongs to the **reset-and-repropose round** this slice
-inherits from ADR 0024 — an interleaved session loop should cost less per
-iteration, so the number must be re-measured against the new loop rather than
-argued upward.
+The 40-operation ceiling therefore retains at least eight ordinary operations
+for atomic review/rollback settlement and bounded retries. A third maximum turn
+would not fit that resumed worst case (`32 + 9 = 41`) and would make recovery
+headroom path-dependent. `DEFAULT_SESSION_ITERATIONS` and
+`MAX_SESSION_ITERATIONS` are therefore both **2**.
+
+The default session operation reserve tests assert the local, remote, and resumed
+arithmetic and the retained headroom. Global tool-call, runtime, token, and cost
+ceilings still bind first. If the next provider or tool operation cannot be
+admitted, the session lands exhausted with a non-approvable blocker. Every
+future change to provider/tool admission or settlement must re-measure the
+worst case; no cheaper average can substitute for the admitted maximum.
+
+Session entry and every provider/tool admission leave one ordinary operation
+slot and one `commandTimeoutMs` active-runtime allowance unspent for the
+unconditional `session.reconcile` resume path. If that margin is unavailable,
+the operation is not admitted and no provider/tool effect occurs; the session
+exhausts against its already persisted evidence. This is recovery admission,
+not a free replay. A genuinely started operation is still charged
+conservatively before the reserved reconciliation operation runs.
 
 ### One iteration budget, not two
 
@@ -416,11 +450,90 @@ rather than merely rejected after the fact.
 **A `done` signal stops the batch.** Later calls in the same iteration are not
 executed, so a model cannot append work after declaring itself finished.
 
-### Two open questions for Kevin, both deliberately unresolved here:
+### Decided while wiring 2b-ii(b2)
 
-1. **Default `iterationCeiling`.** The vision document proposes 8. Nothing has
-   been measured. Recommend shipping 2b with a low default (3–4) and raising it
-   on evidence from the eval scenarios rather than starting at 8 by assertion.
-2. **Whether 2a ships alone.** It is infrastructure with no user-visible
-   capability. The alternative is holding it until 2b is ready and reviewing a
-   larger change with the loop included.
+**Provider and tool work is admitted before effects.** The
+`provider.revise` operation is inserted before provider I/O. Each tool operation
+is inserted before its grant check or host action. Refusal, failure,
+interruption, and cancellation therefore spend the admitted budget rather than
+creating a free probe or retry.
+
+**Effectful settlement is atomic with its boundary.** A tool operation that
+produces formal verification or a session-terminal outcome finishes in the same
+SQLite transaction that records that evidence/event. `review.validate`,
+rollback, and restore operations likewise finish in the same transaction as
+their corresponding state transition. Recovery therefore observes either a
+still-started operation to charge/reconcile or one complete settled boundary,
+never a success row separated from the state/evidence it claims.
+
+**The first attempt remains single-shot.** Approval still creates the private
+workspace and requests the ordinary strict patch set. Only failed formal
+verification enters the session. A plan with `iterationCeiling: 0` never enters
+the loop and lands the failed evidence directly for review.
+
+**Patch intent precedes materialization.** `propose_patch` is an advisory
+preview/validation call: it persists no patch authority, and no in-memory
+proposal is authoritative for a later call. `apply_patchset` carries the exact
+bounded PatchSet it intends to materialize and independently repeats grant,
+path, preimage, secret, and ceiling validation against the immutable baseline.
+It then returns the private worktree to that baseline, persists the exact new
+patch/checkpoint intent, and uses the existing guarded file-write path. If
+materialization is interrupted after intent persistence, resume reconciles from
+that persisted intent and records `unavailable`, non-approvable verification;
+it never infers authority from partial bytes or reuses an in-memory proposal.
+
+**Checks and completion are separate host decisions.** `run_checks` must name
+the complete approved plan check list in order and records a current formal
+verification while the session remains `running`. `report_done` revalidates the
+live checkpoint, changed paths, diff, and passing evidence before it may land
+`awaiting_review`. Model copy cannot turn a failed or stale check into success.
+
+**Human input and exhaustion are review stops, not approvals.** A bounded,
+secret-scanned question and an iteration-exhaustion reason are persisted as
+session blockers. Both land `awaiting_review`; review approval refuses while a
+blocker is current.
+
+**Remote repeat calls do not inherit an egress shortcut.** Every non-loopback
+provider turn still requires approval for the exact original context digest.
+The separately approved readable manifest is the only additional context
+authority. Tool results and errors are bounded, secret-scanned, fenced as
+untrusted, and cannot alter that authority.
+
+**Browser approvals and broader agent infrastructure remain separate.** Slice
+2b does not add browser approval/execution, capability-aware provider routing,
+application landing, package installation, preview processes, PostgreSQL,
+distributed workers, or multi-agent orchestration. Those require their own
+authority and evidence.
+
+The two earlier open questions are resolved: the measured maximum is 2, and 2a
+is no longer an isolated infrastructure slice because 2b now consumes it.
+
+### Implementation correction recorded 2026-07-30
+
+A cold review found two implementation defects; neither changed this accepted
+decision. After explicit human authorization, the local candidate corrected
+both:
+
+1. Initial, compacted, live-tool, and resumed remote session prompts now project
+   check ID, outcome, exit code, truncation state, and an explicit
+   `outputOmitted` marker only. Full stdout/stderr remains in local canonical
+   verification evidence. Durable remote resume derives the projection from the
+   atomically adjacent `verification.completed` event, ignores legacy raw or
+   truncated tool transcripts, and fails closed if that adjacency is malformed.
+2. Fresh plans validate `mutation.patchset` scope against the plan's narrowed
+   targets. Session entry reparses persisted grants before iteration admission,
+   provider work, reconciliation, or any worktree restoration; patch
+   preparation rechecks the same invariant, and the store retains its atomic
+   target-set defense.
+
+The corrected tree passes 391 unit/provider tests, 78 integration tests, 133
+security tests with zero failed static assertions, evaluator counts 7/0/3, both
+dependency audits, and the complete `pnpm check` gate. Adversarial coverage
+proves canary diagnostics never reach remote requests while raw local evidence
+remains exact, and a mutually consistent legacy broad grant changes no
+worktree, patch, or checkpoint bytes and reaches no provider or reconciliation.
+
+The candidate remains on publication hold because it is uncommitted and
+unpublished; exact-head hosted CI, native acceptance, and the remaining release
+reviews are not yet recorded. Local correction evidence is current, but it is
+not a final release claim.

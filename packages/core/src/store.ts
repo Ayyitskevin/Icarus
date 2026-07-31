@@ -22,8 +22,8 @@ import { assertTransition } from "./state-machine.js";
 import type {
   ApprovalRecord,
   CapabilityGrant,
-  CheckpointFile,
   CheckProfile,
+  CheckpointFile,
   ContextManifest,
   EditProposal,
   EventRecord,
@@ -69,6 +69,14 @@ export const CANCELLATION_RECOVERY_OPERATION_KIND = "cancellation.recovery";
 export const SESSION_ITERATION_OPERATION_KIND = "provider.revise";
 export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
+const SESSION_CHECK_OPERATION_KIND = "session.tool.exec.check";
+const SESSION_PATCH_OPERATION_KIND = "session.tool.mutation.patchset";
+const SESSION_RECONCILE_OPERATION_KIND = "session.reconcile";
+const SESSION_REPORT_DONE_OPERATION_KIND = "session.control.report_done";
+const SESSION_REQUEST_HUMAN_OPERATION_KIND = "session.control.request_human_input";
+const REVIEW_VALIDATION_OPERATION_KIND = "review.validate";
+const CHECKPOINT_ROLLBACK_OPERATION_KIND = "checkpoint.rollback";
+const CHECKPOINT_RESTORE_OPERATION_KIND = "checkpoint.restore";
 export const RUN_EVENT_PAGE_LIMIT = 64;
 export const RUN_PRESENTATION_EVENT_LIMIT = 200;
 export const RUN_PRESENTATION_APPROVAL_LIMIT = 12;
@@ -1882,6 +1890,9 @@ export class IcarusStore {
     actor: string,
     decision: "approve" | "reject",
   ): RunRecord {
+    if (decision === "approve") {
+      this.#assertSessionCompletedForApproval(runId);
+    }
     return this.#validateApprovalRequest(runId, reviewApprovalTransition(digest, actor, decision));
   }
 
@@ -1891,7 +1902,11 @@ export class IcarusStore {
     actor: string,
     decision: "approve" | "reject",
   ): RunRecord {
-    return this.#approveAndTransition(runId, reviewApprovalTransition(digest, actor, decision));
+    return this.#approveAndTransition(
+      runId,
+      reviewApprovalTransition(digest, actor, decision),
+      decision === "approve" ? () => this.#assertSessionCompletedForApproval(runId) : undefined,
+    );
   }
 
   approveRollback(runId: string, digest: string, actor: string): RunRecord {
@@ -2065,10 +2080,12 @@ export class IcarusStore {
       }
       const result = this.#database
         .prepare(
-          `UPDATE runs SET version = version + 1, updated_at = ?
+          `UPDATE runs SET diff = CASE WHEN ? THEN NULL ELSE diff END,
+           verification_json = CASE WHEN ? THEN NULL ELSE verification_json END,
+           version = version + 1, updated_at = ?
            WHERE id = ? AND state = 'running'`,
         )
-        .run(now, runId);
+        .run(supersedes === null ? 0 : 1, supersedes === null ? 0 : 1, now, runId);
       invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
       this.#appendEvent(runId, "patch_set.intent_recorded", {
         paths: editPaths,
@@ -2100,6 +2117,41 @@ export class IcarusStore {
   /** Remaining approved repair attempts for a run (ADR 0024). */
   remainingIterationBudget(runId: string): number {
     return this.#iterationBudgetRemaining(this.getRun(runId));
+  }
+  /**
+   * True only when a completed failing verification is the latest event that
+   * established the verifying state. This lets crash recovery enter the
+   * already-earned repair session without rerunning checks, while a later
+   * restore still forces fresh verification.
+   */
+  sessionRepairReady(runId: string): boolean {
+    const run = this.getRun(runId);
+    if (
+      run.state !== "verifying" ||
+      run.verification?.outcome !== "failed" ||
+      this.#iterationBudgetRemaining(run) === 0
+    ) {
+      return false;
+    }
+    const latest = this.#database
+      .prepare(
+        `SELECT type, payload_json FROM run_events
+         WHERE run_id = ?
+           AND type IN ('verification.completed', 'restore.completed')
+         ORDER BY sequence DESC LIMIT 1`,
+      )
+      .get(runId);
+    if (latest === undefined) return false;
+    const event = row(latest, "session repair boundary");
+    if (text(event.type, "run_events.type") !== "verification.completed") return false;
+    const payload = parseJson<unknown>(event.payload_json, "run_events.payload_json");
+    invariant(
+      typeof payload === "object" && payload !== null && !Array.isArray(payload),
+      "DATABASE_ERROR",
+      "Session repair boundary payload is invalid",
+    );
+    const boundary = payload as Record<string, unknown>;
+    return boundary.to === "verifying" && boundary.outcome === "failed";
   }
 
   #iterationBudgetRemaining(run: RunRecord): number {
@@ -2135,6 +2187,298 @@ export class IcarusStore {
   }
 
   /**
+   * Tool-grant spend is derived from durable operation admission, including
+   * refused, failed, and interrupted calls. Counting started rows means a
+   * process crash cannot resurrect capability budget.
+   */
+  countOperationsByKind(runId: string, kind: string): number {
+    invariant(
+      kind.length > 0 && kind.length <= 128 && !/[\r\n\0]/.test(kind),
+      "INVALID_OPERATION_KIND",
+      "Operation kind is invalid",
+    );
+    this.getRun(runId);
+    const value = row(
+      this.#database
+        .prepare("SELECT COUNT(*) AS total FROM operations WHERE run_id = ? AND kind = ?")
+        .get(runId, kind),
+      "operation kind count",
+    );
+    return numberValue(value.total, "operations.total");
+  }
+
+  /**
+   * Appends an iteration boundary only after its complete emitted batch has
+   * settled. Provider/tool operations remain the source of spend; this event
+   * is resumable evidence, not another counter.
+   */
+  recordSessionIterationBoundary(runId: string, iterations: number): RunRecord {
+    invariant(
+      Number.isSafeInteger(iterations) && iterations > 0,
+      "INVALID_SESSION_ITERATION",
+      "Session iteration boundary is invalid",
+    );
+    const transaction = this.#database.transaction(() => {
+      const current = this.getRun(runId);
+      invariant(
+        current.state === "running" || current.state === "awaiting_review",
+        "INVALID_STATE",
+        "Session iteration is not active",
+      );
+      invariant(
+        iterations === this.countSessionIterations(runId),
+        "INVALID_SESSION_ITERATION",
+        "Session iteration boundary does not match durable provider admission",
+      );
+      const latest = this.#latestSessionIterationBoundary(runId);
+      invariant(
+        latest === null || latest < iterations,
+        "INVALID_SESSION_ITERATION",
+        "Session iteration boundary is duplicate or nonmonotonic",
+      );
+      this.#appendEvent(runId, "session.iteration_completed", { iterations });
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+  /**
+   * Lands a failed verification directly in non-approvable review when a
+   * session cannot retain the ordinary reconciliation margin at entry.
+   */
+  recordSessionAdmissionExhausted(runId: string): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const current = this.getRun(runId);
+      invariant(current.state === "verifying", "INVALID_STATE", "Run is not verifying");
+      invariant(
+        current.verification !== null && current.verification.outcome === "failed",
+        "VERIFICATION_NOT_PASSED",
+        "Session admission exhaustion requires failing verification",
+      );
+      invariant(
+        this.#iterationBudgetRemaining(current) > 0,
+        "ITERATION_BUDGET_EXHAUSTED",
+        "Session admission has no approved iteration remaining",
+      );
+      assertTransition(current.state, "awaiting_review");
+      const now = this.#now();
+      const result = this.#database
+        .prepare(
+          `UPDATE runs SET state = 'awaiting_review', version = version + 1, updated_at = ?
+           WHERE id = ? AND state = 'verifying'`,
+        )
+        .run(now, runId);
+      invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+      this.#appendEvent(runId, "session.exhausted", {
+        iterations: this.countSessionIterations(runId),
+        reason: "recovery_margin",
+      });
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
+  /**
+   * Lands a terminal agent-session disposition. A human question or exhausted
+   * budget is intentionally non-approvable; review approval checks the latest
+   * disposition before accepting otherwise-passing evidence.
+   */
+  recordSessionOutcome(
+    runId: string,
+    kind: "completed" | "awaiting_human" | "exhausted",
+    textValue: string | null,
+    iterations: number,
+  ): RunRecord {
+    this.#assertSessionOutcomeInput(kind, textValue, iterations);
+    const transaction = this.#database.transaction(() => {
+      this.#recordSessionOutcomeInTransaction(runId, kind, textValue, iterations);
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
+  #assertSessionOutcomeInput(
+    kind: "completed" | "awaiting_human" | "exhausted",
+    textValue: string | null,
+    iterations: number,
+  ): void {
+    invariant(
+      Number.isSafeInteger(iterations) && iterations >= 0,
+      "INVALID_SESSION_ITERATION",
+      "Session outcome iteration count is invalid",
+    );
+    invariant(
+      (kind === "exhausted" && textValue === null) ||
+        (kind !== "exhausted" &&
+          textValue !== null &&
+          textValue.trim().length > 0 &&
+          Buffer.byteLength(textValue, "utf8") <= 2_000 &&
+          !/[\r\0]/.test(textValue)),
+      "INVALID_SESSION_OUTCOME",
+      "Session outcome text is invalid",
+    );
+  }
+
+  #recordSessionOutcomeInTransaction(
+    runId: string,
+    kind: "completed" | "awaiting_human" | "exhausted",
+    textValue: string | null,
+    iterations: number,
+    operationId?: string,
+  ): void {
+    const current = this.getRun(runId);
+    invariant(current.state === "running", "INVALID_STATE", "Agent session is not running");
+    invariant(
+      iterations === this.countSessionIterations(runId),
+      "INVALID_SESSION_ITERATION",
+      "Session outcome does not match durable provider admission",
+    );
+    if (kind === "completed") {
+      invariant(
+        current.verification !== null &&
+          current.verification.outcome === "passed" &&
+          current.diff !== null,
+        "VERIFICATION_NOT_PASSED",
+        "Agent session cannot complete without current passing verification",
+      );
+      invariant(
+        this.getCheckpoint(runId).checkpointSha256 === current.verification.checkpointSha256,
+        "CHECKPOINT_MISMATCH",
+        "Agent session verification is not bound to the current checkpoint",
+      );
+    }
+    const now = this.#now();
+    const result = this.#database
+      .prepare(
+        `UPDATE runs SET state = 'awaiting_review', version = version + 1, updated_at = ?
+         WHERE id = ? AND state = 'running'`,
+      )
+      .run(now, runId);
+    invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+    const eventType =
+      kind === "completed"
+        ? "session.completed"
+        : kind === "awaiting_human"
+          ? "session.awaiting_human"
+          : "session.exhausted";
+    this.#appendEvent(runId, eventType, {
+      iterations,
+      ...(operationId === undefined ? {} : { operationId }),
+      ...(kind === "completed"
+        ? { summary: textValue as string }
+        : kind === "awaiting_human"
+          ? { question: textValue as string }
+          : {}),
+    });
+  }
+
+  #latestSessionIterationBoundary(runId: string): number | null {
+    const latest = this.#database
+      .prepare(
+        `SELECT payload_json FROM run_events
+         WHERE run_id = ? AND type = 'session.iteration_completed'
+         ORDER BY sequence DESC LIMIT 1`,
+      )
+      .get(runId);
+    if (latest === undefined) return null;
+    const payload = parseJson<unknown>(
+      row(latest, "session iteration boundary").payload_json,
+      "run_events.payload_json",
+    );
+    invariant(
+      typeof payload === "object" && payload !== null && !Array.isArray(payload),
+      "DATABASE_ERROR",
+      "Session iteration boundary payload is invalid",
+    );
+    const iterations = (payload as Record<string, unknown>).iterations;
+    invariant(
+      typeof iterations === "number" && Number.isSafeInteger(iterations) && iterations > 0,
+      "DATABASE_ERROR",
+      "Session iteration boundary count is invalid",
+    );
+    return iterations;
+  }
+
+  #assertSessionCompletedForApproval(runId: string): void {
+    const latest = this.#database
+      .prepare(
+        `SELECT sequence, type, payload_json FROM run_events
+         WHERE run_id = ?
+           AND type IN ('session.completed', 'session.awaiting_human', 'session.exhausted')
+         ORDER BY sequence DESC LIMIT 1`,
+      )
+      .get(runId);
+    if (latest === undefined) {
+      invariant(
+        this.countSessionIterations(runId) === 0,
+        "SESSION_NOT_COMPLETED",
+        "This agent session has no completed terminal disposition",
+      );
+      return;
+    }
+    const disposition = row(latest, "session disposition");
+    invariant(
+      text(disposition.type, "run_events.type") === "session.completed",
+      "SESSION_NOT_COMPLETED",
+      "This agent session paused or exhausted its budget and cannot be approved",
+    );
+    const sequence = numberValue(disposition.sequence, "run_events.sequence");
+    const payload = parseJson<unknown>(disposition.payload_json, "run_events.payload_json");
+    invariant(
+      typeof payload === "object" && payload !== null && !Array.isArray(payload),
+      "DATABASE_ERROR",
+      "Session completion payload is invalid",
+    );
+    const completion = payload as Record<string, unknown>;
+    invariant(
+      Number.isSafeInteger(completion.iterations) &&
+        (completion.iterations as number) > 0 &&
+        completion.iterations === this.countSessionIterations(runId) &&
+        typeof completion.operationId === "string" &&
+        completion.operationId.length > 0,
+      "SESSION_NOT_COMPLETED",
+      "Session completion is not bound to its durable provider iteration",
+    );
+    const operation = this.#database
+      .prepare("SELECT kind, status FROM operations WHERE id = ? AND run_id = ?")
+      .get(completion.operationId, runId);
+    invariant(
+      operation !== undefined &&
+        text(row(operation, "session completion operation").kind, "operations.kind") ===
+          SESSION_REPORT_DONE_OPERATION_KIND &&
+        text(row(operation, "session completion operation").status, "operations.status") ===
+          "succeeded",
+      "SESSION_NOT_COMPLETED",
+      "Session completion is not paired with a succeeded report_done operation",
+    );
+    const finished = this.#database
+      .prepare(
+        `SELECT type, payload_json FROM run_events
+         WHERE run_id = ? AND sequence = ?`,
+      )
+      .get(runId, sequence - 1);
+    const finishedPayload =
+      finished === undefined
+        ? null
+        : parseJson<unknown>(
+            row(finished, "session completion operation event").payload_json,
+            "run_events.payload_json",
+          );
+    invariant(
+      finished !== undefined &&
+        text(row(finished, "session completion operation event").type, "run_events.type") ===
+          "operation.finished" &&
+        typeof finishedPayload === "object" &&
+        finishedPayload !== null &&
+        !Array.isArray(finishedPayload) &&
+        (finishedPayload as Record<string, unknown>).operationId === completion.operationId &&
+        (finishedPayload as Record<string, unknown>).kind === SESSION_REPORT_DONE_OPERATION_KIND &&
+        (finishedPayload as Record<string, unknown>).outcome === "succeeded",
+      "SESSION_NOT_COMPLETED",
+      "Session completion was not atomically paired after report_done settlement",
+    );
+  }
+
+  /**
    * Re-enters execution after a failed verification. Requires an approved plan
    * carrying an unspent repair grant and a recorded failing verification; the
    * generic transition path stays closed to this edge.
@@ -2160,6 +2504,18 @@ export class IcarusStore {
         remaining > 0,
         "ITERATION_BUDGET_EXHAUSTED",
         "The approved iteration budget is exhausted",
+      );
+      const project = this.getProject(current.projectId);
+      invariant(
+        current.usage.toolCalls + 1 <= project.ceiling.maxToolCalls,
+        "TOOL_BUDGET_EXCEEDED",
+        "Session entry requires one ordinary operation slot for recovery",
+      );
+      invariant(
+        current.usage.activeRuntimeMs + project.ceiling.commandTimeoutMs <=
+          project.ceiling.maxActiveRuntimeMs,
+        "RUNTIME_BUDGET_EXCEEDED",
+        "Session entry requires command runtime for recovery",
       );
       assertTransition(current.state, "running");
       const now = this.#now();
@@ -2235,104 +2591,114 @@ export class IcarusStore {
 
   /**
    * Records a completed verification attempt. `nextState` is `awaiting_review`
-   * for a landing attempt and `verifying` for an attempt that an approved
-   * repair grant will retry (ADR 0024); either way the complete evidence and
-   * diff are appended to the event stream.
+   * for a landing attempt, `verifying` for an initial failure an approved
+   * session will retry, and `running` for a tool-led session check. Either way
+   * the complete evidence and diff are appended to the event stream.
    */
   recordVerificationAndAwaitReview(
     runId: string,
     diff: string,
     verification: VerificationEvidence,
-    nextState: "awaiting_review" | "verifying" = "awaiting_review",
+    nextState: "awaiting_review" | "verifying" | "running" = "awaiting_review",
   ): RunRecord {
     const transaction = this.#database.transaction(() => {
-      const current = this.getRun(runId);
-      invariant(current.state === "verifying", "INVALID_STATE", "Run is not verifying");
-      invariant(current.plan !== null, "MISSING_PLAN", "Run has no approved plan");
-      const project = this.getProject(current.projectId);
-      invariant(diff.length > 0, "EMPTY_DIFF", "Verification diff is empty");
-      invariant(
-        Buffer.byteLength(diff, "utf8") <= project.ceiling.maxDiffBytes,
-        "DIFF_BUDGET_EXCEEDED",
-        "Verification diff exceeds the byte ceiling",
-      );
-      invariant(
-        sha256(diff) === verification.diffSha256,
-        "VERIFICATION_DIGEST_MISMATCH",
-        "Verification digest does not match the persisted diff",
-      );
-      invariant(
-        this.#changedPathsMatchPatchSet(current, verification.changedPaths),
-        "CHANGED_PATH_MISMATCH",
-        "Verification must contain exactly the patch-set paths",
-      );
-      const expectedChecks = current.plan.checkIds.map((checkId) => {
-        const check = project.checks.find((candidate) => candidate.id === checkId);
-        invariant(
-          check !== undefined,
-          "CHECK_MISMATCH",
-          "Approved plan references an unknown check",
-        );
-        return check;
-      });
-      invariant(
-        verification.checks.length === expectedChecks.length &&
-          verification.checks.every(
-            (evidence, index) =>
-              evidence.checkId === expectedChecks[index]?.id &&
-              JSON.stringify(evidence.argv) === JSON.stringify(expectedChecks[index]?.argv) &&
-              Buffer.byteLength(evidence.stdout, "utf8") +
-                Buffer.byteLength(evidence.stderr, "utf8") <=
-                project.ceiling.maxCommandOutputBytes,
-          ),
-        "CHECK_EVIDENCE_MISMATCH",
-        "Verification evidence does not match the approved check profile",
-      );
-      const derivedOutcome = verification.checks.every((evidence) => evidence.outcome === "passed")
-        ? "passed"
-        : verification.checks.some((evidence) => evidence.outcome === "failed")
-          ? "failed"
-          : "unavailable";
-      invariant(
-        verification.outcome === derivedOutcome,
-        "VERIFICATION_OUTCOME_MISMATCH",
-        "Verification outcome does not match its check evidence",
-      );
-      invariant(
-        this.getCheckpoint(runId).checkpointSha256 === verification.checkpointSha256,
-        "CHECKPOINT_MISMATCH",
-        "Verification is not bound to the immutable checkpoint",
-      );
-      if (nextState === "verifying") {
-        invariant(
-          verification.outcome === "failed",
-          "VERIFICATION_OUTCOME_MISMATCH",
-          "Only a failing verification may be retained for repair",
-        );
-        invariant(
-          this.#iterationBudgetRemaining(current) > 0,
-          "ITERATION_BUDGET_EXHAUSTED",
-          "The approved iteration budget is exhausted",
-        );
-      }
-      const now = this.#now();
-      this.#database
-        .prepare(
-          `UPDATE runs SET diff = ?, verification_json = ?, state = ?,
-           version = version + 1, updated_at = ? WHERE id = ? AND state = 'verifying'`,
-        )
-        .run(diff, json(verification), nextState, now, runId);
-      this.#appendEvent(runId, "verification.completed", {
-        from: "verifying",
-        to: nextState,
-        outcome: verification.outcome,
-        diffSha256: verification.diffSha256,
-        diff,
-        verification,
-      });
+      this.#recordVerificationInTransaction(runId, diff, verification, nextState);
     });
     transaction();
     return this.getRun(runId);
+  }
+
+  #recordVerificationInTransaction(
+    runId: string,
+    diff: string,
+    verification: VerificationEvidence,
+    nextState: "awaiting_review" | "verifying" | "running",
+  ): void {
+    const current = this.getRun(runId);
+    invariant(
+      current.state === "verifying" || (current.state === "running" && nextState === "running"),
+      "INVALID_STATE",
+      "Run is not verifying",
+    );
+    invariant(current.plan !== null, "MISSING_PLAN", "Run has no approved plan");
+    const project = this.getProject(current.projectId);
+    invariant(diff.length > 0, "EMPTY_DIFF", "Verification diff is empty");
+    invariant(
+      Buffer.byteLength(diff, "utf8") <= project.ceiling.maxDiffBytes,
+      "DIFF_BUDGET_EXCEEDED",
+      "Verification diff exceeds the byte ceiling",
+    );
+    invariant(
+      sha256(diff) === verification.diffSha256,
+      "VERIFICATION_DIGEST_MISMATCH",
+      "Verification digest does not match the persisted diff",
+    );
+    invariant(
+      this.#changedPathsMatchPatchSet(current, verification.changedPaths),
+      "CHANGED_PATH_MISMATCH",
+      "Verification must contain exactly the patch-set paths",
+    );
+    const expectedChecks = current.plan.checkIds.map((checkId) => {
+      const check = project.checks.find((candidate) => candidate.id === checkId);
+      invariant(check !== undefined, "CHECK_MISMATCH", "Approved plan references an unknown check");
+      return check;
+    });
+    invariant(
+      verification.checks.length === expectedChecks.length &&
+        verification.checks.every(
+          (evidence, index) =>
+            evidence.checkId === expectedChecks[index]?.id &&
+            JSON.stringify(evidence.argv) === JSON.stringify(expectedChecks[index]?.argv) &&
+            Buffer.byteLength(evidence.stdout, "utf8") +
+              Buffer.byteLength(evidence.stderr, "utf8") <=
+              project.ceiling.maxCommandOutputBytes,
+        ),
+      "CHECK_EVIDENCE_MISMATCH",
+      "Verification evidence does not match the approved check profile",
+    );
+    const derivedOutcome = verification.checks.every((evidence) => evidence.outcome === "passed")
+      ? "passed"
+      : verification.checks.some((evidence) => evidence.outcome === "failed")
+        ? "failed"
+        : "unavailable";
+    invariant(
+      verification.outcome === derivedOutcome,
+      "VERIFICATION_OUTCOME_MISMATCH",
+      "Verification outcome does not match its check evidence",
+    );
+    invariant(
+      this.getCheckpoint(runId).checkpointSha256 === verification.checkpointSha256,
+      "CHECKPOINT_MISMATCH",
+      "Verification is not bound to the immutable checkpoint",
+    );
+    if (nextState === "verifying") {
+      invariant(
+        verification.outcome === "failed",
+        "VERIFICATION_OUTCOME_MISMATCH",
+        "Only a failing verification may be retained for repair",
+      );
+      invariant(
+        this.#iterationBudgetRemaining(current) > 0,
+        "ITERATION_BUDGET_EXHAUSTED",
+        "The approved iteration budget is exhausted",
+      );
+    }
+    const now = this.#now();
+    const result = this.#database
+      .prepare(
+        `UPDATE runs SET diff = ?, verification_json = ?, state = ?,
+         version = version + 1, updated_at = ? WHERE id = ? AND state = ?`,
+      )
+      .run(diff, json(verification), nextState, now, runId, current.state);
+    invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+    this.#appendEvent(runId, "verification.completed", {
+      from: current.state,
+      to: nextState,
+      outcome: verification.outcome,
+      diffSha256: verification.diffSha256,
+      diff,
+      verification,
+    });
   }
 
   /**
@@ -2513,12 +2879,49 @@ export class IcarusStore {
         current.resumeState === "restoring"
       ) {
         invariant(
-          current.worktreePath !== null &&
-            current.baselineBase64 !== null &&
-            current.approvedBase64 !== null,
+          current.worktreePath !== null,
           "MISSING_CHECKPOINT",
-          "Run cannot resume verification without applied edit state",
+          "Run cannot resume recovery without its private worktree",
         );
+        const modernPatchSet =
+          this.#database.prepare("SELECT 1 FROM patch_sets WHERE run_id = ?").get(runId) !==
+          undefined;
+        if (modernPatchSet) {
+          const checkpointFileCount = numberValue(
+            row(
+              this.#database
+                .prepare("SELECT COUNT(*) AS total FROM checkpoint_files WHERE run_id = ?")
+                .get(runId),
+              "checkpoint file count",
+            ).total,
+            "checkpoint_files.total",
+          );
+          invariant(
+            checkpointFileCount > 0,
+            "MISSING_CHECKPOINT",
+            "Patch-set run cannot resume without persisted checkpoint files",
+          );
+        } else {
+          const legacy = row(
+            this.#database.prepare("SELECT edit_json FROM runs WHERE id = ?").get(runId),
+            "legacy edit state",
+          );
+          invariant(
+            typeof legacy.edit_json === "string" &&
+              current.baselineBase64 !== null &&
+              current.approvedBase64 !== null,
+            "MISSING_CHECKPOINT",
+            "Legacy run cannot resume without its applied edit bytes",
+          );
+        }
+        if (current.resumeState === "rolling_back" || current.resumeState === "restoring") {
+          invariant(
+            this.#database.prepare("SELECT 1 FROM checkpoints WHERE run_id = ?").get(runId) !==
+              undefined,
+            "MISSING_CHECKPOINT",
+            "Recovery state cannot resume without its immutable checkpoint",
+          );
+        }
       }
       const now = this.#now();
       const result = this.#database
@@ -2714,6 +3117,148 @@ export class IcarusStore {
     return this.#finishOperation(token, finish, false);
   }
 
+  /**
+   * Atomically settles a session check or patch application and persists the
+   * resulting current verification snapshot. A validation failure rolls the
+   * operation back to `started` together with every usage/event write.
+   */
+  finishSessionVerificationOperation(
+    token: OperationToken,
+    finish: OperationFinish,
+    diff: string,
+    verification: VerificationEvidence,
+  ): RunRecord {
+    this.#assertAtomicOperationSettlementInput(token, finish, [
+      SESSION_CHECK_OPERATION_KIND,
+      SESSION_PATCH_OPERATION_KIND,
+      SESSION_RECONCILE_OPERATION_KIND,
+    ]);
+    const transaction = this.#database.transaction(() => {
+      invariant(
+        this.getRun(token.runId).state === "running",
+        "INVALID_STATE",
+        "Session verification can only settle while the session is running",
+      );
+      this.#finishOperationInTransaction(token, finish, false);
+      this.#recordVerificationInTransaction(token.runId, diff, verification, "running");
+    });
+    transaction();
+    return this.getRun(token.runId);
+  }
+  /**
+   * Atomically records a patch action that changed durable intent but missed
+   * its operation boundary. Only an unavailable snapshot may accompany the
+   * failed/cancelled patch operation, so the state remains non-authoritative
+   * while still exposing a rollback digest.
+   */
+  finishFailedSessionPatchVerificationOperation(
+    token: OperationToken,
+    finish: OperationFinish,
+    diff: string,
+    verification: VerificationEvidence,
+  ): RunRecord {
+    invariant(
+      token.kind === SESSION_PATCH_OPERATION_KIND,
+      "OPERATION_TOKEN_MISMATCH",
+      "Only a session patch operation can settle a failed patch snapshot",
+    );
+    invariant(
+      finish.outcome === "failed" || finish.outcome === "cancelled",
+      "INVALID_OPERATION_OUTCOME",
+      "Failed patch settlement requires a failed or cancelled operation",
+    );
+    invariant(
+      verification.outcome === "unavailable",
+      "VERIFICATION_OUTCOME_MISMATCH",
+      "Failed patch settlement can only persist unavailable verification",
+    );
+    this.#assertOperationFinishInput(finish);
+    const transaction = this.#database.transaction(() => {
+      invariant(
+        this.getRun(token.runId).state === "running",
+        "INVALID_STATE",
+        "Failed session patch can only settle while the session is running",
+      );
+      this.#finishOperationInTransaction(token, finish, false);
+      this.#recordVerificationInTransaction(token.runId, diff, verification, "running");
+    });
+    transaction();
+    return this.getRun(token.runId);
+  }
+
+  /** Atomically settles report_done/request_human_input and its disposition. */
+  finishSessionControlOperation(
+    token: OperationToken,
+    finish: OperationFinish,
+    kind: "completed" | "awaiting_human",
+    textValue: string,
+    iterations: number,
+  ): RunRecord {
+    const expectedKind =
+      kind === "completed"
+        ? SESSION_REPORT_DONE_OPERATION_KIND
+        : SESSION_REQUEST_HUMAN_OPERATION_KIND;
+    this.#assertAtomicOperationSettlementInput(token, finish, [expectedKind]);
+    this.#assertSessionOutcomeInput(kind, textValue, iterations);
+    const transaction = this.#database.transaction(() => {
+      invariant(
+        this.getRun(token.runId).state === "running",
+        "INVALID_STATE",
+        "Session control can only settle while the session is running",
+      );
+      this.#finishOperationInTransaction(token, finish, false);
+      this.#recordSessionOutcomeInTransaction(token.runId, kind, textValue, iterations, token.id);
+    });
+    transaction();
+    return this.getRun(token.runId);
+  }
+
+  /** Atomically settles review.validate and records the bound approval. */
+  finishReviewValidationAndApprove(
+    token: OperationToken,
+    finish: OperationFinish,
+    digest: string,
+    actor: string,
+  ): RunRecord {
+    this.#assertAtomicOperationSettlementInput(token, finish, [REVIEW_VALIDATION_OPERATION_KIND]);
+    const approval = reviewApprovalTransition(digest, actor, "approve");
+    const transaction = this.#database.transaction(() => {
+      invariant(
+        this.getRun(token.runId).state === "awaiting_review",
+        "INVALID_STATE",
+        "Review validation can only settle at the review gate",
+      );
+      this.#finishOperationInTransaction(token, finish, false);
+      this.#assertSessionCompletedForApproval(token.runId);
+      this.#approveAndTransitionInTransaction(token.runId, approval);
+    });
+    transaction();
+    return this.getRun(token.runId);
+  }
+
+  /** Atomically settles checkpoint rollback/restore and its state transition. */
+  finishCheckpointRecoveryOperation(token: OperationToken, finish: OperationFinish): RunRecord {
+    this.#assertAtomicOperationSettlementInput(token, finish, [
+      CHECKPOINT_ROLLBACK_OPERATION_KIND,
+      CHECKPOINT_RESTORE_OPERATION_KIND,
+    ]);
+    const rollback = token.kind === CHECKPOINT_ROLLBACK_OPERATION_KIND;
+    const expectedState: RunState = rollback ? "rolling_back" : "restoring";
+    const to: RunState = rollback ? "rolled_back" : "verifying";
+    const eventType = rollback ? "rollback.completed" : "restore.completed";
+    const transaction = this.#database.transaction(() => {
+      invariant(
+        this.getRun(token.runId).state === expectedState,
+        "INVALID_STATE",
+        "Checkpoint recovery operation is not at its expected state",
+      );
+      this.#finishOperationInTransaction(token, finish, false);
+      this.#finishInternalTransitionInTransaction(token.runId, expectedState, to, eventType);
+    });
+    transaction();
+    return this.getRun(token.runId);
+  }
+
   finishCancellationRecoveryOperation(token: OperationToken, finish: OperationFinish): RunRecord {
     invariant(
       token.kind === CANCELLATION_RECOVERY_OPERATION_KIND,
@@ -2730,7 +3275,34 @@ export class IcarusStore {
     );
   }
 
+  #assertAtomicOperationSettlementInput(
+    token: OperationToken,
+    finish: OperationFinish,
+    expectedKinds: readonly string[],
+  ): void {
+    invariant(
+      expectedKinds.includes(token.kind),
+      "OPERATION_TOKEN_MISMATCH",
+      "Operation token kind cannot settle this durable action",
+    );
+    invariant(
+      finish.outcome === "succeeded",
+      "INVALID_OPERATION_OUTCOME",
+      "Only a succeeded operation can settle a durable action",
+    );
+    this.#assertOperationFinishInput(finish);
+  }
+
   #finishOperation(token: OperationToken, finish: OperationFinish, emergency: boolean): RunRecord {
+    this.#assertOperationFinishInput(finish);
+    const transaction = this.#database.transaction(() => {
+      this.#finishOperationInTransaction(token, finish, emergency);
+    });
+    transaction();
+    return this.getRun(token.runId);
+  }
+
+  #assertOperationFinishInput(finish: OperationFinish): void {
     invariant(
       Number.isFinite(finish.activeRuntimeMs) && finish.activeRuntimeMs >= 0,
       "INVALID_OPERATION_USAGE",
@@ -2752,101 +3324,104 @@ export class IcarusStore {
       "INVALID_OPERATION_USAGE",
       "Operation cost is invalid",
     );
-    const transaction = this.#database.transaction(() => {
-      const operation = row(
-        this.#database
-          .prepare("SELECT * FROM operations WHERE id = ? AND run_id = ?")
-          .get(token.id, token.runId),
-        "operation",
-      );
-      const persistedKind = text(operation.kind, "operation.kind");
+  }
+
+  #finishOperationInTransaction(
+    token: OperationToken,
+    finish: OperationFinish,
+    emergency: boolean,
+  ): void {
+    const operation = row(
+      this.#database
+        .prepare("SELECT * FROM operations WHERE id = ? AND run_id = ?")
+        .get(token.id, token.runId),
+      "operation",
+    );
+    const persistedKind = text(operation.kind, "operation.kind");
+    invariant(
+      persistedKind === token.kind &&
+        numberValue(operation.reserved_cost_usd, "operation.reserved_cost_usd") ===
+          token.reservedCostUsd &&
+        numberValue(operation.reserved_tokens, "operation.reserved_tokens") ===
+          token.reservedTokens &&
+        numberValue(operation.reserved_runtime_ms, "operation.reserved_runtime_ms") ===
+          token.reservedRuntimeMs,
+      "OPERATION_TOKEN_MISMATCH",
+      "Operation token does not match its persisted reservation",
+    );
+    invariant(
+      emergency === (persistedKind === CANCELLATION_RECOVERY_OPERATION_KIND),
+      "INVALID_EMERGENCY_OPERATION",
+      "Cancellation recovery must use its dedicated finish path",
+    );
+    invariant(
+      text(operation.status, "operation.status") === "started",
+      "OPERATION_ALREADY_FINISHED",
+      "Operation is not active",
+    );
+    const actualCost = finish.estimatedCostUsd ?? token.reservedCostUsd;
+    invariant(
+      actualCost <= token.reservedCostUsd + Number.EPSILON,
+      "OPERATION_COST_EXCEEDED",
+      "Provider reported a cost above its reserved worst case",
+    );
+    const actualTokens =
+      finish.inputTokens === null || finish.outputTokens === null
+        ? token.reservedTokens
+        : finish.inputTokens + finish.outputTokens;
+    invariant(
+      actualTokens <= token.reservedTokens,
+      "OPERATION_TOKENS_EXCEEDED",
+      "Provider reported token usage above its reservation",
+    );
+    invariant(
+      finish.activeRuntimeMs <= token.reservedRuntimeMs,
+      "OPERATION_RUNTIME_EXCEEDED",
+      "Operation exceeded its runtime reservation",
+    );
+    const run = this.getRun(token.runId);
+    if (emergency) {
       invariant(
-        persistedKind === token.kind &&
-          numberValue(operation.reserved_cost_usd, "operation.reserved_cost_usd") ===
-            token.reservedCostUsd &&
-          numberValue(operation.reserved_tokens, "operation.reserved_tokens") ===
-            token.reservedTokens &&
-          numberValue(operation.reserved_runtime_ms, "operation.reserved_runtime_ms") ===
-            token.reservedRuntimeMs,
-        "OPERATION_TOKEN_MISMATCH",
-        "Operation token does not match its persisted reservation",
+        run.state === "cancelling",
+        "INVALID_STATE",
+        "Cancellation recovery can only finish while the run is cancelling",
       );
+    } else {
+      const project = this.getProject(run.projectId);
       invariant(
-        emergency === (persistedKind === CANCELLATION_RECOVERY_OPERATION_KIND),
-        "INVALID_EMERGENCY_OPERATION",
-        "Cancellation recovery must use its dedicated finish path",
+        run.usage.activeRuntimeMs + finish.activeRuntimeMs <= project.ceiling.maxActiveRuntimeMs,
+        "RUNTIME_BUDGET_EXCEEDED",
+        "Operation exceeded the active-runtime ceiling",
       );
-      invariant(
-        text(operation.status, "operation.status") === "started",
-        "OPERATION_ALREADY_FINISHED",
-        "Operation is not active",
-      );
-      const actualCost = finish.estimatedCostUsd ?? token.reservedCostUsd;
-      invariant(
-        actualCost <= token.reservedCostUsd + Number.EPSILON,
-        "OPERATION_COST_EXCEEDED",
-        "Provider reported a cost above its reserved worst case",
-      );
-      const actualTokens =
+    }
+    const now = this.#now();
+    this.#database
+      .prepare("UPDATE operations SET status = ?, result_json = ?, finished_at = ? WHERE id = ?")
+      .run(finish.outcome, json(finish.detail), now, token.id);
+    this.#database
+      .prepare(
+        `UPDATE runs SET reserved_cost_usd = MAX(0, reserved_cost_usd - ?),
+         estimated_cost_usd = estimated_cost_usd + ?, input_tokens = input_tokens + ?,
+         output_tokens = output_tokens + ?, active_runtime_ms = active_runtime_ms + ?,
+         updated_at = ? WHERE id = ?`,
+      )
+      .run(
+        token.reservedCostUsd,
+        actualCost,
         finish.inputTokens === null || finish.outputTokens === null
-          ? token.reservedTokens
-          : finish.inputTokens + finish.outputTokens;
-      invariant(
-        actualTokens <= token.reservedTokens,
-        "OPERATION_TOKENS_EXCEEDED",
-        "Provider reported token usage above its reservation",
+          ? actualTokens
+          : finish.inputTokens,
+        finish.inputTokens === null || finish.outputTokens === null ? 0 : finish.outputTokens,
+        finish.activeRuntimeMs,
+        now,
+        token.runId,
       );
-      invariant(
-        finish.activeRuntimeMs <= token.reservedRuntimeMs,
-        "OPERATION_RUNTIME_EXCEEDED",
-        "Operation exceeded its runtime reservation",
-      );
-      const run = this.getRun(token.runId);
-      if (emergency) {
-        invariant(
-          run.state === "cancelling",
-          "INVALID_STATE",
-          "Cancellation recovery can only finish while the run is cancelling",
-        );
-      } else {
-        const project = this.getProject(run.projectId);
-        invariant(
-          run.usage.activeRuntimeMs + finish.activeRuntimeMs <= project.ceiling.maxActiveRuntimeMs,
-          "RUNTIME_BUDGET_EXCEEDED",
-          "Operation exceeded the active-runtime ceiling",
-        );
-      }
-      const now = this.#now();
-      this.#database
-        .prepare("UPDATE operations SET status = ?, result_json = ?, finished_at = ? WHERE id = ?")
-        .run(finish.outcome, json(finish.detail), now, token.id);
-      this.#database
-        .prepare(
-          `UPDATE runs SET reserved_cost_usd = MAX(0, reserved_cost_usd - ?),
-           estimated_cost_usd = estimated_cost_usd + ?, input_tokens = input_tokens + ?,
-           output_tokens = output_tokens + ?, active_runtime_ms = active_runtime_ms + ?,
-           updated_at = ? WHERE id = ?`,
-        )
-        .run(
-          token.reservedCostUsd,
-          actualCost,
-          finish.inputTokens === null || finish.outputTokens === null
-            ? actualTokens
-            : finish.inputTokens,
-          finish.inputTokens === null || finish.outputTokens === null ? 0 : finish.outputTokens,
-          finish.activeRuntimeMs,
-          now,
-          token.runId,
-        );
-      this.#appendEvent(token.runId, "operation.finished", {
-        operationId: token.id,
-        kind: token.kind,
-        outcome: finish.outcome,
-        detail: finish.detail,
-      });
+    this.#appendEvent(token.runId, "operation.finished", {
+      operationId: token.id,
+      kind: token.kind,
+      outcome: finish.outcome,
+      detail: finish.detail,
     });
-    transaction();
-    return this.getRun(token.runId);
   }
 
   markStartedOperationsInterrupted(runId: string): RunRecord {
@@ -3224,47 +3799,56 @@ export class IcarusStore {
     );
   }
 
-  #approveAndTransition(runId: string, approval: ApprovalTransition): RunRecord {
-    this.#assertApprovalInput(approval);
+  #approveAndTransition(
+    runId: string,
+    approval: ApprovalTransition,
+    precondition?: () => void,
+  ): RunRecord {
     const transaction = this.#database.transaction(() => {
-      const current = this.getRun(runId);
-      this.#assertApprovalGate(runId, current, approval);
-      assertTransition(current.state, approval.to);
-      const now = this.#now();
-      this.#database
-        .prepare(
-          `INSERT INTO approvals
-           (id, run_id, kind, digest, actor, decision, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          this.#id(),
-          runId,
-          approval.kind,
-          approval.digest,
-          approval.actor,
-          approval.decision,
-          now,
-        );
-      const result = this.#database
-        .prepare(
-          `UPDATE runs SET state = ?, resume_state = NULL, error_code = NULL,
-           error_message = NULL, version = version + 1, updated_at = ?
-           WHERE id = ? AND state = ?`,
-        )
-        .run(approval.to, now, runId, approval.expectedState);
-      invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
-      this.#appendEvent(runId, approval.eventType, {
-        from: current.state,
-        to: approval.to,
-        kind: approval.kind,
-        digest: approval.digest,
-        actor: approval.actor,
-        decision: approval.decision,
-      });
+      precondition?.();
+      this.#approveAndTransitionInTransaction(runId, approval);
     });
     transaction();
     return this.getRun(runId);
+  }
+
+  #approveAndTransitionInTransaction(runId: string, approval: ApprovalTransition): void {
+    this.#assertApprovalInput(approval);
+    const current = this.getRun(runId);
+    this.#assertApprovalGate(runId, current, approval);
+    assertTransition(current.state, approval.to);
+    const now = this.#now();
+    this.#database
+      .prepare(
+        `INSERT INTO approvals
+         (id, run_id, kind, digest, actor, decision, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        this.#id(),
+        runId,
+        approval.kind,
+        approval.digest,
+        approval.actor,
+        approval.decision,
+        now,
+      );
+    const result = this.#database
+      .prepare(
+        `UPDATE runs SET state = ?, resume_state = NULL, error_code = NULL,
+         error_message = NULL, version = version + 1, updated_at = ?
+         WHERE id = ? AND state = ?`,
+      )
+      .run(approval.to, now, runId, approval.expectedState);
+    invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+    this.#appendEvent(runId, approval.eventType, {
+      from: current.state,
+      to: approval.to,
+      kind: approval.kind,
+      digest: approval.digest,
+      actor: approval.actor,
+      decision: approval.decision,
+    });
   }
 
   #validateApprovalRequest(runId: string, approval: ApprovalTransition): RunRecord {
@@ -3315,26 +3899,35 @@ export class IcarusStore {
     eventType: string,
   ): RunRecord {
     const transaction = this.#database.transaction(() => {
-      const current = this.getRun(runId);
-      invariant(
-        current.state === expectedState,
-        "INVALID_STATE",
-        "Run is not at the expected recovery step",
-      );
-      assertTransition(current.state, to);
-      const now = this.#now();
-      const result = this.#database
-        .prepare(
-          `UPDATE runs SET state = ?, resume_state = NULL, error_code = NULL,
-           error_message = NULL, version = version + 1, updated_at = ?
-           WHERE id = ? AND state = ?`,
-        )
-        .run(to, now, runId, expectedState);
-      invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
-      this.#appendEvent(runId, eventType, { from: expectedState, to });
+      this.#finishInternalTransitionInTransaction(runId, expectedState, to, eventType);
     });
     transaction();
     return this.getRun(runId);
+  }
+
+  #finishInternalTransitionInTransaction(
+    runId: string,
+    expectedState: RunState,
+    to: RunState,
+    eventType: string,
+  ): void {
+    const current = this.getRun(runId);
+    invariant(
+      current.state === expectedState,
+      "INVALID_STATE",
+      "Run is not at the expected recovery step",
+    );
+    assertTransition(current.state, to);
+    const now = this.#now();
+    const result = this.#database
+      .prepare(
+        `UPDATE runs SET state = ?, resume_state = NULL, error_code = NULL,
+         error_message = NULL, version = version + 1, updated_at = ?
+         WHERE id = ? AND state = ?`,
+      )
+      .run(to, now, runId, expectedState);
+    invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+    this.#appendEvent(runId, eventType, { from: expectedState, to });
   }
 
   #assertNoOtherActiveRun(projectId: string, runId: string): void {
