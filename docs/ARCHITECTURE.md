@@ -41,7 +41,7 @@ contract test requires one.
 ## Local workspace boundary
 
 The production server binds exact IPv4 `127.0.0.1` and serves compiled UI
-assets and `/api` from one public origin. Under candidate ADR 0040, an ordinary
+assets and `/api` from one public origin. Under accepted ADR 0040, an ordinary
 start asks the operating system for an ephemeral port, verifies the exact
 `127.0.0.1` IPv4 binding, then CSPRNG-selects a 16-byte nonce encoded as 32
 lowercase hexadecimal characters. The socket remains
@@ -62,15 +62,17 @@ review-only. Bind failures stay loud. The server emits no CORS permission. It
 is a foreground local process, not a remotely reachable daemon.
 
 Mutation support is a browser-family release contract, not a `User-Agent`
-authorization check. Candidate ADR 0040 supports only Chromium-family versions
+authorization check. Accepted ADR 0040 supports only Chromium-family versions
 covered by real-browser acceptance. Safari and every unverified browser must
 use the explicit-port review-only mode; Icarus cannot automatically downgrade a
 random `.localhost` navigation that never reaches the server. Exact-head real
-Chrome composition passed at implementation commit `eb01b640...` in Linux CI
-`30618041483` and native run `30618043377` on macOS and Windows. ADR 0040
-remains Candidate, rather than an accepted release boundary, pending explicit
-human acceptance of the operator-controlled browser/resolver/proxy residual
-risk.
+Chrome composition passed at implementation commit
+`eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI `30618041483` and
+native run `30618043377` on macOS and Windows. Explicit human acceptance of the
+interim operator-controlled browser/resolver/proxy residual risk was recorded
+on 2026-07-31. That architectural acceptance does not make Gate 1
+release-complete. No live migration, merge, deployment, or public release was
+authorized or performed as part of the acceptance.
 
 The API projects server-side mutation/planning availability separately from
 the client-held session. React combines only those booleans, never the bearer,
@@ -84,10 +86,16 @@ planning do not create a private worktree or modify the source checkout. There
 is no HTTP route for approval, edit or check execution, arbitrary commands,
 commit, push, or deployment.
 
-The current process shutdown closes HTTP connections immediately. That is an
-explicit portability-slice limitation, not a recovery guarantee: durable
-guarded browser actions cannot be added until shutdown drains or settles
-admitted actions through the ADR 0029 ledger before closing the runtime.
+Process shutdown now closes mutation admission synchronously, drains the exact
+set of HTTP handlers registered before that boundary, waits for their response
+settlement, and only then closes residual sockets and the SQLite runtime. The
+local ADR 0029 foundation also creates and exactly inspects the browser-action
+ledger, records prepared/admitted/settled transitions, and refuses orphaned
+prepared rows under the Linux run lease at workspace startup. No guarded
+approval/execution route uses that ledger yet, and admitted-row terminal
+reconciliation plus the bounded browser recovery projection remain required
+before such routes can ship. The drain is therefore a lifecycle guarantee, not
+a claim that an existing unguarded POST is idempotent.
 
 The API presenter allowlists product evidence instead of returning `RunRecord`
 or history rows. It omits raw context/source blobs and private cache, worktree,
@@ -101,13 +109,15 @@ derived phases are `planned`, `awaiting_approval`, `running`, `completed`,
 approval/recovery state is never flattened into completion.
 
 The HTTP server and explicit-port review shell support Linux, macOS, and Windows
-with no fleet or cloud dependency. Candidate repository import, context preview,
-draft persistence, and loopback planning mutations require a supported
+with no fleet or cloud dependency. Mutation-capable repository import, context
+preview, draft persistence, and loopback planning mutations require a supported
 Chromium-family browser covered by the acceptance record. ADR 0040's exact-head
-native technical gate passed at `eb01b640...`; release support remains held
-pending explicit human acceptance of its operator-controlled
-browser/resolver/proxy residual risk. Planning creates no private worktree and
-executes no project code. Before each bounded context/provider operation,
+native technical gate passed at
+`eb01b6406c12126c60add7ac83800f8eba8ffdc9`, and human acceptance of its interim
+operator-controlled browser/resolver/proxy residual risk was recorded on
+2026-07-31. Remaining Gate 1 runtime slices still gate release. Planning creates
+no private worktree and executes no project code. Before each bounded
+context/provider operation,
 SQLite atomically admits one `started` operation per run; a concurrent planner
 receives `RUN_BUSY`.
 Approval and execution remain Linux-only and use the stronger kernel lease
@@ -634,9 +644,9 @@ fail-closed audit or make imported repositories writable.
 
 ## Safety boundary
 
-- The HTTP server binds exact `127.0.0.1`. Candidate mutation sessions use a
-  fresh 16-byte `.localhost` public-origin nonce and independent bearer only
-  after the bind succeeds, with no Node/OS lookup or resolver injection.
+- The HTTP server binds exact `127.0.0.1`. Accepted interim mutation sessions
+  use a fresh 16-byte `.localhost` public-origin nonce and independent bearer
+  only after the bind succeeds, with no Node/OS lookup or resolver injection.
   Every non-GET/HEAD request receives exact
   Host/Origin/authorization/action-header validation,
   duplicate-member-rejecting bounded JSON contracts, no CORS grant, and safe

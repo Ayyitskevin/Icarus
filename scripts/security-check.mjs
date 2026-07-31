@@ -21,8 +21,19 @@ async function collectSources(directory, include) {
 
 const processSource = await readFile("packages/core/src/process.ts", "utf8");
 const gitSource = await readFile("packages/core/src/git.ts", "utf8");
+const coreSchemaSource = await readFile("packages/core/src/core-schema.ts", "utf8");
+const gate1SchemaSource = await readFile("packages/core/src/gate1-schema.ts", "utf8");
+const browserActionStateSource = await readFile(
+  "packages/core/src/browser-action-state.ts",
+  "utf8",
+);
+const landingGitSource = await readFile("packages/core/src/landing-git.ts", "utf8");
+const landingRecordsSource = await readFile("packages/core/src/landing-records.ts", "utf8");
+const landingStateSource = await readFile("packages/core/src/landing-state.ts", "utf8");
 const sandboxSource = await readFile("packages/core/src/sandbox.ts", "utf8");
 const workspaceServerSource = await readFile("packages/api/src/server.ts", "utf8");
+const actionCoordinatorSource = await readFile("packages/api/src/action-coordinator.ts", "utf8");
+const workspaceMainSource = await readFile("packages/api/src/main.ts", "utf8");
 const workspaceSessionSource = await readFile("packages/api/src/workspace-session.ts", "utf8");
 const workspacePresenterSource = await readFile("packages/api/src/present.ts", "utf8");
 const workspaceApiSource = await readFile("packages/workspace/src/api.ts", "utf8");
@@ -97,6 +108,25 @@ const workspaceOriginHostnameIndex = workspaceServerSource.indexOf("const origin
 const workspaceSessionCreationIndex = workspaceServerSource.indexOf(
   "session = createBoundWorkspaceSession(mode, address.port, originHostname, reviewOnlyReason)",
 );
+const workspaceRequestListenerIndex = workspaceServerSource.indexOf(
+  "workspaceRequestListener(options, session, coordinator, shutdownResponses)",
+);
+const browserActionSchemaStart = gate1SchemaSource.indexOf(
+  "export const BROWSER_ACTION_LEDGER_SCHEMA",
+);
+const landingSchemaStart = gate1SchemaSource.indexOf("export const LANDING_LEDGER_SCHEMA");
+const landingSchemaEnd = gate1SchemaSource.indexOf(
+  "\nconst BROWSER_ACTION_OBJECTS",
+  landingSchemaStart,
+);
+const browserActionSchemaSource =
+  browserActionSchemaStart >= 0 && landingSchemaStart > browserActionSchemaStart
+    ? gate1SchemaSource.slice(browserActionSchemaStart, landingSchemaStart)
+    : "";
+const landingSchemaSource =
+  landingSchemaStart >= 0 && landingSchemaEnd > landingSchemaStart
+    ? gate1SchemaSource.slice(landingSchemaStart, landingSchemaEnd)
+    : "";
 const ignore = await readFile(".gitignore", "utf8");
 const testSources = await collectSources("tests", (name) => name.endsWith(".test.ts"));
 const repairSessionStart = serviceSource.indexOf("  async #runRepairSession(");
@@ -110,7 +140,10 @@ const repairSessionSource =
     : "";
 const eventPageMethodStart = storeSource.indexOf("  listEventPage(");
 const historyMethodStart = storeSource.indexOf("  listEventHistoryPage(");
-const historyMethodEnd = storeSource.indexOf("\n  #appendEvent(", historyMethodStart);
+const historyMethodEnd = storeSource.indexOf(
+  "\n  #assertBrowserActionAnchors(",
+  historyMethodStart,
+);
 const eventPageStoreSource =
   eventPageMethodStart >= 0 && historyMethodStart > eventPageMethodStart
     ? storeSource.slice(eventPageMethodStart, historyMethodStart)
@@ -233,6 +266,38 @@ const verificationApiRequestSource =
   verificationApiRequestStart >= 0 && verificationApiRequestEnd > verificationApiRequestStart
     ? workspaceApiSource.slice(verificationApiRequestStart, verificationApiRequestEnd)
     : "";
+const gate1MigrationInspectionIndex = gate1SchemaSource.indexOf(
+  "const inspection = inspectGate1SchemasWithCoreRequirement(databasePath, true);",
+);
+const gate1WritableDatabaseIndex = gate1SchemaSource.lastIndexOf(
+  "const database = new Database(databasePath",
+);
+const gate1StartupInspectionIndex = storeSource.indexOf(
+  "const gate1Schemas = assertGate1SchemasForStartup(databasePath)",
+);
+const storeWritableDatabaseIndex = storeSource.indexOf(
+  "this.#database = new Database(databasePath)",
+);
+const gate1ApplyPreconditionIndex = gate1SchemaSource.indexOf(
+  "assertMigrationPrecondition(inspectOpenDatabase(database, true), token);",
+);
+const gate1MigrationDdlIndex = gate1SchemaSource.lastIndexOf("database.exec(");
+const gate1SnapshotOpenIndex = gate1SchemaSource.indexOf(
+  "database = new Database(snapshotPath, { readonly: true, fileMustExist: true })",
+);
+const gate1SnapshotCleanupIndex = gate1SchemaSource.indexOf(
+  "rmSync(snapshotRoot, { recursive: true, force: true })",
+);
+const shutdownResponseTrackIndex = workspaceServerSource.indexOf(
+  "trackShutdownResponse(response, shutdownResponses)",
+);
+const shutdownCoordinatorTrackIndex = workspaceServerSource.indexOf("work = coordinator.track(");
+const shutdownDrainIndex = workspaceServerSource.indexOf(
+  "const drainPromise = coordinator.drain()",
+);
+const shutdownCloseConnectionsIndex = workspaceServerSource.indexOf("server.closeAllConnections()");
+const shutdownServerCloseIndex = workspaceMainSource.indexOf("await server?.close()");
+const shutdownRuntimeCloseIndex = workspaceMainSource.indexOf("runtime?.close()");
 
 const assertions = {
   controllerNeverUsesShell:
@@ -263,6 +328,151 @@ const assertions = {
   providersExposeNoTools:
     providerSource.includes("tools: []") && providerSource.includes('tool_choice: "none"'),
   dedicatedStateMarker: runtimeSource.includes(".icarus-state-v1"),
+  controllerStdinIsBoundedAndTransient:
+    processSource.includes("export const MAX_CONTROLLER_STDIN_BYTES = 8 * 1024 * 1024") &&
+    processSource.includes("maximumBytes > MAX_CONTROLLER_STDIN_BYTES") &&
+    processSource.includes("options.stdinBytes.byteLength > maximumBytes") &&
+    processSource.includes('options.stdinBytes === undefined ? "ignore" : "pipe"') &&
+    processSource.includes("payload.fill(0)") &&
+    !processSource.includes("stdinBytes.toString("),
+  gate1MigrationIsCliOnlyAndOneShot:
+    cliSource.includes("if (migrationApproval.gate1 !== null)") &&
+    cliSource.includes(
+      'migrateGate1Schema(path.join(root, "icarus.sqlite3"), migrationApproval.gate1)',
+    ) &&
+    cliSource.indexOf("if (migrationApproval.gate1 !== null)") <
+      cliSource.indexOf("runtime = await createIcarusRuntime(root") &&
+    cliSource.includes("return;\n    }\n    runtime = await createIcarusRuntime") &&
+    gate1SchemaSource.includes(
+      'export const BROWSER_ACTION_LEDGER_MIGRATION = "browser-action-ledger-v1"',
+    ) &&
+    gate1SchemaSource.includes('export const LANDING_LEDGER_MIGRATION = "landing-ledger-v1"') &&
+    gate1SchemaSource.includes(
+      "token === BROWSER_ACTION_LEDGER_MIGRATION || token === LANDING_LEDGER_MIGRATION",
+    ) &&
+    gate1SchemaSource.includes('"MIGRATION_ORDER_REQUIRED"') &&
+    gate1SchemaSource.includes("apply.immediate()"),
+  gate1SchemaPreflightsReadOnlyBeforeWritable:
+    gate1SchemaSource.includes("const source = fingerprintSqliteFamily(resolvedDatabasePath)") &&
+    gate1SchemaSource.includes(
+      "const snapshotPath = copySqliteSnapshot(resolvedDatabasePath, snapshotRoot, source)",
+    ) &&
+    gate1SchemaSource.includes("assertSqliteFamilyUnchanged(resolvedDatabasePath, source)") &&
+    gate1SnapshotOpenIndex >= 0 &&
+    gate1SnapshotCleanupIndex >= 0 &&
+    gate1SnapshotOpenIndex < gate1SnapshotCleanupIndex &&
+    !gate1SchemaSource.includes(
+      "new Database(databasePath, { readonly: true, fileMustExist: true })",
+    ) &&
+    gate1MigrationInspectionIndex >= 0 &&
+    gate1WritableDatabaseIndex >= 0 &&
+    gate1MigrationInspectionIndex < gate1WritableDatabaseIndex &&
+    gate1StartupInspectionIndex >= 0 &&
+    storeWritableDatabaseIndex >= 0 &&
+    gate1StartupInspectionIndex < storeWritableDatabaseIndex &&
+    gate1SchemaSource.includes("databaseStat.nlink === 1") &&
+    gate1SchemaSource.includes("markerStat.nlink === 1") &&
+    gate1SchemaSource.includes("(parentStat.mode & 0o777) === 0o700") &&
+    gate1SchemaSource.includes("(databaseStat.mode & 0o777) === 0o600") &&
+    gate1SchemaSource.includes("(markerStat.mode & 0o777) === 0o600") &&
+    gate1SchemaSource.includes('lstatSync(path.join(current, ".git"))') &&
+    gate1SchemaSource.includes('"STATE_REPOSITORY_OVERLAP"') &&
+    gate1SchemaSource.includes(
+      "assertMigrationPrecondition(inspectOpenDatabase(database, true), token);",
+    ) &&
+    gate1ApplyPreconditionIndex >= 0 &&
+    gate1MigrationDdlIndex >= 0 &&
+    gate1ApplyPreconditionIndex < gate1MigrationDdlIndex &&
+    gate1SchemaSource.includes("assertClosedSchemaObjectSet(database)") &&
+    gate1SchemaSource.includes("assertExactPreGate1Schema(database, requireCompleteCore)") &&
+    gate1SchemaSource.includes("version?.user_version === ICARUS_SCHEMA_USER_VERSION") &&
+    coreSchemaSource.includes("export const ICARUS_PRE_GATE1_SCHEMA") &&
+    coreSchemaSource.includes("export const ICARUS_PRE_GATE1_OBJECTS"),
+  gate1LedgersPersistNoBearerOrRawHttpSecrets:
+    browserActionSchemaSource.includes("CREATE TABLE IF NOT EXISTS browser_action_requests") &&
+    landingSchemaSource.includes("CREATE TABLE landing_http_requests") &&
+    !/(?:bearer|authorization|cookie|request_headers|response_headers|response_body|credential_value|token_value)/i.test(
+      `${browserActionSchemaSource}\n${landingSchemaSource}`,
+    ),
+  browserActionContractIsClosedAndDigestBound:
+    [
+      "egress.approve",
+      "plan.approve",
+      "review.approve",
+      "review.reject",
+      "rollback.approve",
+      "restore.approve",
+      "run.resume",
+      "run.cancel",
+    ].every((kind) => browserActionStateSource.includes(`"${kind}"`)) &&
+    browserActionStateSource.includes(
+      "return sha256(JSON.stringify(browserActionDescriptorTuple(input)))",
+    ) &&
+    browserActionStateSource.includes('"ACTION_ID_CONFLICT"') &&
+    gate1SchemaSource.includes("browser_action_requests_active_non_cancel") &&
+    gate1SchemaSource.includes("browser_action_requests_active_cancel"),
+  browserActionAdmissionAndSettlementAreDurablyFenced:
+    storeSource.includes("current.state !== record.expectedState") &&
+    storeSource.includes("revision !== record.eventRevision") &&
+    storeSource.includes("this.#browserActionSubjectDigest(current, record.kind)") &&
+    storeSource.includes('this.#refusePreparedBrowserActionRecord(actionId, "STALE_ACTION")') &&
+    storeSource.includes("assertBrowserActionCancellationParent(record, activeNonCancel)") &&
+    storeSource.includes("settlement.domainEventSequence > record.admissionEventSequence") &&
+    storeSource.includes("operationStartSequences.length === 1") &&
+    storeSource.includes("operationStartSequence > record.admissionEventSequence") &&
+    storeSource.includes("operationStartSequence < settlement.domainEventSequence") &&
+    storeSource.includes("BROWSER_ACTION_FAILED_OPERATION_BOUNDARIES") &&
+    storeSource.includes("#assertBrowserResumeActionChain(") &&
+    storeSource.includes("BROWSER_ACTION_RESUME_CANCELLABLE_STAGES.has(resumedStage)") &&
+    storeSource.includes("return runBrowserActionImmediate(transaction)"),
+  landingContractPinsGitHubAndClosedLifecycle:
+    landingRecordsSource.includes('export const GITHUB_API_ORIGIN = "https://api.github.com"') &&
+    landingRecordsSource.includes('export const GITHUB_RECEIPT_ORIGIN = "https://github.com"') &&
+    landingRecordsSource.includes('export const LANDING_BRANCH_NAMESPACE = "icarus/"') &&
+    landingRecordsSource.includes(
+      'export const LANDING_CREDENTIAL_ENV_PREFIX = "ICARUS_GITHUB_TOKEN_"',
+    ) &&
+    landingRecordsSource.includes("^ICARUS_GITHUB_TOKEN_") &&
+    landingRecordsSource.includes("assertLandingCredentialEnvironmentAllowed") &&
+    landingRecordsSource.includes("PROFILE_BASE_BRANCH_URL_SYNTAX_PATTERN") &&
+    landingRecordsSource.includes("assertProfileBaseBranch(decoded.baseBranch)") &&
+    landingRecordsSource.includes("containsSecretShapedContent(Buffer.from(") &&
+    landingRecordsSource.includes("profile.commitIdentity") &&
+    landingRecordsSource.includes("contains credential-shaped content") &&
+    landingStateSource.includes('"preparing_candidate"') &&
+    landingStateSource.includes('"reconciliation_required"') &&
+    landingStateSource.includes('"github.pull_request.create"') &&
+    !landingRecordsSource.includes("git push"),
+  gitPathspecMagicIsDisabled:
+    gitSource.includes('GIT_LITERAL_PATHSPECS: "1"') &&
+    landingGitSource.includes('GIT_LITERAL_PATHSPECS: "1"'),
+  landingGitUsesOnlyPrivateFixedLocalPlumbing:
+    landingGitSource.includes('"write-tree"') &&
+    landingGitSource.includes('["hash-object", "-t", "commit", "-w", "--stdin"]') &&
+    landingGitSource.includes('"update-ref"') &&
+    landingGitSource.includes('"--no-deref"') &&
+    landingGitSource.includes("ZERO_SHA1") &&
+    landingGitSource.includes('["show-ref", "--verify", "--quiet", "--", headRef]') &&
+    !landingGitSource.includes('"--exists"') &&
+    landingGitSource.includes('"LANDING_LOCAL_REF_CONFLICT"') &&
+    !['"push"', '"fetch"', '"pull"', '"clone"', '"remote"'].some((command) =>
+      landingGitSource.includes(command),
+    ),
+  workspaceShutdownDrainsBeforeClosingRuntime:
+    actionCoordinatorSource.includes('this.#state = "draining"') &&
+    actionCoordinatorSource.includes("Promise.all(active.map(({ settlement }) => settlement))") &&
+    shutdownResponseTrackIndex >= 0 &&
+    shutdownCoordinatorTrackIndex >= 0 &&
+    shutdownResponseTrackIndex < shutdownCoordinatorTrackIndex &&
+    workspaceServerSource.includes('response.once("finish", settle)') &&
+    workspaceServerSource.includes('response.once("close", settle)') &&
+    shutdownDrainIndex >= 0 &&
+    shutdownCloseConnectionsIndex >= 0 &&
+    shutdownDrainIndex < shutdownCloseConnectionsIndex &&
+    shutdownServerCloseIndex >= 0 &&
+    shutdownRuntimeCloseIndex >= 0 &&
+    shutdownServerCloseIndex < shutdownRuntimeCloseIndex &&
+    !actionCoordinatorSource.includes("AbortController"),
   environmentFilesIgnored: ignore.split(/\r?\n/).includes(".env") && ignore.includes(".env.*"),
   workflowBootstrapPinnedAndBounded:
     actionlintToolSource.includes('ACTIONLINT_VERSION = "1.7.12"') &&
@@ -310,9 +520,7 @@ const assertions = {
   workspaceSessionCreatedOnlyAfterExactBind:
     workspaceOriginHostnameIndex > workspaceExactAddressIndex &&
     workspaceSessionCreationIndex > workspaceOriginHostnameIndex &&
-    workspaceServerSource.indexOf(
-      'server.on("request", workspaceRequestListener(options, session))',
-    ) > workspaceSessionCreationIndex &&
+    workspaceRequestListenerIndex > workspaceSessionCreationIndex &&
     workspaceSessionSource.includes("const bearer = Buffer.from(random(BEARER_BYTES))") &&
     workspaceSessionSource.includes(
       "return new BoundWorkspaceSession(mode, port, hostname, reviewOnlyReason, random)",
@@ -491,8 +699,8 @@ const assertions = {
     ),
   workspaceApprovalProjectionBounded:
     storeSource.includes("export const RUN_PRESENTATION_APPROVAL_LIMIT = 12") &&
-    storeSource.includes("CREATE INDEX IF NOT EXISTS approvals_by_run") &&
-    storeSource.includes("ON approvals(run_id)") &&
+    coreSchemaSource.includes("CREATE INDEX IF NOT EXISTS approvals_by_run") &&
+    coreSchemaSource.includes("ON approvals(run_id)") &&
     ["run_id", "kind", "digest", "actor", "decision", "created_at"].every((column) =>
       approvalProjectionSource.includes(`typeof(${column}) = 'text'`),
     ) &&
@@ -719,7 +927,7 @@ const assertions = {
     cliSource.includes('approval === "readable-manifest-v3"') &&
     // One token approves one migration; the tokens are not combinable.
     cliSource.includes(
-      "const none = { approvalIndex: false, patchSet: false, readableManifest: false }",
+      "approvalIndex: false,\n    patchSet: false,\n    readableManifest: false,\n    gate1: null,",
     ),
   persistedReadableManifestIsDigestVerified:
     storeSource.includes("readableManifest(runId: string): ReadableManifest | null") &&
@@ -835,17 +1043,20 @@ const assertions = {
     providerSource.includes('url.hostname.toLowerCase() === "api.anthropic.com"') &&
     providerSource.includes('"PROVIDER_SECRET_DETECTED"') &&
     providerSource.includes("!text.includes(this.#apiKey)"),
-  workspaceApprovalProjectionFailsClosed: [
-    "runId === expectedRunId",
-    "APPROVAL_KINDS.has",
-    "/^[a-f0-9]{64}$/.test(digest)",
-    'Buffer.byteLength(actor, "utf8") <= APPROVAL_ACTOR_MAX_BYTES',
-    "!containsUnsafeActorCharacter(actor)",
-    "!containsSecretShapedContent",
-    "APPROVAL_DECISIONS.has",
-    'decision === "approve" || kind === "review"',
-    "isCanonicalTimestamp(createdAt)",
-  ].every((guard) => approvalRowSource.includes(guard)),
+  workspaceApprovalProjectionFailsClosed:
+    [
+      "runId === expectedRunId",
+      "APPROVAL_KINDS.has",
+      "/^[a-f0-9]{64}$/.test(digest)",
+      "assertOperatorActor(actor)",
+      "APPROVAL_DECISIONS.has",
+      'decision === "approve" || kind === "review"',
+      "isCanonicalTimestamp(createdAt)",
+    ].every((guard) => approvalRowSource.includes(guard)) &&
+    policySource.includes("export function assertOperatorActor(") &&
+    policySource.includes('Buffer.byteLength(actor, "utf8") <= OPERATOR_ACTOR_MAX_BYTES') &&
+    policySource.includes("!/[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]/u.test(actor)") &&
+    policySource.includes('!containsSecretShapedContent(Buffer.from(actor, "utf8"))'),
   workspaceApprovalPresenterAllowlists:
     ["kind", "digest", "actor", "decision", "createdAt"].every((field) =>
       approvalPresenterSource.includes(`${field}: approval.${field}`),

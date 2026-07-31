@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
@@ -27,6 +27,41 @@ async function capturedError(action: Promise<unknown>): Promise<IcarusError> {
 }
 
 describe("Git controller transport hardening", () => {
+  test("treats pathspec-magic-looking targets as literal paths without widening the diff", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const controllerHome = path.join(fixture.root, "controller-home");
+    const runsRoot = path.join(fixture.root, "runs");
+    await mkdir(controllerHome, { recursive: true, mode: 0o700 });
+    await mkdir(runsRoot, { recursive: true, mode: 0o700 });
+    const controller = new GitController(controllerHome, runsRoot);
+    const inspection = await controller.inspectRepository(fixture.repository);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
+    const workspace = await controller.createPrivateWorkspace(
+      fixture.repository,
+      inspection.head,
+      path.join(runsRoot, randomUUID()),
+    );
+    const magicPath = "[x].txt";
+
+    await controller.applyFileWrites(
+      workspace.worktreePath,
+      [
+        { path: magicPath, content: "approved magic bytes\n" },
+        { path: "x.txt", content: "must stay outside the reviewed diff\n" },
+      ],
+      1_024,
+    );
+    await controller.stageIntentToAdd(workspace.worktreePath, [magicPath]);
+    const diff = await controller.diff(workspace.worktreePath, [magicPath], 64 * 1_024);
+
+    expect(diff).toContain(`diff --git a/${magicPath} b/${magicPath}`);
+    expect(diff).toContain("+approved magic bytes");
+    expect(diff).not.toContain("diff --git a/x.txt b/x.txt");
+    expect(diff).not.toContain("must stay outside the reviewed diff");
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+  });
+
   test("keeps local file cloning compatible and blocks source alternate-ref commands", async () => {
     const fixture = await createFixtureRepository();
     cleanups.push(fixture.cleanup);

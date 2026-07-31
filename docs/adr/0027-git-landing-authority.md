@@ -1196,6 +1196,16 @@ Before a writable SQLite handle opens, a read-only preflight inspects:
   and partial predicate; and
 - absence of any unknown partial landing object.
 
+The implementation does not SQLite-open the source database for this
+inspection. It fingerprints owned regular main/WAL/SHM files, copies main and
+WAL (not transient SHM) into a private `0700` snapshot with `0600` files,
+inspects that copy, and then proves the source family still has the same
+identity, bytes, and membership. SQLite reconstructs SHM only inside the
+snapshot. An unexpected journal/sibling or detected race fails closed, and the
+snapshot is removed in `finally` after handled completion or error. An
+uncatchable process termination can leave only mode-restricted temporary
+residue, never a source-family mutation.
+
 No landing object means `missing`. Every object exactly matching this ADR means
 `valid`. A partial table set, extra/missing/reordered column, malformed
 constraint, or misdefined index is database corruption and fails closed even

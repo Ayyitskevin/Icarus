@@ -9,13 +9,16 @@ does not install a daemon, accept remote traffic, depend on
 fleet/homelab/cloud services, or touch production systems.
 
 The HTTP server and explicit-port review UI support Linux, macOS, and Windows
-using platform-neutral Node/browser primitives. Candidate mutation-capable
+using platform-neutral Node/browser primitives. Mutation-capable
 repository import, context preview, draft persistence, and loopback planning
 are limited to a supported Chromium-family browser. ADR 0040's implementation
-and exact-head technical evidence are complete at `eb01b640...` in Linux CI
-`30618041483` and native real-Chrome run `30618043377`; Candidate release
-support remains held pending explicit human acceptance of the
-operator-controlled browser/resolver/proxy residual risk. Planning creates no
+and exact-head technical evidence are complete at
+`eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI `30618041483` and
+native real-Chrome run `30618043377`; explicit human acceptance of the interim
+operator-controlled browser/resolver/proxy residual risk was recorded on
+2026-07-31. Remaining Gate 1 runtime slices still gate release, and this
+acceptance does not change that gate. No live migration, merge, deployment, or
+public release was authorized or performed as part of it. Planning creates no
 private worktree and executes no project code. SQLite atomically admits one
 started operation per run before bounded context/provider work and rejects a
 concurrent planner. Approval and execution remain Linux-only because they
@@ -84,10 +87,10 @@ Node/operating-system lookup, hosts-file edit, or browser resolver injection;
 the browser's built-in reserved-name handling must navigate the public origin.
 The client removes the fragment before render and retains the bearer only in
 that origin's `sessionStorage`. Its implementation and native evidence are
-complete, but this remains candidate behavior rather than an accepted
-portability claim because production does not own or attest the browser and the
-operator-controlled browser/resolver/proxy risk still requires explicit human
-acceptance.
+complete, and explicit human acceptance of the interim
+browser/resolver/proxy risk was recorded on 2026-07-31. This accepted operating
+contract does not attest the browser process and does not make Gate 1
+release-complete.
 
 Setting `ICARUS_PORT` to an explicit integer from 1 through 65535 instead starts
 `http://127.0.0.1:<port>` in stable review-only mode: it emits no bearer and
@@ -103,13 +106,17 @@ does not trust `User-Agent`, cannot determine which browser will open a printed
 URL, and cannot automatically downgrade a random `.localhost` navigation that
 never reaches it. Failure to bind exact `127.0.0.1` remains fatal.
 
-The current portability slice force-closes HTTP connections during process
-shutdown. It does not automatically retry an interrupted POST. If shutdown
-occurs during project registration, draft creation, or planning, restart,
-reload authoritative state, and inspect the resulting project/run before
-deciding whether to submit another action. Guarded approval/execution routes
-remain absent; their ADR 0029 implementation must add durable action admission,
-reconciliation, and graceful drain-or-settlement before those effects are
+The first `SIGINT` or `SIGTERM` closes request admission, drains every HTTP
+handler registered before that boundary, waits for response settlement, and
+then closes residual sockets and SQLite. A second signal keeps the operating
+system's default hard-termination behavior as the manual escape hatch. Icarus
+does not automatically retry an interrupted POST. If a hard termination occurs
+during project registration, draft creation, or planning, restart, reload
+authoritative state, and inspect the resulting project/run before deciding
+whether to submit another action. Guarded approval/execution routes remain
+absent. Their local ADR 0029 ledger foundation refuses orphaned prepared rows
+under the Linux run lease, but admitted-row terminal reconciliation and the
+browser recovery projection are still required before those effects are
 enabled.
 
 The browser golden path is:
@@ -140,8 +147,9 @@ in real headless Chromium. It proves fragment removal before render,
 session-scoped reload, tokenless GETs, authenticated POSTs, stale/malformed
 revocation, stable review-only suppression, token non-disclosure, and an
 unchanged source fingerprint without a resolver override. That exact-origin
-composition passed at implementation commit `eb01b640...` in native run
-`30618043377`: both macOS 15 arm64 and Windows Server 2025 x64 used
+composition passed at implementation commit
+`eb01b6406c12126c60add7ac83800f8eba8ffdc9` in native run `30618043377`: both
+macOS 15 arm64 and Windows Server 2025 x64 used
 `Chrome/150.0.7871.187` with CDP `1.3` at the pinned Google Chrome paths. A
 Node HTTP client, resolver injection, hosts-file edit, review-only run, or
 mocked browser is not substitute evidence.
@@ -230,6 +238,35 @@ its own token: a state root needing both runs two separate invocations, one per
 token, each after its own verified backup. Startup inspects the existing
 database read-only and fails with `DATABASE_MIGRATION_REQUIRED` before opening
 it for writing.
+
+The local Gate 1 ledger foundation adds two further one-shot tokens in an exact
+order:
+
+```text
+ICARUS_APPROVE_SCHEMA_MIGRATION=browser-action-ledger-v1
+ICARUS_APPROVE_SCHEMA_MIGRATION=landing-ledger-v1
+```
+
+Use two separate stopped maintenance processes and take a fresh verified backup
+before each. The browser-action token must run first; the landing token refuses
+while that schema is absent. Each invocation exits immediately after applying
+and re-inspecting only its named schema, before normal runtime startup. Reusing
+a token, racing two copies of one token, supplying a combined value, finding a
+partial/lookalike Gate 1 object, using a permissive state/database/marker mode,
+or placing the state root inside a Git checkout fails closed. This repository
+implementation and its temporary-database tests do not authorize or perform a
+live migration.
+
+Gate 1 preflight never opens the source SQLite family. It fingerprints the
+owned regular main, WAL, and SHM files; copies only the main database and WAL
+into a private `0700` temporary directory with `0600` files; lets SQLite rebuild
+SHM there; and verifies the source fingerprints again before and after exact
+schema inspection. An unexpected journal/sibling or any detected race fails
+closed, and the private snapshot is removed in `finally`. This preserves
+committed uncheckpointed WAL truth without creating or changing source
+sidecars. An uncatchable process termination can leave a private,
+mode-restricted temporary snapshot for host cleanup, but cannot turn it into a
+source-family write.
 
 Because the plan approval digest now binds the approved target set, the policy
 version advances. A run already parked in `awaiting_approval` under the previous

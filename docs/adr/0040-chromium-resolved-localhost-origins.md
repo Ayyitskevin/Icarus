@@ -1,10 +1,11 @@
 # ADR 0040: Chromium-resolved `.localhost` mutation origins
 
-- Status: Candidate — implementation and exact-head technical evidence
-  complete; explicit human acceptance of the operator-controlled
-  browser/resolver/proxy residual risk pending
+- Status: Accepted — exact-head technical evidence is complete at
+  `eb01b6406c12126c60add7ac83800f8eba8ffdc9`; explicit human acceptance of
+  the interim operator-controlled browser/resolver/proxy residual risk was
+  recorded on 2026-07-31
 - Date: 2026-07-31
-- Proposes to supersede in part upon acceptance:
+- Supersedes in part:
   [ADR 0029](0029-browser-approval-authority.md)'s operating-system lookup
   proof, arbitrary-browser portability claim, and corresponding
   origin-acceptance clauses only
@@ -42,7 +43,7 @@ resolve the hostname sends no request at all. This is therefore an operator and
 release support contract, not a `User-Agent` authorization rule or an automatic
 downgrade.
 
-## Candidate decision
+## Decision
 
 ### Fresh public origin, fixed socket bind
 
@@ -105,10 +106,10 @@ mode.
 
 Production does not yet own or attest the browser process. Opening the
 fragment-bearing launch URL in an unverified browser, resolver configuration,
-or proxy is outside this candidate boundary and could expose the fragment to
-nonlocal same-origin content. This residual risk requires explicit human
-acceptance. A later owned Chromium or desktop attach/start handshake should
-replace the operator-enforced browser boundary.
+or proxy is outside this accepted interim boundary and could expose the
+fragment to nonlocal same-origin content. Explicit human acceptance of this
+residual risk was recorded on 2026-07-31. A later owned Chromium or desktop
+attach/start handshake should replace the operator-enforced browser boundary.
 
 ### Interim topology
 
@@ -172,10 +173,14 @@ Exact implementation commit
   stopped truthfully at `awaiting_approval`, emitted zero browser errors and
   zero external requests, and left the source checkout unchanged.
 
-These results complete the technical evidence only. Production still prints
-the fragment-bearing URL and does not own or attest the browser, resolver
-configuration, or proxy. ADR 0040 therefore remains Candidate until a human
-explicitly accepts that interim operator contract.
+These results complete the technical evidence. Production still prints the
+fragment-bearing URL and does not own or attest the browser, resolver
+configuration, or proxy. On 2026-07-31, the human operator explicitly accepted
+that residual risk for this interim contract.
+
+Acceptance records the browser/resolver/proxy risk decision only. Gate 1's
+remaining runtime slices are incomplete. No live migration, merge, deployment,
+or public release was authorized or performed as part of this acceptance.
 
 ## Consequences
 
@@ -185,7 +190,8 @@ The cost is an explicit browser-family support boundary: review-only browsing
 remains broadly available through a stable numeric origin, while mutation is
 supported only where real Chromium acceptance says it works.
 
-Until this candidate is accepted, ADR 0029 remains authoritative. Acceptance
-would leave ADR 0029 authoritative for bearer handling, HTTP authentication,
-guarded-action fencing, action-ledger recovery, shutdown settlement, and every
-clause not explicitly superseded here.
+ADR 0040 now supersedes only ADR 0029's operating-system lookup proof,
+arbitrary-browser portability claim, and corresponding origin-acceptance
+clauses. ADR 0029 remains authoritative for bearer handling, HTTP
+authentication, guarded-action fencing, action-ledger recovery, shutdown
+settlement, and every clause not explicitly superseded here.

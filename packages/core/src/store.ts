@@ -3,11 +3,33 @@ import { chmodSync, existsSync, lstatSync } from "node:fs";
 import path from "node:path";
 
 import Database from "better-sqlite3";
-import { containsSecretShapedContent } from "./context.js";
+import {
+  assertBrowserActionCancellationParent,
+  assertBrowserActionIdentity,
+  assertBrowserActionSettlement,
+  assertSameBrowserActionIdentity,
+  type BrowserActionAdmittedRecord,
+  type BrowserActionIdentity,
+  type BrowserActionPreparedRecord,
+  type BrowserActionRecord,
+  type BrowserActionSettledRecord,
+  type BrowserActionSettlement,
+  isBrowserActionKind,
+  isBrowserActionOutcome,
+  isBrowserActionStatus,
+} from "./browser-action-state.js";
+import {
+  ICARUS_APPROVAL_INDEX_SCHEMA,
+  ICARUS_CORE_SCHEMA,
+  ICARUS_PATCH_SET_SCHEMA,
+  ICARUS_READABLE_MANIFEST_SCHEMA,
+} from "./core-schema.js";
 import { digestJson, sha256 } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
+import { assertGate1SchemasForStartup, createGate1Schemas } from "./gate1-schema.js";
 import {
   assertCheckProfiles,
+  assertOperatorActor,
   assertReadableManifest,
   assertRepositoryRelativePath,
   assertSandboxProfile,
@@ -169,6 +191,142 @@ const RUN_PRESENTATION_ACTION_EVENT_TYPES = [
   "cancellation.completed",
   "review.accepted",
 ] as const;
+const BROWSER_ACTION_DOMAIN_EVENT_TYPES: Readonly<
+  Record<BrowserActionIdentity["kind"], ReadonlySet<string>>
+> = {
+  "egress.approve": new Set([
+    "egress.approved",
+    "plan.created",
+    "run.failed",
+    "cancellation.completed",
+  ]),
+  "plan.approve": new Set([
+    "plan.approved",
+    "verification.completed",
+    "session.completed",
+    "session.awaiting_human",
+    "session.exhausted",
+    "run.failed",
+    "cancellation.completed",
+  ]),
+  "review.approve": new Set(["review.accepted", "run.failed", "cancellation.completed"]),
+  "review.reject": new Set(["review.rejected", "rollback.completed", "run.failed"]),
+  "rollback.approve": new Set(["rollback.approved", "rollback.completed", "run.failed"]),
+  "restore.approve": new Set([
+    "restore.approved",
+    "verification.completed",
+    "session.completed",
+    "session.awaiting_human",
+    "session.exhausted",
+    "run.failed",
+  ]),
+  "run.resume": new Set([
+    "resume.requested",
+    "run.resumed",
+    "egress.requested",
+    "plan.created",
+    "verification.completed",
+    "session.completed",
+    "session.awaiting_human",
+    "session.exhausted",
+    "rollback.completed",
+    "restore.completed",
+    "cancellation.completed",
+    "run.failed",
+  ]),
+  "run.cancel": new Set(["cancellation.requested", "run.failed"]),
+};
+const BROWSER_ACTION_DOMAIN_OPERATION_KINDS: Readonly<
+  Record<BrowserActionIdentity["kind"], ReadonlySet<string>>
+> = {
+  "egress.approve": new Set(["egress.validate"]),
+  "plan.approve": new Set(["approval.validate"]),
+  "review.approve": new Set(["review.validate"]),
+  "review.reject": new Set(["checkpoint.rollback"]),
+  "rollback.approve": new Set(["checkpoint.rollback"]),
+  "restore.approve": new Set(["checkpoint.restore"]),
+  "run.resume": new Set([
+    "context.prepare",
+    "provider.plan",
+    "provider.edit",
+    "sandbox.verify",
+    "checkpoint.rollback",
+    "checkpoint.restore",
+    "cancellation.recovery",
+  ]),
+  "run.cancel": new Set([]),
+};
+const BROWSER_ACTION_FAILED_OPERATION_BOUNDARIES: Readonly<
+  Record<BrowserActionIdentity["kind"], ReadonlySet<string>>
+> = {
+  "egress.approve": new Set(["egress.validate"]),
+  "plan.approve": new Set(["approval.validate"]),
+  "review.approve": new Set(["review.validate"]),
+  "review.reject": new Set([]),
+  "rollback.approve": new Set([]),
+  "restore.approve": new Set([]),
+  "run.resume": new Set([]),
+  "run.cancel": new Set([]),
+};
+const BROWSER_ACTION_RESUME_STAGE_OPERATION_KIND: Readonly<Partial<Record<RunState, string>>> = {
+  preparing: "context.prepare",
+  planned: "provider.plan",
+  running: "provider.edit",
+  verifying: "sandbox.verify",
+  rolling_back: "checkpoint.rollback",
+  restoring: "checkpoint.restore",
+  cancelling: "cancellation.recovery",
+};
+const BROWSER_ACTION_RESUME_STAGES: ReadonlySet<RunState> = new Set(
+  Object.keys(BROWSER_ACTION_RESUME_STAGE_OPERATION_KIND) as RunState[],
+);
+const BROWSER_ACTION_RESUME_CANCELLABLE_STAGES: ReadonlySet<RunState> = new Set([
+  "preparing",
+  "planned",
+  "running",
+  "verifying",
+]);
+const BROWSER_ACTION_SUCCESS_BOUNDARIES: Readonly<
+  Record<BrowserActionIdentity["kind"], Readonly<Record<string, readonly RunState[]>>>
+> = {
+  "egress.approve": {
+    "plan.created": ["awaiting_approval"],
+  },
+  "plan.approve": {
+    "verification.completed": ["awaiting_review"],
+    "session.completed": ["awaiting_review"],
+    "session.awaiting_human": ["awaiting_review"],
+    "session.exhausted": ["awaiting_review"],
+  },
+  "review.approve": {
+    "review.accepted": ["completed"],
+  },
+  "review.reject": {
+    "rollback.completed": ["rolled_back"],
+  },
+  "rollback.approve": {
+    "rollback.completed": ["rolled_back"],
+  },
+  "restore.approve": {
+    "verification.completed": ["awaiting_review"],
+    "session.completed": ["awaiting_review"],
+    "session.awaiting_human": ["awaiting_review"],
+    "session.exhausted": ["awaiting_review"],
+  },
+  "run.resume": {
+    "egress.requested": ["awaiting_egress_approval"],
+    "plan.created": ["awaiting_approval"],
+    "verification.completed": ["awaiting_review"],
+    "session.completed": ["awaiting_review"],
+    "session.awaiting_human": ["awaiting_review"],
+    "session.exhausted": ["awaiting_review"],
+    "rollback.completed": ["rolled_back"],
+    "cancellation.completed": ["cancelled"],
+  },
+  "run.cancel": {
+    "cancellation.requested": ["cancelling", "cancelled", "failed"],
+  },
+};
 
 function isSqliteBusy(error: unknown): boolean {
   return (
@@ -180,6 +338,36 @@ function isSqliteBusy(error: unknown): boolean {
   );
 }
 
+function isSqliteConstraint(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { readonly code?: unknown }).code === "string" &&
+    (error as { readonly code: string }).code.startsWith("SQLITE_CONSTRAINT")
+  );
+}
+
+function sqliteErrorCode(error: unknown): string | null {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { readonly code?: unknown }).code === "string"
+    ? (error as { readonly code: string }).code
+    : null;
+}
+
+function runBrowserActionImmediate<T>(transaction: { immediate(): T }): T {
+  try {
+    return transaction.immediate();
+  } catch (error) {
+    if (isSqliteBusy(error)) {
+      throw new IcarusError("RUN_BUSY", "Another process is updating browser action state");
+    }
+    throw error;
+  }
+}
+
 function emergencyOperationDetail(detail: JsonValue): JsonValue {
   if (typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
     return { ...detail, budgetClass: "emergency" };
@@ -187,147 +375,12 @@ function emergencyOperationDetail(detail: JsonValue): JsonValue {
   return { budgetClass: "emergency", detail };
 }
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS repositories (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  path TEXT NOT NULL UNIQUE,
-  device INTEGER NOT NULL,
-  inode INTEGER NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS projects (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  repository_id TEXT NOT NULL REFERENCES repositories(id),
-  base_ref TEXT NOT NULL,
-  checks_json TEXT NOT NULL,
-  sandbox_json TEXT NOT NULL,
-  ceiling_json TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS runs (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id),
-  task TEXT NOT NULL,
-  target TEXT NOT NULL,
-  provider_json TEXT NOT NULL,
-  state TEXT NOT NULL,
-  resume_state TEXT,
-  base_commit TEXT NOT NULL,
-  context_json TEXT NOT NULL,
-  context_artifact_path TEXT NOT NULL,
-  context_sha256 TEXT NOT NULL,
-  plan_json TEXT,
-  plan_sha256 TEXT,
-  edit_json TEXT,
-  cache_path TEXT,
-  worktree_path TEXT,
-  baseline_base64 TEXT,
-  approved_base64 TEXT,
-  diff TEXT,
-  verification_json TEXT,
-  tool_calls INTEGER NOT NULL DEFAULT 0,
-  input_tokens INTEGER NOT NULL DEFAULT 0,
-  output_tokens INTEGER NOT NULL DEFAULT 0,
-  active_runtime_ms INTEGER NOT NULL DEFAULT 0,
-  estimated_cost_usd REAL NOT NULL DEFAULT 0,
-  reserved_cost_usd REAL NOT NULL DEFAULT 0,
-  error_code TEXT,
-  error_message TEXT,
-  version INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_project
-ON runs(project_id)
-WHERE state NOT IN ('completed', 'failed', 'cancelled', 'rolled_back');
-CREATE TABLE IF NOT EXISTS run_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id TEXT NOT NULL REFERENCES runs(id),
-  sequence INTEGER NOT NULL,
-  type TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  UNIQUE(run_id, sequence)
-);
-CREATE TABLE IF NOT EXISTS approvals (
-  id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES runs(id),
-  kind TEXT NOT NULL,
-  digest TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  decision TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  CHECK(decision IN ('approve', 'reject'))
-);
-CREATE TABLE IF NOT EXISTS operations (
-  id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES runs(id),
-  kind TEXT NOT NULL,
-  status TEXT NOT NULL,
-  reserved_cost_usd REAL NOT NULL,
-  reserved_tokens INTEGER NOT NULL,
-  reserved_runtime_ms INTEGER NOT NULL,
-  result_json TEXT,
-  started_at TEXT NOT NULL,
-  finished_at TEXT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS one_started_operation_per_run
-ON operations(run_id)
-WHERE status = 'started';
-CREATE TABLE IF NOT EXISTS checkpoints (
-  run_id TEXT PRIMARY KEY REFERENCES runs(id),
-  baseline_base64 TEXT NOT NULL,
-  approved_base64 TEXT NOT NULL,
-  checkpoint_sha256 TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-PRAGMA user_version = 1;
-`;
-
-const APPROVAL_INDEX_SCHEMA = `
-CREATE INDEX IF NOT EXISTS approvals_by_run
-ON approvals(run_id);
-`;
-
-/**
- * ADR 0023 storage. Both objects are additive tables, so the migration never
- * rewrites or alters an existing row. Runs persisted under schema v1 keep their
- * single-file `edit_json` and checkpoint columns and remain readable.
- */
-const PATCH_SET_SCHEMA = `
-CREATE TABLE IF NOT EXISTS patch_sets (
-  run_id TEXT PRIMARY KEY REFERENCES runs(id),
-  patch_set_json TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS checkpoint_files (
-  run_id TEXT NOT NULL REFERENCES runs(id),
-  path TEXT NOT NULL,
-  op TEXT NOT NULL,
-  baseline_base64 TEXT,
-  approved_base64 TEXT,
-  PRIMARY KEY (run_id, path),
-  CHECK (op IN ('modify', 'create', 'delete'))
-);
-`;
-
-/**
- * ADR 0026 storage. One row per run holding the enumerated readable set its
- * approval bound. Additive, so the migration never rewrites an existing row —
- * but it is still operator-gated, because a state file that silently gains a
- * table is a state file whose shape nobody agreed to.
- */
-const READABLE_MANIFEST_SCHEMA = `
-CREATE TABLE IF NOT EXISTS readable_manifests (
-  run_id TEXT PRIMARY KEY REFERENCES runs(id),
-  base_commit TEXT NOT NULL,
-  manifest_sha256 TEXT NOT NULL,
-  entries_json TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-`;
+const BROWSER_ACTION_SELECT = `
+SELECT action_id, run_id, kind, expected_state, expected_event_revision,
+       subject_digest, action_digest, parent_action_id, parent_action_digest,
+       actor, status, outcome, admission_event_sequence, domain_event_sequence,
+       domain_operation_id, error_code, created_at, updated_at
+FROM browser_action_requests`;
 
 type ReadableManifestSchemaStatus = "not_applicable" | "missing" | "valid";
 
@@ -586,10 +639,6 @@ function isCanonicalTimestamp(value: string): boolean {
   );
 }
 
-function containsUnsafeActorCharacter(value: string): boolean {
-  return /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value);
-}
-
 function approvalRecordRow(entry: unknown, expectedRunId: string): ApprovalRecord {
   const value = row(entry, "approval");
   const runId = text(value.run_id, "approval.run_id");
@@ -609,14 +658,11 @@ function approvalRecordRow(entry: unknown, expectedRunId: string): ApprovalRecor
     "Approval kind is invalid",
   );
   invariant(/^[a-f0-9]{64}$/.test(digest), "DATABASE_ERROR", "Approval digest is invalid");
-  invariant(
-    actor.trim().length > 0 &&
-      Buffer.byteLength(actor, "utf8") <= APPROVAL_ACTOR_MAX_BYTES &&
-      !containsUnsafeActorCharacter(actor) &&
-      !containsSecretShapedContent(Buffer.from(actor, "utf8")),
-    "DATABASE_ERROR",
-    "Approval actor is invalid",
-  );
+  try {
+    assertOperatorActor(actor);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Approval actor is invalid");
+  }
   invariant(
     APPROVAL_DECISIONS.has(decision as ApprovalRecord["decision"]),
     "DATABASE_ERROR",
@@ -636,6 +682,122 @@ function approvalRecordRow(entry: unknown, expectedRunId: string): ApprovalRecor
     decision: decision as ApprovalRecord["decision"],
     createdAt,
   };
+}
+
+function browserActionRecordRow(entry: unknown): BrowserActionRecord {
+  const value = row(entry, "browser action");
+  const identity: BrowserActionIdentity = {
+    actionId: text(value.action_id, "browser action.action_id"),
+    version: 1,
+    kind: text(value.kind, "browser action.kind") as BrowserActionIdentity["kind"],
+    runId: text(value.run_id, "browser action.run_id"),
+    expectedState: text(
+      value.expected_state,
+      "browser action.expected_state",
+    ) as BrowserActionIdentity["expectedState"],
+    eventRevision: numberValue(
+      value.expected_event_revision,
+      "browser action.expected_event_revision",
+    ),
+    subjectDigest: nullableText(value.subject_digest, "browser action.subject_digest"),
+    activeActionId: nullableText(value.parent_action_id, "browser action.parent_action_id"),
+    activeActionDigest: nullableText(
+      value.parent_action_digest,
+      "browser action.parent_action_digest",
+    ),
+    actionDigest: text(value.action_digest, "browser action.action_digest"),
+  };
+  const actor = text(value.actor, "browser action.actor");
+  const status = text(value.status, "browser action.status");
+  const outcome = nullableText(value.outcome, "browser action.outcome");
+  const admissionEventSequence =
+    value.admission_event_sequence === null
+      ? null
+      : numberValue(value.admission_event_sequence, "browser action.admission_event_sequence");
+  const domainEventSequence =
+    value.domain_event_sequence === null
+      ? null
+      : numberValue(value.domain_event_sequence, "browser action.domain_event_sequence");
+  const domainOperationId = nullableText(
+    value.domain_operation_id,
+    "browser action.domain_operation_id",
+  );
+  const errorCode = nullableText(value.error_code, "browser action.error_code");
+  const createdAt = text(value.created_at, "browser action.created_at");
+  const updatedAt = text(value.updated_at, "browser action.updated_at");
+  try {
+    assertBrowserActionIdentity(identity);
+    assertOperatorActor(actor);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Browser action identity is invalid");
+  }
+  invariant(
+    isBrowserActionKind(identity.kind) &&
+      isBrowserActionStatus(status) &&
+      (outcome === null || isBrowserActionOutcome(outcome)) &&
+      isCanonicalTimestamp(createdAt) &&
+      isCanonicalTimestamp(updatedAt),
+    "DATABASE_ERROR",
+    "Browser action row is invalid",
+  );
+  const base = { ...identity, actor, createdAt, updatedAt };
+  if (status === "prepared") {
+    invariant(
+      outcome === null &&
+        admissionEventSequence === null &&
+        domainEventSequence === null &&
+        domainOperationId === null &&
+        errorCode === null,
+      "DATABASE_ERROR",
+      "Prepared browser action row is invalid",
+    );
+    return {
+      ...base,
+      status,
+      outcome,
+      admissionEventSequence,
+      domainEventSequence,
+      domainOperationId,
+      errorCode,
+    } satisfies BrowserActionPreparedRecord;
+  }
+  if (status === "admitted") {
+    invariant(
+      outcome === null &&
+        admissionEventSequence !== null &&
+        Number.isSafeInteger(admissionEventSequence) &&
+        admissionEventSequence >= 1 &&
+        errorCode === null,
+      "DATABASE_ERROR",
+      "Admitted browser action row is invalid",
+    );
+    return {
+      ...base,
+      status,
+      outcome,
+      admissionEventSequence,
+      domainEventSequence,
+      domainOperationId,
+      errorCode,
+    } satisfies BrowserActionAdmittedRecord;
+  }
+  invariant(outcome !== null, "DATABASE_ERROR", "Settled browser action outcome is missing");
+  const settlement = {
+    outcome,
+    admissionEventSequence,
+    domainEventSequence,
+    domainOperationId,
+    errorCode,
+  } as BrowserActionSettlement;
+  try {
+    assertBrowserActionSettlement(
+      admissionEventSequence === null ? "prepared" : "admitted",
+      settlement,
+    );
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Settled browser action row is invalid");
+  }
+  return { ...base, status, ...settlement } as BrowserActionSettledRecord;
 }
 
 function sqliteRowid(value: unknown, name: string, allowZero: boolean): number {
@@ -1103,6 +1265,7 @@ export class IcarusStore {
       "INVALID_DATABASE_CONFIGURATION",
       "SQLite busy timeout is invalid",
     );
+    const gate1Schemas = assertGate1SchemasForStartup(databasePath);
     const approvalIndexStatus = inspectApprovalIndex(databasePath);
     if (approvalIndexStatus === "missing" && options.allowApprovalIndexMigration !== true) {
       throw new IcarusError(
@@ -1130,16 +1293,278 @@ export class IcarusStore {
     this.#database.pragma("foreign_keys = ON");
     this.#database.pragma("journal_mode = WAL");
     this.#database.pragma("synchronous = FULL");
-    this.#database.exec(SCHEMA);
-    this.#database.exec(APPROVAL_INDEX_SCHEMA);
-    this.#database.exec(PATCH_SET_SCHEMA);
-    this.#database.exec(READABLE_MANIFEST_SCHEMA);
+    this.#database.exec(ICARUS_CORE_SCHEMA);
+    this.#database.exec(ICARUS_APPROVAL_INDEX_SCHEMA);
+    this.#database.exec(ICARUS_PATCH_SET_SCHEMA);
+    this.#database.exec(ICARUS_READABLE_MANIFEST_SCHEMA);
+    if (
+      gate1Schemas.browserActions === "not_applicable" &&
+      gate1Schemas.landing === "not_applicable"
+    ) {
+      createGate1Schemas(this.#database);
+    }
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#id = options.id ?? randomUUID;
   }
 
   close(): void {
     this.#database.close();
+  }
+
+  getBrowserAction(actionId: string): BrowserActionRecord {
+    const entry = this.#database
+      .prepare(`${BROWSER_ACTION_SELECT} WHERE action_id = ?`)
+      .get(actionId);
+    invariant(entry !== undefined, "NOT_FOUND", "Browser action request was not found");
+    return browserActionRecordRow(entry);
+  }
+
+  listActiveBrowserActions(runId?: string): readonly BrowserActionRecord[] {
+    const entries =
+      runId === undefined
+        ? (this.#database
+            .prepare(
+              `${BROWSER_ACTION_SELECT}
+               WHERE status IN ('prepared', 'admitted')
+               ORDER BY run_id, created_at, action_id`,
+            )
+            .all() as unknown[])
+        : (this.#database
+            .prepare(
+              `${BROWSER_ACTION_SELECT}
+               WHERE run_id = ? AND status IN ('prepared', 'admitted')
+               ORDER BY created_at, action_id`,
+            )
+            .all(runId) as unknown[]);
+    return entries.map(browserActionRecordRow);
+  }
+
+  prepareBrowserAction(identity: BrowserActionIdentity, actor: string): BrowserActionRecord {
+    assertBrowserActionIdentity(identity);
+    assertOperatorActor(actor);
+    const transaction = this.#database.transaction((): BrowserActionRecord => {
+      const existing = this.#database
+        .prepare(`${BROWSER_ACTION_SELECT} WHERE action_id = ?`)
+        .get(identity.actionId);
+      if (existing !== undefined) {
+        const record = browserActionRecordRow(existing);
+        assertSameBrowserActionIdentity(record, identity);
+        return record;
+      }
+      invariant(
+        this.#database.prepare("SELECT 1 FROM runs WHERE id = ?").get(identity.runId) !== undefined,
+        "NOT_FOUND",
+        "Run was not found",
+      );
+      const now = this.#now();
+      try {
+        this.#database
+          .prepare(
+            `INSERT INTO browser_action_requests
+             (action_id, run_id, kind, expected_state, expected_event_revision,
+              subject_digest, action_digest, parent_action_id, parent_action_digest,
+              actor, status, outcome, admission_event_sequence,
+              domain_event_sequence, domain_operation_id, error_code, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+          )
+          .run(
+            identity.actionId,
+            identity.runId,
+            identity.kind,
+            identity.expectedState,
+            identity.eventRevision,
+            identity.subjectDigest,
+            identity.actionDigest,
+            identity.activeActionId,
+            identity.activeActionDigest,
+            actor,
+            now,
+            now,
+          );
+      } catch (error) {
+        const code = sqliteErrorCode(error);
+        if (code === "SQLITE_CONSTRAINT_UNIQUE") {
+          throw new IcarusError(
+            "ACTION_IN_PROGRESS",
+            "Another browser action is already active for this run",
+            { runId: identity.runId },
+          );
+        }
+        if (isSqliteConstraint(error)) {
+          throw new IcarusError(
+            "INVALID_BROWSER_ACTION",
+            "Browser action request violates the durable ledger contract",
+          );
+        }
+        if (isSqliteBusy(error)) {
+          throw new IcarusError("RUN_BUSY", "Another process is updating browser action state");
+        }
+        throw error;
+      }
+      return this.getBrowserAction(identity.actionId);
+    });
+    return runBrowserActionImmediate(transaction);
+  }
+
+  admitBrowserAction(actionId: string): BrowserActionAdmittedRecord | BrowserActionSettledRecord {
+    const transaction = this.#database.transaction(
+      (): BrowserActionAdmittedRecord | BrowserActionSettledRecord => {
+        const record = this.getBrowserAction(actionId);
+        if (record.status === "settled") return record;
+        if (record.status === "admitted") return record;
+        const current = this.getRun(record.runId);
+        const revision = numberValue(
+          row(
+            this.#database
+              .prepare(
+                "SELECT COALESCE(MAX(sequence), 0) AS revision FROM run_events WHERE run_id = ?",
+              )
+              .get(record.runId),
+            "browser action event revision",
+          ).revision,
+          "browser action event revision.revision",
+        );
+        const activeNonCancelEntry =
+          record.kind === "run.cancel"
+            ? this.#database
+                .prepare(
+                  `${BROWSER_ACTION_SELECT}
+                   WHERE run_id = ? AND kind <> 'run.cancel'
+                     AND status IN ('prepared', 'admitted')`,
+                )
+                .get(record.runId)
+            : undefined;
+        const activeNonCancel =
+          activeNonCancelEntry === undefined ? null : browserActionRecordRow(activeNonCancelEntry);
+        let cancellationParentMatches = true;
+        try {
+          assertBrowserActionCancellationParent(record, activeNonCancel);
+        } catch {
+          cancellationParentMatches = false;
+        }
+        if (
+          current.state !== record.expectedState ||
+          revision !== record.eventRevision ||
+          this.#browserActionSubjectDigest(current, record.kind) !== record.subjectDigest ||
+          !cancellationParentMatches
+        ) {
+          return this.#refusePreparedBrowserActionRecord(actionId, "STALE_ACTION");
+        }
+        const admissionEventSequence = this.#appendEvent(record.runId, "browser.action.admitted", {
+          browserActionId: record.actionId,
+          kind: record.kind,
+          actionDigest: record.actionDigest,
+        });
+        const updatedAt = this.#now();
+        const result = this.#database
+          .prepare(
+            `UPDATE browser_action_requests
+             SET status = 'admitted', admission_event_sequence = ?, updated_at = ?
+             WHERE action_id = ? AND status = 'prepared'`,
+          )
+          .run(admissionEventSequence, updatedAt, actionId);
+        invariant(
+          result.changes === 1,
+          "CONCURRENT_BROWSER_ACTION_UPDATE",
+          "Browser action changed during admission",
+        );
+        const admitted = this.getBrowserAction(actionId);
+        invariant(
+          admitted.status === "admitted",
+          "DATABASE_ERROR",
+          "Browser action admission did not persist",
+        );
+        return admitted;
+      },
+    );
+    return runBrowserActionImmediate(transaction);
+  }
+
+  refusePreparedBrowserAction(actionId: string, errorCode: string): BrowserActionSettledRecord {
+    const transaction = this.#database.transaction(() =>
+      this.#refusePreparedBrowserActionRecord(actionId, errorCode),
+    );
+    return runBrowserActionImmediate(transaction);
+  }
+
+  settleAdmittedBrowserAction(
+    actionId: string,
+    settlement: BrowserActionSettlement,
+  ): BrowserActionSettledRecord {
+    const transaction = this.#database.transaction((): BrowserActionSettledRecord => {
+      const record = this.getBrowserAction(actionId);
+      if (record.status === "settled") {
+        invariant(
+          record.outcome === settlement.outcome &&
+            record.admissionEventSequence === settlement.admissionEventSequence &&
+            record.domainEventSequence === settlement.domainEventSequence &&
+            record.domainOperationId === settlement.domainOperationId &&
+            record.errorCode === settlement.errorCode,
+          "INVALID_BROWSER_ACTION_TRANSITION",
+          "Browser action is already settled differently",
+        );
+        return record;
+      }
+      invariant(
+        record.status === "admitted",
+        "INVALID_BROWSER_ACTION_TRANSITION",
+        "Browser action must be admitted before this settlement",
+      );
+      assertBrowserActionSettlement("admitted", settlement);
+      invariant(
+        settlement.admissionEventSequence === record.admissionEventSequence,
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        "Settlement admission event does not match the durable action",
+      );
+      this.#assertBrowserActionAnchors(record, settlement);
+      const updatedAt = this.#now();
+      const result = this.#database
+        .prepare(
+          `UPDATE browser_action_requests
+           SET status = 'settled', outcome = ?, domain_event_sequence = ?,
+               domain_operation_id = ?, error_code = ?, updated_at = ?
+           WHERE action_id = ? AND status = 'admitted'`,
+        )
+        .run(
+          settlement.outcome,
+          settlement.domainEventSequence,
+          settlement.domainOperationId,
+          settlement.errorCode,
+          updatedAt,
+          actionId,
+        );
+      invariant(
+        result.changes === 1,
+        "CONCURRENT_BROWSER_ACTION_UPDATE",
+        "Browser action changed during settlement",
+      );
+      const settled = this.getBrowserAction(actionId);
+      invariant(
+        settled.status === "settled",
+        "DATABASE_ERROR",
+        "Browser settlement did not persist",
+      );
+      return settled;
+    });
+    return runBrowserActionImmediate(transaction);
+  }
+
+  /**
+   * Prepared rows prove that no domain action was admitted, so startup may
+   * refuse them without replaying work. Admitted rows deliberately remain
+   * untouched here: settling one requires the exact ADR 0029 terminal-boundary
+   * reconciliation that the guarded action runtime will own.
+   */
+  settleOrphanedPreparedBrowserActions(runId: string): readonly BrowserActionSettledRecord[] {
+    const transaction = this.#database.transaction((): readonly BrowserActionSettledRecord[] => {
+      const prepared = this.listActiveBrowserActions(runId).filter(
+        (record): record is BrowserActionPreparedRecord => record.status === "prepared",
+      );
+      return prepared.map((record) =>
+        this.refusePreparedBrowserAction(record.actionId, "ACTION_NOT_ADMITTED"),
+      );
+    });
+    return runBrowserActionImmediate(transaction);
   }
 
   addRepository(input: {
@@ -3762,7 +4187,498 @@ export class IcarusStore {
     return transaction();
   }
 
-  #appendEvent(runId: string, type: string, payload: unknown): void {
+  #browserActionSubjectDigest(run: RunRecord, kind: BrowserActionIdentity["kind"]): string | null {
+    switch (kind) {
+      case "egress.approve":
+        return run.contextSha256;
+      case "plan.approve":
+        return run.planSha256;
+      case "review.approve":
+      case "review.reject":
+      case "rollback.approve":
+        return run.verification?.diffSha256 ?? null;
+      case "restore.approve": {
+        const checkpoint = this.#database
+          .prepare("SELECT checkpoint_sha256 FROM checkpoints WHERE run_id = ?")
+          .get(run.id);
+        if (checkpoint === undefined) return null;
+        const digest = text(
+          row(checkpoint, "browser action checkpoint").checkpoint_sha256,
+          "browser action checkpoint.checkpoint_sha256",
+        );
+        invariant(
+          /^[a-f0-9]{64}$/.test(digest),
+          "DATABASE_ERROR",
+          "Browser action checkpoint digest is invalid",
+        );
+        return digest;
+      }
+      case "run.resume":
+      case "run.cancel":
+        return null;
+    }
+  }
+
+  #refusePreparedBrowserActionRecord(
+    actionId: string,
+    errorCode: string,
+  ): BrowserActionSettledRecord {
+    const record = this.getBrowserAction(actionId);
+    const settlement: BrowserActionSettlement = {
+      outcome: "refused",
+      admissionEventSequence: null,
+      domainEventSequence: null,
+      domainOperationId: null,
+      errorCode,
+    };
+    assertBrowserActionSettlement("prepared", settlement);
+    if (record.status === "settled") {
+      invariant(
+        record.outcome === "refused" && record.errorCode === errorCode,
+        "INVALID_BROWSER_ACTION_TRANSITION",
+        "Browser action is already settled differently",
+      );
+      return record;
+    }
+    invariant(
+      record.status === "prepared",
+      "INVALID_BROWSER_ACTION_TRANSITION",
+      "An admitted browser action cannot be refused as unadmitted",
+    );
+    const updatedAt = this.#now();
+    const result = this.#database
+      .prepare(
+        `UPDATE browser_action_requests
+         SET status = 'settled', outcome = 'refused', error_code = ?, updated_at = ?
+         WHERE action_id = ? AND status = 'prepared'`,
+      )
+      .run(errorCode, updatedAt, actionId);
+    invariant(
+      result.changes === 1,
+      "CONCURRENT_BROWSER_ACTION_UPDATE",
+      "Browser action changed during refusal",
+    );
+    const settled = this.getBrowserAction(actionId);
+    invariant(settled.status === "settled", "DATABASE_ERROR", "Browser refusal did not persist");
+    return settled;
+  }
+
+  #assertBrowserActionAnchors(
+    record: BrowserActionAdmittedRecord,
+    settlement: BrowserActionSettlement,
+  ): void {
+    const admission = row(
+      this.#database
+        .prepare(
+          "SELECT run_id, type, payload_json FROM run_events WHERE run_id = ? AND sequence = ?",
+        )
+        .get(record.runId, record.admissionEventSequence),
+      "browser action admission event",
+    );
+    const admissionPayload = parseJson<Record<string, unknown>>(
+      admission.payload_json,
+      "browser action admission event.payload_json",
+    );
+    invariant(
+      text(admission.run_id, "browser action admission event.run_id") === record.runId &&
+        text(admission.type, "browser action admission event.type") === "browser.action.admitted" &&
+        admissionPayload.browserActionId === record.actionId,
+      "DATABASE_ERROR",
+      "Browser action admission event is invalid",
+    );
+
+    let domainType: string | null = null;
+    let operationKind: string | null = null;
+    let operationStartSequence: number | null = null;
+
+    if (
+      settlement.outcome === "failed" &&
+      settlement.domainEventSequence === null &&
+      settlement.domainOperationId === null
+    ) {
+      invariant(
+        !this.#hasPostAdmissionBrowserActionAnchor(record),
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        "An unanchored failure is invalid after a browser action domain effect",
+      );
+    }
+
+    if (settlement.domainEventSequence !== null) {
+      const runState = text(
+        row(
+          this.#database.prepare("SELECT state FROM runs WHERE id = ?").get(record.runId),
+          "browser action run state",
+        ).state,
+        "browser action run state.state",
+      ) as RunState;
+      invariant(RUN_STATES.has(runState), "DATABASE_ERROR", "Browser action run state is invalid");
+      const domainEvent = row(
+        this.#database
+          .prepare(
+            "SELECT run_id, type, payload_json FROM run_events WHERE run_id = ? AND sequence = ?",
+          )
+          .get(record.runId, settlement.domainEventSequence),
+        "browser action domain event",
+      );
+      domainType = text(domainEvent.type, "browser action domain event.type");
+      const domainPayload = parseJson<Record<string, unknown>>(
+        domainEvent.payload_json,
+        "browser action domain event.payload_json",
+      );
+      invariant(
+        text(domainEvent.run_id, "browser action domain event.run_id") === record.runId &&
+          settlement.domainEventSequence > record.admissionEventSequence &&
+          BROWSER_ACTION_DOMAIN_EVENT_TYPES[record.kind].has(domainType) &&
+          domainPayload.browserActionId === record.actionId,
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        "Browser action domain event is not an allowed action-linked boundary",
+      );
+      if (settlement.outcome === "succeeded") {
+        const allowedStates = BROWSER_ACTION_SUCCESS_BOUNDARIES[record.kind][domainType];
+        invariant(
+          allowedStates?.includes(runState) === true,
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser action success does not name its exact terminal event and run state",
+        );
+      } else if (settlement.outcome === "cancelled") {
+        invariant(
+          record.kind !== "run.cancel" &&
+            domainType === "cancellation.completed" &&
+            runState === "cancelled",
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser action cancellation does not name its exact terminal event and run state",
+        );
+      } else if (settlement.outcome === "failed") {
+        invariant(
+          record.kind !== "run.cancel" && domainType === "run.failed" && runState === "failed",
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser action failure does not name its exact terminal event and run state",
+        );
+      }
+    }
+
+    if (settlement.domainOperationId !== null) {
+      const operation = row(
+        this.#database
+          .prepare(
+            "SELECT run_id, kind, status, result_json, finished_at FROM operations WHERE id = ?",
+          )
+          .get(settlement.domainOperationId),
+        "browser action domain operation",
+      );
+      const operationStatus = text(operation.status, "browser action domain operation.status");
+      operationKind = text(operation.kind, "browser action domain operation.kind");
+      const operationFinishedAt = nullableText(
+        operation.finished_at,
+        "browser action domain operation.finished_at",
+      );
+      const result =
+        operation.result_json === null
+          ? null
+          : parseJson<Record<string, unknown>>(
+              operation.result_json,
+              "browser action domain operation.result_json",
+            );
+      const operationStartSequences: number[] = [];
+      const operationStartRows = this.#database
+        .prepare(
+          `SELECT sequence, payload_json
+           FROM run_events
+           WHERE run_id = ? AND type = 'operation.started'
+           ORDER BY sequence`,
+        )
+        .all(record.runId) as unknown[];
+      for (const entry of operationStartRows) {
+        const start = row(entry, "browser action operation start event");
+        const payload = parseJson<Record<string, unknown>>(
+          start.payload_json,
+          "browser action operation start event.payload_json",
+        );
+        if (payload.operationId === settlement.domainOperationId) {
+          invariant(
+            payload.kind === operationKind && payload.browserActionId === record.actionId,
+            "INVALID_BROWSER_ACTION_SETTLEMENT",
+            "Browser action operation start is not exactly action-linked",
+          );
+          operationStartSequences.push(
+            numberValue(start.sequence, "browser action operation start event.sequence"),
+          );
+        }
+      }
+      operationStartSequence = operationStartSequences[0] ?? null;
+      const operationIsClosed = ["succeeded", "failed", "cancelled", "interrupted"].includes(
+        operationStatus,
+      );
+      const operationHasClosedDetail =
+        operationIsClosed &&
+        operationFinishedAt !== null &&
+        isCanonicalTimestamp(operationFinishedAt) &&
+        result?.browserActionId === record.actionId;
+      const operationIsOpenReconciliation =
+        settlement.outcome === "reconciliation_required" &&
+        operationStatus === "started" &&
+        operationFinishedAt === null &&
+        result === null;
+      invariant(
+        text(operation.run_id, "browser action domain operation.run_id") === record.runId &&
+          BROWSER_ACTION_DOMAIN_OPERATION_KINDS[record.kind].has(operationKind) &&
+          operationStartSequences.length === 1 &&
+          operationStartSequence !== null &&
+          operationStartSequence > record.admissionEventSequence &&
+          (settlement.domainEventSequence === null ||
+            operationStartSequence < settlement.domainEventSequence) &&
+          (operationHasClosedDetail || operationIsOpenReconciliation),
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        "Browser action domain operation is not an allowed action-linked boundary",
+      );
+      if (settlement.outcome === "failed" && settlement.domainEventSequence === null) {
+        invariant(
+          operationStatus === "failed" &&
+            BROWSER_ACTION_FAILED_OPERATION_BOUNDARIES[record.kind].has(operationKind),
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser action operation is not an allowed direct failure boundary",
+        );
+        invariant(
+          !this.#hasPostAdmissionBrowserActionAnchor(record, {
+            beforeSequence: operationStartSequence,
+            ignoredOperationId: settlement.domainOperationId,
+          }),
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser action direct failure operation was not its first domain effect",
+        );
+      }
+    }
+
+    if (
+      record.kind === "run.resume" &&
+      (settlement.domainEventSequence !== null || settlement.domainOperationId !== null)
+    ) {
+      const resumedStage = this.#assertBrowserResumeActionChain(
+        record,
+        settlement.domainEventSequence,
+        settlement.domainOperationId,
+        operationKind,
+        operationStartSequence,
+      );
+      if (settlement.outcome === "cancelled") {
+        invariant(
+          BROWSER_ACTION_RESUME_CANCELLABLE_STAGES.has(resumedStage),
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser resume cancellation is not valid for the resumed stage",
+        );
+      }
+      if (domainType === "cancellation.completed") {
+        invariant(
+          (resumedStage === "cancelling" && settlement.outcome === "succeeded") ||
+            (BROWSER_ACTION_RESUME_CANCELLABLE_STAGES.has(resumedStage) &&
+              settlement.outcome === "cancelled"),
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser resume cancellation completion has the wrong outcome for its resumed stage",
+        );
+      }
+    }
+  }
+
+  #assertBrowserResumeActionChain(
+    record: BrowserActionAdmittedRecord,
+    terminalEventSequence: number | null,
+    namedOperationId: string | null,
+    namedOperationKind: string | null,
+    namedOperationStartSequence: number | null,
+  ): RunState {
+    const upperSequence =
+      terminalEventSequence ??
+      namedOperationStartSequence ??
+      (() => {
+        throw new IcarusError(
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser resume settlement has no domain anchor",
+        );
+      })();
+    const events = this.#database
+      .prepare(
+        `SELECT sequence, type, payload_json
+         FROM run_events
+         WHERE run_id = ? AND sequence > ? AND sequence <= ?
+         ORDER BY sequence`,
+      )
+      .all(record.runId, record.admissionEventSequence, upperSequence) as unknown[];
+    let resumedStage: RunState | null =
+      record.expectedState === "failed" ? null : record.expectedState;
+    let hasFirstAnchor = false;
+    let firstActionOperation:
+      | { readonly id: string; readonly kind: string; readonly sequence: number }
+      | undefined;
+
+    const bindStage = (candidate: unknown, source: string): void => {
+      invariant(
+        typeof candidate === "string" &&
+          RUN_STATES.has(candidate) &&
+          BROWSER_ACTION_RESUME_STAGES.has(candidate as RunState),
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        `Browser resume ${source} names an invalid resumed stage`,
+      );
+      invariant(
+        resumedStage === null || resumedStage === candidate,
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        "Browser resume action-linked anchors disagree on the resumed stage",
+      );
+      resumedStage = candidate as RunState;
+    };
+
+    for (const entry of events) {
+      const event = row(entry, "browser resume chain event");
+      const sequence = numberValue(event.sequence, "browser resume chain event.sequence");
+      const eventType = text(event.type, "browser resume chain event.type");
+      const payload = parseJson<Record<string, unknown>>(
+        event.payload_json,
+        "browser resume chain event.payload_json",
+      );
+      if (payload.browserActionId !== record.actionId) continue;
+
+      if (eventType === "resume.requested") {
+        invariant(
+          payload.state === record.expectedState,
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser resume request does not match the admitted state",
+        );
+        bindStage(
+          record.expectedState === "failed" ? payload.resumeState : record.expectedState,
+          "request",
+        );
+        if (record.expectedState !== "failed") {
+          invariant(
+            payload.resumeState === null,
+            "INVALID_BROWSER_ACTION_SETTLEMENT",
+            "Browser resume request has an unexpected recovery state",
+          );
+        }
+        hasFirstAnchor = true;
+        continue;
+      }
+
+      if (eventType === "run.resumed") {
+        invariant(
+          record.expectedState === "failed" && payload.from === "failed",
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser run-resumed event does not match the admitted failed state",
+        );
+        bindStage(payload.to, "transition");
+        hasFirstAnchor = true;
+        continue;
+      }
+
+      if (eventType === "operation.started" && firstActionOperation === undefined) {
+        invariant(
+          typeof payload.operationId === "string" && typeof payload.kind === "string",
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser resume operation anchor is malformed",
+        );
+        firstActionOperation = {
+          id: payload.operationId,
+          kind: payload.kind,
+          sequence,
+        };
+        const operationStage = Object.entries(BROWSER_ACTION_RESUME_STAGE_OPERATION_KIND).find(
+          ([, kind]) => kind === payload.kind,
+        )?.[0];
+        bindStage(operationStage, "operation");
+        hasFirstAnchor = true;
+      }
+    }
+
+    invariant(
+      hasFirstAnchor && resumedStage !== null,
+      "INVALID_BROWSER_ACTION_SETTLEMENT",
+      "Browser resume settlement lacks its action-linked first-anchor chain",
+    );
+    if (
+      namedOperationId !== null ||
+      namedOperationKind !== null ||
+      namedOperationStartSequence !== null
+    ) {
+      invariant(
+        firstActionOperation !== undefined &&
+          firstActionOperation.id === namedOperationId &&
+          firstActionOperation.kind === namedOperationKind &&
+          firstActionOperation.sequence === namedOperationStartSequence &&
+          BROWSER_ACTION_RESUME_STAGE_OPERATION_KIND[resumedStage] === namedOperationKind,
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        "Browser resume operation does not match the resumed stage's first operation",
+      );
+    }
+    return resumedStage;
+  }
+
+  #hasPostAdmissionBrowserActionAnchor(
+    record: BrowserActionAdmittedRecord,
+    options: {
+      readonly beforeSequence?: number | null;
+      readonly ignoredOperationId?: string | null;
+    } = {},
+  ): boolean {
+    const events = this.#database
+      .prepare(
+        `SELECT sequence, type, payload_json
+         FROM run_events
+         WHERE run_id = ? AND sequence > ?
+         ORDER BY sequence`,
+      )
+      .all(record.runId, record.admissionEventSequence) as unknown[];
+    for (const entry of events) {
+      const event = row(entry, "browser action post-admission event");
+      const eventSequence = numberValue(
+        event.sequence,
+        "browser action post-admission event.sequence",
+      );
+      if (
+        options.beforeSequence !== undefined &&
+        options.beforeSequence !== null &&
+        eventSequence >= options.beforeSequence
+      ) {
+        continue;
+      }
+      const eventType = text(event.type, "browser action post-admission event.type");
+      const payload = parseJson<Record<string, unknown>>(
+        event.payload_json,
+        "browser action post-admission event.payload_json",
+      );
+      const actionLinked = payload.browserActionId === record.actionId;
+      const permittedEffect =
+        BROWSER_ACTION_DOMAIN_EVENT_TYPES[record.kind].has(eventType) ||
+        (eventType === "operation.started" &&
+          typeof payload.kind === "string" &&
+          BROWSER_ACTION_DOMAIN_OPERATION_KINDS[record.kind].has(payload.kind));
+      if (actionLinked || permittedEffect) {
+        return true;
+      }
+    }
+    const operations = this.#database
+      .prepare(
+        `SELECT id, kind, result_json
+         FROM operations
+         WHERE run_id = ? AND result_json IS NOT NULL`,
+      )
+      .all(record.runId) as unknown[];
+    for (const entry of operations) {
+      const operation = row(entry, "browser action linked operation");
+      const operationId = text(operation.id, "browser action linked operation.id");
+      if (operationId === options.ignoredOperationId) {
+        continue;
+      }
+      text(operation.kind, "browser action linked operation.kind");
+      const result = parseJson<Record<string, unknown>>(
+        operation.result_json,
+        "browser action linked operation.result_json",
+      );
+      if (result.browserActionId === record.actionId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  #appendEvent(runId: string, type: string, payload: unknown): number {
     const sequenceRow = row(
       this.#database
         .prepare(
@@ -3771,17 +4687,13 @@ export class IcarusStore {
         .get(runId),
       "event sequence",
     );
+    const sequence = numberValue(sequenceRow.next_sequence, "event.next_sequence");
     this.#database
       .prepare(
         "INSERT INTO run_events (run_id, sequence, type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
       )
-      .run(
-        runId,
-        numberValue(sequenceRow.next_sequence, "event.next_sequence"),
-        type,
-        json(asJsonValue(payload)),
-        this.#now(),
-      );
+      .run(runId, sequence, type, json(asJsonValue(payload)), this.#now());
+    return sequence;
   }
 
   #hasApproval(
@@ -3864,18 +4776,7 @@ export class IcarusStore {
       "INVALID_APPROVAL",
       "Approval digest is invalid",
     );
-    invariant(
-      approval.actor.trim().length > 0 &&
-        Buffer.byteLength(approval.actor, "utf8") <= APPROVAL_ACTOR_MAX_BYTES &&
-        !containsUnsafeActorCharacter(approval.actor),
-      "INVALID_APPROVAL",
-      "Approval actor is invalid",
-    );
-    invariant(
-      !containsSecretShapedContent(Buffer.from(approval.actor, "utf8")),
-      "SECRET_INPUT_DETECTED",
-      "Approval actor contains recognizable credential material",
-    );
+    assertOperatorActor(approval.actor, "INVALID_APPROVAL");
   }
 
   #assertApprovalGate(runId: string, current: RunRecord, approval: ApprovalTransition): void {

@@ -5,13 +5,17 @@ import path from "node:path";
 
 import {
   assertRegistrationStateSeparation,
+  BROWSER_ACTION_LEDGER_MIGRATION,
   type CheckProfile,
   createIcarusRuntime,
   createProviderConfig,
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
+  type Gate1MigrationToken,
   IcarusError,
   type IcarusRuntime,
+  LANDING_LEDGER_MIGRATION,
+  migrateGate1Schema,
   type RunRecord,
 } from "@icarus/core";
 
@@ -168,8 +172,14 @@ function schemaMigrationApproval(): {
   readonly approvalIndex: boolean;
   readonly patchSet: boolean;
   readonly readableManifest: boolean;
+  readonly gate1: Gate1MigrationToken | null;
 } {
-  const none = { approvalIndex: false, patchSet: false, readableManifest: false };
+  const none = {
+    approvalIndex: false,
+    patchSet: false,
+    readableManifest: false,
+    gate1: null,
+  };
   const approval = process.env.ICARUS_APPROVE_SCHEMA_MIGRATION;
   if (approval === undefined) return none;
   // One token approves exactly one migration. Approving several at once would
@@ -177,9 +187,15 @@ function schemaMigrationApproval(): {
   if (approval === "approval-index-v1") return { ...none, approvalIndex: true };
   if (approval === "patch-set-v2") return { ...none, patchSet: true };
   if (approval === "readable-manifest-v3") return { ...none, readableManifest: true };
+  if (approval === BROWSER_ACTION_LEDGER_MIGRATION) {
+    return { ...none, gate1: BROWSER_ACTION_LEDGER_MIGRATION };
+  }
+  if (approval === LANDING_LEDGER_MIGRATION) {
+    return { ...none, gate1: LANDING_LEDGER_MIGRATION };
+  }
   fail(
     "INVALID_DATABASE_CONFIGURATION",
-    "ICARUS_APPROVE_SCHEMA_MIGRATION must equal approval-index-v1, patch-set-v2, or readable-manifest-v3",
+    "ICARUS_APPROVE_SCHEMA_MIGRATION must equal one documented one-shot migration token",
   );
 }
 
@@ -491,6 +507,11 @@ async function main(): Promise<void> {
       await assertRegistrationStateSeparation(root, registrationPath);
     }
     const migrationApproval = schemaMigrationApproval();
+    if (migrationApproval.gate1 !== null) {
+      migrateGate1Schema(path.join(root, "icarus.sqlite3"), migrationApproval.gate1);
+      print({ migration: migrationApproval.gate1, status: "applied" });
+      return;
+    }
     runtime = await createIcarusRuntime(root, {
       allowApprovalIndexMigration: migrationApproval.approvalIndex,
       allowPatchSetMigration: migrationApproval.patchSet,

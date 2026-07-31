@@ -328,6 +328,26 @@ export class RunLeaseManager {
     }
   }
 
+  async tryWithLease<T>(
+    runId: string,
+    action: () => Promise<T>,
+  ): Promise<{ readonly acquired: true; readonly value: T } | { readonly acquired: false }> {
+    let lease: HeldLease;
+    try {
+      lease = await this.#acquire(runId);
+    } catch (error) {
+      if (error instanceof IcarusError && error.code === "RUN_BUSY") {
+        return { acquired: false };
+      }
+      throw error;
+    }
+    try {
+      return { acquired: true, value: await action() };
+    } finally {
+      await this.#release(runId, lease);
+    }
+  }
+
   async #acquire(runId: string): Promise<HeldLease> {
     invariant(RUN_ID_PATTERN.test(runId), "INVALID_RUN_ID", "Run ID is invalid");
     await this.initialize();

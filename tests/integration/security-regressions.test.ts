@@ -181,6 +181,144 @@ describe("release security regressions", () => {
     }
   });
 
+  test("migrates Gate 1 ledgers browser-first in separate CLI maintenance processes", async () => {
+    const fixture = await createFixtureRepository();
+    try {
+      expect(
+        (
+          await runCli(fixture.stateRoot, [
+            "repo",
+            "add",
+            "--name",
+            "fixture",
+            "--path",
+            fixture.repository,
+          ])
+        ).exitCode,
+      ).toBe(0);
+      const databasePath = path.join(fixture.stateRoot, "icarus.sqlite3");
+      const legacy = new Database(databasePath);
+      const repositoryCount = legacy.prepare("SELECT COUNT(*) AS count FROM repositories").get();
+      legacy.exec(`
+        PRAGMA foreign_keys = OFF;
+        DROP TABLE landing_receipts;
+        DROP TABLE landing_events;
+        DROP TABLE landing_http_requests;
+        DROP TABLE landing_operations;
+        DROP TABLE landing_attempts;
+        DROP TABLE landing_decisions;
+        DROP TABLE landings;
+        DROP TABLE landing_profiles;
+        DROP TABLE browser_action_requests;
+        PRAGMA wal_checkpoint(TRUNCATE);
+        PRAGMA journal_mode = DELETE;
+      `);
+      legacy.close();
+      const digestBeforeRefusal = createHash("sha256")
+        .update(await readFile(databasePath))
+        .digest("hex");
+
+      const missing = await runCli(fixture.stateRoot, ["run", "list"], {
+        ICARUS_APPROVE_SCHEMA_MIGRATION: undefined,
+      });
+      expect(missing.exitCode).toBe(1);
+      expect(missing.stderr).toContain("DATABASE_MIGRATION_REQUIRED");
+
+      const combined = await runCli(fixture.stateRoot, [], {
+        ICARUS_APPROVE_SCHEMA_MIGRATION: "browser-action-ledger-v1,landing-ledger-v1",
+      });
+      expect(combined.exitCode).toBe(2);
+      expect(combined.stderr).toContain("INVALID_DATABASE_CONFIGURATION");
+
+      const wrongOrder = await runCli(fixture.stateRoot, [], {
+        ICARUS_APPROVE_SCHEMA_MIGRATION: "landing-ledger-v1",
+      });
+      expect(wrongOrder.exitCode).toBe(1);
+      expect(wrongOrder.stderr).toContain("MIGRATION_ORDER_REQUIRED");
+      expect(
+        createHash("sha256")
+          .update(await readFile(databasePath))
+          .digest("hex"),
+      ).toBe(digestBeforeRefusal);
+      await expect(lstat(`${databasePath}-wal`)).rejects.toMatchObject({ code: "ENOENT" });
+
+      const browserAttempts = await Promise.all([
+        runCli(fixture.stateRoot, [], {
+          ICARUS_APPROVE_SCHEMA_MIGRATION: "browser-action-ledger-v1",
+        }),
+        runCli(fixture.stateRoot, [], {
+          ICARUS_APPROVE_SCHEMA_MIGRATION: "browser-action-ledger-v1",
+        }),
+      ]);
+      const browserSuccesses = browserAttempts.filter((result) => result.exitCode === 0);
+      const browserRefusals = browserAttempts.filter((result) => result.exitCode !== 0);
+      expect(browserSuccesses).toHaveLength(1);
+      expect(browserRefusals).toHaveLength(1);
+      const browserRefusal = browserRefusals[0];
+      expect(
+        (browserRefusal?.exitCode === 2 &&
+          browserRefusal.stderr.includes("INVALID_DATABASE_CONFIGURATION")) ||
+          (browserRefusal?.exitCode === 1 && browserRefusal.stderr.includes("RUN_BUSY")),
+      ).toBe(true);
+      expect(JSON.parse(browserSuccesses[0]?.stdout ?? "")).toEqual({
+        migration: "browser-action-ledger-v1",
+        status: "applied",
+      });
+
+      const afterBrowser = new Database(databasePath);
+      expect(
+        afterBrowser
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'browser_action_requests'",
+          )
+          .get(),
+      ).toBeDefined();
+      expect(
+        afterBrowser
+          .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'landings'")
+          .get(),
+      ).toBeUndefined();
+      expect(afterBrowser.prepare("SELECT COUNT(*) AS count FROM repositories").get()).toEqual(
+        repositoryCount,
+      );
+      afterBrowser.close();
+
+      const reused = await runCli(fixture.stateRoot, [], {
+        ICARUS_APPROVE_SCHEMA_MIGRATION: "browser-action-ledger-v1",
+      });
+      expect(reused.exitCode).toBe(2);
+      expect(reused.stderr).toContain("INVALID_DATABASE_CONFIGURATION");
+
+      const landing = await runCli(fixture.stateRoot, [], {
+        ICARUS_APPROVE_SCHEMA_MIGRATION: "landing-ledger-v1",
+      });
+      expect(landing.exitCode).toBe(0);
+      expect(JSON.parse(landing.stdout)).toEqual({
+        migration: "landing-ledger-v1",
+        status: "applied",
+      });
+      const migrated = new Database(databasePath);
+      expect(
+        migrated
+          .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'landings'")
+          .get(),
+      ).toBeDefined();
+      expect(migrated.prepare("SELECT COUNT(*) AS count FROM repositories").get()).toEqual(
+        repositoryCount,
+      );
+      migrated.close();
+      expect(
+        (
+          await runCli(fixture.stateRoot, ["run", "list"], {
+            ICARUS_APPROVE_SCHEMA_MIGRATION: undefined,
+          })
+        ).exitCode,
+      ).toBe(0);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   test("rejects a state root hidden in a clean ignored descendant named ..state", async () => {
     const fixture = await createFixtureRepository();
     try {

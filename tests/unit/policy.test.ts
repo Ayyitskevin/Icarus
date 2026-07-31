@@ -5,6 +5,7 @@ import { IcarusError } from "../../packages/core/src/errors.js";
 import type { PatchSetPreimage } from "../../packages/core/src/policy.js";
 import {
   applyExactReplacement,
+  assertOperatorActor,
   checkpointDigest,
   parseEditProposal,
   parsePatchSet,
@@ -180,6 +181,28 @@ describe("approval digests", () => {
 
     // The digest binds the set of affected paths, not the order they arrived in.
     expect(treeCheckpointDigest({ ...input, files: [...files].reverse() })).toBe(baseline);
+  });
+});
+
+describe("operator actor policy", () => {
+  it("accepts bounded human-readable attribution", () => {
+    expect(() => assertOperatorActor("Kevin Lee")).not.toThrow();
+  });
+
+  it.each(["", "   ", "line\nbreak", "hidden\u200bformat", "line\u2028separator"])(
+    "rejects unsafe attribution %j",
+    (actor) => {
+      expectIcarusCode(() => assertOperatorActor(actor), "INVALID_ACTOR");
+    },
+  );
+
+  it("measures the actor limit in UTF-8 bytes", () => {
+    expect(() => assertOperatorActor("é".repeat(100))).not.toThrow();
+    expectIcarusCode(() => assertOperatorActor("é".repeat(101)), "INVALID_ACTOR");
+  });
+
+  it("rejects recognizable credential material", () => {
+    expectIcarusCode(() => assertOperatorActor(`sk-${"a".repeat(24)}`), "SECRET_INPUT_DETECTED");
   });
 });
 

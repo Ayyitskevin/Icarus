@@ -6,7 +6,7 @@ import { TextDecoder } from "node:util";
 
 import { IcarusError, invariant } from "./errors.js";
 import { assertRepositoryRelativePath } from "./policy.js";
-import { runControllerProcess, type ControllerProcessResult } from "./process.js";
+import { type ControllerProcessResult, runControllerProcess } from "./process.js";
 
 const GIT_OUTPUT_LIMIT = 8 * 1024 * 1024;
 const GIT_CONFIG_NAME_OUTPUT_LIMIT = 64 * 1024;
@@ -60,6 +60,7 @@ function gitEnvironment(home: string): Record<string, string> {
     LC_ALL: "C.UTF-8",
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_GLOBAL: nullDevice(),
+    GIT_LITERAL_PATHSPECS: "1",
     GIT_ALLOW_PROTOCOL: "file",
     GIT_TERMINAL_PROMPT: "0",
     GIT_NO_LAZY_FETCH: "1",

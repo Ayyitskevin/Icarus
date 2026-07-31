@@ -125,7 +125,7 @@ policy, and the number of changed files is bounded by the project ceiling.
 The first browser path is intentionally narrower than the guarded CLI lifecycle:
 
 1. A Node API persists repository/project records in the existing SQLite state
-   root. Under candidate ADR 0040, its default ephemeral start binds and verifies
+   root. Under accepted ADR 0040, its default ephemeral start binds and verifies
    exact IPv4 `127.0.0.1`, then creates a CSPRNG-selected 16-byte lowercase-hex
    `.localhost` public-origin nonce and an independent 32-byte bearer in the
    launch fragment. It performs no Node/operating-system lookup, hosts-file edit,
@@ -151,12 +151,13 @@ The first browser path is intentionally narrower than the guarded CLI lifecycle:
    endpoint. The server and review-only UI support Linux, macOS, and Windows.
    Mutation-capable registration, context preview, draft persistence, and
    loopback planning require a supported Chromium-family browser. ADR 0040's
-   exact-head technical gate passed at `eb01b640...` in Linux CI `30618041483`
-   and native real-Chrome run `30618043377`; Candidate release support remains
-   held pending explicit human acceptance of the operator-controlled
-   browser/resolver/proxy residual risk. An atomic SQLite started-operation
-   admission prevents concurrent planning work for the same run on every
-   platform.
+   exact-head technical gate passed at
+   `eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI `30618041483` and
+   native real-Chrome run `30618043377`; explicit human acceptance of the
+   interim operator-controlled browser/resolver/proxy residual risk was recorded
+   on 2026-07-31. Remaining Gate 1 runtime slices still gate release. An atomic
+   SQLite started-operation admission prevents concurrent planning work for the
+   same run on every platform.
 5. The workspace presents the exact internal state and derives only these product
    phases: `draft`, `planned`, `awaiting_approval`, `running`, `completed`,
    `failed`, and `cancelled`. The mapping never turns an approval, recovery, or
@@ -416,14 +417,15 @@ additional tool calls and runtime remain visible.
   Non-success provider HTTP response bodies are not surfaced or persisted, and
   transport errors are sanitized before crossing the provider adapter boundary.
 - The HTTP server and explicit-port review UI support Linux, macOS, and Windows.
-  Candidate mutation-capable repository import, context preview, draft
+  Mutation-capable repository import, context preview, draft
   persistence, and loopback planning additionally require a supported
   Chromium-family browser. ADR 0040's real-Chrome exact-head macOS and Windows
-  composition has passed; Candidate release support remains held pending
-  explicit human acceptance of the operator-controlled browser/resolver/proxy
-  residual risk. Planning is read-only with respect to the imported checkout,
-  and SQLite atomically admits one started operation per run before provider
-  work.
+  composition passed at `eb01b6406c12126c60add7ac83800f8eba8ffdc9`, and
+  explicit human acceptance of the interim operator-controlled
+  browser/resolver/proxy residual risk was recorded on 2026-07-31. Gate 1's
+  remaining runtime slices are incomplete. Planning is read-only with respect
+  to the imported checkout, and SQLite atomically admits one started operation
+  per run before provider work.
 - Approval and execution are supported only on Linux because they inherit the
   kernel lease through `/usr/bin/flock` and `/proc`; execution also inherits
   the Docker sandbox requirements.
@@ -505,9 +507,12 @@ exist in Milestone 1:
 - A production-asset smoke drives the golden path in real Chromium through a
   draft reload, planning, and truthful evidence. The required ADR 0040
   composition passed in real Chrome at exact implementation commit
-  `eb01b640...` on macOS 15 arm64 and Windows Server 2025 x64 in native run
-  `30618043377`. This completes technical evidence, not human acceptance of ADR
-  0040's residual risk.
+  `eb01b6406c12126c60add7ac83800f8eba8ffdc9` on macOS 15 arm64 and Windows
+  Server 2025 x64 in native run `30618043377`. Human acceptance of ADR 0040's
+  interim residual risk was recorded on 2026-07-31; neither that acceptance nor
+  the technical evidence completes Gate 1. No live migration, merge,
+  deployment, or public release was authorized or performed as part of the
+  acceptance.
 - The HTTP presenter exposes populated, bounded plan, action, file, verification,
   check-output, approval, usage, and timestamp evidence for a completed CLI run
   without exposing private runtime paths.

@@ -13,6 +13,7 @@ import { RunLeaseManager } from "./lease.js";
 import {
   assertAllowedTarget,
   assertCheckProfiles,
+  assertOperatorActor,
   assertSandboxProfile,
   assertSunCeiling,
   MAX_SESSION_ITERATIONS,
@@ -571,6 +572,42 @@ export class IcarusService {
     await this.#leases.initialize();
   }
 
+  async reconcilePreparedBrowserActionRequests(): Promise<{
+    readonly settledPrepared: number;
+    readonly busyRunIds: readonly string[];
+    readonly unresolvedAdmittedRunIds: readonly string[];
+  }> {
+    invariant(
+      process.platform === "linux",
+      "UNSUPPORTED_PLATFORM",
+      "Browser action startup inspection requires Linux run leases",
+    );
+    const runIds = [
+      ...new Set(this.#store.listActiveBrowserActions().map((record) => record.runId)),
+    ].sort();
+    let settledPrepared = 0;
+    const busyRunIds: string[] = [];
+    const unresolvedAdmittedRunIds: string[] = [];
+    for (const runId of runIds) {
+      const result = await this.#leases.tryWithLease(runId, async () => {
+        const records = this.#store.settleOrphanedPreparedBrowserActions(runId);
+        return {
+          settledPrepared: records.length,
+          hasAdmitted: this.#store
+            .listActiveBrowserActions(runId)
+            .some((record) => record.status === "admitted"),
+        };
+      });
+      if (!result.acquired) {
+        busyRunIds.push(runId);
+        continue;
+      }
+      settledPrepared += result.value.settledPrepared;
+      if (result.value.hasAdmitted) unresolvedAdmittedRunIds.push(runId);
+    }
+    return { settledPrepared, busyRunIds, unresolvedAdmittedRunIds };
+  }
+
   async registerRepository(
     name: string,
     repositoryPath: string,
@@ -1046,11 +1083,7 @@ export class IcarusService {
 
   async cancel(runId: string, actor: string): Promise<RunRecord> {
     return this.#leases.withLease(runId, async () => {
-      invariant(
-        actor.trim().length > 0 && actor.length <= 200 && !/[\r\n\0]/.test(actor),
-        "INVALID_ACTOR",
-        "Cancellation actor is invalid",
-      );
+      assertOperatorActor(actor);
       this.#store.markStartedOperationsInterrupted(runId);
       const run = this.#store.getRun(runId);
       invariant(ACTIVE_STATES.has(run.state), "INVALID_STATE", "Run is already terminal");
