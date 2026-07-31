@@ -1,9 +1,10 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  createResolvedWorkspaceSession,
+  createBoundWorkspaceSession,
+  createWorkspaceMutationHostname,
+  isFreshWorkspaceLoopbackHostname,
   matchesWorkspaceBearer,
-  workspaceHostnameResolvesToBoundLoopback,
 } from "../../packages/api/src/workspace-session.js";
 
 function launchToken(launchUrl: string): string {
@@ -14,20 +15,27 @@ function launchToken(launchUrl: string): string {
 }
 
 describe("browser workspace session", () => {
-  const loopbackLookup = async () => [
-    { address: "::1", family: 6 },
-    { address: "127.0.0.1", family: 4 },
-  ];
-
-  test("creates a rotating random-origin action session with only a launch fragment", async () => {
-    const first = await createResolvedWorkspaceSession("mutation-capable", 31_337, loopbackLookup);
-    const second = await createResolvedWorkspaceSession("mutation-capable", 31_337, loopbackLookup);
+  test("creates deterministic distinct random-origin action sessions with only launch fragments", () => {
+    const firstHostname = createWorkspaceMutationHostname(() => Uint8Array.from([1, 2, 3]));
+    const secondHostname = createWorkspaceMutationHostname(() => Uint8Array.from([4, 5, 6]));
+    const first = createBoundWorkspaceSession("mutation-capable", 31_337, firstHostname, null, () =>
+      Uint8Array.from({ length: 32 }, () => 7),
+    );
+    const second = createBoundWorkspaceSession(
+      "mutation-capable",
+      31_337,
+      secondHostname,
+      null,
+      () => Uint8Array.from({ length: 32 }, () => 8),
+    );
 
     expect(first).toMatchObject({
       mode: "mutation-capable",
-      authority: expect.stringMatching(/^[a-f0-9]{32}\.localhost:31337$/),
-      hostname: expect.stringMatching(/^[a-f0-9]{32}\.localhost$/),
+      reviewOnlyReason: null,
+      authority: `${firstHostname}:31337`,
+      hostname: firstHostname,
     });
+    expect(isFreshWorkspaceLoopbackHostname(first.hostname)).toBe(true);
     expect(first.url).toBe(`http://${first.authority}`);
     expect(new URL(first.launchUrl).origin).toBe(first.url);
     expect(first.launchUrl.match(/#/g)).toHaveLength(1);
@@ -37,12 +45,36 @@ describe("browser workspace session", () => {
     expect(Object.keys(first)).not.toEqual(expect.arrayContaining(["token", "bearer"]));
   });
 
-  test("creates a plain stable-origin review-only session without a token fragment", async () => {
-    const session = await createResolvedWorkspaceSession("review-only", 8_787, async () => {
-      throw new Error("Review-only startup must not resolve a mutation hostname");
+  test("rejects edge octets, refills entropy exactly, and fails closed on wrong widths", () => {
+    const requests: number[] = [];
+    const chunks = [Uint8Array.from([0, 255, 17]), Uint8Array.from([18, 19])];
+    const hostname = createWorkspaceMutationHostname((size) => {
+      requests.push(size);
+      const chunk = chunks.shift();
+      if (chunk === undefined) throw new Error("unexpected entropy request");
+      return chunk;
     });
+    expect(hostname).toBe("127.17.18.19");
+    expect(requests).toEqual([3, 2]);
+    expect(() => createWorkspaceMutationHostname(() => Uint8Array.from([1, 2]))).toThrowError(
+      expect.objectContaining({ code: "INVALID_ORIGIN" }),
+    );
+    expect(() =>
+      createBoundWorkspaceSession(
+        "mutation-capable",
+        31_337,
+        "127.1.2.3",
+        null,
+        () => new Uint8Array(31),
+      ),
+    ).toThrowError(expect.objectContaining({ code: "INVALID_ACTION_SESSION" }));
+  });
+
+  test("creates a plain stable-origin review-only session without a token fragment", async () => {
+    const session = createBoundWorkspaceSession("review-only", 8_787, "127.0.0.1");
     expect(session).toMatchObject({
       mode: "review-only",
+      reviewOnlyReason: "explicit-port",
       hostname: "127.0.0.1",
       authority: "127.0.0.1:8787",
       url: "http://127.0.0.1:8787",
@@ -64,46 +96,52 @@ describe("browser workspace session", () => {
     expect(matchesWorkspaceBearer(expected, "")).toBe(false);
   });
 
-  test("fails closed to review-only when the random hostname cannot be proven at the bound loopback", async () => {
-    for (const addresses of [
-      [],
-      [{ address: "::1", family: 6 }],
-      [{ address: "127.0.0.2", family: 4 }],
-      [
-        { address: "127.0.0.1", family: 4 },
-        { address: "192.0.2.10", family: 4 },
-      ],
+  test("accepts only canonical fresh numeric loopback bindings", () => {
+    for (const valid of ["127.1.1.1", "127.17.42.93", "127.254.254.254"]) {
+      expect(isFreshWorkspaceLoopbackHostname(valid)).toBe(true);
+      expect(createBoundWorkspaceSession("mutation-capable", 31_337, valid).hostname).toBe(valid);
+    }
+    for (const invalid of [
+      "127.0.0.1",
+      "127.0.1.2",
+      "127.1.2.0",
+      "127.1.2.255",
+      "127.01.2.3",
+      "126.1.2.3",
+      "128.1.2.3",
+      "127.1.2.3.localhost",
+      "::1",
     ]) {
-      const session = await createResolvedWorkspaceSession(
+      expect(isFreshWorkspaceLoopbackHostname(invalid)).toBe(false);
+      expect(() => createBoundWorkspaceSession("mutation-capable", 31_337, invalid)).toThrowError(
+        expect.objectContaining({ code: "INVALID_ORIGIN" }),
+      );
+    }
+    expect(() => createBoundWorkspaceSession("review-only", 31_337, "127.1.2.3")).toThrowError(
+      expect.objectContaining({ code: "INVALID_ORIGIN" }),
+    );
+    expect(() =>
+      createBoundWorkspaceSession(
         "mutation-capable",
         31_337,
-        async () => addresses,
-      );
-      expect(session).toMatchObject({
-        mode: "review-only",
-        hostname: "127.0.0.1",
-        launchUrl: "http://127.0.0.1:31337",
-      });
-    }
-
-    const lookupFailure = await createResolvedWorkspaceSession(
-      "mutation-capable",
-      31_337,
-      async () => {
-        throw new Error("resolution failed");
-      },
-    );
-    expect(lookupFailure.mode).toBe("review-only");
-    await expect(
-      workspaceHostnameResolvesToBoundLoopback("not-canonical.localhost", loopbackLookup),
-    ).resolves.toBe(false);
+        "127.1.2.3",
+        "fresh-loopback-unavailable",
+      ),
+    ).toThrowError(expect.objectContaining({ code: "INVALID_ORIGIN" }));
+    expect(() =>
+      createBoundWorkspaceSession("review-only", 31_337, "127.0.0.1", null),
+    ).toThrowError(expect.objectContaining({ code: "INVALID_ORIGIN" }));
+    expect(
+      createBoundWorkspaceSession("review-only", 31_337, "127.0.0.1", "fresh-loopback-unavailable")
+        .reviewOnlyReason,
+    ).toBe("fresh-loopback-unavailable");
   });
 
   test("rejects invalid bound ports and invalid internal bearer widths", async () => {
-    await expect(
-      createResolvedWorkspaceSession("mutation-capable", 0, loopbackLookup),
-    ).rejects.toMatchObject({ code: "INVALID_PORT" });
-    await expect(createResolvedWorkspaceSession("review-only", 65_536)).rejects.toThrowError(
+    expect(() => createBoundWorkspaceSession("mutation-capable", 0, "127.1.2.3")).toThrowError(
+      expect.objectContaining({ code: "INVALID_PORT" }),
+    );
+    expect(() => createBoundWorkspaceSession("review-only", 65_536, "127.0.0.1")).toThrowError(
       expect.objectContaining({ code: "INVALID_PORT" }),
     );
     expect(() => matchesWorkspaceBearer(Buffer.alloc(31), "Bearer invalid")).toThrowError(

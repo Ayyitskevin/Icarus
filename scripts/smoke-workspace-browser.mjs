@@ -607,7 +607,6 @@ async function startChromium(executable, profile) {
       "--password-store=basic",
       "--safebrowsing-disable-auto-update",
       "--use-mock-keychain",
-      "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost, EXCLUDE *.localhost",
       "--remote-allow-origins=*",
       "--remote-debugging-address=127.0.0.1",
       "--remote-debugging-port=0",
@@ -1998,6 +1997,20 @@ try {
       document.body.innerText.includes("No run records exist in this pinned workspace page."),
     [],
     "the initial empty workspace",
+  );
+  assert.deepEqual(
+    await page.call(() => ({
+      hostname: window.location.hostname,
+      origin: window.location.origin,
+    })),
+    { hostname: workspace.host, origin: workspace.url },
+  );
+  assert.equal(
+    networkRequests
+      .filter((request) => typeof request.url === "string" && /^https?:/.test(request.url))
+      .every((request) => new URL(request.url).origin === workspace.url),
+    true,
+    "initial browser requests must retain the exact numeric-loopback origin",
   );
   assert.equal(await page.capability("Provider"), "unconfigured");
   assert.equal(await page.capability("Execution"), "unconfigured");
@@ -4889,6 +4902,20 @@ try {
   assert.ok(reviewBrowserPage.responseBodyEvidence.inspected > 0);
   assert.equal(reviewBrowserPage.responseBodyEvidence.leaked, false);
   assert.deepEqual(reviewBrowserPage.browserErrors, []);
+  assert.equal(
+    networkRequests
+      .filter((request) => typeof request.url === "string" && /^https?:/.test(request.url))
+      .every((request) => new URL(request.url).origin === workspace.url),
+    true,
+    "mutation browser requests must retain the exact numeric-loopback origin",
+  );
+  assert.equal(
+    reviewBrowserPage.networkRequests
+      .filter((request) => typeof request.url === "string" && /^https?:/.test(request.url))
+      .every((request) => new URL(request.url).origin === reviewWorkspace.url),
+    true,
+    "review browser requests must retain the exact stable-loopback origin",
+  );
 
   const projects = runtime.service.listProjects();
   const browserProject = projects.find((project) => project.name === "browser-project");

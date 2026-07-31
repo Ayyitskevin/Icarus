@@ -1,29 +1,23 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { lookup } from "node:dns/promises";
 import type { IncomingMessage } from "node:http";
 
 import { IcarusError } from "@icarus/core";
 
-const ORIGIN_NONCE_BYTES = 16;
+const FRESH_LOOPBACK_OCTETS = 3;
 const BEARER_BYTES = 32;
 const CANONICAL_BEARER_LENGTH = 43;
 const ACTION_SESSION_FRAGMENT = "icarus-action-session";
+export const REVIEW_ONLY_WORKSPACE_HOST = "127.0.0.1";
 
 export const WORKSPACE_MUTATION_ACTION = "workspace.mutate";
 
 export type WorkspaceServerMode = "mutation-capable" | "review-only";
-
-export interface WorkspaceHostnameAddress {
-  readonly address: string;
-  readonly family: number;
-}
-
-export type WorkspaceHostnameLookup = (
-  hostname: string,
-) => Promise<readonly WorkspaceHostnameAddress[]>;
+export type WorkspaceReviewOnlyReason = "explicit-port" | "fresh-loopback-unavailable";
+export type WorkspaceRandomBytes = (size: number) => Uint8Array;
 
 export interface WorkspaceSession {
   readonly mode: WorkspaceServerMode;
+  readonly reviewOnlyReason: WorkspaceReviewOnlyReason | null;
   readonly hostname: string;
   readonly authority: string;
   readonly url: string;
@@ -86,21 +80,30 @@ export function matchesWorkspaceBearer(expectedBearer: Uint8Array, authorization
 class BoundWorkspaceSession implements WorkspaceSession {
   readonly #expectedBearer: Buffer | null;
   readonly mode: WorkspaceServerMode;
+  readonly reviewOnlyReason: WorkspaceReviewOnlyReason | null;
   readonly hostname: string;
   readonly authority: string;
   readonly url: string;
   readonly launchUrl: string;
 
-  constructor(mode: WorkspaceServerMode, port: number, mutationHostname?: string) {
+  constructor(
+    mode: WorkspaceServerMode,
+    port: number,
+    hostname: string,
+    reviewOnlyReason: WorkspaceReviewOnlyReason | null,
+    random: WorkspaceRandomBytes,
+  ) {
     this.mode = mode;
-    this.hostname =
-      mode === "mutation-capable"
-        ? (mutationHostname ?? createWorkspaceMutationHostname())
-        : "127.0.0.1";
+    this.reviewOnlyReason = reviewOnlyReason;
+    this.hostname = hostname;
     this.authority = `${this.hostname}:${port}`;
     this.url = `http://${this.authority}`;
     if (mode === "mutation-capable") {
-      this.#expectedBearer = randomBytes(BEARER_BYTES);
+      const bearer = Buffer.from(random(BEARER_BYTES));
+      if (bearer.byteLength !== BEARER_BYTES) {
+        throw new IcarusError("INVALID_ACTION_SESSION", "Workspace action session is invalid");
+      }
+      this.#expectedBearer = bearer;
       this.launchUrl = `${this.url}/#${ACTION_SESSION_FRAGMENT}=${this.#expectedBearer.toString(
         "base64url",
       )}`;
@@ -128,7 +131,7 @@ class BoundWorkspaceSession implements WorkspaceSession {
   assertProtectedMutation(request: IncomingMessage): void {
     if (this.mode === "review-only" || this.#expectedBearer === null) {
       request.resume();
-      throw new IcarusError("WORKSPACE_REVIEW_ONLY", "This stable-origin workspace is review-only");
+      throw new IcarusError("WORKSPACE_REVIEW_ONLY", "This workspace session is review-only");
     }
 
     const authorizationValues = rawHeaderValues(request, "authorization");
@@ -164,70 +167,59 @@ class BoundWorkspaceSession implements WorkspaceSession {
   }
 }
 
-export function createWorkspaceMutationHostname(): string {
-  return `${randomBytes(ORIGIN_NONCE_BYTES).toString("hex")}.localhost`;
-}
-
-async function lookupWorkspaceHostname(
-  hostname: string,
-): Promise<readonly WorkspaceHostnameAddress[]> {
-  return lookup(hostname, { all: true, verbatim: true });
+export function createWorkspaceMutationHostname(
+  random: WorkspaceRandomBytes = randomBytes,
+): string {
+  const octets: number[] = [];
+  while (octets.length < FRESH_LOOPBACK_OCTETS) {
+    const requested = FRESH_LOOPBACK_OCTETS - octets.length;
+    const bytes = random(requested);
+    if (bytes.byteLength !== requested) {
+      throw new IcarusError("INVALID_ORIGIN", "Workspace mutation entropy source is invalid");
+    }
+    for (const byte of bytes) {
+      // Avoid subnet/network edge spellings that platform stacks sometimes
+      // special-case while retaining almost the full 127/8 address space.
+      if (byte > 0 && byte < 255) octets.push(byte);
+    }
+  }
+  return `127.${octets.join(".")}`;
 }
 
 /**
- * A mutation origin is usable only when every resolved address is loopback and
- * the IPv4 address to which the server is bound is among the answers.
+ * Accept only one canonical, non-stable IPv4 address from 127/8. Restricting
+ * every random octet to 1..254 avoids alternate numeric spellings and
+ * platform-specific network/broadcast edge cases.
  */
-export async function workspaceHostnameResolvesToBoundLoopback(
-  hostname: string,
-  resolveHostname: WorkspaceHostnameLookup = lookupWorkspaceHostname,
-): Promise<boolean> {
-  if (!/^[a-f0-9]{32}\.localhost$/.test(hostname)) return false;
-  try {
-    const addresses = await resolveHostname(hostname);
-    return (
-      addresses.length > 0 &&
-      addresses.some(({ address, family }) => family === 4 && address === "127.0.0.1") &&
-      addresses.every(
-        ({ address, family }) =>
-          (family === 4 && address === "127.0.0.1") ||
-          (family === 6 && address.toLowerCase() === "::1"),
-      )
-    );
-  } catch {
-    return false;
-  }
+export function isFreshWorkspaceLoopbackHostname(hostname: string): boolean {
+  const octets = hostname.split(".");
+  if (octets.length !== 4 || octets[0] !== "127") return false;
+  return octets.slice(1).every((octet) => {
+    if (!/^(?:0|[1-9][0-9]{0,2})$/.test(octet)) return false;
+    const value = Number(octet);
+    return value >= 1 && value <= 254;
+  });
 }
 
-function createWorkspaceSession(
+export function createBoundWorkspaceSession(
   mode: WorkspaceServerMode,
   port: number,
-  mutationHostname?: string,
+  boundHostname: string,
+  reviewOnlyReason: WorkspaceReviewOnlyReason | null = mode === "review-only"
+    ? "explicit-port"
+    : null,
+  random: WorkspaceRandomBytes = randomBytes,
 ): WorkspaceSession {
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
     throw new IcarusError("INVALID_PORT", "Workspace session port is invalid");
   }
   if (
-    (mode === "mutation-capable" &&
-      (mutationHostname === undefined || !/^[a-f0-9]{32}\.localhost$/.test(mutationHostname))) ||
-    (mode === "review-only" && mutationHostname !== undefined)
+    (mode === "mutation-capable" && !isFreshWorkspaceLoopbackHostname(boundHostname)) ||
+    (mode === "review-only" && boundHostname !== REVIEW_ONLY_WORKSPACE_HOST) ||
+    (mode === "mutation-capable" && reviewOnlyReason !== null) ||
+    (mode === "review-only" && reviewOnlyReason === null)
   ) {
     throw new IcarusError("INVALID_ORIGIN", "Workspace mutation origin is invalid");
   }
-  return new BoundWorkspaceSession(mode, port, mutationHostname);
-}
-
-export async function createResolvedWorkspaceSession(
-  requestedMode: WorkspaceServerMode,
-  port: number,
-  resolveHostname: WorkspaceHostnameLookup = lookupWorkspaceHostname,
-): Promise<WorkspaceSession> {
-  if (requestedMode === "review-only") {
-    return createWorkspaceSession("review-only", port);
-  }
-  const hostname = createWorkspaceMutationHostname();
-  if (!(await workspaceHostnameResolvesToBoundLoopback(hostname, resolveHostname))) {
-    return createWorkspaceSession("review-only", port);
-  }
-  return createWorkspaceSession("mutation-capable", port, hostname);
+  return new BoundWorkspaceSession(mode, port, boundHostname, reviewOnlyReason, random);
 }

@@ -3,10 +3,10 @@
 ## Supported operating mode
 
 Milestone 1 guarded execution runs on one Linux host as one OS user and only
-against local repositories explicitly registered by absolute path. The optional
-workspace is a foreground process fixed to `127.0.0.1`; it does not install a
-daemon, accept remote traffic, depend on fleet/homelab/cloud services, or touch
-production systems.
+against local repositories explicitly registered by absolute path. The
+optional workspace is a foreground process bound to one exact address inside
+IPv4 `127/8`; it does not install a daemon, accept remote traffic, depend on
+fleet/homelab/cloud services, or touch production systems.
 
 The HTTP/UI shell, repository import, context preview, draft persistence, and
 loopback planning support Linux, macOS, and Windows using platform-neutral
@@ -62,13 +62,14 @@ $env:ICARUS_HOME = Join-Path $HOME ".icarus-state"
 pnpm workspace:start
 ```
 
-The process prints JSON containing its one-time launch URL, fixed binding, and
+The process prints JSON containing its one-time launch URL, exact binding, and
 state root. With `ICARUS_PORT` unset, the default is an operating-system-chosen
-ephemeral port on a fresh
-`http://<32-lowercase-hex>.localhost:<port>/` origin. The launch fragment
-contains the mutation-session bearer; open that exact URL and do not copy it
-into logs. The client removes the fragment before render and retains the
-bearer only in that origin's `sessionStorage`.
+ephemeral port on a CSPRNG-selected
+`http://127.<1..254>.<1..254>.<1..254>:<port>/` origin. The server verifies
+that exact numeric-loopback binding before it creates the mutation-session
+bearer. Open the fragment-bearing URL exactly as emitted and do not copy it
+into logs. The client removes the fragment before render and retains the bearer
+only in that origin's `sessionStorage`.
 
 Setting `ICARUS_PORT` to an explicit integer from 1 through 65535 instead starts
 `http://127.0.0.1:<port>` in stable review-only mode: it emits no bearer and
@@ -77,6 +78,11 @@ conflict, or port conflict fails closed without fallback. Stop the foreground
 process with `SIGINT` or `SIGTERM`; projects and drafts are rediscovered from
 SQLite on restart, but mutation authority requires the newly emitted launch
 URL.
+
+If the operating system reports that the selected fresh `127/8` address cannot
+be bound, Icarus creates no bearer and starts one ephemeral
+`http://127.0.0.1:<port>` review-only session. The startup URL then has no
+fragment and every POST is refused. Any other bind error remains fatal.
 
 The current portability slice force-closes HTTP connections during process
 shutdown. It does not automatically retry an interrupted POST. If shutdown

@@ -23,6 +23,7 @@ const processSource = await readFile("packages/core/src/process.ts", "utf8");
 const gitSource = await readFile("packages/core/src/git.ts", "utf8");
 const sandboxSource = await readFile("packages/core/src/sandbox.ts", "utf8");
 const workspaceServerSource = await readFile("packages/api/src/server.ts", "utf8");
+const workspaceSessionSource = await readFile("packages/api/src/workspace-session.ts", "utf8");
 const workspacePresenterSource = await readFile("packages/api/src/present.ts", "utf8");
 const workspaceApiSource = await readFile("packages/workspace/src/api.ts", "utf8");
 const workspaceAppSource = await readFile("packages/workspace/src/App.tsx", "utf8");
@@ -85,6 +86,13 @@ try {
 const workflowSetupIndex = ciWorkflowSource.indexOf("run: pnpm workflow:setup");
 const workflowLintIndex = ciWorkflowSource.indexOf("run: pnpm workflow:lint");
 const frozenInstallIndex = ciWorkflowSource.indexOf("run: pnpm install --frozen-lockfile");
+const workspaceListenIndex = workspaceServerSource.indexOf(
+  "await binding.listen(server, port, host)",
+);
+const workspaceExactAddressIndex = workspaceServerSource.indexOf("address.address !== host");
+const workspaceSessionCreationIndex = workspaceServerSource.indexOf(
+  "session = createBoundWorkspaceSession(mode, address.port, host, reviewOnlyReason)",
+);
 const ignore = await readFile(".gitignore", "utf8");
 const testSources = await collectSources("tests", (name) => name.endsWith(".test.ts"));
 const repairSessionStart = serviceSource.indexOf("  async #runRepairSession(");
@@ -276,7 +284,22 @@ const assertions = {
   ciWorkflowSupplyChainPinned,
   workflowLineEndingsPinned,
   workspaceFixedLoopback:
-    workspaceServerSource.includes('server.listen(port, "127.0.0.1"') &&
+    workspaceServerSource.includes("server.listen(port, host") &&
+    workspaceServerSource.includes("createMutationHostname: createWorkspaceMutationHostname") &&
+    workspaceServerSource.includes("listen: listenOnExactHost") &&
+    workspaceServerSource.includes("address.address !== host") &&
+    workspaceSessionSource.includes(`return \`127.\${octets.join(".")}\``) &&
+    workspaceSessionSource.includes("value >= 1 && value <= 254") &&
+    workspaceServerSource.includes("!isFreshWorkspaceLoopbackHostname(host)") &&
+    workspaceListenIndex >= 0 &&
+    workspaceExactAddressIndex > workspaceListenIndex &&
+    workspaceSessionCreationIndex > workspaceExactAddressIndex &&
+    workspaceServerSource.includes('address.family !== "IPv4"') &&
+    workspaceServerSource.includes('code === "EADDRNOTAVAIL" || code === "EINVAL"') &&
+    workspaceServerSource.includes('mode = "review-only"') &&
+    workspaceServerSource.includes('reviewOnlyReason = "fresh-loopback-unavailable"') &&
+    workspaceServerSource.includes("host = REVIEW_ONLY_WORKSPACE_HOST") &&
+    workspaceServerSource.includes("if (server.listening) await closeListeningServer(server)") &&
     !workspaceServerSource.includes('"0.0.0.0"'),
   workspaceNoCorsGrant: !workspaceServerSource
     .toLowerCase()

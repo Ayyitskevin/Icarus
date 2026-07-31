@@ -31,8 +31,9 @@ Decision records for the current milestone:
 | [0025](adr/0025-hardened-inherited-opencode-workflow.md) | Hardened inherited OpenCode workflow with a repository-owned actor gate, resolving ADR 0010 | Accepted — third-party review and secret rotation outstanding |
 | [0026](adr/0026-agent-session-loop-and-tool-registry.md) | AgentSession loop, host-owned tool registry, and manifest-bound capability grants | Accepted and released through 2b at exact `main` `802b91e6`; browser authority is separate Gate 1 work |
 | [0027](adr/0027-git-landing-authority.md) | Separate proof-bound landing ledger, deterministic candidate commit, create-only GitHub branch, and exact draft PR | Accepted — independent P0/P1 authority reviews passed 2026-07-31; runtime not implemented |
-| [0029](adr/0029-browser-approval-authority.md) | Fresh-origin browser mutation session and fenced Linux run actions | Accepted — independent P0/P1 authority review passed 2026-07-31 |
+| [0029](adr/0029-browser-approval-authority.md) | Fresh-origin browser mutation session and fenced Linux run actions | Accepted — candidate ADR 0039 proposes a numeric origin replacement |
 | [0036](adr/0036-proof-carrying-software-factory-product-direction.md) | Proof-carrying software factory product direction and gated competitive roadmap | Accepted product direction — Gate 0 released at exact `main` `802b91e6`; Gate 1 active |
+| [0039](adr/0039-portable-numeric-loopback-origins.md) | Portable CSPRNG-selected numeric-loopback mutation origins | Candidate — exact-head Linux, browser, macOS, and Windows acceptance pending |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.

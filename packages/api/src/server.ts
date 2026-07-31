@@ -35,7 +35,11 @@ import {
 } from "./present.js";
 import { parseStrictJson } from "./strict-json.js";
 import {
-  createResolvedWorkspaceSession,
+  createBoundWorkspaceSession,
+  createWorkspaceMutationHostname,
+  isFreshWorkspaceLoopbackHostname,
+  REVIEW_ONLY_WORKSPACE_HOST,
+  type WorkspaceReviewOnlyReason,
   type WorkspaceServerMode,
   type WorkspaceSession,
 } from "./workspace-session.js";
@@ -55,12 +59,18 @@ export interface WorkspaceServerOptions {
 
 export interface StartedWorkspaceServer {
   readonly server: Server;
-  readonly host: "127.0.0.1";
+  readonly host: string;
   readonly port: number;
   readonly url: string;
   readonly launchUrl: string;
   readonly mode: WorkspaceServerMode;
+  readonly reviewOnlyReason: WorkspaceReviewOnlyReason | null;
   close(): Promise<void>;
+}
+
+export interface WorkspaceServerBindingHooks {
+  readonly createMutationHostname: () => string;
+  readonly listen: (server: Server, port: number, host: string) => Promise<void>;
 }
 
 function headers(contentType: string): Record<string, string> {
@@ -256,9 +266,13 @@ function presentRunById(options: WorkspaceServerOptions, runId: string): Record<
 
 function workspaceSnapshot(
   options: WorkspaceServerOptions,
-  mode: WorkspaceServerMode,
+  session: WorkspaceSession,
 ): Record<string, unknown> {
-  const mutationAvailable = mode === "mutation-capable";
+  const mutationAvailable = session.mode === "mutation-capable";
+  const reviewOnlyReason =
+    session.reviewOnlyReason === "fresh-loopback-unavailable"
+      ? "This platform could not bind a fresh numeric-loopback origin, so this workspace is review-only."
+      : "This stable-origin workspace is review-only. Relaunch without an explicit port to make bounded changes.";
   return {
     capabilities: {
       server: { status: "available", binding: "loopback" },
@@ -266,7 +280,7 @@ function workspaceSnapshot(
         status: mutationAvailable ? "available" : "review_only",
         reason: mutationAvailable
           ? "This fresh-origin workspace has a session-scoped browser mutation transport."
-          : "This stable-origin workspace is review-only. Relaunch without an explicit port to make bounded changes.",
+          : reviewOnlyReason,
       },
       provider: {
         status: "unconfigured",
@@ -276,7 +290,7 @@ function workspaceSnapshot(
         status: mutationAvailable ? "available" : "review_only",
         reason: mutationAvailable
           ? "Portable loopback planning is available; SQLite operation admission prevents concurrent provider work."
-          : "Planning is disabled because this stable-origin workspace is review-only.",
+          : `Planning is disabled. ${reviewOnlyReason}`,
       },
       execution: {
         status: "unconfigured",
@@ -304,7 +318,7 @@ async function routeApi(
     return true;
   }
   if (method === "GET" && pathname === "/api/workspace") {
-    json(response, 200, workspaceSnapshot(options, session.mode));
+    json(response, 200, workspaceSnapshot(options, session));
     return true;
   }
   if (method === "GET" && pathname === "/api/projects") {
@@ -559,42 +573,78 @@ export async function startWorkspaceServer(
   options: WorkspaceServerOptions,
   port: number,
 ): Promise<StartedWorkspaceServer> {
+  return startWorkspaceServerWithBindingHooks(options, port, {
+    createMutationHostname: createWorkspaceMutationHostname,
+    listen: listenOnExactHost,
+  });
+}
+
+/** @internal Deterministic seam for exact bind/fallback acceptance tests. */
+export async function startWorkspaceServerWithBindingHooks(
+  options: WorkspaceServerOptions,
+  port: number,
+  binding: WorkspaceServerBindingHooks,
+): Promise<StartedWorkspaceServer> {
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
     throw new IcarusError("INVALID_PORT", "Workspace port is invalid");
   }
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error): void => reject(error);
-    server.once("error", onError);
-    server.listen(port, "127.0.0.1", () => {
-      server.off("error", onError);
-      resolve();
-    });
-  });
+  const requestedMode: WorkspaceServerMode = port === 0 ? "mutation-capable" : "review-only";
+  let mode = requestedMode;
+  let reviewOnlyReason: WorkspaceReviewOnlyReason | null =
+    requestedMode === "review-only" ? "explicit-port" : null;
+  let host =
+    requestedMode === "mutation-capable"
+      ? binding.createMutationHostname()
+      : REVIEW_ONLY_WORKSPACE_HOST;
+  if (requestedMode === "mutation-capable" && !isFreshWorkspaceLoopbackHostname(host)) {
+    throw new IcarusError("INVALID_ORIGIN", "Workspace mutation binding is invalid");
+  }
+  let server = createServer();
+  try {
+    await binding.listen(server, port, host);
+  } catch (error) {
+    if (server.listening) await closeListeningServer(server);
+    if (requestedMode !== "mutation-capable" || !isUnsupportedFreshLoopbackBinding(error)) {
+      throw error;
+    }
+    server = createServer();
+    mode = "review-only";
+    reviewOnlyReason = "fresh-loopback-unavailable";
+    host = REVIEW_ONLY_WORKSPACE_HOST;
+    try {
+      await binding.listen(server, 0, host);
+    } catch (fallbackError) {
+      if (server.listening) await closeListeningServer(server);
+      throw fallbackError;
+    }
+  }
   const address = server.address();
-  if (address === null || typeof address === "string" || address.address !== "127.0.0.1") {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    throw new IcarusError("UNSAFE_BINDING", "Workspace did not bind to IPv4 loopback");
+  if (
+    address === null ||
+    typeof address === "string" ||
+    address.family !== "IPv4" ||
+    address.address !== host
+  ) {
+    await closeListeningServer(server);
+    throw new IcarusError("UNSAFE_BINDING", "Workspace did not bind to the exact IPv4 loopback");
   }
   let session: WorkspaceSession;
   try {
-    session = await createResolvedWorkspaceSession(
-      port === 0 ? "mutation-capable" : "review-only",
-      address.port,
-    );
+    session = createBoundWorkspaceSession(mode, address.port, host, reviewOnlyReason);
     server.on("request", workspaceRequestListener(options, session));
   } catch (error) {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await closeListeningServer(server);
     throw error;
   }
   let closed = false;
   return {
     server,
-    host: "127.0.0.1",
+    host,
     port: address.port,
     url: session.url,
     launchUrl: session.launchUrl,
     mode: session.mode,
+    reviewOnlyReason: session.reviewOnlyReason,
     close: async () => {
       if (closed) return;
       closed = true;
@@ -604,4 +654,29 @@ export async function startWorkspaceServer(
       });
     },
   };
+}
+
+async function listenOnExactHost(server: Server, port: number, host: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error): void => reject(error);
+    server.once("error", onError);
+    server.listen(port, host, () => {
+      server.off("error", onError);
+      resolve();
+    });
+  });
+}
+
+function isUnsupportedFreshLoopbackBinding(error: unknown): boolean {
+  if (!(error instanceof Error) || !("code" in error)) return false;
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EADDRNOTAVAIL" || code === "EINVAL";
+}
+
+async function closeListeningServer(server: Server): Promise<void> {
+  if (!server.listening) return;
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error === undefined ? resolve() : reject(error)));
+    server.closeAllConnections();
+  });
 }

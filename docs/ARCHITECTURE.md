@@ -40,17 +40,20 @@ contract test requires one.
 
 ## Local workspace boundary
 
-The production server binds only to `127.0.0.1` and serves compiled UI assets
-and `/api` from one origin. An ordinary start chooses an ephemeral port plus a
-fresh 128-bit lowercase-hex `.localhost` hostname and emits one fragment-only
-32-byte mutation-session bearer. A synchronously bootstrapped client stores it
-only in `sessionStorage` and removes the fragment before render. Every `POST`
-requires the exact Host, Origin, canonical bearer, JSON content type, and
-`workspace.mutate` action header before body parsing or service work. `GET`
-requests remain tokenless. An explicitly configured stable port emits no
-bearer and is strictly review-only. The server emits no CORS permission and
-fails rather than choosing a different binding or configured port. It is a
-foreground local process, not a remotely reachable daemon.
+The production server binds only inside IPv4 `127/8` and serves compiled UI
+assets and `/api` from one origin. An ordinary start CSPRNG-selects a canonical
+`127.<1..254>.<1..254>.<1..254>` address, asks the operating system for an
+ephemeral port, verifies that exact binding, and only then emits one
+fragment-only 32-byte mutation-session bearer. A synchronously bootstrapped
+client stores it only in `sessionStorage` and removes the fragment before
+render. Every `POST` requires the exact Host, Origin, canonical bearer, JSON
+content type, and `workspace.mutate` action header before body parsing or
+service work. `GET` requests remain tokenless. An explicitly configured stable
+port emits no bearer and is strictly review-only. An unsupported fresh
+numeric-loopback bind falls back once to a bearer-free ephemeral
+`127.0.0.1` review origin; other bind failures stay loud. The server emits no
+CORS permission. It is a foreground local process, not a remotely reachable
+daemon.
 
 The API projects server-side mutation/planning availability separately from
 the client-held session. React combines only those booleans, never the bearer,

@@ -7,6 +7,7 @@ import {
   type StartedWorkspaceServer,
   startWorkspaceServer,
 } from "../../packages/api/src/server.js";
+import { isFreshWorkspaceLoopbackHostname } from "../../packages/api/src/workspace-session.js";
 import { createIcarusRuntime } from "../../packages/core/src/index.js";
 import { IcarusStore } from "../../packages/core/src/store.js";
 import type { RunRecord } from "../../packages/core/src/types.js";
@@ -99,7 +100,8 @@ describe("CLI lifecycle across process restarts", () => {
         0,
       );
       const firstHeaders = workspaceMutationHeaders(first);
-      expect(first.url).toMatch(/^http:\/\/[a-f0-9]{32}\.localhost:[1-9][0-9]*$/);
+      expect(isFreshWorkspaceLoopbackHostname(first.host)).toBe(true);
+      expect(first.url).toBe(`http://${first.host}:${first.port}`);
       expect((await fetch(`${first.url}/api/health`)).status).toBe(200);
 
       await first.close();

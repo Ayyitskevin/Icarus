@@ -193,11 +193,12 @@ $env:ICARUS_HOME = Join-Path $HOME ".icarus-state"
 pnpm workspace:start
 ```
 
-Open the exact one-time launch URL printed by the process. The server binds
-only to `127.0.0.1` behind a fresh random `.localhost` origin, removes its
-fragment-only mutation bearer before render, validates every POST's exact
-session headers, and never enables cross-origin access. Importing and
-previewing a repository reads its committed Git objects;
+Open the exact one-time launch URL printed by the process. The default server
+binds one fresh CSPRNG-selected numeric address inside IPv4 `127/8`, creates
+its fragment-only mutation bearer only after verifying that exact binding,
+removes the fragment before render, validates every POST's exact session
+headers, and never enables cross-origin access. Importing and previewing a
+repository reads its committed Git objects;
 it does not copy, edit, check, commit, or push the source. Planning is available
 on Linux, macOS, and Windows only when the chosen model is served by loopback
 Ollama. Until an endpoint and model are entered, the workspace clearly reports

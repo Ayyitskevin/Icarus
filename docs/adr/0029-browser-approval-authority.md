@@ -1,6 +1,6 @@
 # ADR 0029: Browser approval authority
 
-- Status: Accepted
+- Status: Accepted — ADR 0039 proposes a numeric mutation-origin replacement
 - Date: 2026-07-31
 - Depends on: [ADR 0014](0014-loopback-api-react-workspace.md),
   [ADR 0022](0022-native-macos-windows-acceptance.md),
@@ -11,6 +11,10 @@
 - Related: [ADR 0019](0019-bounded-approval-provenance.md),
   [ADR 0027](0027-git-landing-authority.md), and
   [ADR 0036](0036-proof-carrying-software-factory-product-direction.md)
+- Proposed partial supersession:
+  candidate [ADR 0039](0039-portable-numeric-loopback-origins.md) would replace
+  only this record's `.localhost` origin, operating-system lookup proof, fixed
+  mutation binding, and corresponding origin-acceptance clauses upon acceptance
 
 ## Context
 

@@ -11,6 +11,7 @@ import {
   startWorkspaceServer as startWorkspaceServerImplementation,
   type WorkspaceServerOptions,
 } from "../../packages/api/src/server.js";
+import { isFreshWorkspaceLoopbackHostname } from "../../packages/api/src/workspace-session.js";
 import {
   createIcarusRuntime,
   DEFAULT_CEILING,
@@ -248,13 +249,15 @@ describe("loopback local workspace API", () => {
       runtime = undefined;
     });
 
-    expect(server.host).toBe("127.0.0.1");
+    expect(isFreshWorkspaceLoopbackHostname(server.host)).toBe(true);
     expect(server.mode).toBe("mutation-capable");
-    expect(server.url).toMatch(/^http:\/\/[a-f0-9]{32}\.localhost:[1-9][0-9]*$/);
+    expect(server.url).toBe(`http://${server.host}:${server.port}`);
     expect(server.launchUrl).toMatch(
-      /^http:\/\/[a-f0-9]{32}\.localhost:[1-9][0-9]*\/#icarus-action-session=[A-Za-z0-9_-]{43}$/,
+      new RegExp(
+        `^http://${server.host.replaceAll(".", "\\.")}:${server.port}/#icarus-action-session=[A-Za-z0-9_-]{43}$`,
+      ),
     );
-    expect(server.server.address()).toMatchObject({ address: "127.0.0.1" });
+    expect(server.server.address()).toMatchObject({ address: server.host });
     const empty = await fetch(`${server.url}/api/workspace`);
     expect(empty.status).toBe(200);
     expect(await responseJson(empty)).toMatchObject({
@@ -2248,17 +2251,19 @@ describe("loopback local workspace API", () => {
     );
     expect(runtime.service.listRuns()).toEqual([]);
 
-    await expect(
-      startWorkspaceServer({ runtime, stateRoot: fixture.stateRoot, workspaceDist }, server.port),
-    ).rejects.toMatchObject({ code: "EADDRINUSE" });
-
     const reviewOnlyPort = server.port;
-    await server.close();
     const reviewOnly = await startWorkspaceServer(
       { runtime, stateRoot: fixture.stateRoot, workspaceDist },
       reviewOnlyPort,
     );
     cleanups.push(reviewOnly.close);
+    await expect(
+      startWorkspaceServer(
+        { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+        reviewOnlyPort,
+      ),
+    ).rejects.toMatchObject({ code: "EADDRINUSE" });
+    await server.close();
     expect(reviewOnly).toMatchObject({
       mode: "review-only",
       url: `http://127.0.0.1:${reviewOnlyPort}`,

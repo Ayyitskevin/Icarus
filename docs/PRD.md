@@ -125,14 +125,15 @@ policy, and the number of changed files is bounded by the project ceiling.
 The first browser path is intentionally narrower than the guarded CLI lifecycle:
 
 1. A Node API persists repository/project records in the existing SQLite state
-   root and binds only to `127.0.0.1`. Its default ephemeral start serves React
-   and `/api` from a fresh 128-bit `.localhost` origin and emits an independent
-   32-byte bearer only in the launch fragment. The client removes that fragment
-   before render and retains it only in `sessionStorage`. Every POST requires
-   exact same-origin session headers before a bounded, duplicate-member-
-   rejecting JSON body is read; GETs are tokenless and no CORS access is
-   granted. An explicitly configured stable port is GET-only and emits no
-   bearer.
+   root. Its default ephemeral start binds one CSPRNG-selected canonical
+   `127.<1..254>.<1..254>.<1..254>` address, verifies that exact binding, serves
+   React and `/api` from that fresh numeric-loopback origin, and only then emits
+   an independent 32-byte bearer in the launch fragment. The client removes
+   that fragment before render and retains it only in `sessionStorage`. Every
+   POST requires exact same-origin session headers before a bounded,
+   duplicate-member-rejecting JSON body is read; GETs are tokenless and no
+   CORS access is granted. An explicitly configured stable port or unsupported
+   fresh-loopback bind is `127.0.0.1` GET-only and emits no bearer.
 2. Import records an existing local Git repository but does not modify its
    content, refs, config, index, or worktree metadata.
 3. Context preview is deterministic metadata over one committed tree and target.

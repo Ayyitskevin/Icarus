@@ -10,6 +10,17 @@ import { createIcarusRuntime } from "../packages/core/dist/index.js";
 
 const SANDBOX_IMAGE = `python:3.12-slim@sha256:${"c".repeat(64)}`;
 
+function isFreshLoopbackHost(hostname) {
+  const octets = hostname.split(".");
+  return (
+    octets.length === 4 &&
+    octets[0] === "127" &&
+    octets
+      .slice(1)
+      .every((octet) => /^(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])$/.test(octet))
+  );
+}
+
 function git(cwd, args) {
   return execFileSync("git", args, {
     cwd,
@@ -194,7 +205,8 @@ try {
     Array.isArray(foreground.startup) ||
     JSON.stringify(Object.keys(foreground.startup).sort()) !==
       JSON.stringify(["binding", "stateRoot", "url"]) ||
-    foreground.startup.binding !== "127.0.0.1" ||
+    typeof foreground.startup.binding !== "string" ||
+    !isFreshLoopbackHost(foreground.startup.binding) ||
     foreground.startup.stateRoot !== path.join(root, "foreground-state") ||
     typeof foreground.startup.url !== "string" ||
     foreground.stderr !== ""
@@ -206,7 +218,7 @@ try {
     /^#icarus-action-session=([A-Za-z0-9_-]{43})$/.exec(startupUrl.hash)?.[1] ?? null;
   if (
     startupToken === null ||
-    !/^[a-f0-9]{32}\.localhost$/.test(startupUrl.hostname) ||
+    startupUrl.hostname !== foreground.startup.binding ||
     foreground.stdout.trim() !== JSON.stringify(foreground.startup) ||
     JSON.stringify({
       binding: foreground.startup.binding,
@@ -240,8 +252,11 @@ try {
     },
     0,
   );
-  if (!/^http:\/\/[a-f0-9]{32}\.localhost:[1-9][0-9]*$/.test(workspace.url)) {
-    throw new Error("Workspace did not use a random localhost origin");
+  if (
+    !isFreshLoopbackHost(workspace.host) ||
+    workspace.url !== `http://${workspace.host}:${workspace.port}`
+  ) {
+    throw new Error("Workspace did not use an exact fresh numeric-loopback origin");
   }
   const firstLaunchUrl = workspace.launchUrl;
   const project = await post(workspace, `${workspace.url}/api/projects`, {
