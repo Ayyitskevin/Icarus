@@ -360,11 +360,19 @@ const assertions = {
     browserSmokeSource.includes("protocolVersion: chromiumVersion.protocolVersion") &&
     browserSmokeSource.includes("userAgent: chromiumVersion.userAgent"),
   browserSmokeRetriesTransientDevToolsPortLocks:
-    browserSmokeSource.includes('["ENOENT", "EBUSY", "EACCES", "EPERM"].includes(error?.code)') &&
-    browserSmokeSource.includes("Timed out waiting for Chromium CDP"),
-  browserSmokeDoesNotCrossLinuxExecutionLease:
+    browserSmokeSource.includes('errorCode !== "ENOENT"') &&
+    browserSmokeSource.includes('process.platform === "win32" && errorCode === "EBUSY"') &&
+    browserSmokeSource.includes("last active-port read error"),
+  browserSmokeDoesNotInvokeLifecycleResume:
     browserSmokeSource.includes("insertResumeRequestedFixture(stateRoot, browserRunId)") &&
     !browserSmokeSource.includes("runtime.service.resume("),
+  browserSmokeContentionWaitsForInFlightState:
+    browserSmokeSource.includes("clickContendingButton") &&
+    browserSmokeSource.includes("the enabled in-flight control") &&
+    workspaceAppSource.includes("navigationDisabled={refreshing}") &&
+    (workspaceAppSource.match(/disabled=\{navigationDisabled \|\| !canLoadOlder\}/g)?.length ??
+      0) === 2 &&
+    !browserSmokeSource.includes("clickButtonTwice"),
   workspaceNoCorsGrant: !workspaceServerSource
     .toLowerCase()
     .includes("access-control-allow-origin"),

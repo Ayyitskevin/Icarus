@@ -691,6 +691,7 @@ class CdpClient {
 async function waitForDevToolsEndpoint(profile, child, stderr) {
   const activePortPath = path.join(profile, "DevToolsActivePort");
   const deadline = Date.now() + START_TIMEOUT_MS;
+  let lastReadErrorCode = null;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(`Chromium exited before CDP was ready: ${stderr.value}`);
@@ -701,11 +702,17 @@ async function waitForDevToolsEndpoint(profile, child, stderr) {
         return `ws://127.0.0.1:${port}${browserPath}`;
       }
     } catch (error) {
-      if (!["ENOENT", "EBUSY", "EACCES", "EPERM"].includes(error?.code)) throw error;
+      const errorCode = error?.code;
+      if (errorCode !== "ENOENT" && !(process.platform === "win32" && errorCode === "EBUSY")) {
+        throw error;
+      }
+      lastReadErrorCode = errorCode;
     }
     await delay(25);
   }
-  throw new Error(`Timed out waiting for Chromium CDP: ${stderr.value}`);
+  throw new Error(
+    `Timed out waiting for Chromium CDP; last active-port read error: ${lastReadErrorCode ?? "none"}; stderr: ${stderr.value}`,
+  );
 }
 
 async function startChromium(executable, profile) {
@@ -849,18 +856,38 @@ class BrowserPage {
     assert.equal(clicked, true, `Could not click enabled button ${text}`);
   }
 
-  async clickButtonTwice(text) {
-    const clicked = await this.call((label) => {
-      const normalize = (value) => value.replaceAll(/\s+/g, " ").trim();
-      const button = Array.from(document.querySelectorAll("button")).find(
-        (candidate) => normalize(candidate.textContent ?? "") === label,
-      );
-      if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
-      button.click();
-      button.click();
-      return true;
-    }, text);
-    assert.equal(clicked, true, `Could not contend enabled button ${text}`);
+  async clickContendingButton(text, sectionId) {
+    await this.waitFor(
+      (label, rootId) => {
+        const normalize = (value) => value.replaceAll(/\s+/g, " ").trim();
+        const root = document.querySelector(`#${rootId}`);
+        const button = Array.from(root?.querySelectorAll("button") ?? []).find(
+          (candidate) => normalize(candidate.textContent ?? "") === label,
+        );
+        return (
+          root?.getAttribute("aria-busy") === "true" &&
+          button instanceof HTMLButtonElement &&
+          !button.disabled
+        );
+      },
+      [text, sectionId],
+      `the enabled in-flight control ${text}`,
+    );
+    const clicked = await this.call(
+      (label, rootId) => {
+        const normalize = (value) => value.replaceAll(/\s+/g, " ").trim();
+        const root = document.querySelector(`#${rootId}`);
+        const button = Array.from(root?.querySelectorAll("button") ?? []).find(
+          (candidate) => normalize(candidate.textContent ?? "") === label,
+        );
+        if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+        button.click();
+        return true;
+      },
+      text,
+      sectionId,
+    );
+    assert.equal(clicked, true, `Could not issue the contending request through ${text}`);
   }
 
   async pressKey(key, code, virtualKeyCode) {
@@ -2447,8 +2474,9 @@ try {
   const contendedProjectPageRequest = browserPage.holdNextProjectPage();
   finishHeldBrowserProjectPageRequest = contendedProjectPageRequest.finish;
   const contendedProjectPageBaseline = projectPageRequestCount();
-  await page.clickButtonTwice("Older projects");
+  await page.clickButton("Older projects");
   const contendedProjectPageObservation = await contendedProjectPageRequest.observed;
+  await page.clickContendingButton("Older projects", "workspace-project-page");
   await page.waitFor(
     () =>
       document
@@ -2849,8 +2877,9 @@ try {
   const contendedRunPageRequest = browserPage.holdNextRunPage();
   finishHeldBrowserRunPageRequest = contendedRunPageRequest.finish;
   const contendedRunPageBaseline = runPageRequestCount();
-  await page.clickButtonTwice("Older runs");
+  await page.clickButton("Older runs");
   const contendedRunPageObservation = await contendedRunPageRequest.observed;
+  await page.clickContendingButton("Older runs", "workspace-run-page");
   await page.waitFor(
     () =>
       document

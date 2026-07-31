@@ -2231,6 +2231,7 @@ function RunEvidence({
 interface WorkspaceProjectPageProps {
   readonly session: ProjectPageSession;
   readonly busy: boolean;
+  readonly navigationDisabled: boolean;
   readonly error: string | null;
   readonly retryRequest: ProjectPageRequest | null;
   readonly selectedProjectId: string | null;
@@ -2242,6 +2243,7 @@ interface WorkspaceProjectPageProps {
 function WorkspaceProjectPage({
   session,
   busy,
+  navigationDisabled,
   error,
   retryRequest,
   selectedProjectId,
@@ -2306,7 +2308,7 @@ function WorkspaceProjectPage({
         <button
           type="button"
           className="button--secondary"
-          disabled={busy || !canLoadNewer}
+          disabled={navigationDisabled || !canLoadNewer}
           onClick={() => onNavigate("newer")}
         >
           Newer projects
@@ -2314,7 +2316,7 @@ function WorkspaceProjectPage({
         <button
           type="button"
           className="button--secondary"
-          disabled={busy || !canLoadOlder}
+          disabled={navigationDisabled || !canLoadOlder}
           onClick={() => onNavigate("older")}
         >
           Older projects
@@ -2338,6 +2340,7 @@ function WorkspaceProjectPage({
 interface WorkspaceRunPageProps {
   readonly session: RunPageSession;
   readonly busy: boolean;
+  readonly navigationDisabled: boolean;
   readonly error: string | null;
   readonly retryRequest: RunPageRequest | null;
   readonly selectedRunId: string | null;
@@ -2350,6 +2353,7 @@ interface WorkspaceRunPageProps {
 function WorkspaceRunPage({
   session,
   busy,
+  navigationDisabled,
   error,
   retryRequest,
   selectedRunId,
@@ -2421,7 +2425,7 @@ function WorkspaceRunPage({
         <button
           type="button"
           className="button--secondary"
-          disabled={busy || !canLoadNewer}
+          disabled={navigationDisabled || !canLoadNewer}
           onClick={() => onNavigate("newer")}
         >
           Newer runs
@@ -2429,7 +2433,7 @@ function WorkspaceRunPage({
         <button
           type="button"
           className="button--secondary"
-          disabled={busy || !canLoadOlder}
+          disabled={navigationDisabled || !canLoadOlder}
           onClick={() => onNavigate("older")}
         >
           Older runs
@@ -2995,6 +2999,7 @@ export function App() {
               <WorkspaceProjectPage
                 session={projectPageSession}
                 busy={projectPageBusy || refreshing}
+                navigationDisabled={refreshing}
                 error={projectPageError}
                 retryRequest={projectPageRetryRequest}
                 selectedProjectId={selectedProjectId}
@@ -3013,6 +3018,7 @@ export function App() {
               <WorkspaceRunPage
                 session={runPageSession}
                 busy={runPageBusy || refreshing}
+                navigationDisabled={refreshing}
                 error={runPageError}
                 retryRequest={runPageRetryRequest}
                 selectedRunId={selectedRun?.id ?? null}
