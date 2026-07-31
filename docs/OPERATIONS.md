@@ -62,11 +62,30 @@ $env:ICARUS_HOME = Join-Path $HOME ".icarus-state"
 pnpm workspace:start
 ```
 
-The process prints JSON containing its exact URL, fixed binding, and state root.
-The default is `http://127.0.0.1:8787`; `ICARUS_PORT` may select another explicit
-local port. Binding or port conflicts fail closed without address/port fallback.
-Stop the foreground process with `SIGINT` or `SIGTERM`; projects and drafts are
-rediscovered from SQLite on restart.
+The process prints JSON containing its one-time launch URL, fixed binding, and
+state root. With `ICARUS_PORT` unset, the default is an operating-system-chosen
+ephemeral port on a fresh
+`http://<32-lowercase-hex>.localhost:<port>/` origin. The launch fragment
+contains the mutation-session bearer; open that exact URL and do not copy it
+into logs. The client removes the fragment before render and retains the
+bearer only in that origin's `sessionStorage`.
+
+Setting `ICARUS_PORT` to an explicit integer from 1 through 65535 instead starts
+`http://127.0.0.1:<port>` in stable review-only mode: it emits no bearer and
+rejects every POST. An explicit `ICARUS_PORT=0`, invalid value, binding
+conflict, or port conflict fails closed without fallback. Stop the foreground
+process with `SIGINT` or `SIGTERM`; projects and drafts are rediscovered from
+SQLite on restart, but mutation authority requires the newly emitted launch
+URL.
+
+The current portability slice force-closes HTTP connections during process
+shutdown. It does not automatically retry an interrupted POST. If shutdown
+occurs during project registration, draft creation, or planning, restart,
+reload authoritative state, and inspect the resulting project/run before
+deciding whether to submit another action. Guarded approval/execution routes
+remain absent; their ADR 0029 implementation must add durable action admission,
+reconciliation, and graceful drain-or-settlement before those effects are
+enabled.
 
 The browser golden path is:
 
@@ -92,16 +111,20 @@ The browser golden path is:
 
 With `ICARUS_CHROMIUM_EXECUTABLE` set to an explicit local Chromium binary,
 `pnpm smoke:workspace:browser` drives this path through the compiled application
-in real headless Chromium, reloads before planning, and verifies the source
-fingerprint remains unchanged.
+in real headless Chromium. It proves fragment removal before render,
+session-scoped reload, tokenless GETs, authenticated POSTs, stale/malformed
+revocation, stable review-only suppression, token non-disclosure, and an
+unchanged source fingerprint.
 
-Treat the loopback server as same-user local authority. It has no authentication
-because it is not a remote service: do not reverse-proxy it, bind it to a LAN or
-Tailscale address, publish it through a tunnel, or weaken Host/Origin checks. The
-server accepts bounded JSON mutations, serves UI/API from one origin, and grants
-no CORS permission. API presenters omit raw context/source blobs and private
-cache/worktree/artifact paths; explicitly stored diff/check output stays bounded
-and redacted.
+Treat the loopback server and launch URL as same-user local authority. The
+per-start bearer authenticates POST transport but is not a remote-service or
+hostile-local-user security boundary: do not reverse-proxy it, bind it to a LAN
+or Tailscale address, publish it through a tunnel, paste the launch URL into
+shared logs, or weaken Host/Origin checks. Every POST requires the exact
+session transport before its bounded strict-JSON body is read; GETs carry no
+bearer, and no CORS permission is granted. API presenters omit raw
+context/source blobs and private cache/worktree/artifact paths; explicitly
+stored diff/check output stays bounded and redacted.
 
 The browser accepts loopback Ollama planning only. It has no cloud-provider key
 entry, provider fallback, arbitrary shell, account, telemetry, commit, push,

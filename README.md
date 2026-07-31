@@ -17,11 +17,12 @@ registry; it never becomes arbitrary shell or deployment authority.
 Icarus is not a chatbot shell, an autonomous production deployer, or a claim
 that later roadmap features already exist.
 
-> **Candidate status:** LOCAL CORRECTIONS PASS; PUBLICATION HOLD. The
-> uncommitted ADR 0026 candidate now closes the remote check-output and
-> mutation-scope defects and passes the complete local gate. It is not release
-> evidence until an exact candidate commit, hosted CI, native acceptance, and
-> the remaining release reviews are recorded.
+> **Release status:** Gate 0 is released at exact `main`
+> `802b91e6f6c9b392f56c9ee3660be818a0f74a62` with Linux, macOS, and Windows
+> evidence. The current Gate 1 worktree adds only the portable authenticated
+> browser-mutation session and its client capability state. It is not a Gate 1
+> release: the durable guarded-action ledger and Git landing runtime do not yet
+> exist.
 
 ## Current scope
 
@@ -55,9 +56,13 @@ The first Milestone 3 vertical slice adds a same-origin React workspace and a
 loopback-only local API. It can persist a repository/project, preview a
 deterministic filtered map of the committed tree, save a task as a draft, ask a
 configured loopback Ollama model for a plan, and reopen browser-safe evidence
-after restart. The browser is deliberately review-only: it cannot approve a
-plan, create a worktree, execute checks, mutate the imported repository, or
-claim that unrun work completed.
+after restart. Those portable POSTs now use a fresh authenticated mutation
+session, while the guarded lifecycle remains review-only in the browser: it
+cannot approve a plan, create a worktree, execute checks, mutate the imported
+repository, or claim that unrun work completed.
+The workspace reports mutation and planning capability from both the server
+mode and the tab's live session; stable or revoked sessions become visibly
+review-only and disable the corresponding controls.
 
 The second Milestone 3 slice adds project-scoped, nonpersistent repository
 observation with independent
@@ -114,22 +119,24 @@ under an 8 MiB UTF-8 ceiling before success headers are sent, with bounded error
 copy and a fixed non-recursive fallback.
 
 These bounded observation slices are merged and exact implementation-head
-hosted CI verified. They do not complete full M3, establish native macOS or
-Windows acceptance, close ADR 0025's third-party review/secret-rotation work,
-authorize a live approval-index migration, or make Icarus production-ready.
+hosted CI verified. At their original slice checkpoints they did not establish
+native macOS or Windows acceptance; exact-head native acceptance was later
+recorded for the Gate 0 release at `802b91e6`. They still do not complete full
+M3, close ADR 0025's third-party review/secret-rotation work, authorize a live
+approval-index migration, or make Icarus production-ready.
 
-ADR 0026 slice 2b is implemented in the current candidate: the initial approved
+ADR 0026 slice 2b is implemented and released in the Gate 0 baseline: the initial approved
 PatchSet attempt remains, only failed formal verification enters the session,
 and `iterationCeiling: 0` remains single-shot. Provider turns and tool calls are
 durably admitted before effects; completion is host-gated on current passing
-full-plan evidence. The corrected local candidate now projects only host-owned
+full-plan evidence. The released implementation projects only host-owned
 check metadata to remote session prompts while retaining full raw output in
 local evidence, and it revalidates mutation grants against the plan's narrowed
 targets before session admission or worktree effects. Roomy, compacted, live
 tool, loopback, legacy-resume, and malformed-grant regressions pass with the
-complete local gate. Publication, exact-head hosted CI, native acceptance, and
-the remaining release reviews are still pending; no final release claim is made
-here.
+complete local gate. Exact-head Linux and native evidence are linked in
+`docs/PLANS.md`; that Gate 0 evidence does not validate the current Gate 1
+worktree until it is published and rerun at the new exact head.
 
 [ADR 0036](docs/adr/0036-proof-carrying-software-factory-product-direction.md)
 sets the next product direction: Verified Change Gate, browser and VS Code
@@ -186,15 +193,22 @@ $env:ICARUS_HOME = Join-Path $HOME ".icarus-state"
 pnpm workspace:start
 ```
 
-Open `http://127.0.0.1:8787`. The server binds only to `127.0.0.1`,
-validates browser `Host` and `Origin`, and never enables cross-origin
-access. Importing and previewing a repository reads its committed Git objects;
+Open the exact one-time launch URL printed by the process. The server binds
+only to `127.0.0.1` behind a fresh random `.localhost` origin, removes its
+fragment-only mutation bearer before render, validates every POST's exact
+session headers, and never enables cross-origin access. Importing and
+previewing a repository reads its committed Git objects;
 it does not copy, edit, check, commit, or push the source. Planning is available
 on Linux, macOS, and Windows only when the chosen model is served by loopback
 Ollama. Until an endpoint and model are entered, the workspace clearly reports
 provider and execution capabilities as `unconfigured`. Saving a configured
 draft contacts no provider; the separate plan action does. Approval and
 execution continue through the Linux CLI only.
+
+For presentation-only Vite development, start a stable GET-only API with
+`ICARUS_PORT=8787 pnpm workspace:start`, then run `pnpm workspace:ui` in a
+second terminal. That stable origin intentionally cannot submit forms; use the
+printed production launch URL or the real-browser smoke for mutation testing.
 
 The existing CLI golden path begins with:
 

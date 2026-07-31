@@ -5,33 +5,67 @@
 The dependency-ordered plan for making Icarus a trustworthy Cursor rival with
 a Buzz-inspired multi-agent mission room is
 [`ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md`](ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md).
-It preserves the current ADR 0026 release hold, makes Gate 1 browser authority
-plus reversible Git landing the first product slice, places a thin VS Code
-workbench in the center, introduces a bounded read-only Council before
-write-capable collaboration, and requires isolated child runs plus deterministic
-integration for the later Crew.
+It records the closure of the historical ADR 0026 release hold, makes Gate 1
+browser authority plus isolated create-only Git landing with reconciliation the
+first forward product slice,
+places a thin VS Code workbench in the center, introduces a bounded read-only
+Council before write-capable collaboration, and requires isolated child runs
+plus deterministic integration for the later Crew.
 
-The immediate sequence is:
+Gate 0 release closure was recorded on 2026-07-31. [PR
+#18](https://github.com/Ayyitskevin/Icarus/pull/18) merged the candidate as
+`d4bbcd4aab713bee23237099286e6d9b9f74283b`; the native-fixture correction
+followed as exact `main` `802b91e6f6c9b392f56c9ee3660be818a0f74a62`. Linux
+[run 30602942008](https://github.com/Ayyitskevin/Icarus/actions/runs/30602942008)
+and both native jobs in
+[run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
+succeeded at that exact head.
 
-1. close and publish the exact Gate 0 candidate with hosted/native/review
-   evidence;
-2. accept ADR 0029 browser approval authority and ADR 0027 Git landing
-   authority;
-3. implement browser parity, a separate landing ledger, private
-   branch/commit, allowlisted push, draft PR, and metadata-only receipt;
-4. prove deterministic retrieval and typed read-only outcomes;
-5. ship the shared client and VS Code workbench; and
-6. accept ADR 0037, then prove read-only Council lift before ADR 0033/0038
+The immediate forward sequence now begins with Gate 1:
+
+1. complete the accepted ADR 0029 guarded browser-action implementation and
+   implement the accepted ADR 0027 Git landing authority;
+2. implement browser parity, a separate landing ledger, deterministic
+   candidate commit, absent-only `icarus/<run-id>` reference, bounded GitHub
+   REST object upload, draft PR, and metadata-only reconciliation receipt;
+3. prove deterministic retrieval and typed read-only outcomes;
+4. ship the shared client and VS Code workbench; and
+5. accept ADR 0037, then prove read-only Council lift before ADR 0033/0038
    executable Crew work.
 
-## Current candidate: ADR 0026 slice 2b production wiring
+### Gate 1 implementation checkpoint
 
-Status: **LOCAL CORRECTIONS PASS; PUBLICATION HOLD**. Explicit human approval
-authorized the High remote-egress and Medium
-mutation-scope/worktree-consistency corrections. Both now fail closed under
-adversarial regression, and the complete local gate passes. The tree remains
-uncommitted and unpublished; exact implementation-head hosted CI, native
-acceptance, and the remaining release reviews are unrecorded.
+ADR 0029 is accepted. The current worktree implements and cold-reviews its
+portable transport bootstrap: random per-start origin and bearer, universal
+POST authentication before body/service work, strict JSON, stable GET-only
+mode, synchronous fragment removal, tab-scoped session revocation, and
+truthful mutation/planning capability controls. It does **not** implement the
+ADR 0029 guarded-action request ledger, browser approval/execution routes, or
+restart reconciliation.
+
+ADR 0027 and its normative v1 record companion are accepted after independent
+P0/P1 authority reviews. No landing schema, candidate builder, provider
+gateway, branch, pull request, or migration is implemented by this checkpoint.
+
+Before guarded browser actions are admitted, the local server must replace its
+current immediate connection close with a proven drain-or-durable-settlement
+path for authenticated in-flight mutations. The acceptance evidence must cover
+signals at every action-admission and settlement boundary; documentation alone
+does not close this debt.
+
+## Released Gate 0 baseline: ADR 0026 slice 2b production wiring
+
+Status: **MERGED AND RELEASED AT EXACT MAIN**. The corrected ADR 0026
+implementation, exact-head Linux gate, and exact-head macOS/Windows native
+acceptance pass at `802b91e6f6c9b392f56c9ee3660be818a0f74a62`. Gate 1 is
+the current forward work.
+
+At authoring/candidate time, status was **LOCAL CORRECTIONS PASS; PUBLICATION
+HOLD**. Explicit human approval authorized the High remote-egress and Medium
+mutation-scope/worktree-consistency corrections. Both failed closed under
+adversarial regression, and the complete local gate passed, but the tree was
+then uncommitted and unpublished; exact implementation-head hosted CI, native
+acceptance, and the remaining release reviews had not yet been recorded.
 
 ### Corrective release gate
 
@@ -56,15 +90,16 @@ acceptance, and the remaining release reviews are unrecorded.
       evaluator, production and full dependency audits, and `git diff --check`
 - [x] After the two runtime corrections, rerun the local gates plus cold
       security-boundary review on one tree
-- [ ] Commit/publish one candidate, pass exact-head hosted CI and native
+- [x] Commit/publish one candidate, pass exact-head hosted CI and native
       acceptance, and persist the final role-neutral architecture/release
       review artifact with exact tree, reviewed surfaces, rerunnable evidence,
       findings, and disposition. Fleet guard or independent agent lanes may
       supply review artifacts, but no named reviewer is a repository-level
-      dependency
+      dependency. PR #18, Linux run 30602942008, and native run 30602949132
+      record the published exact-head evidence at `802b91e6...`
 
-Fresh corrected-tree local evidence on 2026-07-30 (this is not publication or
-release clearance):
+Fresh corrected-tree local evidence recorded on 2026-07-30, before publication
+and release clearance:
 
 - Focused ADR 0026/store/grant/tool/state/Docker verification: 8 files and
   213 tests passed.
@@ -140,7 +175,9 @@ migration:
 - [x] `pnpm check`, dependency audit, and `git diff --check` pass from fresh output
 - [x] The later cold audit's remote-egress and mutation-scope blockers are
       corrected and independently re-reviewed
-- [ ] Exact implementation-head hosted `ci` passes after publication
+- [x] Exact implementation-head hosted `ci`
+      [run 30602942008](https://github.com/Ayyitskevin/Icarus/actions/runs/30602942008)
+      passes at `802b91e6f6c9b392f56c9ee3660be818a0f74a62`
 
 Historical pre-hold evaluator and local-gate evidence on 2026-07-30:
 
@@ -158,7 +195,9 @@ Historical pre-hold evaluator and local-gate evidence on 2026-07-30:
 - An earlier adversarial re-review passed the context, evaluator, and
   single-crash reconciliation policy. A later cold audit found the two blockers
   in the corrective gate above, so this evidence does not clear the candidate.
-  Publication and exact-head hosted CI remain deliberately unclaimed.
+  At that pre-publication checkpoint, publication and exact-head hosted CI
+  remained deliberately unclaimed; the Gate 0 closure above records their later
+  completion.
 
 Deferred beyond this slice: browser approval/execution (2c), capability-aware
 provider routing, richer retrieval, package installation, previews, landing,
@@ -236,11 +275,11 @@ the reliability slice without claiming a broader milestone is complete.
       passed its real `quality` job at exact implementation head
       `f8fe03e399fb46f197bbcbc0df8f1edabbe2e0c9`
 
-## Native-host acceptance: implementation merged, hosted acceptance pending
+## Native-host acceptance: accepted at the exact Gate 0 head
 
 ADR 0022 and its manual workflow are merged and registered on the default
-branch. Local policy and portable-composition evidence pass, but no native
-workflow run exists. This does not claim native acceptance.
+branch. The exact-head native workflow now passes on macOS 15 arm64 and Windows
+Server 2025 x64 at `802b91e6f6c9b392f56c9ee3660be818a0f74a62`.
 
 ### Portable boundary and authority
 
@@ -260,19 +299,25 @@ workflow run exists. This does not claim native acceptance.
       command, repository mutation, credential, push, deployment, or public
       endpoint authority
 
-### Local evidence and remaining host gate
+### Local and hosted evidence
 
 - [x] Fresh combined `pnpm check`: three workflows validated; formatting 95
       files; 169 unit/provider and 44 integration tests; evaluation 5 passed,
       0 failed, 5 unsupported; 118 security tests plus 49 static assertions; and
       a 23-module production build
 - [x] Native workflow policy/security tests and the selected portable composition
-      smoke pass locally on Linux without claiming native-host execution
+      smoke passed locally on Linux; at that candidate-time checkpoint this did
+      not yet claim native-host execution
 - [x] Combined cached-Chromium acceptance passes with zero browser errors,
       external requests, or source-state changes
 - [x] Publish and register the manual workflow on the default branch
-- [ ] With explicit authorization, dispatch one exact candidate commit and
-      record both native job URLs, runner image versions, commit, and conclusions
+- [x] With explicit authorization, dispatch exact main and record successful
+      [native run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132):
+      [macOS 15 arm64](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132/job/91069305460)
+      used `macos-15-arm64` image `20260715.0234.1`, and
+      [Windows Server 2025 x64](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132/job/91069305501)
+      used `windows-2025-vs2026` image `20260714.173.1`; both succeeded at
+      `802b91e6f6c9b392f56c9ee3660be818a0f74a62`
 
 ## Accepted eighth M3 observation slice: bounded project catalog and JSON transport
 
@@ -919,9 +964,11 @@ Fresh acceptance recorded on 2026-07-20:
       passed
 - [x] `git diff --check`: no errors
 
-Native macOS and Windows host runs remain unrecorded; platform-policy paths are
-covered on the Linux test host. Registry dependency audit is intentionally not
-part of this no-network local slice.
+At this slice's authoring/candidate-time checkpoint, native macOS and Windows
+host runs remained unrecorded and platform-policy paths were covered on the
+Linux test host. Exact-head native acceptance was later recorded in run
+30602949132. Registry dependency audit was intentionally not part of that
+no-network local slice.
 
 ## Prior plan: Milestone 0 plus minimal Milestone 1
 
@@ -1096,7 +1143,7 @@ ADR 0019 bounds only the ordinary newest approval suffix. ADR 0020 presents only
 the legacy browser projection of an already persisted one-file diff. ADR 0021
 bounds the project/repository catalog and aggregate JSON transport. ADR 0023's
 CLI transactional PatchSets and ADR 0026's failed-verification session are now
-implemented in the current candidate. Older approval pagination, current
+implemented in the released Gate 0 baseline. Older approval pagination, current
 file/status views, multi-file or payload-bearing browser diff/history, browser
 approval, and browser execution remain later, explicitly reviewed expansions.
 See `docs/ROADMAP.md`.

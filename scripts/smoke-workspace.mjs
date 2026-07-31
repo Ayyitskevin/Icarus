@@ -1,6 +1,6 @@
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -42,10 +42,24 @@ async function fingerprint(repository) {
   };
 }
 
-async function post(url, value) {
+function workspaceMutationHeaders(workspace) {
+  const launch = new URL(workspace.launchUrl);
+  const match = /^#icarus-action-session=([A-Za-z0-9_-]{43})$/.exec(launch.hash);
+  if (workspace.mode !== "mutation-capable" || match === null || launch.origin !== workspace.url) {
+    throw new Error("Workspace did not expose one canonical action-session launch fragment");
+  }
+  return {
+    origin: workspace.url,
+    authorization: `Bearer ${match[1]}`,
+    "content-type": "application/json",
+    "x-icarus-action": "workspace.mutate",
+  };
+}
+
+async function post(workspace, url, value) {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: workspaceMutationHeaders(workspace),
     body: JSON.stringify(value),
   });
   const body = await response.json();
@@ -99,6 +113,58 @@ async function startProvider() {
   };
 }
 
+async function captureWorkspaceStartup(stateRoot) {
+  const child = spawn(process.execPath, [path.resolve("packages/api/dist/main.js")], {
+    env: { ...process.env, ICARUS_HOME: stateRoot },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const closed = new Promise((resolve) => child.once("close", resolve));
+  let stdout = "";
+  let stderr = "";
+  const startup = await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error("Workspace startup record was not emitted within 10 seconds"));
+    }, 10_000);
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      const newline = stdout.indexOf("\n");
+      if (newline < 0) return;
+      clearTimeout(timeout);
+      try {
+        resolve(JSON.parse(stdout.slice(0, newline)));
+      } catch (error) {
+        reject(error);
+      } finally {
+        child.kill("SIGTERM");
+      }
+    });
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      if (stdout.indexOf("\n") < 0) {
+        clearTimeout(timeout);
+        reject(
+          new Error(
+            `Workspace exited before startup output (code=${String(code)}, signal=${String(
+              signal,
+            )}, stderr=${stderr})`,
+          ),
+        );
+      }
+    });
+  });
+  await closed;
+  return { startup, stdout, stderr };
+}
+
 const root = await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-smoke-"));
 let runtime;
 let workspace;
@@ -106,6 +172,50 @@ let provider;
 try {
   const repository = path.join(root, "repository");
   const stateRoot = path.join(root, "state");
+  const configuredZero = spawnSync(process.execPath, [path.resolve("packages/api/dist/main.js")], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ICARUS_HOME: path.join(root, "configured-zero-state"),
+      ICARUS_PORT: "0",
+    },
+  });
+  if (
+    configuredZero.status !== 1 ||
+    configuredZero.stdout !== "" ||
+    !configuredZero.stderr.includes('"code":"INVALID_PORT"')
+  ) {
+    throw new Error("An explicit ICARUS_PORT=0 did not fail closed");
+  }
+  const foreground = await captureWorkspaceStartup(path.join(root, "foreground-state"));
+  if (
+    typeof foreground.startup !== "object" ||
+    foreground.startup === null ||
+    Array.isArray(foreground.startup) ||
+    JSON.stringify(Object.keys(foreground.startup).sort()) !==
+      JSON.stringify(["binding", "stateRoot", "url"]) ||
+    foreground.startup.binding !== "127.0.0.1" ||
+    foreground.startup.stateRoot !== path.join(root, "foreground-state") ||
+    typeof foreground.startup.url !== "string" ||
+    foreground.stderr !== ""
+  ) {
+    throw new Error("Foreground startup output was not the closed launch-record shape");
+  }
+  const startupUrl = new URL(foreground.startup.url);
+  const startupToken =
+    /^#icarus-action-session=([A-Za-z0-9_-]{43})$/.exec(startupUrl.hash)?.[1] ?? null;
+  if (
+    startupToken === null ||
+    !/^[a-f0-9]{32}\.localhost$/.test(startupUrl.hostname) ||
+    foreground.stdout.trim() !== JSON.stringify(foreground.startup) ||
+    JSON.stringify({
+      binding: foreground.startup.binding,
+      stateRoot: foreground.startup.stateRoot,
+    }).includes(startupToken) ||
+    foreground.stdout.split(startupToken).length !== 2
+  ) {
+    throw new Error("Foreground startup output disclosed or misplaced the action-session bearer");
+  }
   await mkdir(path.join(repository, "src"), { recursive: true });
   await writeFile(path.join(repository, "README.md"), "# Workspace smoke fixture\n");
   await writeFile(path.join(repository, "src", "app.txt"), "local state stays untouched\n");
@@ -130,7 +240,11 @@ try {
     },
     0,
   );
-  const project = await post(`${workspace.url}/api/projects`, {
+  if (!/^http:\/\/[a-f0-9]{32}\.localhost:[1-9][0-9]*$/.test(workspace.url)) {
+    throw new Error("Workspace did not use a random localhost origin");
+  }
+  const firstLaunchUrl = workspace.launchUrl;
+  const project = await post(workspace, `${workspace.url}/api/projects`, {
     repository: { name: "smoke-repository", path: repository },
     project: {
       name: "smoke-project",
@@ -139,10 +253,15 @@ try {
       checks: [{ id: "verify", name: "Verify", argv: ["node", "--test"] }],
     },
   });
-  const preview = await post(`${workspace.url}/api/projects/${project.id}/context-preview`, {
-    target: "src/app.txt",
-  });
+  const preview = await post(
+    workspace,
+    `${workspace.url}/api/projects/${project.id}/context-preview`,
+    {
+      target: "src/app.txt",
+    },
+  );
   const repeatedPreview = await post(
+    workspace,
     `${workspace.url}/api/projects/${project.id}/context-preview`,
     { target: "src/app.txt" },
   );
@@ -153,7 +272,7 @@ try {
   ) {
     throw new Error("Context preview was not deterministic metadata-only evidence");
   }
-  const draft = await post(`${workspace.url}/api/runs`, {
+  const draft = await post(workspace, `${workspace.url}/api/runs`, {
     projectId: project.id,
     task: "Inspect a bounded local change request.",
     targets: ["src/app.txt"],
@@ -187,6 +306,9 @@ try {
     { runtime, stateRoot, workspaceDist: path.resolve("packages/workspace/dist") },
     0,
   );
+  if (workspace.launchUrl === firstLaunchUrl) {
+    throw new Error("Workspace action origin and bearer did not rotate after restart");
+  }
   const draftResponse = await fetch(`${workspace.url}/api/runs/${draft.id}`);
   const persistedDraft = await draftResponse.json();
   if (
@@ -197,7 +319,7 @@ try {
   ) {
     throw new Error("Draft was not recovered before planning after restart");
   }
-  const planned = await post(`${workspace.url}/api/runs/${draft.id}/plan`, {});
+  const planned = await post(workspace, `${workspace.url}/api/runs/${draft.id}/plan`, {});
   if (
     planned.state !== "awaiting_approval" ||
     planned.verification?.outcome !== "not_run" ||
@@ -226,6 +348,8 @@ try {
     !indexResponse.ok ||
     !indexHtml.includes("Icarus") ||
     indexResponse.headers.get("content-security-policy") === null ||
+    !indexResponse.headers.get("content-security-policy").includes("worker-src 'none'") ||
+    !indexResponse.headers.get("content-security-policy").includes("manifest-src 'none'") ||
     indexResponse.headers.has("access-control-allow-origin")
   ) {
     throw new Error("Production workspace entry was not served with the local security headers");

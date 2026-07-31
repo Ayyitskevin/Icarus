@@ -41,10 +41,21 @@ contract test requires one.
 ## Local workspace boundary
 
 The production server binds only to `127.0.0.1` and serves compiled UI assets
-and `/api` from one origin. It rejects non-loopback Host or Origin values,
-accepts only allowlisted methods/routes and bounded JSON mutation bodies, emits
-no CORS permission, and fails rather than choosing a different address or port.
-It is a foreground local process, not a remotely reachable daemon.
+and `/api` from one origin. An ordinary start chooses an ephemeral port plus a
+fresh 128-bit lowercase-hex `.localhost` hostname and emits one fragment-only
+32-byte mutation-session bearer. A synchronously bootstrapped client stores it
+only in `sessionStorage` and removes the fragment before render. Every `POST`
+requires the exact Host, Origin, canonical bearer, JSON content type, and
+`workspace.mutate` action header before body parsing or service work. `GET`
+requests remain tokenless. An explicitly configured stable port emits no
+bearer and is strictly review-only. The server emits no CORS permission and
+fails rather than choosing a different binding or configured port. It is a
+foreground local process, not a remotely reachable daemon.
+
+The API projects server-side mutation/planning availability separately from
+the client-held session. React combines only those booleans, never the bearer,
+and disables protected controls immediately when the server is stable
+review-only or the tab session is absent, malformed, or rejected as stale.
 
 The first route set can inspect workspace state, register a repository/project,
 preview committed-tree context metadata, persist a task draft, plan that draft
@@ -52,6 +63,11 @@ with loopback Ollama, and read a run. Repository import, preview, draft, and
 planning do not create a private worktree or modify the source checkout. There
 is no HTTP route for approval, edit or check execution, arbitrary commands,
 commit, push, or deployment.
+
+The current process shutdown closes HTTP connections immediately. That is an
+explicit portability-slice limitation, not a recovery guarantee: durable
+guarded browser actions cannot be added until shutdown drains or settles
+admitted actions through the ADR 0029 ledger before closing the runtime.
 
 The API presenter allowlists product evidence instead of returning `RunRecord`
 or history rows. It omits raw context/source blobs and private cache, worktree,
@@ -593,14 +609,17 @@ fail-closed audit or make imported repositories writable.
 
 ## Safety boundary
 
-- The HTTP server has a fixed loopback bind, same-origin UI/API, loopback Host
-  and Origin validation, bounded JSON contracts, no CORS grant, and safe response
-  headers. It fails closed on malformed or unrecognized mutations.
+- The HTTP server has a fixed loopback bind, fresh mutation origin/session,
+  exact Host/Origin/authorization/action-header validation for every POST,
+  duplicate-member-rejecting bounded JSON contracts, no CORS grant, and safe
+  response headers. Stable configured origins are GET-only. It fails closed on
+  malformed or unrecognized mutations.
 - Browser repository data is rendered as untrusted text from allowlisted
   presenters. Raw domain records, context/source blobs, private runtime paths,
   and provider credentials do not cross the response boundary.
-- The browser exposes planning and review only; it cannot approve a digest,
-  execute an edit/check/command, or commit, push, or deploy.
+- The browser exposes protected project/draft/planning mutations plus review;
+  it still cannot approve a digest, execute an edit/check/command, or commit,
+  publish a ref/PR, push, or deploy.
 - Remote-context approval gates non-loopback egress, plan approval gates the
   first write/edit call, and human review gates completion.
 - Provider output with recognizable credential material fails before plan/edit

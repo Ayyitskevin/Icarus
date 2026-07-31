@@ -1,12 +1,16 @@
 import { createHash } from "node:crypto";
-import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { createRequire } from "node:module";
 import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { startWorkspaceServer } from "../../packages/api/src/server.js";
+import {
+  type StartedWorkspaceServer,
+  startWorkspaceServer as startWorkspaceServerImplementation,
+  type WorkspaceServerOptions,
+} from "../../packages/api/src/server.js";
 import {
   createIcarusRuntime,
   DEFAULT_CEILING,
@@ -24,6 +28,7 @@ import {
 } from "../support/integration-cli.js";
 
 const cleanups: Array<() => Promise<void>> = [];
+const mutationHeadersByOrigin = new Map<string, Readonly<Record<string, string>>>();
 
 interface TestDatabase {
   prepare(sql: string): {
@@ -44,16 +49,48 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) {
     await cleanup();
   }
+  mutationHeadersByOrigin.clear();
 });
 
 async function responseJson(response: Response): Promise<Record<string, unknown>> {
   return (await response.json()) as Record<string, unknown>;
 }
 
+function workspaceMutationHeaders(
+  server: StartedWorkspaceServer,
+): Readonly<Record<string, string>> {
+  if (server.mode !== "mutation-capable") {
+    throw new Error("Review-only workspace has no mutation session");
+  }
+  const launch = new URL(server.launchUrl);
+  const match = /^#icarus-action-session=([A-Za-z0-9_-]{43})$/.exec(launch.hash);
+  if (match === null || launch.origin !== server.url) {
+    throw new Error("Workspace launch URL did not contain one canonical action session");
+  }
+  return {
+    origin: server.url,
+    authorization: `Bearer ${match[1] ?? ""}`,
+    "content-type": "application/json",
+    "x-icarus-action": "workspace.mutate",
+  };
+}
+
+async function startWorkspaceServer(
+  options: WorkspaceServerOptions,
+  port: number,
+): Promise<StartedWorkspaceServer> {
+  const server = await startWorkspaceServerImplementation(options, port);
+  if (server.mode === "mutation-capable") {
+    mutationHeadersByOrigin.set(server.url, workspaceMutationHeaders(server));
+  }
+  return server;
+}
+
 async function postJson(url: string, value: unknown): Promise<Response> {
+  const mutationHeaders = mutationHeadersByOrigin.get(new URL(url).origin);
   return fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...mutationHeaders },
     body: JSON.stringify(value),
   });
 }
@@ -69,6 +106,24 @@ function persistenceSnapshot(database: TestDatabase): Record<string, readonly un
     checkpoints: database.prepare("SELECT * FROM checkpoints ORDER BY run_id").all(),
     sequences: database.prepare("SELECT * FROM sqlite_sequence ORDER BY name").all(),
   };
+}
+
+async function filesContainingBytes(root: string, needle: Buffer): Promise<string[]> {
+  const matches: string[] = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    if (directory === undefined) break;
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(entryPath);
+      } else if (entry.isFile() && (await readFile(entryPath)).indexOf(needle) >= 0) {
+        matches.push(path.relative(root, entryPath));
+      }
+    }
+  }
+  return matches.sort();
 }
 
 function workspaceRunId(index: number): string {
@@ -123,8 +178,8 @@ async function rawRequest(
   url: string,
   options: {
     readonly method?: string;
-    readonly headers?: Readonly<Record<string, string>>;
-    readonly body?: string;
+    readonly headers?: http.OutgoingHttpHeaders | readonly string[];
+    readonly body?: string | Uint8Array;
   },
 ): Promise<{
   readonly status: number;
@@ -194,11 +249,17 @@ describe("loopback local workspace API", () => {
     });
 
     expect(server.host).toBe("127.0.0.1");
+    expect(server.mode).toBe("mutation-capable");
+    expect(server.url).toMatch(/^http:\/\/[a-f0-9]{32}\.localhost:[1-9][0-9]*$/);
+    expect(server.launchUrl).toMatch(
+      /^http:\/\/[a-f0-9]{32}\.localhost:[1-9][0-9]*\/#icarus-action-session=[A-Za-z0-9_-]{43}$/,
+    );
     expect(server.server.address()).toMatchObject({ address: "127.0.0.1" });
     const empty = await fetch(`${server.url}/api/workspace`);
     expect(empty.status).toBe(200);
     expect(await responseJson(empty)).toMatchObject({
       capabilities: {
+        mutation: { status: "available" },
         provider: { status: "unconfigured" },
         planning: { status: "available" },
         execution: { status: "unconfigured" },
@@ -1870,6 +1931,12 @@ describe("loopback local workspace API", () => {
     expect(badHost.body).toContain("INVALID_HOST");
     expect(badHost.headers["access-control-allow-origin"]).toBeUndefined();
 
+    const alternateLoopbackHost = await rawRequest(`${server.url}/api/workspace`, {
+      headers: { host: `127.0.0.1:${server.port}` },
+    });
+    expect(alternateLoopbackHost.status).toBe(422);
+    expect(alternateLoopbackHost.body).toContain("INVALID_HOST");
+
     const badOrigin = await rawRequest(`${server.url}/api/workspace`, {
       headers: { origin: "https://attacker.example" },
     });
@@ -1882,27 +1949,210 @@ describe("loopback local workspace API", () => {
     expect(crossLoopbackOrigin.status).toBe(422);
     expect(crossLoopbackOrigin.body).toContain("INVALID_ORIGIN");
 
+    const preflight = await rawRequest(`${server.url}/api/projects`, {
+      method: "OPTIONS",
+      headers: {
+        origin: server.url,
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization,x-icarus-action",
+      },
+    });
+    expect(preflight.status).toBe(404);
+    expect(preflight.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(preflight.headers["access-control-allow-methods"]).toBeUndefined();
+    expect(preflight.headers["access-control-allow-headers"]).toBeUndefined();
+
+    const mutationHeaders = workspaceMutationHeaders(server);
+    const authorization = mutationHeaders.authorization ?? "";
+    const token = authorization.slice("Bearer ".length);
+    const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    cleanups.push(async () => database.close());
+    const persistenceBeforeTransportRefusals = persistenceSnapshot(database);
+
+    const missingAuthorization = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: {
+        origin: server.url,
+        "content-type": "application/json",
+        "x-icarus-action": "workspace.mutate",
+      },
+      body: "{",
+    });
+    expect(missingAuthorization.status).toBe(401);
+    expect(missingAuthorization.body).toContain("ACTION_SESSION_REQUIRED");
+    expect(missingAuthorization.body).not.toContain(token);
+
+    const wrongAuthorization = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: { ...mutationHeaders, authorization: `Bearer ${"A".repeat(43)}` },
+      body: "{",
+    });
+    expect(wrongAuthorization.status).toBe(401);
+    expect(wrongAuthorization.body).toBe(missingAuthorization.body);
+
+    const unknownPostWithoutAuthorization = await rawRequest(`${server.url}/api/future-mutation`, {
+      method: "POST",
+      headers: {
+        origin: server.url,
+        "content-type": "application/json",
+        "x-icarus-action": "workspace.mutate",
+      },
+      body: "{}",
+    });
+    expect(unknownPostWithoutAuthorization.status).toBe(401);
+    expect(unknownPostWithoutAuthorization.body).toBe(missingAuthorization.body);
+
+    const bearerInQuery = await rawRequest(
+      `${server.url}/api/projects?icarus-action-session=${token}`,
+      {
+        method: "POST",
+        headers: {
+          origin: server.url,
+          "content-type": "application/json",
+          "x-icarus-action": "workspace.mutate",
+        },
+        body: JSON.stringify({ token }),
+      },
+    );
+    expect(bearerInQuery.status).toBe(401);
+    expect(bearerInQuery.body).toBe(missingAuthorization.body);
+
+    const bearerInCookie = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: {
+        origin: server.url,
+        cookie: `icarus-action-session=${token}`,
+        "content-type": "application/json",
+        "x-icarus-action": "workspace.mutate",
+      },
+      body: "{}",
+    });
+    expect(bearerInCookie.status).toBe(401);
+
+    const missingOrigin = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: {
+        authorization,
+        "content-type": "application/json",
+        "x-icarus-action": "workspace.mutate",
+      },
+      body: "{}",
+    });
+    expect(missingOrigin.status).toBe(422);
+    expect(missingOrigin.body).toContain("INVALID_ORIGIN");
+
+    for (const invalidOrigin of ["null", "https://attacker.example"]) {
+      const invalidMutationOrigin = await rawRequest(`${server.url}/api/projects`, {
+        method: "POST",
+        headers: { ...mutationHeaders, origin: invalidOrigin },
+        body: "{}",
+      });
+      expect(invalidMutationOrigin.status).toBe(422);
+      expect(invalidMutationOrigin.body).toContain("INVALID_ORIGIN");
+    }
+
+    const missingActionHeader = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: {
+        origin: server.url,
+        authorization,
+        "content-type": "application/json",
+      },
+      body: "{}",
+    });
+    expect(missingActionHeader.status).toBe(422);
+    expect(missingActionHeader.body).toContain("INVALID_REQUEST");
+
+    const wrongActionHeader = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: { ...mutationHeaders, "x-icarus-action": "plan.approve" },
+      body: "{}",
+    });
+    expect(wrongActionHeader.status).toBe(422);
+    expect(wrongActionHeader.body).toContain("INVALID_REQUEST");
+
+    const authority = new URL(server.url).host;
+    const rawMutationHeaders = [
+      "Host",
+      authority,
+      "Origin",
+      server.url,
+      "Authorization",
+      authorization,
+      "Content-Type",
+      "application/json",
+      "X-Icarus-Action",
+      "workspace.mutate",
+    ] as const;
+    for (const [duplicateName, expectedStatus, expectedCode] of [
+      ["Host", 422, "INVALID_HOST"],
+      ["Origin", 422, "INVALID_ORIGIN"],
+      ["Authorization", 401, "ACTION_SESSION_REQUIRED"],
+      ["Content-Type", 415, "UNSUPPORTED_MEDIA_TYPE"],
+      ["X-Icarus-Action", 422, "INVALID_REQUEST"],
+    ] as const) {
+      const duplicateHeaders = [...rawMutationHeaders];
+      const valueIndex = duplicateHeaders.findIndex(
+        (value) => value.toLowerCase() === duplicateName.toLowerCase(),
+      );
+      const duplicateValue = duplicateHeaders[valueIndex + 1] ?? "";
+      duplicateHeaders.push(duplicateName, duplicateValue);
+      const duplicated = await rawRequest(`${server.url}/api/projects`, {
+        method: "POST",
+        headers: duplicateHeaders,
+        body: "{}",
+      });
+      expect(duplicated.status).toBe(expectedStatus);
+      expect(duplicated.body).toContain(expectedCode);
+      if (duplicateName === "Authorization") {
+        expect(duplicated.body).toBe(missingAuthorization.body);
+      }
+      expect(duplicated.headers["access-control-allow-origin"]).toBeUndefined();
+    }
+
     const wrongType = await rawRequest(`${server.url}/api/projects`, {
       method: "POST",
-      headers: { "content-type": "text/plain" },
+      headers: { ...mutationHeaders, "content-type": "text/plain" },
       body: "{}",
     });
     expect(wrongType.status).toBe(415);
 
     const oversized = await rawRequest(`${server.url}/api/projects`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: mutationHeaders,
       body: JSON.stringify({ padding: "x".repeat(70 * 1024) }),
     });
     expect(oversized.status).toBe(413);
 
     const malformedJson = await rawRequest(`${server.url}/api/projects`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: mutationHeaders,
       body: "{",
     });
     expect(malformedJson.status).toBe(422);
     expect(malformedJson.body).toContain("INVALID_JSON");
+
+    const malformedUtf8 = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: mutationHeaders,
+      body: Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d]),
+    });
+    expect(malformedUtf8.status).toBe(422);
+    expect(malformedUtf8.body).toContain("INVALID_JSON");
+
+    const duplicateJsonMember = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: mutationHeaders,
+      body: '{"repository":{},"\\u0072epository":{}}',
+    });
+    expect(duplicateJsonMember.status).toBe(422);
+    expect(duplicateJsonMember.body).toContain("INVALID_JSON");
+
+    const workspaceProjection = await rawRequest(`${server.url}/api/workspace`, {});
+    expect(workspaceProjection.status).toBe(200);
+    expect(workspaceProjection.body).not.toContain(token);
+    expect(await filesContainingBytes(fixture.stateRoot, Buffer.from(token, "utf8"))).toEqual([]);
+    expect(persistenceSnapshot(database)).toEqual(persistenceBeforeTransportRefusals);
 
     const unknownField = await postJson(`${server.url}/api/projects`, {
       repository: { name: "unknown-field", path: fixture.repository },
@@ -2001,5 +2251,35 @@ describe("loopback local workspace API", () => {
     await expect(
       startWorkspaceServer({ runtime, stateRoot: fixture.stateRoot, workspaceDist }, server.port),
     ).rejects.toMatchObject({ code: "EADDRINUSE" });
+
+    const reviewOnlyPort = server.port;
+    await server.close();
+    const reviewOnly = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      reviewOnlyPort,
+    );
+    cleanups.push(reviewOnly.close);
+    expect(reviewOnly).toMatchObject({
+      mode: "review-only",
+      url: `http://127.0.0.1:${reviewOnlyPort}`,
+      launchUrl: `http://127.0.0.1:${reviewOnlyPort}`,
+    });
+    expect(new URL(reviewOnly.launchUrl).hash).toBe("");
+    expect((await fetch(`${reviewOnly.url}/api/health`)).status).toBe(200);
+    expect(await responseJson(await fetch(`${reviewOnly.url}/api/workspace`))).toMatchObject({
+      capabilities: {
+        mutation: { status: "review_only" },
+        planning: { status: "review_only" },
+      },
+    });
+    const persistenceBeforeReviewOnlyPost = persistenceSnapshot(database);
+    const reviewOnlyPost = await rawRequest(`${reviewOnly.url}/api/future-mutation`, {
+      method: "POST",
+      body: "{",
+    });
+    expect(reviewOnlyPost.status).toBe(403);
+    expect(reviewOnlyPost.body).toContain("WORKSPACE_REVIEW_ONLY");
+    expect(reviewOnlyPost.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(persistenceSnapshot(database)).toEqual(persistenceBeforeReviewOnlyPost);
   });
 });

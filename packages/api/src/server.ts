@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
+import { TextDecoder } from "node:util";
 
 import {
   assertRegistrationStateSeparation,
@@ -32,6 +33,12 @@ import {
   presentWorkspaceProjectPage,
   presentWorkspaceRunPage,
 } from "./present.js";
+import { parseStrictJson } from "./strict-json.js";
+import {
+  createResolvedWorkspaceSession,
+  type WorkspaceServerMode,
+  type WorkspaceSession,
+} from "./workspace-session.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 export const MAX_JSON_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -51,6 +58,8 @@ export interface StartedWorkspaceServer {
   readonly host: "127.0.0.1";
   readonly port: number;
   readonly url: string;
+  readonly launchUrl: string;
+  readonly mode: WorkspaceServerMode;
   close(): Promise<void>;
 }
 
@@ -59,7 +68,7 @@ function headers(contentType: string): Record<string, string> {
     "cache-control": "no-store",
     "content-type": contentType,
     "content-security-policy":
-      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; worker-src 'none'; manifest-src 'none'",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
@@ -89,6 +98,8 @@ function internalError(response: ServerResponse): void {
 }
 
 function errorStatus(error: IcarusError): number {
+  if (error.code === "ACTION_SESSION_REQUIRED") return 401;
+  if (error.code === "WORKSPACE_REVIEW_ONLY") return 403;
   if (error.code === "NOT_FOUND") return 404;
   if (error.code === "REQUEST_TOO_LARGE") return 413;
   if (error.code === "RESPONSE_TOO_LARGE") return 500;
@@ -165,71 +176,8 @@ function safeError(error: unknown): { readonly status: number; readonly body: un
   };
 }
 
-function requestHostname(request: IncomingMessage): string | null {
-  const host = request.headers.host;
-  if (host === undefined) return null;
-  try {
-    return new URL(`http://${host}`).hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-function requestAuthority(request: IncomingMessage): string | null {
-  const host = request.headers.host;
-  if (host === undefined) return null;
-  try {
-    const parsed = new URL(`http://${host}`);
-    if (
-      parsed.username.length > 0 ||
-      parsed.password.length > 0 ||
-      parsed.pathname !== "/" ||
-      parsed.search.length > 0 ||
-      parsed.hash.length > 0
-    ) {
-      return null;
-    }
-    return parsed.host.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-function assertLocalBrowserRequest(request: IncomingMessage): void {
-  const authority = requestAuthority(request);
-  const hostname = requestHostname(request);
-  if (
-    authority === null ||
-    (hostname !== "127.0.0.1" && hostname !== "localhost" && hostname !== "::1")
-  ) {
-    throw new IcarusError("INVALID_HOST", "The workspace accepts only loopback Host headers");
-  }
-  const origin = request.headers.origin;
-  if (origin === undefined) return;
-  let parsed: URL;
-  try {
-    parsed = new URL(origin);
-  } catch {
-    throw new IcarusError("INVALID_ORIGIN", "The request Origin is invalid");
-  }
-  const originHostname = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (
-    parsed.protocol !== "http:" ||
-    (originHostname !== "127.0.0.1" && originHostname !== "localhost" && originHostname !== "::1")
-  ) {
-    throw new IcarusError("INVALID_ORIGIN", "The workspace accepts only loopback Origins");
-  }
-  if (parsed.host.toLowerCase() !== authority) {
-    throw new IcarusError(
-      "INVALID_ORIGIN",
-      "The workspace accepts only a same-origin browser authority",
-    );
-  }
-}
-
 async function readJson(request: IncomingMessage): Promise<unknown> {
-  const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
-  if (contentType !== "application/json") {
+  if (request.headers["content-type"] !== "application/json") {
     throw new IcarusError("UNSUPPORTED_MEDIA_TYPE", "Mutation requests require application/json");
   }
   const contentLength = request.headers["content-length"];
@@ -251,11 +199,15 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
     }
     chunks.push(bytes);
   }
+  let source: string;
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      Buffer.concat(chunks),
+    );
   } catch {
-    throw new IcarusError("INVALID_JSON", "Request body must be valid JSON");
+    throw new IcarusError("INVALID_JSON", "Request body must be valid UTF-8 JSON");
   }
+  return parseStrictJson(source);
 }
 
 function decodedRouteId(value: string, name: string): string {
@@ -302,18 +254,29 @@ function presentRunById(options: WorkspaceServerOptions, runId: string): Record<
   return presentRun(project, snapshot);
 }
 
-function workspaceSnapshot(options: WorkspaceServerOptions): Record<string, unknown> {
+function workspaceSnapshot(
+  options: WorkspaceServerOptions,
+  mode: WorkspaceServerMode,
+): Record<string, unknown> {
+  const mutationAvailable = mode === "mutation-capable";
   return {
     capabilities: {
       server: { status: "available", binding: "loopback" },
+      mutation: {
+        status: mutationAvailable ? "available" : "review_only",
+        reason: mutationAvailable
+          ? "This fresh-origin workspace has a session-scoped browser mutation transport."
+          : "This stable-origin workspace is review-only. Relaunch without an explicit port to make bounded changes.",
+      },
       provider: {
         status: "unconfigured",
         reason: "Enter a loopback Ollama model and endpoint for each draft.",
       },
       planning: {
-        status: "available",
-        reason:
-          "Portable loopback planning is available; SQLite operation admission prevents concurrent provider work.",
+        status: mutationAvailable ? "available" : "review_only",
+        reason: mutationAvailable
+          ? "Portable loopback planning is available; SQLite operation admission prevents concurrent provider work."
+          : "Planning is disabled because this stable-origin workspace is review-only.",
       },
       execution: {
         status: "unconfigured",
@@ -329,6 +292,7 @@ function workspaceSnapshot(options: WorkspaceServerOptions): Record<string, unkn
 
 async function routeApi(
   options: WorkspaceServerOptions,
+  session: WorkspaceSession,
   request: IncomingMessage,
   response: ServerResponse,
   pathname: string,
@@ -340,7 +304,7 @@ async function routeApi(
     return true;
   }
   if (method === "GET" && pathname === "/api/workspace") {
-    json(response, 200, workspaceSnapshot(options));
+    json(response, 200, workspaceSnapshot(options, session.mode));
     return true;
   }
   if (method === "GET" && pathname === "/api/projects") {
@@ -546,13 +510,28 @@ async function serveWorkspace(
   response.end(request.method === "HEAD" ? undefined : bytes);
 }
 
-export function createWorkspaceServer(options: WorkspaceServerOptions): Server {
-  return createServer(async (request, response) => {
+function workspaceRequestListener(
+  options: WorkspaceServerOptions,
+  session: WorkspaceSession,
+): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
+  return async (request, response) => {
     try {
-      assertLocalBrowserRequest(request);
-      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      session.assertExactHost(request);
+      const url = new URL(request.url ?? "/", session.url);
+      if (request.method === "POST") {
+        session.assertProtectedMutation(request);
+      } else {
+        session.assertOptionalExactOrigin(request);
+      }
       if (url.pathname.startsWith(API_PREFIX)) {
-        const handled = await routeApi(options, request, response, url.pathname, url.searchParams);
+        const handled = await routeApi(
+          options,
+          session,
+          request,
+          response,
+          url.pathname,
+          url.searchParams,
+        );
         if (!handled) {
           json(response, 404, { error: { code: "NOT_FOUND", message: "API route was not found" } });
         }
@@ -573,7 +552,7 @@ export function createWorkspaceServer(options: WorkspaceServerOptions): Server {
         if (!response.headersSent) internalError(response);
       }
     }
-  });
+  };
 }
 
 export async function startWorkspaceServer(
@@ -583,7 +562,7 @@ export async function startWorkspaceServer(
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
     throw new IcarusError("INVALID_PORT", "Workspace port is invalid");
   }
-  const server = createWorkspaceServer(options);
+  const server = createServer();
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error): void => reject(error);
     server.once("error", onError);
@@ -597,12 +576,25 @@ export async function startWorkspaceServer(
     await new Promise<void>((resolve) => server.close(() => resolve()));
     throw new IcarusError("UNSAFE_BINDING", "Workspace did not bind to IPv4 loopback");
   }
+  let session: WorkspaceSession;
+  try {
+    session = await createResolvedWorkspaceSession(
+      port === 0 ? "mutation-capable" : "review-only",
+      address.port,
+    );
+    server.on("request", workspaceRequestListener(options, session));
+  } catch (error) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    throw error;
+  }
   let closed = false;
   return {
     server,
     host: "127.0.0.1",
     port: address.port,
-    url: `http://127.0.0.1:${address.port}`,
+    url: session.url,
+    launchUrl: session.launchUrl,
+    mode: session.mode,
     close: async () => {
       if (closed) return;
       closed = true;

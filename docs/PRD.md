@@ -11,9 +11,10 @@ The accepted product direction in ADR 0036 is to compete for the
 task-to-running-application outcome served by Cursor/VS Code, Replit, and
 Supabase while owning a different center of gravity: proof-carrying authority,
 execution, evidence, and recovery. Icarus will expose that kernel through a
-browser and VS Code extension, land reversible Git changes, orchestrate bounded
-preview environments, and drive isolated Supabase change packs. It will not
-reimplement an editor engine, Postgres, Auth, Storage, or Realtime.
+browser and VS Code extension, land changes through isolated create-only
+branches and draft pull requests with explicit reconciliation, orchestrate
+bounded preview environments, and drive isolated Supabase change packs. It
+will not reimplement an editor engine, Postgres, Auth, Storage, or Realtime.
 
 ## First user
 
@@ -124,9 +125,14 @@ policy, and the number of changed files is bounded by the project ceiling.
 The first browser path is intentionally narrower than the guarded CLI lifecycle:
 
 1. A Node API persists repository/project records in the existing SQLite state
-   root and serves a React workspace from the same fixed `127.0.0.1` origin.
-   Host and Origin values are loopback-only, mutation bodies are bounded JSON,
-   and the server grants no CORS access.
+   root and binds only to `127.0.0.1`. Its default ephemeral start serves React
+   and `/api` from a fresh 128-bit `.localhost` origin and emits an independent
+   32-byte bearer only in the launch fragment. The client removes that fragment
+   before render and retains it only in `sessionStorage`. Every POST requires
+   exact same-origin session headers before a bounded, duplicate-member-
+   rejecting JSON body is read; GETs are tokenless and no CORS access is
+   granted. An explicitly configured stable port is GET-only and emits no
+   bearer.
 2. Import records an existing local Git repository but does not modify its
    content, refs, config, index, or worktree metadata.
 3. Context preview is deterministic metadata over one committed tree and target.
@@ -466,8 +472,10 @@ exist in Milestone 1:
   fixture validation all pass in CI.
 - The evaluation report states unsupported scenarios rather than counting them
   as successes.
-- The workspace API rejects non-loopback Host/Origin requests, oversized or
-  malformed mutations, and remote planning endpoints without mutating state.
+- The workspace API rejects wrong/duplicated Host, Origin, authorization,
+  content-type, or action headers; stable-origin POSTs; oversized, malformed,
+  duplicate-member mutations; and remote planning endpoints without mutating
+  state.
   Malformed provider URLs and missing repositories return useful
   `INVALID_PROVIDER_URL` and `INVALID_REPOSITORY` errors without persistence.
 - Context preview is deterministic for one commit and target, returns metadata

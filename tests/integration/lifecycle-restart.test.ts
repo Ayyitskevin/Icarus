@@ -3,7 +3,10 @@ import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
-import { startWorkspaceServer } from "../../packages/api/src/server.js";
+import {
+  type StartedWorkspaceServer,
+  startWorkspaceServer,
+} from "../../packages/api/src/server.js";
 import { createIcarusRuntime } from "../../packages/core/src/index.js";
 import { IcarusStore } from "../../packages/core/src/store.js";
 import type { RunRecord } from "../../packages/core/src/types.js";
@@ -24,6 +27,22 @@ interface PublicRun extends Omit<RunRecord, "context"> {
 }
 
 const cleanups: Array<() => Promise<void>> = [];
+
+function workspaceMutationHeaders(
+  server: StartedWorkspaceServer,
+): Readonly<Record<string, string>> {
+  const launch = new URL(server.launchUrl);
+  const match = /^#icarus-action-session=([A-Za-z0-9_-]{43})$/.exec(launch.hash);
+  if (server.mode !== "mutation-capable" || match === null || launch.origin !== server.url) {
+    throw new Error("Workspace did not expose one action-session launch fragment");
+  }
+  return {
+    origin: server.url,
+    authorization: `Bearer ${match[1] ?? ""}`,
+    "content-type": "application/json",
+    "x-icarus-action": "workspace.mutate",
+  };
+}
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
@@ -63,6 +82,66 @@ async function configureProject(
 }
 
 describe("CLI lifecycle across process restarts", () => {
+  test("rotates the action origin and bearer across a foreground runtime restart", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+
+    let runtime = await createIcarusRuntime(fixture.stateRoot);
+    let first: StartedWorkspaceServer | undefined;
+    let second: StartedWorkspaceServer | undefined;
+    try {
+      first = await startWorkspaceServer(
+        { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+        0,
+      );
+      const firstHeaders = workspaceMutationHeaders(first);
+      expect(first.url).toMatch(/^http:\/\/[a-f0-9]{32}\.localhost:[1-9][0-9]*$/);
+      expect((await fetch(`${first.url}/api/health`)).status).toBe(200);
+
+      await first.close();
+      first = undefined;
+      runtime.close();
+      runtime = await createIcarusRuntime(fixture.stateRoot);
+
+      second = await startWorkspaceServer(
+        { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+        0,
+      );
+      const secondHeaders = workspaceMutationHeaders(second);
+      expect(second.url).not.toBe(new URL(firstHeaders.origin ?? "").origin);
+      expect(second.launchUrl).not.toContain(firstHeaders.authorization?.slice("Bearer ".length));
+      const health = await fetch(`${second.url}/api/health`);
+      expect(health.status).toBe(200);
+      expect(health.headers.get("content-security-policy")).toContain("worker-src 'none'");
+      expect(health.headers.get("content-security-policy")).toContain("manifest-src 'none'");
+
+      const staleBearer = await fetch(`${second.url}/api/projects`, {
+        method: "POST",
+        headers: {
+          ...secondHeaders,
+          authorization: firstHeaders.authorization ?? "",
+        },
+        body: "{}",
+      });
+      expect(staleBearer.status).toBe(401);
+      expect(await staleBearer.json()).toMatchObject({
+        error: { code: "ACTION_SESSION_REQUIRED" },
+      });
+      expect(runtime.service.listRepositories()).toEqual([]);
+      expect(runtime.service.listProjects()).toEqual([]);
+      expect(runtime.service.listRuns()).toEqual([]);
+      expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+    } finally {
+      await first?.close();
+      await second?.close();
+      runtime.close();
+    }
+  });
+
   test("persists approvals, verifies in Docker, rolls back, restores, and preserves the source checkout", async () => {
     const fixture = await createFixtureRepository();
     cleanups.push(fixture.cleanup);

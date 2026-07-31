@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { createIcarusRuntime, IcarusError, type IcarusRuntime } from "@icarus/core";
 
-import { startWorkspaceServer, type StartedWorkspaceServer } from "./server.js";
+import { type StartedWorkspaceServer, startWorkspaceServer } from "./server.js";
 
 function stateRoot(): string {
   const explicit = process.env.ICARUS_HOME;
@@ -20,7 +20,8 @@ function stateRoot(): string {
 }
 
 function port(): number {
-  const raw = process.env.ICARUS_PORT ?? "8787";
+  const raw = process.env.ICARUS_PORT;
+  if (raw === undefined) return 0;
   if (!/^\d{1,5}$/.test(raw)) throw new IcarusError("INVALID_PORT", "ICARUS_PORT is invalid");
   const parsed = Number(raw);
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 65_535) {
@@ -45,7 +46,7 @@ async function main(): Promise<void> {
     const workspaceDist = fileURLToPath(new URL("../../workspace/dist/", import.meta.url));
     server = await startWorkspaceServer({ runtime, stateRoot: root, workspaceDist }, port());
     process.stdout.write(
-      `${JSON.stringify({ url: server.url, binding: server.host, stateRoot: root })}\n`,
+      `${JSON.stringify({ url: server.launchUrl, binding: server.host, stateRoot: root })}\n`,
     );
     process.once("SIGINT", () => void shutdown());
     process.once("SIGTERM", () => void shutdown());

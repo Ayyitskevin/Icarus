@@ -1,5 +1,6 @@
 import type { FormEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { hasActionSession, subscribeActionSessionAvailability } from "./action-session.js";
 import type {
   CapabilityView,
   CheckEvidenceView,
@@ -372,10 +373,15 @@ function RepositoryStatusPanel({ project }: { readonly project: ProjectView }) {
 
 interface ProjectRegistrationFormProps {
   readonly busy: boolean;
+  readonly mutationCapability: CapabilityView;
   readonly onCreated: (project: ProjectView) => Promise<void>;
 }
 
-function ProjectRegistrationForm({ busy, onCreated }: ProjectRegistrationFormProps) {
+function ProjectRegistrationForm({
+  busy,
+  mutationCapability,
+  onCreated,
+}: ProjectRegistrationFormProps) {
   const [repositoryName, setRepositoryName] = useState("");
   const [repositoryPath, setRepositoryPath] = useState("");
   const [projectName, setProjectName] = useState("");
@@ -390,6 +396,12 @@ function ProjectRegistrationForm({ busy, onCreated }: ProjectRegistrationFormPro
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     setLocalError(null);
+    if (mutationCapability.status !== "available") {
+      setLocalError(
+        mutationCapability.reason ?? "Project registration is unavailable in review-only mode.",
+      );
+      return;
+    }
     let argv: unknown;
     try {
       argv = JSON.parse(checkArgv) as unknown;
@@ -448,6 +460,11 @@ function ProjectRegistrationForm({ busy, onCreated }: ProjectRegistrationFormPro
         Enter an absolute path. The browser does not scan your filesystem, and registration does not
         execute repository code.
       </p>
+      {mutationCapability.status === "available" ? null : (
+        <p className="message message--warning" role="status">
+          {mutationCapability.reason ?? "Project registration is unavailable in review-only mode."}
+        </p>
+      )}
       <form className="form-grid" onSubmit={(event) => void submit(event)}>
         <label>
           Repository name
@@ -518,7 +535,10 @@ function ProjectRegistrationForm({ busy, onCreated }: ProjectRegistrationFormPro
           </p>
         )}
         <div className="form-actions form-grid__wide">
-          <button type="submit" disabled={busy || submitting}>
+          <button
+            type="submit"
+            disabled={busy || submitting || mutationCapability.status !== "available"}
+          >
             {submitting ? "Registering…" : "Register project"}
           </button>
         </div>
@@ -688,6 +708,7 @@ function ContextSummary({
 
 interface ProjectDetailProps {
   readonly project: ProjectView;
+  readonly mutationCapability: CapabilityView;
   readonly planningCapability: CapabilityView;
   readonly runs: readonly RunSummaryView[];
   readonly onSelectRun: (runId: string) => Promise<void>;
@@ -696,6 +717,7 @@ interface ProjectDetailProps {
 
 function ProjectDetail({
   project,
+  mutationCapability,
   planningCapability,
   runs,
   onSelectRun,
@@ -743,6 +765,13 @@ function ProjectDetail({
   const requestPreview = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     setPreviewError(null);
+    if (mutationCapability.status !== "available") {
+      setPreview(null);
+      setPreviewError(
+        mutationCapability.reason ?? "Context preview is unavailable in review-only mode.",
+      );
+      return;
+    }
     setPreviewing(true);
     try {
       const result = await previewProjectContext(project.id, previewTarget.trim());
@@ -831,6 +860,11 @@ function ProjectDetail({
           The API returns deterministic metadata and exclusion reasons. Repository contents are
           rendered only as text and this action does not invoke a provider or project check.
         </p>
+        {mutationCapability.status === "available" ? null : (
+          <p className="message message--warning" role="status">
+            {mutationCapability.reason ?? "Context preview is unavailable in review-only mode."}
+          </p>
+        )}
         <form className="inline-form" onSubmit={(event) => void requestPreview(event)}>
           <label>
             Tracked target path
@@ -841,7 +875,14 @@ function ProjectDetail({
               placeholder="src/example.ts"
             />
           </label>
-          <button type="submit" disabled={previewing || previewTarget.trim().length === 0}>
+          <button
+            type="submit"
+            disabled={
+              previewing ||
+              previewTarget.trim().length === 0 ||
+              mutationCapability.status !== "available"
+            }
+          >
             {previewing ? "Inspecting…" : "Preview context"}
           </button>
         </form>
@@ -2410,6 +2451,11 @@ function WorkspaceRunPage({
 }
 
 export function App() {
+  const actionSessionAvailable = useSyncExternalStore(
+    subscribeActionSessionAvailability,
+    hasActionSession,
+    () => false,
+  );
   const [workspace, setWorkspace] = useState<WorkspaceView | null>(null);
   const [projectPageSession, setProjectPageSession] = useState<ProjectPageSession | null>(null);
   const [projectPageBusy, setProjectPageBusy] = useState(false);
@@ -2427,6 +2473,38 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const mutationCapability = useMemo<CapabilityView>(() => {
+    const reported = workspace?.capabilities.mutation;
+    if (reported === undefined || reported.status !== "available" || actionSessionAvailable) {
+      return (
+        reported ?? {
+          status: "unavailable",
+          reason: "The workspace mutation capability has not loaded.",
+        }
+      );
+    }
+    return {
+      status: "review_only",
+      reason:
+        "This tab has no current action session. Open a fresh action-session launch URL to make bounded changes.",
+    };
+  }, [actionSessionAvailable, workspace]);
+  const planningCapability = useMemo<CapabilityView>(() => {
+    const reported = workspace?.capabilities.planning;
+    if (reported === undefined) {
+      return {
+        status: "unavailable",
+        reason: "The workspace planning capability has not loaded.",
+      };
+    }
+    if (reported.status !== "available" || mutationCapability.status === "available") {
+      return reported;
+    }
+    return {
+      status: "review_only",
+      reason: mutationCapability.reason,
+    };
+  }, [mutationCapability, workspace]);
   const workspaceRequestRef = useRef<AbortController | null>(null);
   const workspaceGenerationRef = useRef(0);
   const projectPageSessionRef = useRef<ProjectPageSession | null>(null);
@@ -2893,7 +2971,7 @@ export function App() {
       ) : workspace === null ? (
         <main id="workspace-main" className="loading-state" tabIndex={-1}>
           <h2>Workspace unavailable</h2>
-          <p>Start the local API on 127.0.0.1:8787, then retry.</p>
+          <p>Start the local workspace and open its exact printed launch URL, then retry.</p>
         </main>
       ) : (
         <main id="workspace-main" className="workspace-layout" tabIndex={-1}>
@@ -2902,7 +2980,8 @@ export function App() {
               <h2 id="capabilities-heading">Capabilities</h2>
               <div className="stack stack--small">
                 <CapabilityCard label="Provider" capability={workspace.capabilities.provider} />
-                <CapabilityCard label="Planning" capability={workspace.capabilities.planning} />
+                <CapabilityCard label="Mutation" capability={mutationCapability} />
+                <CapabilityCard label="Planning" capability={planningCapability} />
                 <CapabilityCard label="Execution" capability={workspace.capabilities.execution} />
               </div>
             </section>
@@ -2948,18 +3027,27 @@ export function App() {
           <div className="content">
             {selectedRun === null ? (
               selectedProject === null ? (
-                <ProjectRegistrationForm busy={refreshing} onCreated={projectCreated} />
+                <ProjectRegistrationForm
+                  busy={refreshing}
+                  mutationCapability={mutationCapability}
+                  onCreated={projectCreated}
+                />
               ) : (
                 <>
                   <ProjectDetail
                     key={selectedProject.id}
                     project={selectedProject}
-                    planningCapability={workspace.capabilities.planning}
+                    mutationCapability={mutationCapability}
+                    planningCapability={planningCapability}
                     runs={projectRuns}
                     onSelectRun={selectRun}
                     onRunCreated={openCreatedRun}
                   />
-                  <ProjectRegistrationForm busy={refreshing} onCreated={projectCreated} />
+                  <ProjectRegistrationForm
+                    busy={refreshing}
+                    mutationCapability={mutationCapability}
+                    onCreated={projectCreated}
+                  />
                 </>
               )
             ) : (
@@ -2970,7 +3058,7 @@ export function App() {
                 <RunEvidence
                   key={selectedRun.id}
                   run={selectedRun}
-                  planningCapability={workspace.capabilities.planning}
+                  planningCapability={planningCapability}
                   onRunChanged={mergeRun}
                   onRefresh={refreshRun}
                   registerAuxiliaryCancellation={registerAuxiliaryCancellation}

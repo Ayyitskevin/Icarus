@@ -25,12 +25,14 @@ Decision records for the current milestone:
 | [0019](adr/0019-bounded-approval-provenance.md) | Bounded approval provenance | Accepted |
 | [0020](adr/0020-bounded-persisted-diff-review.md) | Bounded persisted diff and run-status review | Accepted |
 | [0021](adr/0021-bounded-project-catalog-and-json-responses.md) | Bounded project catalog and JSON responses | Accepted |
-| [0022](adr/0022-native-macos-windows-acceptance.md) | Explicit native macOS and Windows acceptance | Proposed — native runs pending |
+| [0022](adr/0022-native-macos-windows-acceptance.md) | Explicit native macOS and Windows acceptance | Accepted — exact-head macOS and Windows jobs passed at `802b91e6` |
 | [0023](adr/0023-transactional-multi-file-patch-sets.md) | Transactional multi-file patch sets, superseding the ADR 0003 mutation boundary | Accepted |
 | [0024](adr/0024-bounded-repair-loop.md) | Bounded repair loop with a plan-carried repair grant | Superseded by ADR 0026's failed-verification session loop; plan-bound authority, durable accounting, same-target validation, exhaustion semantics, and human review remain in force |
 | [0025](adr/0025-hardened-inherited-opencode-workflow.md) | Hardened inherited OpenCode workflow with a repository-owned actor gate, resolving ADR 0010 | Accepted — third-party review and secret rotation outstanding |
-| [0026](adr/0026-agent-session-loop-and-tool-registry.md) | AgentSession loop, host-owned tool registry, and manifest-bound capability grants | Accepted design — corrected local implementation candidate passes the full gate; exact-head hosted CI, native acceptance, and separate browser-approval design outstanding |
-| [0036](adr/0036-proof-carrying-software-factory-product-direction.md) | Proof-carrying software factory product direction and gated competitive roadmap | Accepted product direction — implementation staged; current ADR 0026 hold remains |
+| [0026](adr/0026-agent-session-loop-and-tool-registry.md) | AgentSession loop, host-owned tool registry, and manifest-bound capability grants | Accepted and released through 2b at exact `main` `802b91e6`; browser authority is separate Gate 1 work |
+| [0027](adr/0027-git-landing-authority.md) | Separate proof-bound landing ledger, deterministic candidate commit, create-only GitHub branch, and exact draft PR | Accepted — independent P0/P1 authority reviews passed 2026-07-31; runtime not implemented |
+| [0029](adr/0029-browser-approval-authority.md) | Fresh-origin browser mutation session and fenced Linux run actions | Accepted — independent P0/P1 authority review passed 2026-07-31 |
+| [0036](adr/0036-proof-carrying-software-factory-product-direction.md) | Proof-carrying software factory product direction and gated competitive roadmap | Accepted product direction — Gate 0 released at exact `main` `802b91e6`; Gate 1 active |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.

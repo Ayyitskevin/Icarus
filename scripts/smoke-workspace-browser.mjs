@@ -36,6 +36,7 @@ const VALID_ARCHIVED_RUN_TASK = "Archived browser run 020";
 const ALTERNATE_ARCHIVED_RUN_TASK = "Archived browser run 021";
 const APPROVAL_HTML_SENTINEL = '<img data-approval-injection="true"> Recorded digest:';
 const DIFF_HTML_SENTINEL = '<img data-diff-injection="true" src=x onerror=alert(1)>';
+const ACTION_SESSION_STORAGE_KEY = "icarus.action-session";
 
 const Database = createRequire(new URL("../packages/core/package.json", import.meta.url))(
   "better-sqlite3",
@@ -43,6 +44,33 @@ const Database = createRequire(new URL("../packages/core/package.json", import.m
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function availableLoopbackPort() {
+  const server = http.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    await new Promise((resolve) => server.close(resolve));
+    throw new Error("Could not reserve a review-only browser smoke port");
+  }
+  await new Promise((resolve, reject) => {
+    server.close((error) => (error === undefined ? resolve() : reject(error)));
+  });
+  return address.port;
+}
+
+function actionSessionFromLaunchUrl(launchUrl) {
+  const match = /^#icarus-action-session=([A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$/.exec(
+    new URL(launchUrl).hash,
+  );
+  if (match === null) {
+    throw new Error("The mutation-capable workspace launch URL is missing its canonical session");
+  }
+  return match[1];
 }
 
 async function waitForObserved(predicate, description, timeoutMs = UI_TIMEOUT_MS) {
@@ -579,7 +607,7 @@ async function startChromium(executable, profile) {
       "--password-store=basic",
       "--safebrowsing-disable-auto-update",
       "--use-mock-keychain",
-      "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost",
+      "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost, EXCLUDE *.localhost",
       "--remote-allow-origins=*",
       "--remote-debugging-address=127.0.0.1",
       "--remote-debugging-port=0",
@@ -1077,7 +1105,8 @@ class BrowserPage {
   }
 }
 
-async function createBrowserPage(chromium, workspaceUrl) {
+async function createBrowserPage(chromium, workspaceUrl, launchUrl) {
+  const actionSession = launchUrl === workspaceUrl ? null : actionSessionFromLaunchUrl(launchUrl);
   const { targetId } = await chromium.cdp.send("Target.createTarget", { url: "about:blank" });
   const { sessionId } = await chromium.cdp.send("Target.attachToTarget", {
     targetId,
@@ -1087,6 +1116,82 @@ async function createBrowserPage(chromium, workspaceUrl) {
   await chromium.cdp.send("Runtime.enable", {}, sessionId);
   await chromium.cdp.send("Network.enable", {}, sessionId);
   await chromium.cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*" }] }, sessionId);
+  const responseBodyEvidence = { inspected: 0, leaked: false };
+  await chromium.cdp.send(
+    "Runtime.addBinding",
+    { name: "__icarusRecordResponseBodyEvidence" },
+    sessionId,
+  );
+  chromium.cdp.on(sessionId, "Runtime.bindingCalled", (event) => {
+    if (event.name !== "__icarusRecordResponseBodyEvidence") return;
+    if (event.payload === "inspected") responseBodyEvidence.inspected += 1;
+    if (event.payload === "leaked") responseBodyEvidence.leaked = true;
+  });
+  await chromium.cdp.send(
+    "Page.addScriptToEvaluateOnNewDocument",
+    {
+      source: `(${(
+        (storageKey) => {
+          const evidence = {
+            replaceObserved: false,
+            canonicalFragmentRemoved: false,
+            firstRootMutationAfterReplace: null,
+            hashAtFirstRootMutation: null,
+            responseTextsInspected: 0,
+            responseTokenLeak: false,
+          };
+          Object.defineProperty(window, "__icarusActionSessionSmoke", {
+            configurable: false,
+            enumerable: false,
+            value: evidence,
+            writable: false,
+          });
+
+          const observer = new MutationObserver(() => {
+            if (evidence.firstRootMutationAfterReplace !== null) return;
+            const root = document.getElementById("root");
+            if (root === null || root.childNodes.length === 0) return;
+            evidence.firstRootMutationAfterReplace = evidence.replaceObserved;
+            evidence.hashAtFirstRootMutation = window.location.hash;
+            observer.disconnect();
+          });
+          observer.observe(document, { childList: true, subtree: true });
+
+          const originalReplaceState = window.history.replaceState;
+          window.history.replaceState = function (...args) {
+            const removingCanonicalFragment =
+              /^#icarus-action-session=[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(
+                window.location.hash,
+              );
+            const result = Reflect.apply(originalReplaceState, this, args);
+            if (removingCanonicalFragment) {
+              evidence.replaceObserved = true;
+              evidence.canonicalFragmentRemoved = window.location.hash.length === 0;
+            }
+            return result;
+          };
+
+          const originalResponseText = Response.prototype.text;
+          Response.prototype.text = async function (...args) {
+            const text = await Reflect.apply(originalResponseText, this, args);
+            evidence.responseTextsInspected += 1;
+            window.__icarusRecordResponseBodyEvidence("inspected");
+            try {
+              const token = window.sessionStorage.getItem(storageKey);
+              if (token !== null && text.includes(token)) {
+                evidence.responseTokenLeak = true;
+                window.__icarusRecordResponseBodyEvidence("leaked");
+              }
+            } catch {
+              // Unavailable storage is a fail-closed state; the response remains observable.
+            }
+            return text;
+          };
+        }
+      ).toString()})(${JSON.stringify(ACTION_SESSION_STORAGE_KEY)});`,
+    },
+    sessionId,
+  );
 
   const networkRequests = [];
   const networkResponses = [];
@@ -1095,6 +1200,32 @@ async function createBrowserPage(chromium, workspaceUrl) {
   const networkRequestUrls = new Map();
   const blockedExternalRequests = [];
   const browserErrors = [];
+  const localRequestSecurity = [];
+  const tokenLeaks = {
+    requestUrls: false,
+    requestBodies: false,
+    browserErrors: false,
+  };
+  const safeObservedText = (value) => {
+    if (typeof value !== "string" || actionSession === null) return value;
+    if (value.includes(actionSession)) {
+      return value.replaceAll(actionSession, "[REDACTED_ACTION_SESSION]");
+    }
+    return value;
+  };
+  const headerValue = (headers, expectedName) => {
+    const entry = Object.entries(headers ?? {}).find(
+      ([name]) => name.toLowerCase() === expectedName,
+    );
+    return typeof entry?.[1] === "string" ? entry[1] : null;
+  };
+  const recordBrowserError = (value) => {
+    const rendered = typeof value === "string" ? value : String(value);
+    if (actionSession !== null && rendered.includes(actionSession)) {
+      tokenLeaks.browserErrors = true;
+    }
+    browserErrors.push(safeObservedText(rendered));
+  };
   let eventFailuresRemaining = 0;
   let eventHistoryFailuresRemaining = 0;
   let verificationAttemptFailuresRemaining = 0;
@@ -1108,11 +1239,16 @@ async function createBrowserPage(chromium, workspaceUrl) {
   let runPageRequestHold = null;
   let workspaceRequestHold = null;
   chromium.cdp.on(sessionId, "Network.requestWillBeSent", (event) => {
-    networkRequestUrls.set(event.requestId, event.request?.url);
+    const rawUrl = event.request?.url;
+    if (actionSession !== null && typeof rawUrl === "string" && rawUrl.includes(actionSession)) {
+      tokenLeaks.requestUrls = true;
+    }
+    const observedUrl = safeObservedText(rawUrl);
+    networkRequestUrls.set(event.requestId, observedUrl);
     networkRequests.push({
       requestId: event.requestId,
       method: event.request?.method,
-      url: event.request?.url,
+      url: observedUrl,
       observedAt: Date.now(),
     });
   });
@@ -1120,7 +1256,7 @@ async function createBrowserPage(chromium, workspaceUrl) {
     networkResponses.push({
       requestId: event.requestId,
       status: event.response?.status,
-      url: event.response?.url,
+      url: safeObservedText(event.response?.url),
       observedAt: Date.now(),
     });
   });
@@ -1143,15 +1279,19 @@ async function createBrowserPage(chromium, workspaceUrl) {
     networkRequestUrls.delete(event.requestId);
   });
   chromium.cdp.on(sessionId, "Runtime.exceptionThrown", (event) => {
-    browserErrors.push(
+    recordBrowserError(
       event.exceptionDetails?.exception?.description ?? event.exceptionDetails?.text,
     );
   });
   chromium.cdp.on(sessionId, "Runtime.consoleAPICalled", (event) => {
-    if (event.type === "error") browserErrors.push("Browser console error");
+    if (event.type === "error") recordBrowserError("Browser console error");
   });
   chromium.cdp.on(sessionId, "Fetch.requestPaused", (event) => {
     const requestUrl = event.request?.url ?? "";
+    const requestBody = event.request?.postData ?? "";
+    if (actionSession !== null && requestBody.includes(actionSession)) {
+      tokenLeaks.requestBodies = true;
+    }
     let external = false;
     let localEventPoll = false;
     let localEventHistory = false;
@@ -1165,6 +1305,35 @@ async function createBrowserPage(chromium, workspaceUrl) {
       external =
         (parsed.protocol === "http:" || parsed.protocol === "https:") &&
         parsed.origin !== workspaceUrl;
+      if (parsed.origin === workspaceUrl) {
+        const authorization = headerValue(event.request?.headers, "authorization");
+        const action = headerValue(event.request?.headers, "x-icarus-action");
+        const contentType = headerValue(event.request?.headers, "content-type");
+        const presentedActionSession =
+          /^Bearer ([A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$/.exec(authorization ?? "")?.[1] ?? null;
+        if (
+          presentedActionSession !== null &&
+          (requestUrl.includes(presentedActionSession) ||
+            requestBody.includes(presentedActionSession))
+        ) {
+          if (requestUrl.includes(presentedActionSession)) tokenLeaks.requestUrls = true;
+          if (requestBody.includes(presentedActionSession)) tokenLeaks.requestBodies = true;
+        }
+        localRequestSecurity.push({
+          method: event.request?.method ?? "",
+          url: safeObservedText(requestUrl),
+          authorizationPresent: authorization !== null,
+          authorizationCanonical:
+            authorization !== null &&
+            /^Bearer [A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(authorization),
+          authorizationMatchesSession:
+            actionSession === null
+              ? authorization === null
+              : authorization === `Bearer ${actionSession}`,
+          action,
+          contentType,
+        });
+      }
       localEventPoll =
         parsed.origin === workspaceUrl &&
         event.request?.method === "GET" &&
@@ -1196,7 +1365,7 @@ async function createBrowserPage(chromium, workspaceUrl) {
     } catch {
       external = false;
     }
-    if (external) blockedExternalRequests.push(requestUrl);
+    if (external) blockedExternalRequests.push(safeObservedText(requestUrl));
     if (
       localWorkspaceRead &&
       workspaceRequestHold !== null &&
@@ -1313,7 +1482,7 @@ async function createBrowserPage(chromium, workspaceUrl) {
           },
           sessionId,
         )
-        .catch((error) => browserErrors.push(error.message));
+        .catch((error) => recordBrowserError(error.message));
       return;
     }
     void chromium.cdp
@@ -1324,11 +1493,11 @@ async function createBrowserPage(chromium, workspaceUrl) {
           : { requestId: event.requestId },
         sessionId,
       )
-      .catch((error) => browserErrors.push(error.message));
+      .catch((error) => recordBrowserError(error.message));
   });
 
   const loaded = chromium.cdp.waitForEvent(sessionId, "Page.loadEventFired");
-  await chromium.cdp.send("Page.navigate", { url: workspaceUrl }, sessionId);
+  await chromium.cdp.send("Page.navigate", { url: launchUrl }, sessionId);
   await loaded;
   const page = new BrowserPage(chromium.cdp, sessionId);
   await page.waitFor(
@@ -1338,6 +1507,7 @@ async function createBrowserPage(chromium, workspaceUrl) {
   );
   return {
     page,
+    targetId,
     sessionId,
     networkRequests,
     networkResponses,
@@ -1345,6 +1515,9 @@ async function createBrowserPage(chromium, workspaceUrl) {
     networkFailures,
     blockedExternalRequests,
     browserErrors,
+    localRequestSecurity,
+    responseBodyEvidence,
+    tokenLeaks,
     failNextEventPoll: () => {
       eventFailuresRemaining += 1;
     },
@@ -1765,6 +1938,7 @@ if (chromiumExecutable === undefined || chromiumExecutable.trim().length === 0) 
 const root = await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-browser-smoke-"));
 let runtime;
 let workspace;
+let reviewWorkspace;
 let provider;
 let chromium;
 let releaseProviderResponse;
@@ -1804,7 +1978,7 @@ try {
     0,
   );
   chromium = await startChromium(path.resolve(chromiumExecutable), profile);
-  const browserPage = await createBrowserPage(chromium, workspace.url);
+  const browserPage = await createBrowserPage(chromium, workspace.url, workspace.launchUrl);
   const {
     page,
     networkRequests,
@@ -1813,6 +1987,9 @@ try {
     networkFailures,
     blockedExternalRequests,
     browserErrors,
+    localRequestSecurity,
+    responseBodyEvidence,
+    tokenLeaks,
   } = browserPage;
 
   await page.waitFor(
@@ -1824,6 +2001,68 @@ try {
   );
   assert.equal(await page.capability("Provider"), "unconfigured");
   assert.equal(await page.capability("Execution"), "unconfigured");
+
+  const initialActionSessionEvidence = await page.call((storageKey) => {
+    const evidence = window.__icarusActionSessionSmoke;
+    const stored = window.sessionStorage.getItem(storageKey);
+    const localStorageValues = Object.values(window.localStorage);
+    return {
+      replaceObserved: evidence?.replaceObserved === true,
+      canonicalFragmentRemoved: evidence?.canonicalFragmentRemoved === true,
+      firstRootMutationAfterReplace: evidence?.firstRootMutationAfterReplace === true,
+      hashAtFirstRootMutation: evidence?.hashAtFirstRootMutation ?? null,
+      responseTextsInspected: evidence?.responseTextsInspected ?? 0,
+      responseTokenLeak: evidence?.responseTokenLeak === true,
+      hash: window.location.hash,
+      sessionStorageKeys: Object.keys(window.sessionStorage).sort(),
+      storedCanonical: stored !== null && /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(stored),
+      tokenAbsentFromDom: stored !== null && !document.documentElement.outerHTML.includes(stored),
+      tokenAbsentFromLocalStorage:
+        stored !== null && localStorageValues.every((value) => !value.includes(stored)),
+      tokenAbsentFromCookies: stored !== null && !document.cookie.includes(stored),
+      tokenAbsentFromLocation: stored !== null && !window.location.href.includes(stored),
+    };
+  }, ACTION_SESSION_STORAGE_KEY);
+  assert.deepEqual(initialActionSessionEvidence, {
+    replaceObserved: true,
+    canonicalFragmentRemoved: true,
+    firstRootMutationAfterReplace: true,
+    hashAtFirstRootMutation: "",
+    responseTextsInspected: 1,
+    responseTokenLeak: false,
+    hash: "",
+    sessionStorageKeys: [ACTION_SESSION_STORAGE_KEY],
+    storedCanonical: true,
+    tokenAbsentFromDom: true,
+    tokenAbsentFromLocalStorage: true,
+    tokenAbsentFromCookies: true,
+    tokenAbsentFromLocation: true,
+  });
+
+  await reloadPage(chromium, browserPage);
+  const reloadedActionSessionEvidence = await page.call((storageKey) => {
+    const stored = window.sessionStorage.getItem(storageKey);
+    return {
+      hash: window.location.hash,
+      sessionStorageKeys: Object.keys(window.sessionStorage).sort(),
+      storedCanonical: stored !== null && /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(stored),
+      tokenAbsentFromDom: stored !== null && !document.documentElement.outerHTML.includes(stored),
+      tokenAbsentFromLocalStorage:
+        stored !== null &&
+        Object.values(window.localStorage).every((value) => !value.includes(stored)),
+      tokenAbsentFromCookies: stored !== null && !document.cookie.includes(stored),
+      tokenAbsentFromLocation: stored !== null && !window.location.href.includes(stored),
+    };
+  }, ACTION_SESSION_STORAGE_KEY);
+  assert.deepEqual(reloadedActionSessionEvidence, {
+    hash: "",
+    sessionStorageKeys: [ACTION_SESSION_STORAGE_KEY],
+    storedCanonical: true,
+    tokenAbsentFromDom: true,
+    tokenAbsentFromLocalStorage: true,
+    tokenAbsentFromCookies: true,
+    tokenAbsentFromLocation: true,
+  });
 
   await page.pressKey("Tab", "Tab", 9);
   assert.equal(
@@ -3417,9 +3656,6 @@ try {
   await historyVerificationRequest.observed;
   const verificationHistoryRequestBaseline = networkRequests.length;
   await page.clickButton("Load older activity");
-  const historyVerificationOutcome = await historyVerificationRequest.finish();
-  finishHeldBrowserVerificationRequest = undefined;
-  assert.equal(historyVerificationOutcome, "cancelled");
   await page.waitFor(
     () =>
       document.querySelector(".history-panel")?.getAttribute("aria-busy") === "false" &&
@@ -3427,6 +3663,9 @@ try {
     [],
     "abort-before-history verification ordering with retained evidence",
   );
+  const historyVerificationOutcome = await historyVerificationRequest.finish();
+  finishHeldBrowserVerificationRequest = undefined;
+  assert.equal(historyVerificationOutcome, "cancelled");
   assert.equal(await page.verificationFact("Pinned revision"), "502");
   const verificationHistoryNetworkRequest = networkRequests
     .slice(verificationHistoryRequestBaseline)
@@ -4421,6 +4660,236 @@ try {
   assert.deepEqual(browserErrors, []);
   assert.equal((await page.bodyText()).includes(HISTORICAL_EVENT_SENTINEL), false);
 
+  const successfulPostSecurity = localRequestSecurity.filter(
+    (request) => request.method === "POST",
+  );
+  assert.ok(successfulPostSecurity.length > 0);
+  assert.equal(
+    successfulPostSecurity.every(
+      (request) =>
+        request.authorizationPresent &&
+        request.authorizationCanonical &&
+        request.authorizationMatchesSession &&
+        request.action === "workspace.mutate" &&
+        request.contentType === "application/json",
+    ),
+    true,
+    "every browser POST must carry the exact workspace action-session transport",
+  );
+  assert.equal(
+    localRequestSecurity
+      .filter((request) => request.method === "GET")
+      .every((request) => !request.authorizationPresent && request.action === null),
+    true,
+    "browser GETs must remain tokenless",
+  );
+  assert.deepEqual(tokenLeaks, {
+    requestUrls: false,
+    requestBodies: false,
+    browserErrors: false,
+  });
+  const latestDocumentResponseTokenEvidence = await page.call(() => ({
+    inspected: window.__icarusActionSessionSmoke?.responseTextsInspected ?? 0,
+    leaked: window.__icarusActionSessionSmoke?.responseTokenLeak === true,
+  }));
+  assert.ok(latestDocumentResponseTokenEvidence.inspected > 0);
+  assert.equal(latestDocumentResponseTokenEvidence.leaked, false);
+  assert.ok(responseBodyEvidence.inspected > latestDocumentResponseTokenEvidence.inspected);
+  assert.equal(responseBodyEvidence.leaked, false);
+
+  await page.clickButton("← Back to project");
+  await page.waitFor(
+    () => document.querySelector("#project-detail-heading")?.textContent === "browser-project",
+    [],
+    "the project view before stale-session rejection",
+  );
+  await page.setField("Tracked target path", TARGET);
+  const stalePostBaseline = localRequestSecurity.filter(
+    (request) => request.method === "POST",
+  ).length;
+  assert.equal(
+    await page.call((storageKey) => {
+      window.sessionStorage.setItem(storageKey, "A".repeat(43));
+      return window.sessionStorage.getItem(storageKey) === "A".repeat(43);
+    }, ACTION_SESSION_STORAGE_KEY),
+    true,
+  );
+  await page.clickButton("Preview context");
+  await page.waitFor(
+    () =>
+      document.body.innerText.includes(
+        "ACTION_SESSION_REQUIRED: This workspace is review-only until it is opened from a fresh action-session launch URL.",
+      ),
+    [],
+    "the fixed stale action-session error",
+  );
+  assert.equal(
+    localRequestSecurity.filter((request) => request.method === "POST").length,
+    stalePostBaseline + 1,
+  );
+  const stalePostSecurity = localRequestSecurity.at(-1);
+  assert.deepEqual(
+    {
+      method: stalePostSecurity?.method,
+      authorizationPresent: stalePostSecurity?.authorizationPresent,
+      authorizationCanonical: stalePostSecurity?.authorizationCanonical,
+      action: stalePostSecurity?.action,
+      contentType: stalePostSecurity?.contentType,
+    },
+    {
+      method: "POST",
+      authorizationPresent: true,
+      authorizationCanonical: true,
+      action: "workspace.mutate",
+      contentType: "application/json",
+    },
+  );
+  const staleSessionEvidence = await page.call(
+    (storageKey) => ({
+      storageCleared: window.sessionStorage.getItem(storageKey) === null,
+      staleTokenAbsentFromDom: !document.documentElement.outerHTML.includes("A".repeat(43)),
+      staleTokenAbsentFromLocalStorage: Object.values(window.localStorage).every(
+        (value) => !value.includes("A".repeat(43)),
+      ),
+      staleTokenAbsentFromCookies: !document.cookie.includes("A".repeat(43)),
+      staleTokenAbsentFromLocation: !window.location.href.includes("A".repeat(43)),
+      responseTokenLeak: window.__icarusActionSessionSmoke?.responseTokenLeak === true,
+    }),
+    ACTION_SESSION_STORAGE_KEY,
+  );
+  assert.deepEqual(staleSessionEvidence, {
+    storageCleared: true,
+    staleTokenAbsentFromDom: true,
+    staleTokenAbsentFromLocalStorage: true,
+    staleTokenAbsentFromCookies: true,
+    staleTokenAbsentFromLocation: true,
+    responseTokenLeak: false,
+  });
+  await page.waitFor(
+    () =>
+      document.body.innerText.includes(
+        "This tab has no current action session. Open a fresh action-session launch URL to make bounded changes.",
+      ),
+    [],
+    "the stale tab to become truthfully review-only",
+  );
+  assert.equal(await page.buttonDisabled("Preview context"), true);
+  assert.deepEqual(tokenLeaks, {
+    requestUrls: false,
+    requestBodies: false,
+    browserErrors: false,
+  });
+  assert.equal(responseBodyEvidence.leaked, false);
+
+  reviewWorkspace = await startWorkspaceServer(
+    {
+      runtime,
+      stateRoot,
+      workspaceDist: path.resolve("packages/workspace/dist"),
+    },
+    await availableLoopbackPort(),
+  );
+  assert.equal(reviewWorkspace.mode, "review-only");
+  assert.equal(reviewWorkspace.launchUrl, reviewWorkspace.url);
+  const reviewBrowserPage = await createBrowserPage(
+    chromium,
+    reviewWorkspace.url,
+    reviewWorkspace.launchUrl,
+  );
+  await reviewBrowserPage.page.waitFor(
+    () => document.querySelector("#projects-heading") !== null,
+    [],
+    "the stable-origin review-only workspace",
+  );
+  const malformedLoaded = chromium.cdp.waitForEvent(
+    reviewBrowserPage.sessionId,
+    "Page.loadEventFired",
+  );
+  await chromium.cdp.send(
+    "Page.navigate",
+    {
+      url: `${reviewWorkspace.url}/malformed-fragment#icarus-action-session=malformed`,
+    },
+    reviewBrowserPage.sessionId,
+  );
+  await malformedLoaded;
+  await reviewBrowserPage.page.waitFor(
+    () => document.querySelector("#projects-heading") !== null,
+    [],
+    "the review-only workspace after malformed-fragment rejection",
+  );
+  assert.deepEqual(
+    await reviewBrowserPage.page.call(
+      (storageKey) => ({
+        hash: window.location.hash,
+        sessionStorageKeys: Object.keys(window.sessionStorage),
+        actionSessionAbsent: window.sessionStorage.getItem(storageKey) === null,
+      }),
+      ACTION_SESSION_STORAGE_KEY,
+    ),
+    {
+      hash: "",
+      sessionStorageKeys: [],
+      actionSessionAbsent: true,
+    },
+  );
+  await reviewBrowserPage.page.setField("Repository name", "review-only-repository");
+  await reviewBrowserPage.page.setField("Absolute repository path", repository);
+  await reviewBrowserPage.page.setField("Project name", "review-only-project");
+  await reviewBrowserPage.page.setField("Digest-pinned sandbox image", SANDBOX_IMAGE);
+  await reviewBrowserPage.page.setField(
+    "Exact check argv (JSON array, never shell text)",
+    JSON.stringify(["node", "--test"]),
+  );
+  const reviewPostBaseline = reviewBrowserPage.networkRequests.filter(
+    (request) => request.method === "POST",
+  ).length;
+  await reviewBrowserPage.page.waitFor(
+    () =>
+      document.body.innerText.includes(
+        "This stable-origin workspace is review-only. Relaunch without an explicit port to make bounded changes.",
+      ),
+    [],
+    "the stable workspace mutation capability",
+  );
+  assert.deepEqual(
+    await reviewBrowserPage.page.call(() =>
+      Object.fromEntries(
+        Array.from(document.querySelectorAll(".capability-card")).map((card) => [
+          card.querySelector("h3")?.textContent?.trim(),
+          card.querySelector(".status")?.textContent?.trim(),
+        ]),
+      ),
+    ),
+    {
+      Provider: "unconfigured",
+      Mutation: "review_only",
+      Planning: "review_only",
+      Execution: "unconfigured",
+    },
+  );
+  assert.equal(await reviewBrowserPage.page.buttonDisabled("Register project"), true);
+  assert.equal(
+    reviewBrowserPage.networkRequests.filter((request) => request.method === "POST").length,
+    reviewPostBaseline,
+    "a tokenless review-only page must expose no enabled POST control",
+  );
+  assert.equal(
+    reviewBrowserPage.localRequestSecurity.every(
+      (request) =>
+        request.method !== "GET" || (!request.authorizationPresent && request.action === null),
+    ),
+    true,
+  );
+  assert.deepEqual(reviewBrowserPage.tokenLeaks, {
+    requestUrls: false,
+    requestBodies: false,
+    browserErrors: false,
+  });
+  assert.ok(reviewBrowserPage.responseBodyEvidence.inspected > 0);
+  assert.equal(reviewBrowserPage.responseBodyEvidence.leaked, false);
+  assert.deepEqual(reviewBrowserPage.browserErrors, []);
+
   const projects = runtime.service.listProjects();
   const browserProject = projects.find((project) => project.name === "browser-project");
   const run = runtime.service.getRun(browserRunId);
@@ -4496,6 +4965,16 @@ try {
         eventRequests: eventRequests.length,
         browserErrors: browserErrors.length,
         blockedExternalRequests: blockedExternalRequests.length,
+        actionSessionSecurity: {
+          fragmentStrippedBeforeRender: true,
+          sessionSurvivedReload: true,
+          successfulProtectedPosts: successfulPostSecurity.length,
+          getRequestsTokenless: true,
+          staleSessionCleared: true,
+          malformedFragmentRejected: true,
+          reviewOnlyPostSuppressed: true,
+          tokenAbsentFromDomStorageCookiesUrlsBodiesResponsesAndErrors: true,
+        },
         sourceUnchanged: true,
       },
       null,
@@ -4516,6 +4995,7 @@ try {
   releaseProviderResponse?.();
   releaseProviderResponse = undefined;
   await stopChromium(chromium);
+  await reviewWorkspace?.close();
   await workspace?.close();
   runtime?.close();
   await provider?.close();
