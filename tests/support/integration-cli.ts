@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -70,7 +70,7 @@ export async function createFixtureRepository(): Promise<{
   readonly stateRoot: string;
   cleanup(): Promise<void>;
 }> {
-  const root = await mkdtemp(path.join(os.tmpdir(), "icarus-integration-"));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "icarus-integration-")));
   const repository = path.join(root, "repository");
   const stateRoot = path.join(root, "state");
   await cp(path.resolve("fixtures/evals/repos/basic"), repository, { recursive: true });
