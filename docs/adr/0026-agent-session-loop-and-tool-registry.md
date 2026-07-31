@@ -1,8 +1,7 @@
 # ADR 0026: AgentSession loop and host-owned tool registry
 
-- Status: Accepted design — 2a and the corrected local 2b candidate are
-  implemented; exact-head hosted CI, native acceptance, release reviews, and
-  2c remain outstanding
+- Status: Accepted and released through 2b at exact `main`
+  `802b91e6f6c9b392f56c9ee3660be818a0f74a62`; 2c is separate Gate 1 work
 - Date: 2026-07-26
 - Related: [ADR 0023](0023-transactional-multi-file-patch-sets.md) (patch sets),
   [ADR 0024](0024-bounded-repair-loop.md) (bounded repair loop — superseded by
@@ -195,8 +194,9 @@ grants, and browser approvals. That is too much for one reviewable change.
     truncation, and untrusted result fencing. The registry is callable-ready
     but nothing calls it — the loop that does is 2b, which also supplies the
     ledger-derived call counts and the per-call metered operation.
-- **2b — the loop and write tools (implemented and locally verified in the
-  current candidate; exact-head hosted CI pending).** `propose_patch`,
+- **2b — the loop and write tools (released).** At authoring/candidate time this
+  slice was implemented and locally verified while exact-head hosted CI was
+  still pending. `propose_patch`,
   `apply_patchset`, `run_checks`, the `verifying → running` edge (the state is
   `running`; no `executing` state exists), durable boundary/terminal events,
   and conservative resume. The initial provider edit remains in place; a
@@ -533,7 +533,20 @@ proves canary diagnostics never reach remote requests while raw local evidence
 remains exact, and a mutually consistent legacy broad grant changes no
 worktree, patch, or checkpoint bytes and reaches no provider or reconciliation.
 
-The candidate remains on publication hold because it is uncommitted and
-unpublished; exact-head hosted CI, native acceptance, and the remaining release
-reviews are not yet recorded. Local correction evidence is current, but it is
-not a final release claim.
+At authoring/candidate time, the corrected tree remained on publication hold
+because it was uncommitted and unpublished; exact-head hosted CI, native
+acceptance, and the remaining release reviews had not yet been recorded. That
+paragraph is retained as the historical boundary on the July 30 local evidence,
+not as current release state.
+
+### Gate 0 release closure recorded 2026-07-31
+
+[PR #18](https://github.com/Ayyitskevin/Icarus/pull/18) merged the 2b candidate
+as `d4bbcd4aab713bee23237099286e6d9b9f74283b`. The native-fixture correction
+followed as exact `main` `802b91e6f6c9b392f56c9ee3660be818a0f74a62`.
+Linux [run 30602942008](https://github.com/Ayyitskevin/Icarus/actions/runs/30602942008)
+and both macOS and Windows jobs in native
+[run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
+succeeded at that exact head. Gate 0 is merged and released. Browser approval
+slice 2c now begins as Gate 1 contract work under ADR 0029 rather than as
+unfinished ADR 0026 release work.

@@ -91,12 +91,31 @@ describe("native acceptance workflow policy", () => {
     );
     expect(() => validateNativeAcceptanceWorkflow(byteDrift)).toThrow("workflow digest mismatch");
   });
+
+  it("rejects browser-path drift and resolver injection", async () => {
+    const pathDrift = (await workflow()).replace(
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    );
+    const resolverInjection = (await workflow()).replace(
+      "run: pnpm build && node scripts/smoke-workspace-browser.mjs",
+      "run: pnpm build && node scripts/smoke-workspace-browser.mjs --host-resolver-rules",
+    );
+
+    expect(() => validateNativeAcceptanceWorkflow(pathDrift)).toThrow(
+      "must retain the exact macOS and Windows host matrix",
+    );
+    expect(() => validateNativeAcceptanceWorkflow(resolverInjection)).toThrow(
+      "must not inject browser resolver rules",
+    );
+  });
 });
 
 describe("native host attestation policy", () => {
   const darwin = {
     architecture: "arm64",
     configuredArchitecture: "arm64",
+    configuredChromiumExecutable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     configuredPlatform: "darwin",
     nodeVersion: "22.23.0",
     platform: "darwin",
@@ -114,6 +133,7 @@ describe("native host attestation policy", () => {
         ...darwin,
         architecture: "x64",
         configuredArchitecture: "x64",
+        configuredChromiumExecutable: String.raw`C:\Program Files\Google\Chrome\Application\chrome.exe`,
         configuredPlatform: "win32",
         platform: "win32",
       }),
@@ -127,6 +147,12 @@ describe("native host attestation policy", () => {
     expect(() => validateNativeHost({ ...darwin, configuredPlatform: "win32" })).toThrow(
       "native host identity mismatch",
     );
+    expect(() =>
+      validateNativeHost({ ...darwin, configuredChromiumExecutable: undefined }),
+    ).toThrow("native Chromium executable was not configured");
+    expect(() =>
+      validateNativeHost({ ...darwin, configuredChromiumExecutable: "/Applications/Chromium" }),
+    ).toThrow("native Chromium executable drifted");
     expect(() =>
       validateNativeHost({
         ...darwin,

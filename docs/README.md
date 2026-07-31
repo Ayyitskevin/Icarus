@@ -1,6 +1,12 @@
-# Release readiness
+# Release-readiness snapshot — 2026-07-22
 
-Status: review candidate, not a production release.
+Status: historical review-candidate record, retained for provenance.
+
+This file is not the current release status. See
+[`PLANS.md`](PLANS.md) and [`ROADMAP.md`](ROADMAP.md) for the Gate 0 release at
+`802b91e6f6c9b392f56c9ee3660be818a0f74a62` and current Gate 1 work. Statements
+below about pending runs and proposed ADRs describe this snapshot unless an
+explicit later update is called out.
 
 This record distinguishes the merged M3 observation work from the additional
 release-readiness hardening on `sol/icarus-m3-release-readiness`. It does not
@@ -77,16 +83,22 @@ file does not create a self-invalidating follow-up commit.
 
 ## Held, skipped, and operator-gated work
 
-- `.github/workflows/native-acceptance.yml` is registered on `main` with
+- At this snapshot, `.github/workflows/native-acceptance.yml` was registered on
+  `main` with
   workflow ID `318514643` and SHA-256
   `aa6d95b7dbba583e0b74f397a096d45642fc65b9c7aa4035478bf1b497213fb7`.
-  It has zero hosted runs. No dispatch occurred because explicit native-run
-  authorization was not provided; ADR 0022 remains Proposed.
-- ADR 0010 remains the release security hold. Neither
+  It then had zero hosted runs because native dispatch had not yet been
+  authorized, and ADR 0022 was Proposed. Later exact-head macOS and Windows
+  acceptance passed in
+  [run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132),
+  and ADR 0022 is now Accepted.
+- At this snapshot, ADR 0010 remained the release security hold. Neither
   `docs/adr/0010-inherited-opencode-workflow-security-hold.md` nor
   `.github/workflows/opencode.yml` was changed or accepted. The workflow's
   retained SHA-256 is
   `e943363f0407e958a7abac650edc9647d3838ebbf3bd2f4133db45df00a251cf`.
+  ADR 0025 later resolved ADR 0010; ADR 0025's separate third-party review and
+  secret-rotation work remains outstanding.
 - Building `approval-index-v1` against existing non-test state requires a
   verified backup and explicit operator approval. Only synthetic state was
   exercised here.
@@ -97,10 +109,12 @@ file does not create a self-invalidating follow-up commit.
   deployment was performed. Authorized repository publication for this work is
   limited to a draft review branch and draft PR.
 
-## Release decision
+## Snapshot release decision
 
-The bounded merged observation slices and this branch's hardening are ready for
-exact-head hosted review. Full release remains held until ADR 0010 is resolved,
-both explicitly authorized native jobs pass at the chosen exact commit, any
-live approval-index rollout receives its separate backup and operator gate, and
-the operator chooses the repository merge policy. Full M3 remains open.
+At the snapshot date, the bounded merged observation slices and this branch's
+hardening were ready for exact-head hosted review. Full release was held until
+ADR 0010 could be resolved, both explicitly authorized native jobs passed at
+the chosen exact commit, any live approval-index rollout received its separate
+backup and operator gate, and the operator chose the repository merge policy.
+The first two conditions were later satisfied for Gate 0; live migration stays
+separately gated, and full M3 remains open.

@@ -1,7 +1,7 @@
 # ADR 0036: Proof-carrying software factory product direction
 
-- Status: Accepted product direction — implementation staged; ADR 0026 local
-  corrections pass, with publication/hosted/native release evidence outstanding
+- Status: Accepted product direction — Gate 0 merged and released at exact
+  `main` `802b91e6f6c9b392f56c9ee3660be818a0f74a62`; Gate 1 is current
 - Date: 2026-07-30
 - Supersedes: the current product positioning and roadmap sequencing in
   [`FABLE_ICARUS_VISION.md`](../FABLE_ICARUS_VISION.md) sections 1, 11, and 13.
@@ -18,11 +18,13 @@
 
 ## Context
 
-Icarus began as a local provenance and recovery kernel. The current candidate
-has the beginnings of a software factory: transactional multi-file PatchSets,
-digest-bound approvals and capability grants, a two-turn failed-verification
-session, private Git worktrees, no-network registered checks, append-only
-evidence, rollback and restore, and Ollama, OpenAI, and Anthropic adapters.
+Icarus began as a local provenance and recovery kernel. At this ADR's
+authoring/candidate time, the held Gate 0 tree had the beginnings of a software
+factory: transactional multi-file PatchSets, digest-bound approvals and
+capability grants, a two-turn failed-verification session, private Git
+worktrees, no-network registered checks, append-only evidence, rollback and
+restore, and Ollama, OpenAI, and Anthropic adapters. That candidate is now the
+released Gate 0 baseline recorded below.
 
 That foundation is unusually rigorous, but it is not yet a competitive product.
 The workspace is review-only, finished work cannot land on a branch or pull
@@ -99,13 +101,14 @@ potential by two defects in the ADR 0026 implementation candidate:
    rather than the plan's narrower target set, allowing private-worktree bytes
    to move before durable intent rejects the scope.
 
-The explicitly authorized local correction now closes both paths with
+The explicitly authorized local correction closed both paths with
 initial/live/compacted/resumed remote canaries, full local evidence retention,
-and a byte-exact legacy broad-grant refusal. This remains the baseline,
-release-adjusted product score: closing the defects improves trust evidence but
-does not by itself raise the sparse product-surface scores. Publication,
-exact-head hosted CI, native acceptance, and the remaining release reviews are
-still open.
+and a byte-exact legacy broad-grant refusal. At authoring/candidate time this was
+the release-adjusted baseline while publication, exact-head hosted CI, native
+acceptance, and the remaining release reviews were still open. Those Gate 0
+publication and exact-head evidence conditions are now closed; the 5.0/10 score
+still stands because release closure does not by itself raise the sparse
+product-surface scores.
 
 ## Decision
 
@@ -114,8 +117,8 @@ still open.
 Icarus will compete on the governed task-to-running-application outcome:
 
 > Task → explicit authority → bounded agent work → transactional change →
-> reproducible verification → evidence receipt → reversible Git landing →
-> isolated preview or service change.
+> reproducible verification → evidence receipt → isolated create-only Git
+> landing with reconciliation → isolated preview or service change.
 
 The differentiated first product is **Icarus Verified Change Gate**:
 
@@ -191,7 +194,7 @@ ADR numbers reserved by the Fable plan remain stable:
 
 ## Delivery sequence and exit gates
 
-### Gate 0 — restore release truth
+### Gate 0 — restore release truth (released 2026-07-31)
 
 1. Close the remote check-output egress defect without discarding full local
    operator evidence.
@@ -203,11 +206,22 @@ ADR numbers reserved by the Fable plan remain stable:
 5. Run the exact-tree focused suites, `pnpm check`, evaluator, dependency
    audits, diff check, cold security review, and hosted CI.
 
-Local status on 2026-07-30: items 1–4 are complete, and item 5 passes through
-the focused/full gates, evaluator, both dependency audits, diff check, and two
-independent security-boundary reviews. Exact-head hosted CI, native acceptance,
-and final release review remain open because the tree is intentionally
+Historical local status on 2026-07-30: items 1–4 were complete, and item 5
+passed through the focused/full gates, evaluator, both dependency audits, diff
+check, and two independent security-boundary reviews. At that
+authoring/candidate-time checkpoint, exact-head hosted CI, native acceptance,
+and final release review remained open because the tree was intentionally
 uncommitted and unpublished.
+
+Gate 0 release closure was recorded on 2026-07-31. [PR
+#18](https://github.com/Ayyitskevin/Icarus/pull/18) merged the candidate as
+`d4bbcd4aab713bee23237099286e6d9b9f74283b`; the native-fixture correction
+followed as exact `main` `802b91e6f6c9b392f56c9ee3660be818a0f74a62`. Linux
+[run 30602942008](https://github.com/Ayyitskevin/Icarus/actions/runs/30602942008)
+and both jobs in native
+[run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
+succeeded at that exact head. Gate 0 is merged and released; forward
+implementation now begins with the Gate 1 contracts and benchmark.
 
 Exit gate: zero known authority bypasses; remote canary data outside approved
 context/manifest never reaches a provider; malformed mutation scope changes no
@@ -221,15 +235,19 @@ reviewer.
 
 ### Gate 1 — Verified Change Gate
 
-Draft and accept ADR 0029 browser approval authority and ADR 0027 Git landing,
-then implement them:
+ADR 0029 browser approval authority and ADR 0027 Git landing authority are
+accepted. Complete their implementations:
 
 - server-start session token, same-origin/CSRF protection, digest-bound action
   forms, CLI parity, live activity, and explicit capability display;
-- branch and commit inside the private Git cache;
-- allowlisted push plus draft-PR creation behind a separate landing grant;
+- deterministic candidate commit plus an absent-only
+  `refs/heads/icarus/<run-id>` reference inside the private Git cache;
+- bounded GitHub REST object upload, absent-only remote-reference creation, and
+  draft-PR creation behind a separate landing grant;
 - evidence receipt attached to the pull request;
-- no force-push, merge, deployment, or source-checkout mutation authority.
+- no direct ref update/deletion, force-push, merge, deployment, or
+  source-checkout mutation endpoint; ADR 0027 must disclose and bind the
+  repository automation that branch and draft-PR events may trigger.
 
 Exit gate: task → plan/grants → repair → review → draft PR succeeds on three
 representative repositories; reload/restart preserves the session; rejection

@@ -1,7 +1,9 @@
 # ADR 0022: Explicit native macOS and Windows acceptance
 
-- Status: Proposed
+- Status: Accepted — exact-head macOS and Windows jobs passed
 - Date: 2026-07-22
+- Accepted: 2026-07-31 at
+  `802b91e6f6c9b392f56c9ee3660be818a0f74a62`
 - Related: [ADR 0010](0010-inherited-opencode-workflow-security-hold.md),
   [ADR 0011](0011-kernel-backed-stable-run-leases.md), and
   [ADR 0014](0014-loopback-api-react-workspace.md)
@@ -12,8 +14,9 @@ Icarus claims that the loopback HTTP/UI shell, repository import, committed-tree
 context preview, draft persistence, loopback planning, and SQLite operation
 admission support Linux, macOS, and Windows. Guarded approval and execution are
 separately Linux-only because they require `/usr/bin/flock`, `/proc`, and the
-Docker containment contract. Existing Linux tests simulate portable policy
-branches, but no real macOS or Windows host run has been recorded.
+Docker containment contract. At authoring/candidate time, existing Linux tests
+simulated portable policy branches but no real macOS or Windows host run had
+been recorded. The accepted exact-head evidence is recorded below.
 
 Running the complete Linux release gate on another operating system would make a
 false claim: that gate intentionally includes Linux lease, filesystem, Git, and
@@ -94,18 +97,39 @@ additional exact authority boundary, not a YAML parser substitute.
 
 ## Consequences
 
-Native acceptance becomes explicit and repeatable without pretending that
-Linux-only authority is portable. A candidate is not natively accepted until
-both matrix jobs succeed at that exact commit and the resulting run URL, commit,
-runner image versions, and job conclusions are recorded in the release handoff.
-The workflow and policy are published and registered on `main` at
-`03c27640ffd0e8a377f2a17e64dc2be987a52409`, and the exact implementation-head
-Linux CI gate passed. GitHub reports zero native workflow runs, so both real host
-results remain pending.
+Native acceptance is explicit and repeatable without pretending that Linux-only
+authority is portable. A candidate is not natively accepted until both matrix
+jobs succeed at that exact commit and the resulting run URL, commit, runner
+image versions, and job conclusions are recorded.
 
-Merging the workflow accepts its bounded manual mechanism, not its native-host
-result. This ADR remains Proposed until both exact-commit matrix jobs pass and
-their runner evidence is recorded.
+That condition is now satisfied. [Native run
+30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
+completed successfully at exact `main`
+`802b91e6f6c9b392f56c9ee3660be818a0f74a62`:
+
+- [macOS 15 arm64 job
+  91069305460](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132/job/91069305460)
+  succeeded on macOS 15.7.7 with runner image `macos-15-arm64`
+  `20260715.0234.1`.
+- [Windows Server 2025 x64 job
+  91069305501](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132/job/91069305501)
+  succeeded on Windows Server 2025 10.0.26100 with runner image
+  `windows-2025-vs2026` `20260714.173.1`.
+
+The matching Linux [run
+30602942008](https://github.com/Ayyitskevin/Icarus/actions/runs/30602942008)
+also succeeded at that exact head. [PR
+#18](https://github.com/Ayyitskevin/Icarus/pull/18) merged the Gate 0 candidate
+as `d4bbcd4aab713bee23237099286e6d9b9f74283b`; the native-fixture correction
+then produced exact main `802b91e6...`. Gate 0 is merged and released, and this
+ADR is Accepted. Forward product work now begins with Gate 1.
+
+At authoring/candidate time, the workflow and policy were already published and
+registered on `main` at `03c27640ffd0e8a377f2a17e64dc2be987a52409`, and the
+exact implementation-head Linux gate had passed, but GitHub reported zero
+native workflow runs. Merging the workflow therefore accepted only its bounded
+manual mechanism, both real host results remained pending, and this ADR remained
+Proposed. The exact-commit jobs above close that historical condition.
 
 The exact workflow digest intentionally makes any change fail the local security
 test until the workflow and policy are reviewed together. Action-release or
@@ -116,8 +140,10 @@ spend but does not serve as an automatic branch-protection gate.
 This decision adds no runtime/package/schema behavior, provider call, repository
 mutation, browser authority, approval, product execution, arbitrary command,
 product commit/push/deployment, secret, or public endpoint. It does not modify or
-bless the inherited OpenCode workflow; ADR 0010 remains an independent release
-hold.
+bless the inherited OpenCode workflow. At authoring/candidate time ADR 0010
+remained an independent release hold; ADR 0025 later resolved that decision by
+hardening while retaining its separate third-party review and secret-rotation
+work.
 
 ## Upstream provenance
 

@@ -4,18 +4,19 @@
 supersedes the current product positioning and sequencing in
 `docs/FABLE_ICARUS_VISION.md`. Icarus now targets the governed
 task-to-running-application outcome: a proof-carrying authority kernel with
-browser and VS Code surfaces, reversible Git landing, isolated Replit-class
-environments, and Supabase integration. It will integrate editor and backend
-primitives instead of reimplementing them. The executable program, including
-the Buzz-inspired agent mission room and center-IDE layout, is in the
+browser and VS Code surfaces, isolated create-only Git landing with
+reconciliation, isolated Replit-class environments, and Supabase integration.
+It will integrate editor and backend primitives instead of reimplementing them.
+The executable program, including the Buzz-inspired agent mission room and
+center-IDE layout, is in the
 [Icarus collaborative IDE game plan](ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md).
 
 The current sequence is:
 
 | Gate | Product outcome | Exit evidence |
 | --- | --- | --- |
-| 0 | Restore release truth for ADR 0026 | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green |
-| 1 | Verified Change Gate | browser digest approvals plus branch/commit/allowlisted push/draft PR on three repositories; no force-push, merge, deployment, or source-checkout mutation |
+| 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
+| 1 | Verified Change Gate | browser digest approvals plus deterministic candidate commit, absent-only `icarus/<run-id>` reference, bounded GitHub REST object upload, draft PR, and reconciliation receipt on three repositories; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint; derivative repository automation is disclosed and digest-bound |
 | 2 | Context and agent quality | measured explanation/security/refactor evals, retrieval recall ≥0.90 and precision ≥0.60, first-pass plan acceptance ≥80% |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
@@ -33,11 +34,20 @@ identity, automation, and public-effect scale.
 
 Phase 1's transactional PatchSet boundary is implemented under ADR 0023. Phase
 2a's grants, readable manifest, and registry are present. The ADR 0026 slice 2b
-candidate has closed the cold review's remote check-output egress and
-mutation-grant/plan-target defects on the local tree. The full local gate and
-adversarial regressions pass. It remains **HOLD**, not release-ready, because it
-is uncommitted/unpublished and exact-head hosted CI, native acceptance, and the
-remaining release reviews are not yet recorded.
+candidate closed the cold review's remote check-output egress and
+mutation-grant/plan-target defects. At authoring/candidate time, the full local
+gate and adversarial regressions passed but the tree remained **HOLD** because
+it was uncommitted/unpublished and exact-head hosted CI, native acceptance, and
+the remaining release reviews had not yet been recorded.
+
+That historical hold is closed. [PR #18](https://github.com/Ayyitskevin/Icarus/pull/18)
+merged as `d4bbcd4aab713bee23237099286e6d9b9f74283b`; the native-fixture
+correction followed as `802b91e6f6c9b392f56c9ee3660be818a0f74a62`, now exact
+`main`. Linux [run 30602942008](https://github.com/Ayyitskevin/Icarus/actions/runs/30602942008)
+and both macOS and Windows jobs in native
+[run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
+succeeded at that exact head. Gate 0 is merged and released; current forward
+work begins with Gate 1 authority contracts and benchmark evidence.
 
 The milestone records below are retained as history and as the source of release
 holds that remain open. Where their order conflicts with ADR 0036, ADR 0036
@@ -66,9 +76,12 @@ reversible transactional PatchSet with Ollama and OpenAI adapters. A failed
 initial attempt may use the separately approved, bounded ADR 0026 session; its
 operator-selected-target lifecycle is covered by the executable fixture eval.
 
-Exit gate: every item in `docs/PLANS.md` Phase A-D, Repair continuation, and
-Final adversarial continuation is checked with evidence, hosted `ci` is green
-at the exact candidate commit, and ADR 0025's residual release work is closed.
+Historical exit gate: every item in `docs/PLANS.md` Phase A-D, Repair
+continuation, and Final adversarial continuation is checked with evidence,
+hosted `ci` is green at the exact candidate commit, and ADR 0025's residual
+release work is closed. Gate 0's exact-head hosted and native evidence is
+recorded above; ADR 0025's separate third-party review and secret-rotation work
+is not silently discharged by that Gate 0 release.
 
 ## M2 — Context intelligence
 
@@ -83,10 +96,12 @@ evals, context budget allocation, and retrieval-quality fixtures.
 
 Status: historical implementation record. Eight bounded observation slices were
 merged with recorded local, independent-review, and exact implementation-head
-hosted evidence. Native macOS and Windows host acceptance remained pending, the
-approval-index rollout against existing state remained operator-gated, and ADR
-0025's residual work independently blocked release. The unclosed browser
-authority and execution outcome is now governed by ADR 0036 Gate 1.
+hosted evidence. At that slice's authoring/candidate time, native macOS and
+Windows host acceptance remained pending, the approval-index rollout against
+existing state remained operator-gated, and ADR 0025's residual work
+independently blocked release. Exact-head native acceptance is now recorded in
+run 30602949132. The browser authority and execution outcome remains governed by
+ADR 0036 Gate 1.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
@@ -94,10 +109,12 @@ metadata, persisted task drafts, loopback Ollama planning, exact internal run
 state plus product phases, and allowlisted plan/action/file/check/output/warning/
 timestamp evidence. Registration, preview, drafts, and loopback planning support
 Linux, macOS, and Windows under atomic SQLite operation admission. It is
-review-only: browser approval, edit execution, checks, commit, push, and
-deployment are not exposed. Guarded approval and execution remain Linux CLI-only
-under the kernel lease and Docker boundary. Missing providers/execution are
-shown as `unconfigured`, and checks that did not run remain `not_run`.
+review-only for the guarded lifecycle: protected project registration, draft,
+and loopback-planning POSTs exist, but browser approval, edit execution, checks,
+commit, push, and deployment are not exposed. Guarded approval and execution
+remain Linux CLI-only under the kernel lease and Docker boundary. Missing
+providers/execution are shown as `unconfigured`, and checks that did not run
+remain `not_run`.
 
 Acceptance was recorded from fresh output of these commands; exact results are
 in `docs/PLANS.md`:
@@ -111,9 +128,11 @@ pnpm check
 git diff --check
 ```
 
-Native macOS and Windows host acceptance remains to be recorded; the current
-branch exercises its platform-policy paths under the Linux test host. A registry
-dependency audit is also intentionally outside this no-network local slice.
+At this slice's authoring time, native macOS and Windows host acceptance
+remained to be recorded and the candidate exercised its platform-policy paths
+under the Linux test host. Exact-head native acceptance was later recorded for
+both hosts in run 30602949132. A registry dependency audit was intentionally
+outside that no-network local slice.
 
 ADR 0015 implements project-scoped, sanitized, nonpersistent repository
 observation and selected-run live event metadata.
@@ -210,7 +229,7 @@ Add stronger sandbox profiles, declared application commands, local preview,
 environment references, resource limits, and crash recovery drills.
 
 The retained routing direction requires a measured task/context baseline.
-Anthropic is already implemented in the current candidate. Any xAI, GLM, or
+Anthropic is implemented in the released Gate 0 baseline. Any xAI, GLM, or
 other adapter must arrive one at a time with capability metadata,
 pricing/privacy policy, and production-adapter contract tests; providers are
 never silently substituted.
@@ -249,13 +268,22 @@ schema changes, and secrets remain human-gated and outside automatic dogfood.
 
 ## Current release and acceptance gates
 
-The merged observation slices and current session candidate do not complete M3
-or authorize release. Preserve ADR 0025's third-party action review and secret
-rotation holds. Native acceptance requires successful exact-commit macOS and
-Windows jobs under ADR 0022. Existing non-test state requires a verified backup
-and explicit operator approval before the approval-index migration. Every
-future release candidate still requires fresh local evidence, independent
-review, and exact published-head hosted CI.
+Gate 0 is merged and released at exact `main`
+`802b91e6f6c9b392f56c9ee3660be818a0f74a62`, with successful Linux and native
+evidence linked above. This does not claim that the historical observation
+slices complete the broader M3/IDE outcome, nor does it silently discharge ADR
+0025's separate third-party action review and secret-rotation work. Existing
+non-test state still requires a verified backup and explicit operator approval
+before the approval-index migration.
+
+Current forward work is Gate 1. ADR 0029 browser authority is accepted and its
+portable mutation-session/client bootstrap is the first local candidate; the
+guarded action ledger and routes remain unimplemented. ADR 0027 Git landing is
+accepted, but no landing runtime or migration exists. After the versioned
+benchmark closes, implementation continues through the bounded
+browser-to-draft-PR path. Every future release candidate still requires fresh
+local evidence, independent review, and exact published-head hosted CI;
+platform claims require the matching exact-commit native evidence.
 
 Older approval pagination, current file/status views, multi-file or raw payload
 browser diff/history, complete browser checkpoint inspection, browser approval,

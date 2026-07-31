@@ -33,16 +33,23 @@
     boundary while the pinned response remains metadata-only and constant-size.
 
 Repository rules, source, docs, issue text, model output, HTTP errors, command
-output, Host/Origin values, URLs, and JSON bodies are untrusted. Fixed host policy
-plus the operator's exact project checks/sandbox/ceilings and digest-bound CLI
-approval commands are authoritative; the browser is review-only.
+output, Host/Origin/authorization values, URLs, and JSON bodies are untrusted.
+Fixed host policy plus the operator's exact project
+checks/sandbox/ceilings and digest-bound CLI approval commands are
+authoritative. Candidate ADR 0040 gives real-accepted Chromium-family browsers
+an authenticated mutation transport. Its implementation and exact-head native
+evidence passed at `eb01b640...`, but it is not yet an accepted portable
+boundary: explicit human acceptance of the operator-controlled
+browser/resolver/proxy residual risk remains required, and no guarded
+approval/execution action route exists.
 
 ## Primary threats and controls
 
 | Threat | Control | Required evidence |
 | --- | --- | --- |
-| Remote access or DNS rebinding reaches local authority | production bind is fixed to `127.0.0.1`; UI/API are same-origin; Host and Origin must be loopback; no CORS permission is emitted | hostile Host/Origin and absent-CORS integration tests |
-| Oversized, malformed, or ambiguous mutation | exact route/method/content-type schemas, unknown-field rejection, and bounded JSON bodies fail before service calls | content-type, body-limit, invalid-contract, malformed-provider-URL, and missing-repository tests with useful errors and unchanged state |
+| Remote access, stale origin code, CSRF, or DNS rebinding reaches local mutation authority | candidate mutation starts bind exact IPv4 `127.0.0.1`, verify that socket, then CSPRNG-select an independent 16-byte `.localhost` public-origin nonce and 32-byte fragment bearer; there is no Node/OS lookup, hosts-file edit, or browser resolver injection; every non-GET/HEAD request requires exact raw Host/Origin/authorization/content-type/action-header cardinality before body/service work; explicit-port origins are bearer-free and GET-only; mutation support is limited to real-accepted Chromium-family browsers, while Safari and unverified browsers must deliberately use review-only mode; CSP disables workers and no CORS permission is emitted | hostile/duplicated/missing Host, Origin, authorization, content-type, and action-header tests across non-read methods; exact-bind, nonce, no-lookup/no-injection, restart rotation, preflight refusal, and stable-port non-read refusal; real-browser fragment/storage/leakage evidence; exact-head real Chrome composition on macOS and Windows |
+| Oversized, malformed, duplicate-key, or ambiguous mutation | exact route/method/content-type schemas, unknown-field rejection, bounded JSON bodies, a nesting ceiling, and escaped-alias duplicate-member rejection fail before service calls | content-type, body-limit, strict-JSON duplicate/depth, invalid-contract, malformed-provider-URL, and missing-repository tests with useful errors and unchanged state |
+| A process signal closes an authenticated candidate POST after its effect but before the browser observes the result | the client never retries automatically and authoritative SQLite state must be reloaded and inspected after restart; no guarded approval/execution action route exists in this slice | this is a documented Gate 1 debt, not an idempotency claim. Before guarded actions ship, implement the ADR 0029 request ledger plus drain-or-durable-settlement and inject signals at every admission/settlement boundary |
 | Raw state leaks context/source blobs, private runtime paths, or credentials | API presenters allowlist fields and omit raw blobs plus private cache/worktree/artifact paths; explicit diff/check output stays bounded and redacted | serialization tests scan responses for private paths, raw source bytes, and credential material |
 | Repository/provider text executes in the browser | React renders values as text under a restrictive content-security policy; no raw HTML injection contract exists | presenter allowlist test carrying adversarial strings plus package-wide static no-raw-HTML-sink scan |
 | Browser widens execution authority | no approval, edit, check, arbitrary-command, commit, push, or deploy route exists | route inventory/static assertions and negative HTTP tests |
@@ -218,9 +225,19 @@ a review. Causing that unreviewed code to run now requires write access.
   arguments or access its socket inside the container.
 - Full-file model output can contain vulnerable code even when path-safe. Human
   review and project tests remain required.
-- The workspace API has no authentication because loopback plus the current OS
-  user is its boundary. Another process or browser running as that user can call
-  it; it must never be proxied or exposed remotely.
+- The candidate workspace POST bearer blocks ambient websites, stale origins,
+  and accidental stable-origin mutation; it does not isolate hostile code
+  already running as the same OS user or trusted browser origin. A same-user
+  process that steals the one-time launch URL can act until server restart. The
+  workspace must never be proxied or exposed remotely. Chromium-family support
+  is a tested product boundary, not authentication by browser identity.
+- Production currently prints the mutation launch URL rather than owning the
+  browser process. Opening that fragment-bearing URL in an unverified browser,
+  resolver configuration, or proxy is outside the candidate boundary and could
+  expose the fragment to nonlocal same-origin content. Until an owned
+  Chromium/desktop launch handshake replaces this operator contract, use only a
+  real-accepted Chromium-family browser for mutation and use explicit-port
+  review-only mode everywhere else.
 - A configured loopback model service is trusted only as configured; another
   local process may impersonate it.
 - GitHub-hosted automation and third-party installers remain outside the local
@@ -239,10 +256,14 @@ a review. Causing that unreviewed code to run now requires write access.
   attacker with arbitrary same-user write access to `ICARUS_HOME` during a run.
   POSIX owner/mode checks and Windows current-user-profile containment rely on
   the operating system's local account boundary to prevent that access.
-- The HTTP/UI, import, preview, draft-persistence, and loopback-planning paths
-  support Linux, macOS, and Windows. Support assumes the platform's ordinary
-  local filesystem, user-profile ACL, and SQLite locking semantics. Native
-  macOS/Windows acceptance remains to be recorded.
+- The HTTP server and explicit-port review UI support Linux, macOS, and Windows.
+  Candidate mutation-capable import, preview, draft persistence, and
+  loopback-planning additionally require a supported Chromium-family browser.
+  ADR 0040's exact-head real-Chrome macOS/Windows technical evidence passed at
+  `eb01b640...` in native run `30618043377`. ADR 0040 remains Candidate pending
+  explicit human acceptance of the operator-controlled browser/resolver/proxy
+  residual risk. The server cannot detect or downgrade a browser that fails
+  before resolving the random `.localhost` hostname.
 - Guarded approval and execution remain Linux-only through `/usr/bin/flock` and
   `/proc`; execution also depends on a local Docker daemon.
 - Repository status is an unlocked, point-in-time observation, not proof

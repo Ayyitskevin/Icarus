@@ -1,3 +1,5 @@
+import { clearActionSession, getActionSession } from "./action-session.js";
+
 export type RunPhase =
   | "draft"
   | "planned"
@@ -30,6 +32,7 @@ export interface CapabilityView {
 
 export interface WorkspaceCapabilities {
   readonly execution: CapabilityView;
+  readonly mutation: CapabilityView;
   readonly planning: CapabilityView;
   readonly provider: CapabilityView;
 }
@@ -523,11 +526,28 @@ export class ApiError extends Error {
   }
 }
 
+const ACTION_SESSION_REQUIRED_MESSAGE =
+  "This workspace is review-only until it is opened from a fresh action-session launch URL.";
+
+function actionSessionRequired(): ApiError {
+  return new ApiError(401, "ACTION_SESSION_REQUIRED", ACTION_SESSION_REQUIRED_MESSAGE);
+}
+
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
+  const method = (init.method ?? "GET").toUpperCase();
   headers.set("accept", "application/json");
-  if (init.body !== undefined) {
+  if (method === "POST") {
+    const actionSession = getActionSession();
+    if (actionSession === null) {
+      throw actionSessionRequired();
+    }
+    headers.set("authorization", `Bearer ${actionSession}`);
+    headers.set("x-icarus-action", "workspace.mutate");
     headers.set("content-type", "application/json");
+  } else {
+    headers.delete("authorization");
+    headers.delete("x-icarus-action");
   }
   let response: Response;
   try {
@@ -552,9 +572,14 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
   }
   if (!response.ok) {
     const body = typeof value === "object" && value !== null ? (value as ApiErrorBody) : undefined;
+    const code = body?.error?.code ?? body?.code ?? "API_ERROR";
+    if (code === "ACTION_SESSION_REQUIRED") {
+      clearActionSession();
+      throw actionSessionRequired();
+    }
     throw new ApiError(
       response.status,
-      body?.error?.code ?? body?.code ?? "API_ERROR",
+      code,
       body?.error?.message ?? body?.message ?? `The local API returned HTTP ${response.status}.`,
     );
   }

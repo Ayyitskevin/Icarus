@@ -40,11 +40,42 @@ contract test requires one.
 
 ## Local workspace boundary
 
-The production server binds only to `127.0.0.1` and serves compiled UI assets
-and `/api` from one origin. It rejects non-loopback Host or Origin values,
-accepts only allowlisted methods/routes and bounded JSON mutation bodies, emits
-no CORS permission, and fails rather than choosing a different address or port.
-It is a foreground local process, not a remotely reachable daemon.
+The production server binds exact IPv4 `127.0.0.1` and serves compiled UI
+assets and `/api` from one public origin. Under candidate ADR 0040, an ordinary
+start asks the operating system for an ephemeral port, verifies the exact
+`127.0.0.1` IPv4 binding, then CSPRNG-selects a 16-byte nonce encoded as 32
+lowercase hexadecimal characters. The socket remains
+`127.0.0.1:<ephemeral-port>` while the public origin is
+`http://<nonce>.localhost:<ephemeral-port>/`. The server does not use Node or
+operating-system lookup, a hosts-file edit, or browser resolver injection;
+real-accepted Chromium-family browsers resolve the reserved hostname through
+their own built-in behavior.
+
+Only after the exact bind succeeds does the server create one independent
+fragment-only 32-byte mutation-session bearer. A synchronously bootstrapped
+client stores it only in `sessionStorage` and removes the fragment before
+render. Every non-`GET`/`HEAD` request requires the exact public Host, Origin,
+canonical bearer, JSON content type, and `workspace.mutate` action header before
+body parsing or service work. `GET` and `HEAD` requests remain tokenless. An explicitly configured stable
+port uses `http://127.0.0.1:<port>/`, emits no bearer, and is strictly
+review-only. Bind failures stay loud. The server emits no CORS permission. It
+is a foreground local process, not a remotely reachable daemon.
+
+Mutation support is a browser-family release contract, not a `User-Agent`
+authorization check. Candidate ADR 0040 supports only Chromium-family versions
+covered by real-browser acceptance. Safari and every unverified browser must
+use the explicit-port review-only mode; Icarus cannot automatically downgrade a
+random `.localhost` navigation that never reaches the server. Exact-head real
+Chrome composition passed at implementation commit `eb01b640...` in Linux CI
+`30618041483` and native run `30618043377` on macOS and Windows. ADR 0040
+remains Candidate, rather than an accepted release boundary, pending explicit
+human acceptance of the operator-controlled browser/resolver/proxy residual
+risk.
+
+The API projects server-side mutation/planning availability separately from
+the client-held session. React combines only those booleans, never the bearer,
+and disables protected controls immediately when the server is stable
+review-only or the tab session is absent, malformed, or rejected as stale.
 
 The first route set can inspect workspace state, register a repository/project,
 preview committed-tree context metadata, persist a task draft, plan that draft
@@ -52,6 +83,11 @@ with loopback Ollama, and read a run. Repository import, preview, draft, and
 planning do not create a private worktree or modify the source checkout. There
 is no HTTP route for approval, edit or check execution, arbitrary commands,
 commit, push, or deployment.
+
+The current process shutdown closes HTTP connections immediately. That is an
+explicit portability-slice limitation, not a recovery guarantee: durable
+guarded browser actions cannot be added until shutdown drains or settles
+admitted actions through the ADR 0029 ledger before closing the runtime.
 
 The API presenter allowlists product evidence instead of returning `RunRecord`
 or history rows. It omits raw context/source blobs and private cache, worktree,
@@ -64,11 +100,16 @@ derived phases are `planned`, `awaiting_approval`, `running`, `completed`,
 `failed`, and `cancelled`, while the exact internal state remains visible. An
 approval/recovery state is never flattened into completion.
 
-The HTTP/UI shell, repository import, context preview, draft persistence, and
-loopback planning support Linux, macOS, and Windows with no fleet or cloud
-dependency. Planning creates no private worktree and executes no project code.
-Before each bounded context/provider operation, SQLite atomically admits one
-`started` operation per run; a concurrent planner receives `RUN_BUSY`.
+The HTTP server and explicit-port review shell support Linux, macOS, and Windows
+with no fleet or cloud dependency. Candidate repository import, context preview,
+draft persistence, and loopback planning mutations require a supported
+Chromium-family browser covered by the acceptance record. ADR 0040's exact-head
+native technical gate passed at `eb01b640...`; release support remains held
+pending explicit human acceptance of its operator-controlled
+browser/resolver/proxy residual risk. Planning creates no private worktree and
+executes no project code. Before each bounded context/provider operation,
+SQLite atomically admits one `started` operation per run; a concurrent planner
+receives `RUN_BUSY`.
 Approval and execution remain Linux-only and use the stronger kernel lease
 through `/usr/bin/flock` and `/proc`; execution checks also require a local
 Docker daemon.
@@ -593,14 +634,20 @@ fail-closed audit or make imported repositories writable.
 
 ## Safety boundary
 
-- The HTTP server has a fixed loopback bind, same-origin UI/API, loopback Host
-  and Origin validation, bounded JSON contracts, no CORS grant, and safe response
-  headers. It fails closed on malformed or unrecognized mutations.
+- The HTTP server binds exact `127.0.0.1`. Candidate mutation sessions use a
+  fresh 16-byte `.localhost` public-origin nonce and independent bearer only
+  after the bind succeeds, with no Node/OS lookup or resolver injection.
+  Every non-GET/HEAD request receives exact
+  Host/Origin/authorization/action-header validation,
+  duplicate-member-rejecting bounded JSON contracts, no CORS grant, and safe
+  response headers. Explicit-port numeric origins are bearer-free and GET-only.
+  It fails closed on malformed or unrecognized mutations.
 - Browser repository data is rendered as untrusted text from allowlisted
   presenters. Raw domain records, context/source blobs, private runtime paths,
   and provider credentials do not cross the response boundary.
-- The browser exposes planning and review only; it cannot approve a digest,
-  execute an edit/check/command, or commit, push, or deploy.
+- The browser exposes protected project/draft/planning mutations plus review;
+  it still cannot approve a digest, execute an edit/check/command, or commit,
+  publish a ref/PR, push, or deploy.
 - Remote-context approval gates non-loopback egress, plan approval gates the
   first write/edit call, and human review gates completion.
 - Provider output with recognizable credential material fails before plan/edit

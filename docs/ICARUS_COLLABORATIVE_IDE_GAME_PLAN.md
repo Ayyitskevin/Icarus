@@ -1,13 +1,19 @@
 # Icarus collaborative IDE game plan
 
-- Status: Product and execution plan; local planning artifact
-- Date: 2026-07-30
+- Status: Product and execution plan; Gate 0 released, Gate 1 active
+- Date: 2026-07-31
 - Planning horizon: 12–18 months, reviewed at every exit gate
 - Governing direction:
   [ADR 0036](adr/0036-proof-carrying-software-factory-product-direction.md)
-- Current release state: ADR 0026 corrections pass locally; publication,
-  exact-head hosted CI, native acceptance, and final release evidence remain
-  open
+- Current release state: exact `main`
+  `802b91e6f6c9b392f56c9ee3660be818a0f74a62`; Gate 0 merged and released with
+  successful exact-head Linux, macOS, and Windows evidence
+- Current Gate 1 portability state: ADR 0039 rejected after native run
+  `30613980911` passed Windows and failed macOS; candidate ADR 0040's
+  Chromium-only mutation boundary and exact-head technical evidence passed at
+  `eb01b640...` in Linux CI `30618041483` and native real-Chrome run
+  `30618043377`; explicit human acceptance of the operator-controlled
+  browser/resolver/proxy residual risk remains pending
 
 This plan turns the product direction in ADR 0036 into a dependency-ordered
 build program. It incorporates the requested Buzz-style experience where
@@ -278,8 +284,8 @@ Exit evidence, not dates, controls progression.
 
 | Earliest runtime start | Gate | Outcome | Effort | Dependency |
 | --- | --- | --- | ---: | --- |
-| Now | G0 | Publish and close the corrected ADR 0026 release candidate | 1–2 weeks | current local candidate |
-| After G0 | G1 | Verified Change Gate: browser authority, reversible branch/commit, allowlisted push, draft PR, receipt | 8–12 weeks | G0, ADR 0029, ADR 0027 |
+| Completed 2026-07-31 | G0 | Released ADR 0026 at exact `main` `802b91e6...` with Linux and native evidence | complete | historical gate |
+| Now | G1 | Verified Change Gate: browser authority, deterministic candidate commit, isolated create-only branch, draft PR, reconciliation receipt | 8–12 weeks | G0 complete; ADRs 0029 and 0027 accepted; ADR 0040 technical transport gate passed, but human residual-risk acceptance and remaining G1 runtime slices are still required |
 | After G1 | G2 | Context quality: local search, repository map, symbols, rules, typed read-only outcomes, fixed evals | 6–8 weeks | G1 benchmark contract |
 | After G2 | G3 | Thin VS Code workbench with the IDE in the center | 6–8 weeks | G1 API, G2 context, topology decision |
 | After G3 | C1 | Read-only agent Council in the mission-room pane | 4–6 weeks | G2 retrieval, G3 shared client, ADR 0037 |
@@ -301,10 +307,10 @@ execution. Broad category competition is a 12–24 month program.
 
 ## Exit gates
 
-### G0 — release truth
+### G0 — release truth (passed at `802b91e6...`)
 
-Keep the existing ADR 0036 gate. Do not build Gate 1 runtime changes on an
-unidentified or unreviewed base. Required outcome:
+The existing ADR 0036 gate is now satisfied. Gate 1 runtime changes must
+continue to build only on an identified and reviewed base. Recorded outcome:
 
 - one committed candidate tree;
 - focused and full local checks;
@@ -315,17 +321,28 @@ unidentified or unreviewed base. Required outcome:
 
 ### G1 — Verified Change Gate
 
-Accept ADR 0029 browser approval authority and ADR 0027 Git landing authority,
-then deliver these slices:
+ADR 0029 browser approval authority and ADR 0027 Git landing authority are
+accepted. ADR 0039's random numeric `127/8` portability experiment is rejected.
+Candidate ADR 0040 passed real Chrome at exact implementation commit
+`eb01b640...` on macOS 15 arm64 and Windows Server 2025 x64 in native run
+`30618043377`. Its interim boundary binds exact `127.0.0.1`, uses a fresh
+16-byte `.localhost` public-origin nonce with no Node/OS lookup or resolver
+injection, supports mutation only in tested Chromium-family browsers, and
+leaves explicit-port sessions bearer-free and review-only for Safari and every
+unverified browser. Before admitting that boundary into a Gate 1 release, the
+operator-controlled browser/resolver/proxy residual risk still requires
+explicit human acceptance. Complete these remaining slices:
 
 1. server-start browser action session, fixed actor, same-origin/CSRF boundary,
    digest/revision-bound action request, and negative security matrix;
 2. browser parity for existing egress, plan, review, recovery, resume, and
    cancellation controls, including grants and ceilings;
 3. a separate durable landing ledger bound to an immutable completed run;
-4. deterministic candidate commit and private `icarus/` branch;
-5. provider-specific, allowlisted HTTPS push and GitHub draft-PR gateway without
-   weakening the existing file-only `GitController`;
+4. deterministic candidate commit and absent-only private
+   `refs/heads/icarus/<run-id>` reference;
+5. provider-specific, bounded GitHub REST object upload, absent-only reference
+   creation, and draft-PR gateway without weakening the existing file-only
+   `GitController`;
 6. redacted metadata/digest-only evidence receipt; and
 7. a pinned three-repository benchmark.
 
@@ -357,6 +374,11 @@ Choose the smallest topology first: on macOS and Windows, use VS Code
 Remote/Dev Containers/WSL so the extension host and Icarus guarded execution
 remain together on Linux. Do not silently turn the loopback API into an
 internet-facing service.
+
+ADR 0040's interim Chromium-only transport is not the center IDE, an owned
+desktop shell, or a substitute for this gate. G3 still owns the VS Code
+lifecycle, secure attach/start handshake, and editor-centered product surface;
+a Code-OSS fork remains deferred until adoption evidence justifies it.
 
 Implement:
 
@@ -453,8 +475,8 @@ remains source-collaboration truth; Icarus preserves the proof and rationale.
 | Durable state | `packages/core/src/store.ts`, `state-machine.ts` | separate landing and collaboration ledgers; append-only room events |
 | Orchestration | `packages/core/src/service.ts`, `session-loop.ts` | landing coordinator first; later room scheduler and child-run integration |
 | Git isolation | `packages/core/src/git.ts` | keep file-only controller; add narrow candidate-commit operations |
-| Provider landing | new provider-specific package | allowlisted push/PR gateway, receipt, idempotent reconciliation |
-| Browser boundary | `packages/api/src/server.ts`, `contracts.ts`, `present.ts` | authenticated mutation session, action routes, bounded projections |
+| Provider landing | new provider-specific package | bounded object-upload/create-ref/draft-PR gateway, receipt, idempotent reconciliation |
+| Browser boundary | `packages/api/src/server.ts`, `contracts.ts`, `present.ts` | candidate Chromium-resolved fresh-origin transport first; authenticated action routes and bounded projections after its native gate |
 | Browser UI | `packages/workspace/src/api.ts`, `App.tsx` | authority/evidence panel first; mission-room pane after shared client |
 | Shared client | new `packages/client` | versioned contracts for browser and VS Code |
 | IDE | new `packages/vscode` | task, room, editor context, diff/check/recovery/landing surfaces |
@@ -469,24 +491,38 @@ Athena delegation boundary.
 
 ## First executable packets
 
-### Packet 0 — close the current candidate
+### Packet 0 — close Gate 0 (completed 2026-07-31)
 
-Working set: the existing ADR 0026 candidate only.
+Working set at authoring/candidate time: the existing ADR 0026 candidate only.
 
-1. Recompute the exact diff fingerprint and rerun the focused/full local gates.
-2. Produce the final role-neutral security and architecture/release artifacts.
-3. Commit one coherent Gate 0 candidate only after the tree and evidence agree.
-4. Publish only under the repository's human/publication gate.
-5. Run exact-head hosted CI and native acceptance; record any skipped platform
-   honestly.
+1. [x] Recompute the exact diff fingerprint and rerun the focused/full local
+   gates.
+2. [x] Produce the final role-neutral security and architecture/release
+   artifacts.
+3. [x] Commit one coherent Gate 0 candidate only after the tree and evidence
+   agree.
+4. [x] Publish only under the repository's human/publication gate.
+5. [x] Run exact-head hosted CI and native acceptance; record any skipped
+   platform honestly.
 
-Do not mix Gate 1 runtime code into the held Gate 0 candidate.
+The historical candidate-time rule was not to mix Gate 1 runtime code into the
+held Gate 0 tree. [PR #18](https://github.com/Ayyitskevin/Icarus/pull/18)
+merged that candidate as `d4bbcd4aab713bee23237099286e6d9b9f74283b`; the
+native-fixture correction followed as exact `main`
+`802b91e6f6c9b392f56c9ee3660be818a0f74a62`. Linux
+[run 30602942008](https://github.com/Ayyitskevin/Icarus/actions/runs/30602942008)
+and both macOS and Windows jobs in native
+[run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
+succeeded there. Gate 0 is merged and released without Gate 1 runtime code;
+Packet 1 is now the forward work.
 
 ### Packet 1 — authority contracts and benchmark
 
 Working set:
 
 - `docs/adr/0029-browser-approval-authority.md`;
+- `docs/adr/0039-portable-numeric-loopback-origins.md`;
+- `docs/adr/0040-chromium-resolved-localhost-origins.md`;
 - `docs/adr/0027-git-landing-authority.md`;
 - `docs/THREAT_MODEL.md`;
 - `docs/ARCHITECTURE.md`;
@@ -494,11 +530,21 @@ Working set:
 - `docs/EVALS.md`; and
 - a versioned Gate 1 benchmark manifest.
 
-Define exact session-token lifecycle, fixed actor, request schema, action
-idempotency, landing profile, landing digest, intent-before-effect stages,
-credential references, branch/ref restrictions, provider reconciliation,
-receipt projection, crash points, migration/recovery contract, and negative
-test matrix before runtime implementation.
+Record the rejected numeric-origin experiment and define the candidate
+Chromium-family support boundary, exact `.localhost` nonce/socket split,
+no-lookup/no-injection rule, explicit-port review mode, exact session-token
+lifecycle, fixed actor, request schema, action idempotency, landing profile,
+landing digest, intent-before-effect stages, credential references, branch/ref
+restrictions, provider reconciliation, receipt projection, crash points,
+migration/recovery contract, and negative test matrix before runtime
+implementation.
+
+Checkpoint: ADRs 0029 and 0027 plus the latter's normative v1 record companion
+are accepted after independent P0/P1 reviews. ADR 0039 is rejected and ADR 0040
+is a candidate with technical evidence complete at `eb01b640...`; explicit
+human acceptance of its operator-controlled browser/resolver/proxy residual
+risk is outstanding. The versioned Gate 1 benchmark manifest is also
+outstanding, so Packet 1 is not complete.
 
 ### Packet 2 — browser authority without Git effects
 
@@ -511,7 +557,18 @@ Working set:
 
 Success means every browser mutation is authenticated, same-origin,
 digest/revision-bound, strict-schema, fixed-actor, restart-aware, and routed
-through the existing service boundary. Git behavior remains unchanged.
+through the existing service boundary. The public origin must use ADR 0040's
+16-byte `.localhost` nonce over an exact `127.0.0.1` bind without Node/OS
+lookup or resolver injection, and the full composition must pass real Chrome
+at the exact head on both native platforms. Git behavior remains unchanged.
+
+Checkpoint: the candidate origin/session transport, strict-JSON boundary, and
+truthful client capability state are implemented locally and cold-reviewed.
+Exact-head native real-Chrome evidence passed at `eb01b640...` in run
+`30618043377`. ADR 0040 remains unaccepted pending explicit human acceptance of
+the operator-controlled browser/resolver/proxy residual risk. The durable
+action request ledger, guarded routes, restart reconciliation, and graceful
+shutdown settlement are not implemented; therefore Packet 2 remains partial.
 
 ### Packet 3 — durable local landing
 
@@ -530,8 +587,9 @@ without touching the source checkout or any network.
 
 Add the allowlisted provider gateway, metadata-only receipt, remote
 reconciliation, and three-repository benchmark. No force-push, merge, branch
-deletion, deployment, arbitrary URL, arbitrary Git arguments, or browser-held
-credentials.
+deletion, direct deployment endpoint, arbitrary URL, arbitrary Git arguments,
+or browser-held credentials. The landing decision must disclose and bind
+repository-configured automation triggered by branch and draft-PR events.
 
 ### Packet 5 — context, IDE, then Council
 
