@@ -1,13 +1,17 @@
 # Icarus collaborative IDE game plan
 
 - Status: Product and execution plan; Gate 0 released, Gate 1 active
-- Date: 2026-07-30
+- Date: 2026-07-31
 - Planning horizon: 12–18 months, reviewed at every exit gate
 - Governing direction:
   [ADR 0036](adr/0036-proof-carrying-software-factory-product-direction.md)
 - Current release state: exact `main`
   `802b91e6f6c9b392f56c9ee3660be818a0f74a62`; Gate 0 merged and released with
   successful exact-head Linux, macOS, and Windows evidence
+- Current Gate 1 portability state: ADR 0039 rejected after native run
+  `30613980911` passed Windows and failed macOS; candidate ADR 0040's
+  Chromium-only mutation boundary and exact-head real Chrome native acceptance
+  remain pending
 
 This plan turns the product direction in ADR 0036 into a dependency-ordered
 build program. It incorporates the requested Buzz-style experience where
@@ -279,7 +283,7 @@ Exit evidence, not dates, controls progression.
 | Earliest runtime start | Gate | Outcome | Effort | Dependency |
 | --- | --- | --- | ---: | --- |
 | Completed 2026-07-31 | G0 | Released ADR 0026 at exact `main` `802b91e6...` with Linux and native evidence | complete | historical gate |
-| Now | G1 | Verified Change Gate: browser authority, deterministic candidate commit, isolated create-only branch, draft PR, reconciliation receipt | 8–12 weeks | G0 complete; ADRs 0029 and 0027 accepted |
+| Now | G1 | Verified Change Gate: browser authority, deterministic candidate commit, isolated create-only branch, draft PR, reconciliation receipt | 8–12 weeks | G0 complete; ADRs 0029 and 0027 accepted; ADR 0040 browser transport candidate must pass |
 | After G1 | G2 | Context quality: local search, repository map, symbols, rules, typed read-only outcomes, fixed evals | 6–8 weeks | G1 benchmark contract |
 | After G2 | G3 | Thin VS Code workbench with the IDE in the center | 6–8 weeks | G1 API, G2 context, topology decision |
 | After G3 | C1 | Read-only agent Council in the mission-room pane | 4–6 weeks | G2 retrieval, G3 shared client, ADR 0037 |
@@ -316,7 +320,14 @@ continue to build only on an identified and reviewed base. Recorded outcome:
 ### G1 — Verified Change Gate
 
 ADR 0029 browser approval authority and ADR 0027 Git landing authority are
-accepted. Complete these slices:
+accepted. ADR 0039's random numeric `127/8` portability experiment is rejected.
+Before admitting browser mutations into the Gate 1 release, candidate ADR 0040
+must pass real Chrome at one exact commit on macOS 15 arm64 and Windows Server
+2025 x64. Its interim boundary binds exact `127.0.0.1`, uses a fresh 16-byte
+`.localhost` public-origin nonce with no Node/OS lookup or resolver injection,
+supports mutation only in tested Chromium-family browsers, and leaves
+explicit-port sessions bearer-free and review-only for Safari and every
+unverified browser. Complete these slices:
 
 1. server-start browser action session, fixed actor, same-origin/CSRF boundary,
    digest/revision-bound action request, and negative security matrix;
@@ -359,6 +370,11 @@ Choose the smallest topology first: on macOS and Windows, use VS Code
 Remote/Dev Containers/WSL so the extension host and Icarus guarded execution
 remain together on Linux. Do not silently turn the loopback API into an
 internet-facing service.
+
+ADR 0040's interim Chromium-only transport is not the center IDE, an owned
+desktop shell, or a substitute for this gate. G3 still owns the VS Code
+lifecycle, secure attach/start handshake, and editor-centered product surface;
+a Code-OSS fork remains deferred until adoption evidence justifies it.
 
 Implement:
 
@@ -456,7 +472,7 @@ remains source-collaboration truth; Icarus preserves the proof and rationale.
 | Orchestration | `packages/core/src/service.ts`, `session-loop.ts` | landing coordinator first; later room scheduler and child-run integration |
 | Git isolation | `packages/core/src/git.ts` | keep file-only controller; add narrow candidate-commit operations |
 | Provider landing | new provider-specific package | bounded object-upload/create-ref/draft-PR gateway, receipt, idempotent reconciliation |
-| Browser boundary | `packages/api/src/server.ts`, `contracts.ts`, `present.ts` | authenticated mutation session, action routes, bounded projections |
+| Browser boundary | `packages/api/src/server.ts`, `contracts.ts`, `present.ts` | candidate Chromium-resolved fresh-origin transport first; authenticated action routes and bounded projections after its native gate |
 | Browser UI | `packages/workspace/src/api.ts`, `App.tsx` | authority/evidence panel first; mission-room pane after shared client |
 | Shared client | new `packages/client` | versioned contracts for browser and VS Code |
 | IDE | new `packages/vscode` | task, room, editor context, diff/check/recovery/landing surfaces |
@@ -501,6 +517,8 @@ Packet 1 is now the forward work.
 Working set:
 
 - `docs/adr/0029-browser-approval-authority.md`;
+- `docs/adr/0039-portable-numeric-loopback-origins.md`;
+- `docs/adr/0040-chromium-resolved-localhost-origins.md`;
 - `docs/adr/0027-git-landing-authority.md`;
 - `docs/THREAT_MODEL.md`;
 - `docs/ARCHITECTURE.md`;
@@ -508,15 +526,20 @@ Working set:
 - `docs/EVALS.md`; and
 - a versioned Gate 1 benchmark manifest.
 
-Define exact session-token lifecycle, fixed actor, request schema, action
-idempotency, landing profile, landing digest, intent-before-effect stages,
-credential references, branch/ref restrictions, provider reconciliation,
-receipt projection, crash points, migration/recovery contract, and negative
-test matrix before runtime implementation.
+Record the rejected numeric-origin experiment and define the candidate
+Chromium-family support boundary, exact `.localhost` nonce/socket split,
+no-lookup/no-injection rule, explicit-port review mode, exact session-token
+lifecycle, fixed actor, request schema, action idempotency, landing profile,
+landing digest, intent-before-effect stages, credential references, branch/ref
+restrictions, provider reconciliation, receipt projection, crash points,
+migration/recovery contract, and negative test matrix before runtime
+implementation.
 
 Checkpoint: ADRs 0029 and 0027 plus the latter's normative v1 record companion
-are accepted after independent P0/P1 reviews. The versioned Gate 1 benchmark
-manifest is still outstanding, so Packet 1 is not complete.
+are accepted after independent P0/P1 reviews. ADR 0039 is rejected and ADR 0040
+is a candidate; its exact-head real Chrome macOS/Windows evidence is still
+outstanding. The versioned Gate 1 benchmark manifest is also outstanding, so
+Packet 1 is not complete.
 
 ### Packet 2 — browser authority without Git effects
 
@@ -529,13 +552,17 @@ Working set:
 
 Success means every browser mutation is authenticated, same-origin,
 digest/revision-bound, strict-schema, fixed-actor, restart-aware, and routed
-through the existing service boundary. Git behavior remains unchanged.
+through the existing service boundary. The public origin must use ADR 0040's
+16-byte `.localhost` nonce over an exact `127.0.0.1` bind without Node/OS
+lookup or resolver injection, and the full composition must pass real Chrome
+at the exact head on both native platforms. Git behavior remains unchanged.
 
-Checkpoint: the portable origin/session transport, strict-JSON boundary, and
+Checkpoint: the candidate origin/session transport, strict-JSON boundary, and
 truthful client capability state are implemented locally and cold-reviewed.
-The durable action request ledger, guarded routes, restart reconciliation, and
-graceful shutdown settlement are not implemented; therefore Packet 2 remains
-partial.
+ADR 0040 remains unaccepted until exact-head native real Chrome evidence
+passes. The durable action request ledger, guarded routes, restart
+reconciliation, and graceful shutdown settlement are not implemented;
+therefore Packet 2 remains partial.
 
 ### Packet 3 — durable local landing
 

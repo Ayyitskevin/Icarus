@@ -40,20 +40,34 @@ contract test requires one.
 
 ## Local workspace boundary
 
-The production server binds only inside IPv4 `127/8` and serves compiled UI
-assets and `/api` from one origin. An ordinary start CSPRNG-selects a canonical
-`127.<1..254>.<1..254>.<1..254>` address, asks the operating system for an
-ephemeral port, verifies that exact binding, and only then emits one
+The production server binds exact IPv4 `127.0.0.1` and serves compiled UI
+assets and `/api` from one public origin. Under candidate ADR 0040, an ordinary
+start asks the operating system for an ephemeral port, verifies the exact
+`127.0.0.1` IPv4 binding, then CSPRNG-selects a 16-byte nonce encoded as 32
+lowercase hexadecimal characters. The socket remains
+`127.0.0.1:<ephemeral-port>` while the public origin is
+`http://<nonce>.localhost:<ephemeral-port>/`. The server does not use Node or
+operating-system lookup, a hosts-file edit, or browser resolver injection;
+real-accepted Chromium-family browsers resolve the reserved hostname through
+their own built-in behavior.
+
+Only after the exact bind succeeds does the server create one independent
 fragment-only 32-byte mutation-session bearer. A synchronously bootstrapped
 client stores it only in `sessionStorage` and removes the fragment before
-render. Every `POST` requires the exact Host, Origin, canonical bearer, JSON
-content type, and `workspace.mutate` action header before body parsing or
-service work. `GET` requests remain tokenless. An explicitly configured stable
-port emits no bearer and is strictly review-only. An unsupported fresh
-numeric-loopback bind falls back once to a bearer-free ephemeral
-`127.0.0.1` review origin; other bind failures stay loud. The server emits no
-CORS permission. It is a foreground local process, not a remotely reachable
-daemon.
+render. Every non-`GET`/`HEAD` request requires the exact public Host, Origin,
+canonical bearer, JSON content type, and `workspace.mutate` action header before
+body parsing or service work. `GET` and `HEAD` requests remain tokenless. An explicitly configured stable
+port uses `http://127.0.0.1:<port>/`, emits no bearer, and is strictly
+review-only. Bind failures stay loud. The server emits no CORS permission. It
+is a foreground local process, not a remotely reachable daemon.
+
+Mutation support is a browser-family release contract, not a `User-Agent`
+authorization check. Candidate ADR 0040 supports only Chromium-family versions
+covered by real-browser acceptance. Safari and every unverified browser must
+use the explicit-port review-only mode; Icarus cannot automatically downgrade a
+random `.localhost` navigation that never reaches the server. Exact-head real
+Chrome composition on macOS and Windows remains pending, so this candidate is
+not an accepted release boundary.
 
 The API projects server-side mutation/planning availability separately from
 the client-held session. React combines only those booleans, never the bearer,
@@ -83,9 +97,11 @@ derived phases are `planned`, `awaiting_approval`, `running`, `completed`,
 `failed`, and `cancelled`, while the exact internal state remains visible. An
 approval/recovery state is never flattened into completion.
 
-The HTTP/UI shell, repository import, context preview, draft persistence, and
-loopback planning support Linux, macOS, and Windows with no fleet or cloud
-dependency. Planning creates no private worktree and executes no project code.
+The HTTP server and explicit-port review shell support Linux, macOS, and Windows
+with no fleet or cloud dependency. Candidate repository import, context preview,
+draft persistence, and loopback planning mutations require a supported
+Chromium-family browser and remain held pending ADR 0040's exact-head native
+Chrome gate. Planning creates no private worktree and executes no project code.
 Before each bounded context/provider operation, SQLite atomically admits one
 `started` operation per run; a concurrent planner receives `RUN_BUSY`.
 Approval and execution remain Linux-only and use the stronger kernel lease
@@ -612,11 +628,14 @@ fail-closed audit or make imported repositories writable.
 
 ## Safety boundary
 
-- The HTTP server has a fixed loopback bind, fresh mutation origin/session,
-  exact Host/Origin/authorization/action-header validation for every POST,
+- The HTTP server binds exact `127.0.0.1`. Candidate mutation sessions use a
+  fresh 16-byte `.localhost` public-origin nonce and independent bearer only
+  after the bind succeeds, with no Node/OS lookup or resolver injection.
+  Every non-GET/HEAD request receives exact
+  Host/Origin/authorization/action-header validation,
   duplicate-member-rejecting bounded JSON contracts, no CORS grant, and safe
-  response headers. Stable configured origins are GET-only. It fails closed on
-  malformed or unrecognized mutations.
+  response headers. Explicit-port numeric origins are bearer-free and GET-only.
+  It fails closed on malformed or unrecognized mutations.
 - Browser repository data is rendered as untrusted text from allowlisted
   presenters. Raw domain records, context/source blobs, private runtime paths,
   and provider credentials do not cross the response boundary.

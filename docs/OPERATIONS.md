@@ -4,18 +4,20 @@
 
 Milestone 1 guarded execution runs on one Linux host as one OS user and only
 against local repositories explicitly registered by absolute path. The
-optional workspace is a foreground process bound to one exact address inside
-IPv4 `127/8`; it does not install a daemon, accept remote traffic, depend on
+optional workspace is a foreground process bound to exact IPv4 `127.0.0.1`; it
+does not install a daemon, accept remote traffic, depend on
 fleet/homelab/cloud services, or touch production systems.
 
-The HTTP/UI shell, repository import, context preview, draft persistence, and
-loopback planning support Linux, macOS, and Windows using platform-neutral
-Node/browser primitives. Planning creates no private worktree and executes no
-project code. SQLite atomically admits one started operation per run before
-bounded context/provider work and rejects a concurrent planner. Approval and
-execution remain Linux-only because they require the stronger kernel lease
-through `/usr/bin/flock` and `/proc`; execution checks also require a local
-Docker daemon.
+The HTTP server and explicit-port review UI support Linux, macOS, and Windows
+using platform-neutral Node/browser primitives. Candidate mutation-capable
+repository import, context preview, draft persistence, and loopback planning
+are limited to a supported Chromium-family browser and remain held until ADR
+0040 passes exact-head real Chrome acceptance on macOS and Windows. Planning
+creates no private worktree and executes no project code. SQLite atomically
+admits one started operation per run before bounded context/provider work and
+rejects a concurrent planner. Approval and execution remain Linux-only because
+they require the stronger kernel lease through `/usr/bin/flock` and `/proc`;
+execution checks also require a local Docker daemon.
 
 Default state layout:
 
@@ -62,14 +64,24 @@ $env:ICARUS_HOME = Join-Path $HOME ".icarus-state"
 pnpm workspace:start
 ```
 
-The process prints JSON containing its one-time launch URL, exact binding, and
-state root. With `ICARUS_PORT` unset, the default is an operating-system-chosen
-ephemeral port on a CSPRNG-selected
-`http://127.<1..254>.<1..254>.<1..254>:<port>/` origin. The server verifies
-that exact numeric-loopback binding before it creates the mutation-session
-bearer. Open the fragment-bearing URL exactly as emitted and do not copy it
-into logs. The client removes the fragment before render and retains the bearer
-only in that origin's `sessionStorage`.
+The process prints JSON containing its one-time launch URL, exact socket
+binding, and state root. With `ICARUS_PORT` unset, the server binds exact
+`127.0.0.1` on an operating-system-chosen ephemeral port and verifies that IPv4
+address before creating a CSPRNG-selected 16-byte lowercase-hex `.localhost`
+public origin and an independent mutation-session bearer:
+
+```text
+socket bind:   127.0.0.1:<ephemeral-port>
+public origin: http://<32-lowercase-hex-origin-nonce>.localhost:<ephemeral-port>/
+```
+
+Open the fragment-bearing URL exactly as emitted in a supported
+Chromium-family browser and do not copy it into logs. Icarus performs no
+Node/operating-system lookup, hosts-file edit, or browser resolver injection;
+the browser's built-in reserved-name handling must navigate the public origin.
+The client removes the fragment before render and retains the bearer only in
+that origin's `sessionStorage`. This is candidate behavior, not an accepted
+portability claim.
 
 Setting `ICARUS_PORT` to an explicit integer from 1 through 65535 instead starts
 `http://127.0.0.1:<port>` in stable review-only mode: it emits no bearer and
@@ -79,10 +91,11 @@ process with `SIGINT` or `SIGTERM`; projects and drafts are rediscovered from
 SQLite on restart, but mutation authority requires the newly emitted launch
 URL.
 
-If the operating system reports that the selected fresh `127/8` address cannot
-be bound, Icarus creates no bearer and starts one ephemeral
-`http://127.0.0.1:<port>` review-only session. The startup URL then has no
-fragment and every POST is refused. Any other bind error remains fatal.
+Use that explicit-port review-only mode for Safari, Firefox until separately
+accepted, embedded webviews, and every unverified/default browser. The server
+does not trust `User-Agent`, cannot determine which browser will open a printed
+URL, and cannot automatically downgrade a random `.localhost` navigation that
+never reaches it. Failure to bind exact `127.0.0.1` remains fatal.
 
 The current portability slice force-closes HTTP connections during process
 shutdown. It does not automatically retry an interrupted POST. If shutdown
@@ -120,15 +133,19 @@ With `ICARUS_CHROMIUM_EXECUTABLE` set to an explicit local Chromium binary,
 in real headless Chromium. It proves fragment removal before render,
 session-scoped reload, tokenless GETs, authenticated POSTs, stale/malformed
 revocation, stable review-only suppression, token non-disclosure, and an
-unchanged source fingerprint.
+unchanged source fingerprint without a resolver override. Candidate acceptance
+also requires the same exact-origin composition in real Chrome at one exact
+commit on macOS 15 arm64 and Windows Server 2025 x64; a Node HTTP client,
+resolver injection, hosts-file edit, or review-only run is not substitute
+evidence.
 
 Treat the loopback server and launch URL as same-user local authority. The
 per-start bearer authenticates POST transport but is not a remote-service or
 hostile-local-user security boundary: do not reverse-proxy it, bind it to a LAN
 or Tailscale address, publish it through a tunnel, paste the launch URL into
-shared logs, or weaken Host/Origin checks. Every POST requires the exact
-session transport before its bounded strict-JSON body is read; GETs carry no
-bearer, and no CORS permission is granted. API presenters omit raw
+shared logs, or weaken Host/Origin checks. Every non-GET/HEAD request requires
+the exact session transport before its bounded strict-JSON body is read; GETs
+and HEADs carry no bearer, and no CORS permission is granted. API presenters omit raw
 context/source blobs and private cache/worktree/artifact paths; explicitly
 stored diff/check output stays bounded and redacted.
 
@@ -618,10 +635,11 @@ gh api "repos/Ayyitskevin/Icarus/commits/$(git rev-parse HEAD)/check-runs"
 
 The durable review evidence is the named test source plus fresh command output;
 do not replace it with a prose claim. `pnpm smoke:workspace:browser` launches
-real headless Chromium; `pnpm smoke:workspace` separately exercises the API and
-production assets across restart. Run these from a clean candidate tree and
-record the observed exit status and counts in
-`docs/PLANS.md`:
+real headless Chromium without resolver injection;
+`pnpm smoke:workspace` separately exercises the API and production assets
+across restart but cannot prove browser-owned `.localhost` resolution. Run
+these from a clean candidate tree and record the observed exit status and
+counts in `docs/PLANS.md`:
 
 ```text
 pnpm workflow:setup

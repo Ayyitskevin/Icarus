@@ -1,15 +1,14 @@
 # ADR 0039: Portable numeric-loopback mutation origins
 
-- Status: Candidate — implementation and native acceptance pending
+- Status: Rejected — exact-head native acceptance disproved portability
 - Date: 2026-07-31
-- Proposes to supersede in part upon acceptance:
-  [ADR 0029](0029-browser-approval-authority.md)'s `.localhost` origin,
-  operating-system lookup proof, fixed mutation binding, and corresponding
-  origin-acceptance clauses only
+- Does not supersede [ADR 0029](0029-browser-approval-authority.md)
 - Depends on: [ADR 0022](0022-native-macos-windows-acceptance.md) and
   [ADR 0029](0029-browser-approval-authority.md)
 - Related:
-  [ADR 0036](0036-proof-carrying-software-factory-product-direction.md)
+  [ADR 0036](0036-proof-carrying-software-factory-product-direction.md) and
+  candidate
+  [ADR 0040](0040-chromium-resolved-localhost-origins.md)
 
 ## Context
 
@@ -34,7 +33,7 @@ unlikely to read a new launch fragment. The finite collision risk is explicit
 below. The mutation server must remain unreachable off-device, and the
 independent bearer plus exact request checks must remain in force.
 
-## Decision
+## Rejected proposal
 
 An ordinary mutation-capable start selects three independent bytes with the
 operating system CSPRNG, rejecting `0` and `255` for each byte, and constructs
@@ -99,9 +98,9 @@ the selection algorithm, observed restart behavior, old-bearer refusal, and
 token nonleakage. Neither the finite random host nor the kernel-selected port
 is claimed never to repeat.
 
-## Required acceptance evidence
+## Original acceptance gate
 
-This decision remains a candidate until one exact commit has all of:
+Acceptance required one exact commit to have all of:
 
 1. the complete Linux `pnpm check` gate;
 2. source-preserving workspace and real Chromium browser smokes;
@@ -121,13 +120,29 @@ If either native host cannot bind and use a random numeric address from
 accept review-only as a substitute. The next design must own the browser or
 desktop resolver boundary explicitly.
 
+## Rejection evidence
+
+Exact-head native run
+[30613980911](https://github.com/Ayyitskevin/Icarus/actions/runs/30613980911)
+resolved this gate against the proposal. The Windows Server 2025 x64 job
+passed the real workspace composition. The macOS 15 arm64 job could not bind
+the selected random `127/8` address, correctly fell back to a bearer-free
+`127.0.0.1` review-only session, and failed the mutation composition rather
+than counting review-only behavior as portable mutation.
+
+That split result disproves the proposal's required macOS-and-Windows
+portability claim. The numeric-loopback implementation is experiment evidence,
+not an accepted product boundary. ADR 0029 therefore remains authoritative
+until a later accepted record supersedes specific clauses.
+
 ## Consequences
 
-The portable composition no longer depends on inconsistent wildcard
-`.localhost` support. Startup output now reports the exact selected numeric
-loopback binding. Existing API and client request shapes do not change.
+Icarus must not describe random numeric `127/8` binding as portable or accept a
+Windows-only result. Candidate ADR 0040 returns to a 128-bit `.localhost`
+origin, removes the Node/operating-system lookup proof, and narrows mutation
+support to browser families whose own reserved-name handling passes real
+native acceptance. It owns that browser support and evidence boundary without
+injecting or replacing the browser's resolver.
 
-Until this candidate is accepted, ADR 0029 remains authoritative. Upon
-acceptance, ADR 0029 remains authoritative for browser bearer handling,
-request authentication, guarded-action fencing, action-ledger recovery, and
-all other clauses not explicitly superseded here.
+This record remains as the evidence for rejecting the numeric alternative. It
+must not be rewritten as though the experiment had never occurred.

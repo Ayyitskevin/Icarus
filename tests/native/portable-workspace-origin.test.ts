@@ -8,8 +8,8 @@ import {
   type StartedWorkspaceServer,
   startWorkspaceServer,
 } from "../../packages/api/src/server.js";
-import { isFreshWorkspaceLoopbackHostname } from "../../packages/api/src/workspace-session.js";
 import { createIcarusRuntime, type IcarusRuntime } from "../../packages/core/src/index.js";
+import { fetchWorkspace } from "../support/workspace-http.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -26,8 +26,8 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-describe("native portable numeric-loopback origin", () => {
-  test("binds, fetches, coexists with stable review, and rejects an old bearer", async () => {
+describe("native portable browser-origin transport", () => {
+  test("binds exact loopback, serves an exact virtual host, and rejects an old bearer", async () => {
     const root = await mkdtemp(path.join(os.homedir(), ".icarus-native-origin-"));
     cleanups.push(async () => rm(root, { recursive: true, force: true }));
     const stateRoot = path.join(root, "state");
@@ -40,17 +40,23 @@ describe("native portable numeric-loopback origin", () => {
 
     const first = await startWorkspaceServer(options, 0);
     cleanups.push(first.close);
-    expect(isFreshWorkspaceLoopbackHostname(first.host)).toBe(true);
+    expect(first.host).toBe("127.0.0.1");
+    expect(new URL(first.url).hostname).toMatch(/^[a-f0-9]{32}\.localhost$/);
     expect(first.mode).toBe("mutation-capable");
     expect(first.reviewOnlyReason).toBeNull();
     expect(first.server.address()).toMatchObject({
-      address: first.host,
+      address: "127.0.0.1",
       family: "IPv4",
       port: first.port,
     });
-    expect((await fetch(`${first.url}/api/health`)).status).toBe(200);
+    expect((await fetchWorkspace(first, `${first.url}/api/health`)).status).toBe(200);
     const firstToken = actionSession(first);
 
+    await expect(startWorkspaceServer(options, first.port)).rejects.toMatchObject({
+      code: "EADDRINUSE",
+    });
+
+    await first.close();
     const stable = await startWorkspaceServer(options, first.port);
     cleanups.push(stable.close);
     expect(stable).toMatchObject({
@@ -60,19 +66,21 @@ describe("native portable numeric-loopback origin", () => {
       reviewOnlyReason: "explicit-port",
       launchUrl: `http://127.0.0.1:${first.port}`,
     });
-    expect((await fetch(`${stable.url}/api/health`)).status).toBe(200);
+    expect((await fetchWorkspace(stable, `${stable.url}/api/health`)).status).toBe(200);
     await expect(startWorkspaceServer(options, first.port)).rejects.toMatchObject({
       code: "EADDRINUSE",
     });
 
-    await first.close();
+    await stable.close();
     const second = await startWorkspaceServer(options, 0);
     cleanups.push(second.close);
-    expect(isFreshWorkspaceLoopbackHostname(second.host)).toBe(true);
+    expect(second.host).toBe("127.0.0.1");
+    expect(new URL(second.url).hostname).toMatch(/^[a-f0-9]{32}\.localhost$/);
+    expect(second.url).not.toBe(first.url);
     const secondToken = actionSession(second);
     expect(secondToken).not.toBe(firstToken);
 
-    const stale = await fetch(`${second.url}/api/future-mutation`, {
+    const stale = await fetchWorkspace(second, `${second.url}/api/future-mutation`, {
       method: "POST",
       headers: {
         origin: second.url,

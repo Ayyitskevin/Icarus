@@ -3,7 +3,7 @@ import type { IncomingMessage } from "node:http";
 
 import { IcarusError } from "@icarus/core";
 
-const FRESH_LOOPBACK_OCTETS = 3;
+const ORIGIN_NONCE_BYTES = 16;
 const BEARER_BYTES = 32;
 const CANONICAL_BEARER_LENGTH = 43;
 const ACTION_SESSION_FRAGMENT = "icarus-action-session";
@@ -12,7 +12,7 @@ export const REVIEW_ONLY_WORKSPACE_HOST = "127.0.0.1";
 export const WORKSPACE_MUTATION_ACTION = "workspace.mutate";
 
 export type WorkspaceServerMode = "mutation-capable" | "review-only";
-export type WorkspaceReviewOnlyReason = "explicit-port" | "fresh-loopback-unavailable";
+export type WorkspaceReviewOnlyReason = "explicit-port";
 export type WorkspaceRandomBytes = (size: number) => Uint8Array;
 
 export interface WorkspaceSession {
@@ -170,41 +170,26 @@ class BoundWorkspaceSession implements WorkspaceSession {
 export function createWorkspaceMutationHostname(
   random: WorkspaceRandomBytes = randomBytes,
 ): string {
-  const octets: number[] = [];
-  while (octets.length < FRESH_LOOPBACK_OCTETS) {
-    const requested = FRESH_LOOPBACK_OCTETS - octets.length;
-    const bytes = random(requested);
-    if (bytes.byteLength !== requested) {
-      throw new IcarusError("INVALID_ORIGIN", "Workspace mutation entropy source is invalid");
-    }
-    for (const byte of bytes) {
-      // Avoid subnet/network edge spellings that platform stacks sometimes
-      // special-case while retaining almost the full 127/8 address space.
-      if (byte > 0 && byte < 255) octets.push(byte);
-    }
+  const nonce = Buffer.from(random(ORIGIN_NONCE_BYTES));
+  if (nonce.byteLength !== ORIGIN_NONCE_BYTES) {
+    throw new IcarusError("INVALID_ORIGIN", "Workspace mutation entropy source is invalid");
   }
-  return `127.${octets.join(".")}`;
+  return `${nonce.toString("hex")}.localhost`;
 }
 
 /**
- * Accept only one canonical, non-stable IPv4 address from 127/8. Restricting
- * every random octet to 1..254 avoids alternate numeric spellings and
- * platform-specific network/broadcast edge cases.
+ * Accept only one canonical 128-bit lowercase origin label beneath the
+ * reserved .localhost suffix. Browser support is proven separately; the
+ * server itself always binds the exact numeric IPv4 loopback address.
  */
-export function isFreshWorkspaceLoopbackHostname(hostname: string): boolean {
-  const octets = hostname.split(".");
-  if (octets.length !== 4 || octets[0] !== "127") return false;
-  return octets.slice(1).every((octet) => {
-    if (!/^(?:0|[1-9][0-9]{0,2})$/.test(octet)) return false;
-    const value = Number(octet);
-    return value >= 1 && value <= 254;
-  });
+export function isWorkspaceMutationHostname(hostname: string): boolean {
+  return /^[a-f0-9]{32}\.localhost$/.test(hostname);
 }
 
 export function createBoundWorkspaceSession(
   mode: WorkspaceServerMode,
   port: number,
-  boundHostname: string,
+  hostname: string,
   reviewOnlyReason: WorkspaceReviewOnlyReason | null = mode === "review-only"
     ? "explicit-port"
     : null,
@@ -214,12 +199,12 @@ export function createBoundWorkspaceSession(
     throw new IcarusError("INVALID_PORT", "Workspace session port is invalid");
   }
   if (
-    (mode === "mutation-capable" && !isFreshWorkspaceLoopbackHostname(boundHostname)) ||
-    (mode === "review-only" && boundHostname !== REVIEW_ONLY_WORKSPACE_HOST) ||
+    (mode === "mutation-capable" && !isWorkspaceMutationHostname(hostname)) ||
+    (mode === "review-only" && hostname !== REVIEW_ONLY_WORKSPACE_HOST) ||
     (mode === "mutation-capable" && reviewOnlyReason !== null) ||
     (mode === "review-only" && reviewOnlyReason === null)
   ) {
     throw new IcarusError("INVALID_ORIGIN", "Workspace mutation origin is invalid");
   }
-  return new BoundWorkspaceSession(mode, port, boundHostname, reviewOnlyReason, random);
+  return new BoundWorkspaceSession(mode, port, hostname, reviewOnlyReason, random);
 }

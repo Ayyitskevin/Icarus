@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   createBoundWorkspaceSession,
   createWorkspaceMutationHostname,
-  isFreshWorkspaceLoopbackHostname,
+  isWorkspaceMutationHostname,
   matchesWorkspaceBearer,
 } from "../../packages/api/src/workspace-session.js";
 
@@ -16,8 +16,12 @@ function launchToken(launchUrl: string): string {
 
 describe("browser workspace session", () => {
   test("creates deterministic distinct random-origin action sessions with only launch fragments", () => {
-    const firstHostname = createWorkspaceMutationHostname(() => Uint8Array.from([1, 2, 3]));
-    const secondHostname = createWorkspaceMutationHostname(() => Uint8Array.from([4, 5, 6]));
+    const firstHostname = createWorkspaceMutationHostname(() =>
+      Uint8Array.from({ length: 16 }, (_, index) => index),
+    );
+    const secondHostname = createWorkspaceMutationHostname(() =>
+      Uint8Array.from({ length: 16 }, (_, index) => index + 16),
+    );
     const first = createBoundWorkspaceSession("mutation-capable", 31_337, firstHostname, null, () =>
       Uint8Array.from({ length: 32 }, () => 7),
     );
@@ -35,7 +39,9 @@ describe("browser workspace session", () => {
       authority: `${firstHostname}:31337`,
       hostname: firstHostname,
     });
-    expect(isFreshWorkspaceLoopbackHostname(first.hostname)).toBe(true);
+    expect(first.hostname).toBe("000102030405060708090a0b0c0d0e0f.localhost");
+    expect(second.hostname).toBe("101112131415161718191a1b1c1d1e1f.localhost");
+    expect(isWorkspaceMutationHostname(first.hostname)).toBe(true);
     expect(first.url).toBe(`http://${first.authority}`);
     expect(new URL(first.launchUrl).origin).toBe(first.url);
     expect(first.launchUrl.match(/#/g)).toHaveLength(1);
@@ -45,25 +51,22 @@ describe("browser workspace session", () => {
     expect(Object.keys(first)).not.toEqual(expect.arrayContaining(["token", "bearer"]));
   });
 
-  test("rejects edge octets, refills entropy exactly, and fails closed on wrong widths", () => {
+  test("uses one exact 128-bit origin draw and fails closed on wrong entropy widths", () => {
     const requests: number[] = [];
-    const chunks = [Uint8Array.from([0, 255, 17]), Uint8Array.from([18, 19])];
     const hostname = createWorkspaceMutationHostname((size) => {
       requests.push(size);
-      const chunk = chunks.shift();
-      if (chunk === undefined) throw new Error("unexpected entropy request");
-      return chunk;
+      return Uint8Array.from({ length: size }, () => 0xff);
     });
-    expect(hostname).toBe("127.17.18.19");
-    expect(requests).toEqual([3, 2]);
-    expect(() => createWorkspaceMutationHostname(() => Uint8Array.from([1, 2]))).toThrowError(
+    expect(hostname).toBe("ffffffffffffffffffffffffffffffff.localhost");
+    expect(requests).toEqual([16]);
+    expect(() => createWorkspaceMutationHostname(() => new Uint8Array(15))).toThrowError(
       expect.objectContaining({ code: "INVALID_ORIGIN" }),
     );
     expect(() =>
       createBoundWorkspaceSession(
         "mutation-capable",
         31_337,
-        "127.1.2.3",
+        "0123456789abcdef0123456789abcdef.localhost",
         null,
         () => new Uint8Array(31),
       ),
@@ -96,51 +99,59 @@ describe("browser workspace session", () => {
     expect(matchesWorkspaceBearer(expected, "")).toBe(false);
   });
 
-  test("accepts only canonical fresh numeric loopback bindings", () => {
-    for (const valid of ["127.1.1.1", "127.17.42.93", "127.254.254.254"]) {
-      expect(isFreshWorkspaceLoopbackHostname(valid)).toBe(true);
+  test("accepts only canonical 128-bit lowercase localhost origin labels", () => {
+    for (const valid of [
+      "00000000000000000000000000000000.localhost",
+      "0123456789abcdef0123456789abcdef.localhost",
+      "ffffffffffffffffffffffffffffffff.localhost",
+    ]) {
+      expect(isWorkspaceMutationHostname(valid)).toBe(true);
       expect(createBoundWorkspaceSession("mutation-capable", 31_337, valid).hostname).toBe(valid);
     }
     for (const invalid of [
       "127.0.0.1",
-      "127.0.1.2",
-      "127.1.2.0",
-      "127.1.2.255",
-      "127.01.2.3",
-      "126.1.2.3",
-      "128.1.2.3",
-      "127.1.2.3.localhost",
+      "localhost",
+      "0123456789abcdef0123456789abcde.localhost",
+      "0123456789abcdef0123456789abcdef0.localhost",
+      "0123456789ABCDEF0123456789ABCDEF.localhost",
+      "g123456789abcdef0123456789abcdef.localhost",
+      "0123456789abcdef0123456789abcdef.localhost.",
+      "0123456789abcdef0123456789abcdef.localhost.example",
       "::1",
     ]) {
-      expect(isFreshWorkspaceLoopbackHostname(invalid)).toBe(false);
+      expect(isWorkspaceMutationHostname(invalid)).toBe(false);
       expect(() => createBoundWorkspaceSession("mutation-capable", 31_337, invalid)).toThrowError(
         expect.objectContaining({ code: "INVALID_ORIGIN" }),
       );
     }
-    expect(() => createBoundWorkspaceSession("review-only", 31_337, "127.1.2.3")).toThrowError(
-      expect.objectContaining({ code: "INVALID_ORIGIN" }),
-    );
+    expect(() =>
+      createBoundWorkspaceSession(
+        "review-only",
+        31_337,
+        "0123456789abcdef0123456789abcdef.localhost",
+      ),
+    ).toThrowError(expect.objectContaining({ code: "INVALID_ORIGIN" }));
     expect(() =>
       createBoundWorkspaceSession(
         "mutation-capable",
         31_337,
-        "127.1.2.3",
-        "fresh-loopback-unavailable",
+        "0123456789abcdef0123456789abcdef.localhost",
+        "explicit-port",
       ),
     ).toThrowError(expect.objectContaining({ code: "INVALID_ORIGIN" }));
     expect(() =>
       createBoundWorkspaceSession("review-only", 31_337, "127.0.0.1", null),
     ).toThrowError(expect.objectContaining({ code: "INVALID_ORIGIN" }));
-    expect(
-      createBoundWorkspaceSession("review-only", 31_337, "127.0.0.1", "fresh-loopback-unavailable")
-        .reviewOnlyReason,
-    ).toBe("fresh-loopback-unavailable");
   });
 
   test("rejects invalid bound ports and invalid internal bearer widths", async () => {
-    expect(() => createBoundWorkspaceSession("mutation-capable", 0, "127.1.2.3")).toThrowError(
-      expect.objectContaining({ code: "INVALID_PORT" }),
-    );
+    expect(() =>
+      createBoundWorkspaceSession(
+        "mutation-capable",
+        0,
+        "0123456789abcdef0123456789abcdef.localhost",
+      ),
+    ).toThrowError(expect.objectContaining({ code: "INVALID_PORT" }));
     expect(() => createBoundWorkspaceSession("review-only", 65_536, "127.0.0.1")).toThrowError(
       expect.objectContaining({ code: "INVALID_PORT" }),
     );

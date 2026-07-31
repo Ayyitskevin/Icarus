@@ -29,6 +29,7 @@ const workspaceApiSource = await readFile("packages/workspace/src/api.ts", "utf8
 const workspaceAppSource = await readFile("packages/workspace/src/App.tsx", "utf8");
 const workspaceStyleSource = await readFile("packages/workspace/src/styles.css", "utf8");
 const browserSmokeSource = await readFile("scripts/smoke-workspace-browser.mjs", "utf8");
+const workspaceSmokeSource = await readFile("scripts/smoke-workspace.mjs", "utf8");
 const workspaceLivePollSource = await readFile("packages/workspace/src/live-poll.ts", "utf8");
 const workspaceProjectPageNavSource = await readFile(
   "packages/workspace/src/project-page-nav.ts",
@@ -87,11 +88,14 @@ const workflowSetupIndex = ciWorkflowSource.indexOf("run: pnpm workflow:setup");
 const workflowLintIndex = ciWorkflowSource.indexOf("run: pnpm workflow:lint");
 const frozenInstallIndex = ciWorkflowSource.indexOf("run: pnpm install --frozen-lockfile");
 const workspaceListenIndex = workspaceServerSource.indexOf(
-  "await binding.listen(server, port, host)",
+  "await binding.listen(server, port, REVIEW_ONLY_WORKSPACE_HOST)",
 );
-const workspaceExactAddressIndex = workspaceServerSource.indexOf("address.address !== host");
+const workspaceExactAddressIndex = workspaceServerSource.indexOf(
+  "address.address !== REVIEW_ONLY_WORKSPACE_HOST",
+);
+const workspaceOriginHostnameIndex = workspaceServerSource.indexOf("const originHostname =");
 const workspaceSessionCreationIndex = workspaceServerSource.indexOf(
-  "session = createBoundWorkspaceSession(mode, address.port, host, reviewOnlyReason)",
+  "session = createBoundWorkspaceSession(mode, address.port, originHostname, reviewOnlyReason)",
 );
 const ignore = await readFile(".gitignore", "utf8");
 const testSources = await collectSources("tests", (name) => name.endsWith(".test.ts"));
@@ -287,20 +291,66 @@ const assertions = {
     workspaceServerSource.includes("server.listen(port, host") &&
     workspaceServerSource.includes("createMutationHostname: createWorkspaceMutationHostname") &&
     workspaceServerSource.includes("listen: listenOnExactHost") &&
-    workspaceServerSource.includes("address.address !== host") &&
-    workspaceSessionSource.includes(`return \`127.\${octets.join(".")}\``) &&
-    workspaceSessionSource.includes("value >= 1 && value <= 254") &&
-    workspaceServerSource.includes("!isFreshWorkspaceLoopbackHostname(host)") &&
+    workspaceSessionSource.includes('export const REVIEW_ONLY_WORKSPACE_HOST = "127.0.0.1"') &&
+    workspaceServerSource.includes("address.address !== REVIEW_ONLY_WORKSPACE_HOST") &&
     workspaceListenIndex >= 0 &&
     workspaceExactAddressIndex > workspaceListenIndex &&
-    workspaceSessionCreationIndex > workspaceExactAddressIndex &&
     workspaceServerSource.includes('address.family !== "IPv4"') &&
-    workspaceServerSource.includes('code === "EADDRNOTAVAIL" || code === "EINVAL"') &&
-    workspaceServerSource.includes('mode = "review-only"') &&
-    workspaceServerSource.includes('reviewOnlyReason = "fresh-loopback-unavailable"') &&
-    workspaceServerSource.includes("host = REVIEW_ONLY_WORKSPACE_HOST") &&
     workspaceServerSource.includes("if (server.listening) await closeListeningServer(server)") &&
-    !workspaceServerSource.includes('"0.0.0.0"'),
+    !workspaceServerSource.includes('"0.0.0.0"') &&
+    !workspaceServerSource.includes('"::"'),
+  workspaceRandomLocalhostOrigin:
+    workspaceSessionSource.includes("const ORIGIN_NONCE_BYTES = 16") &&
+    workspaceSessionSource.includes("const nonce = Buffer.from(random(ORIGIN_NONCE_BYTES))") &&
+    workspaceSessionSource.includes("nonce.byteLength !== ORIGIN_NONCE_BYTES") &&
+    workspaceSessionSource.includes('nonce.toString("hex")}.localhost') &&
+    workspaceSessionSource.includes("/^[a-f0-9]{32}\\.localhost$/") &&
+    workspaceServerSource.includes("binding.createMutationHostname()") &&
+    workspaceServerSource.includes("!isWorkspaceMutationHostname(originHostname)"),
+  workspaceSessionCreatedOnlyAfterExactBind:
+    workspaceOriginHostnameIndex > workspaceExactAddressIndex &&
+    workspaceSessionCreationIndex > workspaceOriginHostnameIndex &&
+    workspaceServerSource.indexOf(
+      'server.on("request", workspaceRequestListener(options, session))',
+    ) > workspaceSessionCreationIndex &&
+    workspaceSessionSource.includes("const bearer = Buffer.from(random(BEARER_BYTES))") &&
+    workspaceSessionSource.includes(
+      "return new BoundWorkspaceSession(mode, port, hostname, reviewOnlyReason, random)",
+    ),
+  workspaceAllNonReadMethodsRequireMutationAuthority:
+    workspaceServerSource.includes('if (request.method === "GET" || request.method === "HEAD")') &&
+    workspaceServerSource.includes("session.assertOptionalExactOrigin(request)") &&
+    workspaceServerSource.includes("session.assertProtectedMutation(request)"),
+  workspaceNoResolverOrBindFallback:
+    !/(?:node:dns|dns\.lookup|getaddrinfo)/.test(
+      `${workspaceServerSource}\n${workspaceSessionSource}`,
+    ) &&
+    !workspaceServerSource.includes("EADDRNOTAVAIL") &&
+    !workspaceServerSource.includes("fresh-loopback-unavailable") &&
+    (workspaceServerSource.match(/server\.listen\(/g)?.length ?? 0) === 1,
+  workspaceSmokesPreservePublicOriginWithoutResolverInjection:
+    workspaceSmokeSource.includes("agent: false") &&
+    workspaceSmokeSource.includes("hostname: workspace.host") &&
+    workspaceSmokeSource.includes("host: target.host") &&
+    workspaceSmokeSource.includes("origin: workspace.url") &&
+    !workspaceSmokeSource.includes("fetch(") &&
+    browserSmokeSource.includes("agent: false") &&
+    browserSmokeSource.includes("hostname: workspace.host") &&
+    browserSmokeSource.includes("host: target.host") &&
+    browserSmokeSource.includes("origin: workspace.url") &&
+    browserSmokeSource.includes('"Page.navigate", { url: launchUrl }') &&
+    !browserSmokeSource.includes("fetch(") &&
+    !browserSmokeSource.includes("--host-resolver-rules"),
+  browserSmokeFlagsAreTestOnly:
+    browserSmokeSource.includes("const SMOKE_ONLY_CHROMIUM_FLAGS = Object.freeze([") &&
+    browserSmokeSource.includes("Product launches must never inherit this test-only flag set") &&
+    browserSmokeSource.includes("...SMOKE_ONLY_CHROMIUM_FLAGS"),
+  browserSmokeRecordsExactBinaryAndVersion:
+    browserSmokeSource.includes('chromium.cdp.send("Browser.getVersion")') &&
+    browserSmokeSource.includes("executable: selectedChromiumExecutable") &&
+    browserSmokeSource.includes("product: chromiumVersion.product") &&
+    browserSmokeSource.includes("protocolVersion: chromiumVersion.protocolVersion") &&
+    browserSmokeSource.includes("userAgent: chromiumVersion.userAgent"),
   workspaceNoCorsGrant: !workspaceServerSource
     .toLowerCase()
     .includes("access-control-allow-origin"),

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const WORKFLOW_PATH = path.join(".github", "workflows", "native-acceptance.yml");
 const MAX_WORKFLOW_BYTES = 32 * 1024;
-const EXPECTED_WORKFLOW_SHA256 = "aa6d95b7dbba583e0b74f397a096d45642fc65b9c7aa4035478bf1b497213fb7";
+const EXPECTED_WORKFLOW_SHA256 = "ccf034113e087d943e0419607f6e0a8abd42374b7ae6646df9a2f0adf165e541";
 const EXPECTED_NODE_VERSION = "22.23.0";
 const EXPECTED_PNPM_VERSION = "9.15.4";
 
@@ -27,12 +27,20 @@ const EXPECTED_RUN_COMMANDS = Object.freeze([
   'pnpm exec vitest run tests/unit/service-draft.test.ts --testNamePattern="on (darwin|win32)" --reporter=dot',
   'pnpm exec vitest run tests/integration/local-workspace-api.test.ts --testNamePattern="persists project, context preview, draft, plan, and evidence without touching source" --reporter=dot',
   "node scripts/security-check.mjs",
-  "pnpm build",
+  "pnpm build && node scripts/smoke-workspace-browser.mjs",
 ]);
 
 const HOSTS = Object.freeze({
-  darwin: { architecture: "arm64", runner: "macos-15" },
-  win32: { architecture: "x64", runner: "windows-2025" },
+  darwin: {
+    architecture: "arm64",
+    chromiumExecutable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    runner: "macos-15",
+  },
+  win32: {
+    architecture: "x64",
+    chromiumExecutable: String.raw`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+    runner: "windows-2025",
+  },
 });
 
 function fail(message) {
@@ -89,9 +97,17 @@ export function validateNativeAcceptanceWorkflow(source) {
   );
   requireSource(
     source,
-    /^ {10}- label: macOS 15 arm64\n {12}os: macos-15\n {12}platform: darwin\n {12}architecture: arm64\n {10}- label: Windows Server 2025 x64\n {12}os: windows-2025\n {12}platform: win32\n {12}architecture: x64$/m,
+    /^ {10}- label: macOS 15 arm64\n {12}os: macos-15\n {12}platform: darwin\n {12}architecture: arm64\n {12}chromiumExecutable: \/Applications\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome\n {10}- label: Windows Server 2025 x64\n {12}os: windows-2025\n {12}platform: win32\n {12}architecture: x64\n {12}chromiumExecutable: C:\\Program Files\\Google\\Chrome\\Application\\chrome\.exe$/m,
     "native acceptance must retain the exact macOS and Windows host matrix",
   );
+  requireSource(
+    source,
+    /^ {6}ICARUS_CHROMIUM_EXECUTABLE: \$\{\{ matrix\.chromiumExecutable \}\}$/m,
+    "native acceptance must pass the reviewed Chromium executable to the browser smoke",
+  );
+  if (source.includes("--host-resolver-rules")) {
+    fail("native acceptance must not inject browser resolver rules");
+  }
   requireSource(
     source,
     /^ {10}ref: \$\{\{ github\.sha \}\}$/m,
@@ -145,42 +161,54 @@ export async function validateNativeAcceptanceFile(filePath = WORKFLOW_PATH) {
   return validateNativeAcceptanceWorkflow(await readFile(resolved, "utf8"));
 }
 
-export function validateNativeHost(
-  input = {
+export function validateNativeHost(input) {
+  const candidate = input ?? {
     architecture: process.arch,
     configuredArchitecture: process.env.ICARUS_NATIVE_EXPECTED_ARCHITECTURE,
+    configuredChromiumExecutable: process.env.ICARUS_CHROMIUM_EXECUTABLE,
     configuredPlatform: process.env.ICARUS_NATIVE_EXPECTED_PLATFORM,
     nodeVersion: process.versions.node,
     platform: process.platform,
     userAgent: process.env.npm_config_user_agent ?? "",
-  },
-) {
-  const expected = HOSTS[input.platform];
+  };
+  const expected = HOSTS[candidate.platform];
   if (expected === undefined) {
-    fail(`native host execution supports only darwin or win32, received ${input.platform}`);
+    fail(`native host execution supports only darwin or win32, received ${candidate.platform}`);
   }
   if (
-    input.configuredPlatform !== input.platform ||
-    input.configuredArchitecture !== input.architecture
+    candidate.configuredPlatform !== candidate.platform ||
+    candidate.configuredArchitecture !== candidate.architecture
   ) {
     fail(
-      `native host identity mismatch: expected ${input.configuredPlatform}/${input.configuredArchitecture}, received ${input.platform}/${input.architecture}`,
+      `native host identity mismatch: expected ${candidate.configuredPlatform}/${candidate.configuredArchitecture}, received ${candidate.platform}/${candidate.architecture}`,
     );
   }
-  if (expected.architecture !== input.architecture) {
+  if (expected.architecture !== candidate.architecture) {
     fail(
-      `native runner architecture drifted: expected ${expected.architecture}, received ${input.architecture}`,
+      `native runner architecture drifted: expected ${expected.architecture}, received ${candidate.architecture}`,
     );
   }
-  if (input.nodeVersion !== EXPECTED_NODE_VERSION) {
+  if (candidate.configuredChromiumExecutable === undefined) {
+    fail("native Chromium executable was not configured");
+  }
+  if (candidate.configuredChromiumExecutable !== expected.chromiumExecutable) {
     fail(
-      `native Node.js version drifted: expected ${EXPECTED_NODE_VERSION}, received ${input.nodeVersion}`,
+      `native Chromium executable drifted: expected ${expected.chromiumExecutable}, received ${candidate.configuredChromiumExecutable}`,
     );
   }
-  if (!input.userAgent.startsWith(`pnpm/${EXPECTED_PNPM_VERSION} `)) {
+  if (candidate.nodeVersion !== EXPECTED_NODE_VERSION) {
+    fail(
+      `native Node.js version drifted: expected ${EXPECTED_NODE_VERSION}, received ${candidate.nodeVersion}`,
+    );
+  }
+  if (!candidate.userAgent.startsWith(`pnpm/${EXPECTED_PNPM_VERSION} `)) {
     fail(`native pnpm version drifted: expected ${EXPECTED_PNPM_VERSION}`);
   }
-  return { architecture: input.architecture, platform: input.platform, runner: expected.runner };
+  return {
+    architecture: candidate.architecture,
+    platform: candidate.platform,
+    runner: expected.runner,
+  };
 }
 
 async function main() {

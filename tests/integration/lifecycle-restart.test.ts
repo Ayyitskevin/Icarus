@@ -7,7 +7,6 @@ import {
   type StartedWorkspaceServer,
   startWorkspaceServer,
 } from "../../packages/api/src/server.js";
-import { isFreshWorkspaceLoopbackHostname } from "../../packages/api/src/workspace-session.js";
 import { createIcarusRuntime } from "../../packages/core/src/index.js";
 import { IcarusStore } from "../../packages/core/src/store.js";
 import type { RunRecord } from "../../packages/core/src/types.js";
@@ -22,6 +21,7 @@ import {
   runCli,
   startOllamaQueue,
 } from "../support/integration-cli.js";
+import { fetchWorkspace } from "../support/workspace-http.js";
 
 interface PublicRun extends Omit<RunRecord, "context"> {
   readonly context: { readonly sha256: string };
@@ -100,9 +100,9 @@ describe("CLI lifecycle across process restarts", () => {
         0,
       );
       const firstHeaders = workspaceMutationHeaders(first);
-      expect(isFreshWorkspaceLoopbackHostname(first.host)).toBe(true);
-      expect(first.url).toBe(`http://${first.host}:${first.port}`);
-      expect((await fetch(`${first.url}/api/health`)).status).toBe(200);
+      expect(first.host).toBe("127.0.0.1");
+      expect(new URL(first.url).hostname).toMatch(/^[a-f0-9]{32}\.localhost$/);
+      expect((await fetchWorkspace(first, `${first.url}/api/health`)).status).toBe(200);
 
       await first.close();
       first = undefined;
@@ -116,12 +116,12 @@ describe("CLI lifecycle across process restarts", () => {
       const secondHeaders = workspaceMutationHeaders(second);
       expect(second.url).not.toBe(new URL(firstHeaders.origin ?? "").origin);
       expect(second.launchUrl).not.toContain(firstHeaders.authorization?.slice("Bearer ".length));
-      const health = await fetch(`${second.url}/api/health`);
+      const health = await fetchWorkspace(second, `${second.url}/api/health`);
       expect(health.status).toBe(200);
       expect(health.headers.get("content-security-policy")).toContain("worker-src 'none'");
       expect(health.headers.get("content-security-policy")).toContain("manifest-src 'none'");
 
-      const staleBearer = await fetch(`${second.url}/api/projects`, {
+      const staleBearer = await fetchWorkspace(second, `${second.url}/api/projects`, {
         method: "POST",
         headers: {
           ...secondHeaders,
@@ -376,7 +376,10 @@ describe("CLI lifecycle across process restarts", () => {
       0,
     );
     try {
-      const apiResponse = await fetch(`${apiServer.url}/api/runs/${planned.id}`);
+      const apiResponse = await fetchWorkspace(
+        apiServer,
+        `${apiServer.url}/api/runs/${planned.id}`,
+      );
       expect(apiResponse.status).toBe(200);
       const apiRun = (await apiResponse.json()) as Record<string, unknown>;
       expect(apiRun).toMatchObject({
@@ -469,7 +472,10 @@ describe("CLI lifecycle across process restarts", () => {
       expect(serializedApiRun).not.toContain(Buffer.from("Hello, Icarus!\n").toString("base64"));
       expect(serializedApiRun).not.toContain("MALICIOUS-INSTRUCTION-FIXTURE");
 
-      const eventResponse = await fetch(`${apiServer.url}/api/runs/${planned.id}/events?after=0`);
+      const eventResponse = await fetchWorkspace(
+        apiServer,
+        `${apiServer.url}/api/runs/${planned.id}/events?after=0`,
+      );
       expect(eventResponse.status).toBe(200);
       const eventPage = (await eventResponse.json()) as {
         readonly revision: number;

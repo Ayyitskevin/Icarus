@@ -23,13 +23,16 @@ jobs:
             os: macos-15
             platform: darwin
             architecture: arm64
+            chromiumExecutable: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
           - label: Windows Server 2025 x64
             os: windows-2025
             platform: win32
             architecture: x64
+            chromiumExecutable: C:\Program Files\Google\Chrome\Application\chrome.exe
     env:
       ICARUS_NATIVE_EXPECTED_PLATFORM: ${{ matrix.platform }}
       ICARUS_NATIVE_EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
+      ICARUS_CHROMIUM_EXECUTABLE: ${{ matrix.chromiumExecutable }}
     steps:
       - name: Check out the exact dispatched commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,5 +84,5 @@ jobs:
       - name: Run static security assertions
         run: node scripts/security-check.mjs
 
-      - name: Build all packages
-        run: pnpm build
+      - name: Build all packages and run the real browser smoke
+        run: pnpm build && node scripts/smoke-workspace-browser.mjs

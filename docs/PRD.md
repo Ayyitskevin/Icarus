@@ -125,15 +125,20 @@ policy, and the number of changed files is bounded by the project ceiling.
 The first browser path is intentionally narrower than the guarded CLI lifecycle:
 
 1. A Node API persists repository/project records in the existing SQLite state
-   root. Its default ephemeral start binds one CSPRNG-selected canonical
-   `127.<1..254>.<1..254>.<1..254>` address, verifies that exact binding, serves
-   React and `/api` from that fresh numeric-loopback origin, and only then emits
-   an independent 32-byte bearer in the launch fragment. The client removes
-   that fragment before render and retains it only in `sessionStorage`. Every
-   POST requires exact same-origin session headers before a bounded,
-   duplicate-member-rejecting JSON body is read; GETs are tokenless and no
-   CORS access is granted. An explicitly configured stable port or unsupported
-   fresh-loopback bind is `127.0.0.1` GET-only and emits no bearer.
+   root. Under candidate ADR 0040, its default ephemeral start binds and verifies
+   exact IPv4 `127.0.0.1`, then creates a CSPRNG-selected 16-byte lowercase-hex
+   `.localhost` public-origin nonce and an independent 32-byte bearer in the
+   launch fragment. It performs no Node/operating-system lookup, hosts-file edit,
+   or browser resolver injection. The client removes that fragment before render
+   and retains it only in `sessionStorage`. Every non-GET/HEAD request requires
+   exact same-origin session headers before a bounded,
+   duplicate-member-rejecting JSON body is read; GETs and HEADs are tokenless
+   and no CORS access is granted. An explicitly
+   configured `127.0.0.1` port is GET-only and emits no bearer. Mutation support
+   is limited to real-accepted Chromium-family browsers; Safari and every
+   unverified browser use the explicit-port review-only mode. The server cannot
+   detect or automatically downgrade a browser that never resolves the random
+   `.localhost` hostname.
 2. Import records an existing local Git repository but does not modify its
    content, refs, config, index, or worktree metadata.
 3. Context preview is deterministic metadata over one committed tree and target.
@@ -143,10 +148,12 @@ The first browser path is intentionally narrower than the guarded CLI lifecycle:
 4. Submitting a task first persists a `preparing` draft without context, provider
    work, cache creation, worktree creation, or source mutation. Planning is a
    separate request and accepts only an explicitly configured loopback Ollama
-   endpoint. Registration, context preview, draft persistence, and loopback
-   planning support Linux, macOS, and Windows. An atomic SQLite started-operation
-   admission prevents concurrent planning work for the same run on every
-   platform.
+   endpoint. The server and review-only UI support Linux, macOS, and Windows.
+   Mutation-capable registration, context preview, draft persistence, and
+   loopback planning require a supported Chromium-family browser and remain held
+   pending exact-head real Chrome acceptance on macOS and Windows. An atomic
+   SQLite started-operation admission prevents concurrent planning work for the
+   same run on every platform.
 5. The workspace presents the exact internal state and derives only these product
    phases: `draft`, `planned`, `awaiting_approval`, `running`, `completed`,
    `failed`, and `cancelled`. The mapping never turns an approval, recovery, or
@@ -405,8 +412,11 @@ additional tool calls and runtime remain visible.
 - Known credentials and detected spans are redacted with constant markers.
   Non-success provider HTTP response bodies are not surfaced or persisted, and
   transport errors are sanitized before crossing the provider adapter boundary.
-- The HTTP/UI shell, repository import, context preview, draft persistence, and
-  loopback planning support Linux, macOS, and Windows. Planning is read-only
+- The HTTP server and explicit-port review UI support Linux, macOS, and Windows.
+  Candidate mutation-capable repository import, context preview, draft
+  persistence, and loopback planning additionally require a supported
+  Chromium-family browser. Release support remains held until ADR 0040's real
+  Chrome exact-head macOS and Windows composition passes. Planning is read-only
   with respect to the imported checkout, and SQLite atomically admits one
   started operation per run before provider work.
 - Approval and execution are supported only on Linux because they inherit the
@@ -476,7 +486,9 @@ exist in Milestone 1:
 - The workspace API rejects wrong/duplicated Host, Origin, authorization,
   content-type, or action headers; stable-origin POSTs; oversized, malformed,
   duplicate-member mutations; and remote planning endpoints without mutating
-  state.
+  state. Exact-bind/no-lookup tests prove the socket remains `127.0.0.1` while
+  the public origin uses a fresh 16-byte `.localhost` nonce; no injected
+  resolver or hosts-file edit is acceptance evidence.
   Malformed provider URLs and missing repositories return useful
   `INVALID_PROVIDER_URL` and `INVALID_REPOSITORY` errors without persistence.
 - Context preview is deterministic for one commit and target, returns metadata
@@ -486,7 +498,9 @@ exist in Milestone 1:
 - Project import, context preview, draft, and planning leave the source checkout
   content and Git metadata unchanged.
 - A production-asset smoke drives the golden path in real Chromium through a
-  draft reload, planning, and truthful evidence.
+  draft reload, planning, and truthful evidence. Candidate ADR 0040 additionally
+  requires that composition in real Chrome at one exact commit on macOS 15
+  arm64 and Windows Server 2025 x64 before portable mutation is accepted.
 - The HTTP presenter exposes populated, bounded plan, action, file, verification,
   check-output, approval, usage, and timestamp evidence for a completed CLI run
   without exposing private runtime paths.

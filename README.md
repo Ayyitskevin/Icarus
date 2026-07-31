@@ -19,10 +19,12 @@ that later roadmap features already exist.
 
 > **Release status:** Gate 0 is released at exact `main`
 > `802b91e6f6c9b392f56c9ee3660be818a0f74a62` with Linux, macOS, and Windows
-> evidence. The current Gate 1 worktree adds only the portable authenticated
-> browser-mutation session and its client capability state. It is not a Gate 1
-> release: the durable guarded-action ledger and Git landing runtime do not yet
-> exist.
+> evidence. The current Gate 1 worktree carries only a candidate authenticated
+> browser-mutation session and its client capability state. Random numeric
+> `127/8` origins were rejected after native run `30613980911` passed Windows
+> and failed macOS. Candidate ADR 0040 instead requires exact-head real Chrome
+> acceptance on both platforms. It is not a Gate 1 release: that evidence, the
+> durable guarded-action ledger, and the Git landing runtime do not yet exist.
 
 ## Current scope
 
@@ -56,10 +58,14 @@ The first Milestone 3 vertical slice adds a same-origin React workspace and a
 loopback-only local API. It can persist a repository/project, preview a
 deterministic filtered map of the committed tree, save a task as a draft, ask a
 configured loopback Ollama model for a plan, and reopen browser-safe evidence
-after restart. Those portable POSTs now use a fresh authenticated mutation
-session, while the guarded lifecycle remains review-only in the browser: it
-cannot approve a plan, create a worktree, execute checks, mutate the imported
-repository, or claim that unrun work completed.
+after restart. The current Gate 1 candidate binds exact `127.0.0.1` while using
+a fresh 128-bit `.localhost` public origin and an independent authenticated
+mutation session. That mutation path is supported only in real-accepted
+Chromium-family browsers and remains held pending exact-head native Chrome
+evidence. Explicit-port sessions remain bearer-free and review-only for Safari
+and every unverified browser. The guarded lifecycle remains review-only in the
+browser: it cannot approve a plan, create a worktree, execute checks, mutate the
+imported repository, or claim that unrun work completed.
 The workspace reports mutation and planning capability from both the server
 mode and the tab's live session; stable or revoked sessions become visibly
 review-only and disable the corresponding controls.
@@ -157,14 +163,17 @@ multi-agent orchestration, and distributed workers.
 - Git 2.40 or newer
 - a clean local repository with at least one commit for workspace import
 
-The loopback HTTP/UI, repository import, context preview, draft persistence, and
-loopback planning path support Linux, macOS, and Windows and require no homelab,
-cloud service, account, telemetry, or global install. Planning is read-only with
-respect to the imported checkout and uses an atomic SQLite operation admission
-record to reject concurrent provider work. Approval and execution remain
-Linux-only: they use the Milestone 1 kernel lease through util-linux `flock` at
-`/usr/bin/flock`, and execution additionally requires Docker with seccomp
-support and a locally present digest-pinned check image.
+The loopback server and explicit-port review UI support Linux, macOS, and
+Windows and require no homelab, cloud service, account, telemetry, or global
+install. Candidate browser registration, context preview, draft persistence,
+and loopback planning mutations additionally require a supported
+Chromium-family browser; release support remains held until real Chrome passes
+the exact-head macOS and Windows composition in ADR 0040. Planning is read-only
+with respect to the imported checkout and uses an atomic SQLite operation
+admission record to reject concurrent provider work. Approval and execution
+remain Linux-only: they use the Milestone 1 kernel lease through util-linux
+`flock` at `/usr/bin/flock`, and execution additionally requires Docker with
+seccomp support and a locally present digest-pinned check image.
 
 ## Quick start
 
@@ -193,23 +202,30 @@ $env:ICARUS_HOME = Join-Path $HOME ".icarus-state"
 pnpm workspace:start
 ```
 
-Open the exact one-time launch URL printed by the process. The default server
-binds one fresh CSPRNG-selected numeric address inside IPv4 `127/8`, creates
-its fragment-only mutation bearer only after verifying that exact binding,
-removes the fragment before render, validates every POST's exact session
-headers, and never enables cross-origin access. Importing and previewing a
-repository reads its committed Git objects;
+Open the exact one-time launch URL printed by the process only in a supported
+Chromium-family browser. The default server binds exact IPv4 `127.0.0.1` on an
+ephemeral port and, after verifying that bind, creates a CSPRNG-selected
+16-byte lowercase-hex `.localhost` public origin plus an independent
+fragment-only mutation bearer. It performs no Node/operating-system lookup,
+hosts-file edit, or browser resolver injection. The client removes the
+fragment before render, every non-GET/HEAD request requires the exact session
+headers, and no cross-origin access is enabled. This remains a candidate boundary until ADR
+0040's real Chrome native gate passes. Importing and previewing a repository
+reads its committed Git objects;
 it does not copy, edit, check, commit, or push the source. Planning is available
-on Linux, macOS, and Windows only when the chosen model is served by loopback
-Ollama. Until an endpoint and model are entered, the workspace clearly reports
-provider and execution capabilities as `unconfigured`. Saving a configured
-draft contacts no provider; the separate plan action does. Approval and
-execution continue through the Linux CLI only.
+through the candidate mutation session only when the chosen model is served by
+loopback Ollama. Until an endpoint and model are entered, the workspace clearly
+reports provider and execution capabilities as `unconfigured`. Saving a
+configured draft contacts no provider; the separate plan action does. Approval
+and execution continue through the Linux CLI only.
 
 For presentation-only Vite development, start a stable GET-only API with
 `ICARUS_PORT=8787 pnpm workspace:start`, then run `pnpm workspace:ui` in a
-second terminal. That stable origin intentionally cannot submit forms; use the
-printed production launch URL or the real-browser smoke for mutation testing.
+second terminal. Use this explicit-port `127.0.0.1` mode for Safari, Firefox,
+embedded webviews, and every unverified/default browser. It emits no bearer and
+intentionally cannot submit forms; the server cannot detect an unsupported
+browser or automatically downgrade a random `.localhost` navigation that never
+reaches it.
 
 The existing CLI golden path begins with:
 
@@ -239,7 +255,9 @@ and must not be used for Icarus state.
 Set `ICARUS_CHROMIUM_EXECUTABLE` to an explicit local Chromium binary, then
 `pnpm smoke:workspace:browser` builds the production assets and drives the
 project → context → draft → browser reload → plan → evidence path in real
-headless Chromium.
+headless Chromium without a resolver override. Candidate release acceptance
+additionally requires the same composition in real Chrome at one exact commit
+on macOS 15 arm64 and Windows Server 2025 x64.
 Focused integration tests also cover restart before planning, useful errors for
 malformed provider URLs and missing repositories, and populated HTTP evidence
 for an already completed CLI run.

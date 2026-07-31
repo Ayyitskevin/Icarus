@@ -11,7 +11,6 @@ import {
   startWorkspaceServer as startWorkspaceServerImplementation,
   type WorkspaceServerOptions,
 } from "../../packages/api/src/server.js";
-import { isFreshWorkspaceLoopbackHostname } from "../../packages/api/src/workspace-session.js";
 import {
   createIcarusRuntime,
   DEFAULT_CEILING,
@@ -27,9 +26,11 @@ import {
   repositoryFingerprint,
   startOllamaQueue,
 } from "../support/integration-cli.js";
+import { fetchWorkspace as fetchWorkspaceDirect } from "../support/workspace-http.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 const mutationHeadersByOrigin = new Map<string, Readonly<Record<string, string>>>();
+const workspaceServersByOrigin = new Map<string, StartedWorkspaceServer>();
 
 interface TestDatabase {
   prepare(sql: string): {
@@ -51,6 +52,7 @@ afterEach(async () => {
     await cleanup();
   }
   mutationHeadersByOrigin.clear();
+  workspaceServersByOrigin.clear();
 });
 
 async function responseJson(response: Response): Promise<Record<string, unknown>> {
@@ -81,10 +83,22 @@ async function startWorkspaceServer(
   port: number,
 ): Promise<StartedWorkspaceServer> {
   const server = await startWorkspaceServerImplementation(options, port);
+  workspaceServersByOrigin.set(server.url, server);
   if (server.mode === "mutation-capable") {
     mutationHeadersByOrigin.set(server.url, workspaceMutationHeaders(server));
   }
   return server;
+}
+
+async function fetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  if (!(input instanceof Request)) {
+    const url = new URL(input);
+    const workspace = workspaceServersByOrigin.get(url.origin);
+    if (workspace !== undefined) {
+      return fetchWorkspaceDirect(workspace, url, init);
+    }
+  }
+  return globalThis.fetch(input, init);
 }
 
 async function postJson(url: string, value: unknown): Promise<Response> {
@@ -187,10 +201,22 @@ async function rawRequest(
   readonly headers: http.IncomingHttpHeaders;
   readonly body: string;
 }> {
+  const target = new URL(url);
+  const workspace = workspaceServersByOrigin.get(target.origin);
+  const configuredHeaders = options.headers;
+  const headers = Array.isArray(configuredHeaders)
+    ? configuredHeaders.some((value, index) => index % 2 === 0 && value.toLowerCase() === "host")
+      ? configuredHeaders
+      : ["Host", target.host, ...configuredHeaders]
+    : { host: target.host, ...configuredHeaders };
   return new Promise((resolve, reject) => {
-    const request = http.request(url, {
+    const request = http.request({
+      hostname: workspace?.host ?? target.hostname,
+      port: target.port,
+      path: `${target.pathname}${target.search}`,
       method: options.method ?? "GET",
-      headers: options.headers,
+      headers,
+      agent: false,
     });
     const chunks: Buffer[] = [];
     request.on("response", (response) => {
@@ -249,12 +275,17 @@ describe("loopback local workspace API", () => {
       runtime = undefined;
     });
 
-    expect(isFreshWorkspaceLoopbackHostname(server.host)).toBe(true);
+    const mutationHostname = new URL(server.url).hostname;
+    expect(server.host).toBe("127.0.0.1");
+    expect(mutationHostname).toMatch(/^[a-f0-9]{32}\.localhost$/);
     expect(server.mode).toBe("mutation-capable");
-    expect(server.url).toBe(`http://${server.host}:${server.port}`);
+    expect(server.url).toBe(`http://${mutationHostname}:${server.port}`);
     expect(server.launchUrl).toMatch(
       new RegExp(
-        `^http://${server.host.replaceAll(".", "\\.")}:${server.port}/#icarus-action-session=[A-Za-z0-9_-]{43}$`,
+        `^http://${mutationHostname.replaceAll(
+          ".",
+          "\\.",
+        )}:${server.port}/#icarus-action-session=[A-Za-z0-9_-]{43}$`,
       ),
     );
     expect(server.server.address()).toMatchObject({ address: server.host });
@@ -826,7 +857,10 @@ describe("loopback local workspace API", () => {
       });
     }
     const forbiddenPut = await fetch(`${server.url}/api/runs`, { method: "PUT" });
-    expect(forbiddenPut.status).toBe(404);
+    expect(forbiddenPut.status).toBe(401);
+    expect(await responseJson(forbiddenPut)).toMatchObject({
+      error: { code: "ACTION_SESSION_REQUIRED" },
+    });
 
     const afterInitialReads = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
     expect(persistenceSnapshot(afterInitialReads)).toEqual(persistenceBefore);
@@ -1904,7 +1938,13 @@ describe("loopback local workspace API", () => {
     );
     cleanups.push(server.close);
 
-    const request = http.get(`${server.url}/api/projects/project-id/repository-status`);
+    const request = http.get({
+      hostname: server.host,
+      port: server.port,
+      path: "/api/projects/project-id/repository-status",
+      headers: { host: new URL(server.url).host },
+      agent: false,
+    });
     request.on("error", () => undefined);
     const propagatedSignal = await signalReceived;
     expect(propagatedSignal.aborted).toBe(false);
@@ -1960,7 +2000,8 @@ describe("loopback local workspace API", () => {
         "access-control-request-headers": "authorization,x-icarus-action",
       },
     });
-    expect(preflight.status).toBe(404);
+    expect(preflight.status).toBe(401);
+    expect(preflight.body).toContain("ACTION_SESSION_REQUIRED");
     expect(preflight.headers["access-control-allow-origin"]).toBeUndefined();
     expect(preflight.headers["access-control-allow-methods"]).toBeUndefined();
     expect(preflight.headers["access-control-allow-headers"]).toBeUndefined();
@@ -2252,18 +2293,16 @@ describe("loopback local workspace API", () => {
     expect(runtime.service.listRuns()).toEqual([]);
 
     const reviewOnlyPort = server.port;
+    await expect(
+      startWorkspaceServer({ runtime, stateRoot: fixture.stateRoot, workspaceDist }, server.port),
+    ).rejects.toMatchObject({ code: "EADDRINUSE" });
+
+    await server.close();
     const reviewOnly = await startWorkspaceServer(
       { runtime, stateRoot: fixture.stateRoot, workspaceDist },
       reviewOnlyPort,
     );
     cleanups.push(reviewOnly.close);
-    await expect(
-      startWorkspaceServer(
-        { runtime, stateRoot: fixture.stateRoot, workspaceDist },
-        reviewOnlyPort,
-      ),
-    ).rejects.toMatchObject({ code: "EADDRINUSE" });
-    await server.close();
     expect(reviewOnly).toMatchObject({
       mode: "review-only",
       url: `http://127.0.0.1:${reviewOnlyPort}`,
@@ -2277,14 +2316,17 @@ describe("loopback local workspace API", () => {
         planning: { status: "review_only" },
       },
     });
-    const persistenceBeforeReviewOnlyPost = persistenceSnapshot(database);
-    const reviewOnlyPost = await rawRequest(`${reviewOnly.url}/api/future-mutation`, {
-      method: "POST",
-      body: "{",
-    });
-    expect(reviewOnlyPost.status).toBe(403);
-    expect(reviewOnlyPost.body).toContain("WORKSPACE_REVIEW_ONLY");
-    expect(reviewOnlyPost.headers["access-control-allow-origin"]).toBeUndefined();
-    expect(persistenceSnapshot(database)).toEqual(persistenceBeforeReviewOnlyPost);
+    const persistenceBeforeReviewOnlyMethods = persistenceSnapshot(database);
+    for (const method of ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+      const refusal = await rawRequest(`${reviewOnly.url}/api/future-mutation`, {
+        method,
+        headers: mutationHeaders,
+        body: "{",
+      });
+      expect(refusal.status).toBe(403);
+      expect(refusal.body).toContain("WORKSPACE_REVIEW_ONLY");
+      expect(refusal.headers["access-control-allow-origin"]).toBeUndefined();
+    }
+    expect(persistenceSnapshot(database)).toEqual(persistenceBeforeReviewOnlyMethods);
   });
 });

@@ -9,16 +9,10 @@ import { startWorkspaceServer } from "../packages/api/dist/server.js";
 import { createIcarusRuntime } from "../packages/core/dist/index.js";
 
 const SANDBOX_IMAGE = `python:3.12-slim@sha256:${"c".repeat(64)}`;
+const WORKSPACE_BIND_HOST = "127.0.0.1";
 
-function isFreshLoopbackHost(hostname) {
-  const octets = hostname.split(".");
-  return (
-    octets.length === 4 &&
-    octets[0] === "127" &&
-    octets
-      .slice(1)
-      .every((octet) => /^(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])$/.test(octet))
-  );
+function isWorkspaceMutationHostname(hostname) {
+  return /^[a-f0-9]{32}\.localhost$/.test(hostname);
 }
 
 function git(cwd, args) {
@@ -67,8 +61,64 @@ function workspaceMutationHeaders(workspace) {
   };
 }
 
+/**
+ * Node must not resolve the public .localhost name. Connect to the server's
+ * attested numeric bind address while exercising its exact public Host and
+ * Origin contract; the browser smoke separately proves real browser routing.
+ */
+async function workspaceRequest(workspace, url, init = {}) {
+  const target = new URL(url);
+  if (
+    workspace.host !== WORKSPACE_BIND_HOST ||
+    target.protocol !== "http:" ||
+    target.origin !== workspace.url
+  ) {
+    throw new Error("Workspace smoke request escaped its exact local public origin");
+  }
+  const headers = {
+    ...init.headers,
+    host: target.host,
+    origin: workspace.url,
+  };
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        agent: false,
+        hostname: workspace.host,
+        port: workspace.port,
+        method: init.method ?? "GET",
+        path: `${target.pathname}${target.search}`,
+        headers,
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.once("error", reject);
+        response.once("end", () => {
+          const responseHeaders = new Headers();
+          for (let index = 0; index < response.rawHeaders.length; index += 2) {
+            responseHeaders.append(
+              response.rawHeaders[index] ?? "",
+              response.rawHeaders[index + 1] ?? "",
+            );
+          }
+          resolve(
+            new Response(Buffer.concat(chunks), {
+              status: response.statusCode ?? 500,
+              statusText: response.statusMessage,
+              headers: responseHeaders,
+            }),
+          );
+        });
+      },
+    );
+    request.once("error", reject);
+    request.end(init.body);
+  });
+}
+
 async function post(workspace, url, value) {
-  const response = await fetch(url, {
+  const response = await workspaceRequest(workspace, url, {
     method: "POST",
     headers: workspaceMutationHeaders(workspace),
     body: JSON.stringify(value),
@@ -205,8 +255,7 @@ try {
     Array.isArray(foreground.startup) ||
     JSON.stringify(Object.keys(foreground.startup).sort()) !==
       JSON.stringify(["binding", "stateRoot", "url"]) ||
-    typeof foreground.startup.binding !== "string" ||
-    !isFreshLoopbackHost(foreground.startup.binding) ||
+    foreground.startup.binding !== WORKSPACE_BIND_HOST ||
     foreground.startup.stateRoot !== path.join(root, "foreground-state") ||
     typeof foreground.startup.url !== "string" ||
     foreground.stderr !== ""
@@ -218,7 +267,8 @@ try {
     /^#icarus-action-session=([A-Za-z0-9_-]{43})$/.exec(startupUrl.hash)?.[1] ?? null;
   if (
     startupToken === null ||
-    startupUrl.hostname !== foreground.startup.binding ||
+    !isWorkspaceMutationHostname(startupUrl.hostname) ||
+    startupUrl.hostname === foreground.startup.binding ||
     foreground.stdout.trim() !== JSON.stringify(foreground.startup) ||
     JSON.stringify({
       binding: foreground.startup.binding,
@@ -252,13 +302,17 @@ try {
     },
     0,
   );
+  const workspacePublicUrl = new URL(workspace.url);
   if (
-    !isFreshLoopbackHost(workspace.host) ||
-    workspace.url !== `http://${workspace.host}:${workspace.port}`
+    workspace.host !== WORKSPACE_BIND_HOST ||
+    workspacePublicUrl.protocol !== "http:" ||
+    !isWorkspaceMutationHostname(workspacePublicUrl.hostname) ||
+    workspacePublicUrl.port !== String(workspace.port)
   ) {
-    throw new Error("Workspace did not use an exact fresh numeric-loopback origin");
+    throw new Error("Workspace did not separate its fixed bind from a random .localhost origin");
   }
   const firstLaunchUrl = workspace.launchUrl;
+  const firstPublicHostname = workspacePublicUrl.hostname;
   const project = await post(workspace, `${workspace.url}/api/projects`, {
     repository: { name: "smoke-repository", path: repository },
     project: {
@@ -296,7 +350,8 @@ try {
   if (draft.state !== "preparing" || draft.phase !== "draft" || provider.requests() !== 0) {
     throw new Error("Draft was not persisted before provider work");
   }
-  const provenanceResponse = await fetch(
+  const provenanceResponse = await workspaceRequest(
+    workspace,
     `${workspace.url}/api/runs/${draft.id}/verification-attempts?snapshot=${String(draft.eventCursor)}`,
   );
   const provenance = await provenanceResponse.json();
@@ -321,10 +376,13 @@ try {
     { runtime, stateRoot, workspaceDist: path.resolve("packages/workspace/dist") },
     0,
   );
-  if (workspace.launchUrl === firstLaunchUrl) {
+  if (
+    workspace.launchUrl === firstLaunchUrl ||
+    new URL(workspace.url).hostname === firstPublicHostname
+  ) {
     throw new Error("Workspace action origin and bearer did not rotate after restart");
   }
-  const draftResponse = await fetch(`${workspace.url}/api/runs/${draft.id}`);
+  const draftResponse = await workspaceRequest(workspace, `${workspace.url}/api/runs/${draft.id}`);
   const persistedDraft = await draftResponse.json();
   if (
     !draftResponse.ok ||
@@ -352,12 +410,15 @@ try {
     { runtime, stateRoot, workspaceDist: path.resolve("packages/workspace/dist") },
     0,
   );
-  const persistedResponse = await fetch(`${workspace.url}/api/runs/${draft.id}`);
+  const persistedResponse = await workspaceRequest(
+    workspace,
+    `${workspace.url}/api/runs/${draft.id}`,
+  );
   const persisted = await persistedResponse.json();
   if (!persistedResponse.ok || persisted.state !== "awaiting_approval") {
     throw new Error("Persisted run was not recovered after restart");
   }
-  const indexResponse = await fetch(workspace.url);
+  const indexResponse = await workspaceRequest(workspace, workspace.url);
   const indexHtml = await indexResponse.text();
   if (
     !indexResponse.ok ||
@@ -377,7 +438,7 @@ try {
     throw new Error("Production workspace entry did not reference its compiled module asset");
   }
   for (const assetPath of assetPaths) {
-    const assetResponse = await fetch(`${workspace.url}${assetPath}`);
+    const assetResponse = await workspaceRequest(workspace, `${workspace.url}${assetPath}`);
     const contentType = assetResponse.headers.get("content-type") ?? "";
     const expectedType = assetPath.endsWith(".js")
       ? "text/javascript"
@@ -403,6 +464,7 @@ try {
     `${JSON.stringify(
       {
         binding: workspace.host,
+        origin: workspace.url,
         projectId: project.id,
         contextDigest: preview.digest,
         runId: draft.id,

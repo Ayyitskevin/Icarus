@@ -1,6 +1,6 @@
 # ADR 0029: Browser approval authority
 
-- Status: Accepted — ADR 0039 proposes a numeric mutation-origin replacement
+- Status: Accepted — origin portability is held by candidate ADR 0040
 - Date: 2026-07-31
 - Depends on: [ADR 0014](0014-loopback-api-react-workspace.md),
   [ADR 0022](0022-native-macos-windows-acceptance.md),
@@ -9,12 +9,21 @@
 - Extends: ADR 0014's loopback workspace and supersedes only its
   review-only-browser restriction
 - Related: [ADR 0019](0019-bounded-approval-provenance.md),
-  [ADR 0027](0027-git-landing-authority.md), and
-  [ADR 0036](0036-proof-carrying-software-factory-product-direction.md)
+  [ADR 0027](0027-git-landing-authority.md),
+  [ADR 0036](0036-proof-carrying-software-factory-product-direction.md), and
+  rejected [ADR 0039](0039-portable-numeric-loopback-origins.md)
 - Proposed partial supersession:
-  candidate [ADR 0039](0039-portable-numeric-loopback-origins.md) would replace
-  only this record's `.localhost` origin, operating-system lookup proof, fixed
-  mutation binding, and corresponding origin-acceptance clauses upon acceptance
+  candidate [ADR 0040](0040-chromium-resolved-localhost-origins.md) would
+  replace only this record's operating-system lookup proof, arbitrary-browser
+  portability claim, and corresponding origin-acceptance clauses upon
+  acceptance
+
+ADR 0039's random numeric `127/8` alternative was rejected after exact-head
+native run
+[30613980911](https://github.com/Ayyitskevin/Icarus/actions/runs/30613980911)
+passed on Windows Server 2025 x64 and failed on macOS 15 arm64. ADR 0040 is not
+yet accepted. Until it is, this record remains the authority contract and its
+portable mutation claim remains held rather than released.
 
 ## Context
 
@@ -139,6 +148,14 @@ attacker-controlled startup code that reads the new fragment. The CSP adds
 `worker-src 'none'; manifest-src 'none'`; the workspace registers no service
 worker, shared worker, or background sync. Stable-origin browser mutation
 authority requires a future superseding design.
+
+Candidate ADR 0040 retains the 16-byte `.localhost` origin nonce and exact
+`127.0.0.1` socket bind but removes this Node/operating-system lookup proof. It
+would support mutation only in real-accepted Chromium-family browsers using
+their built-in reserved-name handling, with no resolver injection. Safari and
+other unverified browsers would use an operator-selected explicit-port,
+bearer-free review-only session; the server cannot infer browser support or
+automatically downgrade a navigation that never reaches it.
 
 ### Protected HTTP requests
 
@@ -672,7 +689,9 @@ tree:
    `.localhost` hostname and ephemeral port, stable/plain origins reject every
    protected POST, failed/empty/IPv6-only/alternate-loopback/non-loopback
    resolution downgrades to a bearer-free review-only origin, the workspace
-   has no service-worker registration, and CSP forbids workers;
+   has no service-worker registration, and CSP forbids workers; candidate ADR
+   0040 would replace the resolver cases with exact-bind/no-lookup assertions
+   and real Chrome native composition upon acceptance;
 9. ledger tests proving same ID/same identity tuple reconciliation, same
    ID/different tuple conflict, the separate non-cancel/cancel uniqueness
    rules, exact DDL and validator truth table, parent/run/domain-anchor

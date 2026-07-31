@@ -37,6 +37,37 @@ const ALTERNATE_ARCHIVED_RUN_TASK = "Archived browser run 021";
 const APPROVAL_HTML_SENTINEL = '<img data-approval-injection="true"> Recorded digest:';
 const DIFF_HTML_SENTINEL = '<img data-diff-injection="true" src=x onerror=alert(1)>';
 const ACTION_SESSION_STORAGE_KEY = "icarus.action-session";
+const WORKSPACE_BIND_HOST = "127.0.0.1";
+
+// These process-wide relaxations exist only inside the disposable compiled-browser
+// smoke profile. Product launches must never inherit this test-only flag set.
+const SMOKE_ONLY_CHROMIUM_FLAGS = Object.freeze([
+  "--headless=new",
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-gpu",
+  "--disable-dev-shm-usage",
+  "--disable-background-networking",
+  "--disable-breakpad",
+  "--disable-client-side-phishing-detection",
+  "--disable-component-extensions-with-background-pages",
+  "--disable-component-update",
+  "--disable-default-apps",
+  "--disable-domain-reliability",
+  "--disable-extensions",
+  "--disable-features=AutofillServerCommunication,MediaRouter,OptimizationHints",
+  "--disable-sync",
+  "--metrics-recording-only",
+  "--no-default-browser-check",
+  "--no-first-run",
+  "--no-proxy-server",
+  "--password-store=basic",
+  "--safebrowsing-disable-auto-update",
+  "--use-mock-keychain",
+  "--remote-allow-origins=*",
+  "--remote-debugging-address=127.0.0.1",
+  "--remote-debugging-port=0",
+]);
 
 const Database = createRequire(new URL("../packages/core/package.json", import.meta.url))(
   "better-sqlite3",
@@ -71,6 +102,60 @@ function actionSessionFromLaunchUrl(launchUrl) {
     throw new Error("The mutation-capable workspace launch URL is missing its canonical session");
   }
   return match[1];
+}
+
+/**
+ * Direct Node-side fixture reads to the numeric bind address. The public URL
+ * remains authoritative in Host and Origin, while browser navigation below
+ * resolves the random .localhost hostname without resolver injection.
+ */
+async function directWorkspaceRequest(workspace, url) {
+  const target = new URL(url);
+  if (
+    workspace.host !== WORKSPACE_BIND_HOST ||
+    target.protocol !== "http:" ||
+    target.origin !== workspace.url
+  ) {
+    throw new Error("Browser smoke fixture request escaped its exact local public origin");
+  }
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        agent: false,
+        hostname: workspace.host,
+        port: workspace.port,
+        method: "GET",
+        path: `${target.pathname}${target.search}`,
+        headers: {
+          host: target.host,
+          origin: workspace.url,
+        },
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.once("error", reject);
+        response.once("end", () => {
+          const responseHeaders = new Headers();
+          for (let index = 0; index < response.rawHeaders.length; index += 2) {
+            responseHeaders.append(
+              response.rawHeaders[index] ?? "",
+              response.rawHeaders[index + 1] ?? "",
+            );
+          }
+          resolve(
+            new Response(Buffer.concat(chunks), {
+              status: response.statusCode ?? 500,
+              statusText: response.statusMessage,
+              headers: responseHeaders,
+            }),
+          );
+        });
+      },
+    );
+    request.once("error", reject);
+    request.end();
+  });
 }
 
 async function waitForObserved(predicate, description, timeoutMs = UI_TIMEOUT_MS) {
@@ -584,35 +669,7 @@ async function startChromium(executable, profile) {
   const stderr = { value: "" };
   const child = spawn(
     executable,
-    [
-      "--headless=new",
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-gpu",
-      "--disable-dev-shm-usage",
-      "--disable-background-networking",
-      "--disable-breakpad",
-      "--disable-client-side-phishing-detection",
-      "--disable-component-extensions-with-background-pages",
-      "--disable-component-update",
-      "--disable-default-apps",
-      "--disable-domain-reliability",
-      "--disable-extensions",
-      "--disable-features=AutofillServerCommunication,MediaRouter,OptimizationHints",
-      "--disable-sync",
-      "--metrics-recording-only",
-      "--no-default-browser-check",
-      "--no-first-run",
-      "--no-proxy-server",
-      "--password-store=basic",
-      "--safebrowsing-disable-auto-update",
-      "--use-mock-keychain",
-      "--remote-allow-origins=*",
-      "--remote-debugging-address=127.0.0.1",
-      "--remote-debugging-port=0",
-      `--user-data-dir=${profile}`,
-      "about:blank",
-    ],
+    [...SMOKE_ONLY_CHROMIUM_FLAGS, `--user-data-dir=${profile}`, "about:blank"],
     { shell: false, stdio: ["ignore", "ignore", "pipe"] },
   );
   let spawnError;
@@ -1933,6 +1990,7 @@ const chromiumExecutable = process.env.ICARUS_CHROMIUM_EXECUTABLE;
 if (chromiumExecutable === undefined || chromiumExecutable.trim().length === 0) {
   throw new Error("ICARUS_CHROMIUM_EXECUTABLE must name an explicit local Chromium executable");
 }
+const selectedChromiumExecutable = path.resolve(chromiumExecutable);
 
 const root = await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-browser-smoke-"));
 let runtime;
@@ -1976,7 +2034,17 @@ try {
     },
     0,
   );
-  chromium = await startChromium(path.resolve(chromiumExecutable), profile);
+  assert.equal(workspace.host, WORKSPACE_BIND_HOST);
+  assert.match(new URL(workspace.url).hostname, /^[a-f0-9]{32}\.localhost$/);
+  chromium = await startChromium(selectedChromiumExecutable, profile);
+  const chromiumVersion = await chromium.cdp.send("Browser.getVersion");
+  for (const field of ["product", "protocolVersion", "userAgent"]) {
+    assert.equal(
+      typeof chromiumVersion[field] === "string" && chromiumVersion[field].length > 0,
+      true,
+      `Chromium Browser.getVersion omitted ${field}`,
+    );
+  }
   const browserPage = await createBrowserPage(chromium, workspace.url, workspace.launchUrl);
   const {
     page,
@@ -2003,14 +2071,14 @@ try {
       hostname: window.location.hostname,
       origin: window.location.origin,
     })),
-    { hostname: workspace.host, origin: workspace.url },
+    { hostname: new URL(workspace.url).hostname, origin: workspace.url },
   );
   assert.equal(
     networkRequests
       .filter((request) => typeof request.url === "string" && /^https?:/.test(request.url))
       .every((request) => new URL(request.url).origin === workspace.url),
     true,
-    "initial browser requests must retain the exact numeric-loopback origin",
+    "initial browser requests must retain the exact random .localhost origin",
   );
   assert.equal(await page.capability("Provider"), "unconfigured");
   assert.equal(await page.capability("Execution"), "unconfigured");
@@ -2234,12 +2302,16 @@ try {
   );
 
   const projectPageFixture = insertProjectPageFixtures(stateRoot);
-  const projectPageFirstResponse = await fetch(`${workspace.url}/api/projects`);
+  const projectPageFirstResponse = await directWorkspaceRequest(
+    workspace,
+    `${workspace.url}/api/projects`,
+  );
   assert.equal(projectPageFirstResponse.status, 200);
   const projectPageFirst = await projectPageFirstResponse.json();
   assert.equal(projectPageFirst.snapshot, projectPageFixture.snapshot);
   assert.equal(projectPageFirst.projects.length, PROJECT_PAGE_SIZE);
-  const projectPageSecondResponse = await fetch(
+  const projectPageSecondResponse = await directWorkspaceRequest(
+    workspace,
     workspace.url +
       "/api/projects?before=" +
       String(projectPageFirst.nextBefore) +
@@ -2620,12 +2692,16 @@ try {
     runSummaryFixture.validArchivedRunId,
   );
 
-  const runSummaryFirstResponse = await fetch(`${workspace.url}/api/runs`);
+  const runSummaryFirstResponse = await directWorkspaceRequest(
+    workspace,
+    `${workspace.url}/api/runs`,
+  );
   assert.equal(runSummaryFirstResponse.status, 200);
   const runSummaryFirstPage = await runSummaryFirstResponse.json();
   assert.equal(runSummaryFirstPage.snapshot, runSummaryFixture.snapshot);
   assert.equal(runSummaryFirstPage.runs.length, RUN_SUMMARY_PAGE_SIZE);
-  const runSummarySecondResponse = await fetch(
+  const runSummarySecondResponse = await directWorkspaceRequest(
+    workspace,
     workspace.url +
       "/api/runs?before=" +
       String(runSummaryFirstPage.nextBefore) +
@@ -2634,7 +2710,8 @@ try {
   );
   assert.equal(runSummarySecondResponse.status, 200);
   const runSummarySecondPage = await runSummarySecondResponse.json();
-  const delayedRunDetailResponse = await fetch(
+  const delayedRunDetailResponse = await directWorkspaceRequest(
+    workspace,
     `${workspace.url}/api/runs/${encodeURIComponent(runSummaryFixture.validArchivedRunId)}`,
   );
   assert.equal(delayedRunDetailResponse.status, 200);
@@ -3230,7 +3307,8 @@ try {
     0,
     "verification provenance must remain lazy until the operator opens it",
   );
-  const directVerificationResponse = await fetch(
+  const directVerificationResponse = await directWorkspaceRequest(
+    workspace,
     `${workspace.url}${verificationRequestPath}?snapshot=${HISTORICAL_EVENT_HIGH_WATER}`,
   );
   assert.equal(directVerificationResponse.status, 200);
@@ -4907,14 +4985,14 @@ try {
       .filter((request) => typeof request.url === "string" && /^https?:/.test(request.url))
       .every((request) => new URL(request.url).origin === workspace.url),
     true,
-    "mutation browser requests must retain the exact numeric-loopback origin",
+    "mutation browser requests must retain the exact random .localhost origin",
   );
   assert.equal(
     reviewBrowserPage.networkRequests
       .filter((request) => typeof request.url === "string" && /^https?:/.test(request.url))
       .every((request) => new URL(request.url).origin === reviewWorkspace.url),
     true,
-    "review browser requests must retain the exact stable-loopback origin",
+    "review browser requests must retain the exact stable numeric-loopback origin",
   );
 
   const projects = runtime.service.listProjects();
@@ -4931,7 +5009,13 @@ try {
     `${JSON.stringify(
       {
         binding: workspace.host,
-        browser: path.basename(chromiumExecutable),
+        origin: workspace.url,
+        browser: {
+          executable: selectedChromiumExecutable,
+          product: chromiumVersion.product,
+          protocolVersion: chromiumVersion.protocolVersion,
+          userAgent: chromiumVersion.userAgent,
+        },
         initialProvider: "unconfigured",
         initialExecution: "unconfigured",
         validationErrors: ["invalid_check_argv", "missing_context_target", "invalid_provider_url"],
