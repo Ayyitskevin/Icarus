@@ -143,10 +143,10 @@ function insertRunSummaryFixtures(stateRoot, browserRunId) {
   );
   const corruptHeavyColumns = database.prepare(
     `UPDATE runs
-     SET provider_json = ?, base_commit = ?, context_json = ?, context_artifact_path = ?,
+     SET base_commit = ?, context_json = ?, context_artifact_path = ?,
          context_sha256 = ?, plan_json = ?, plan_sha256 = ?, edit_json = ?, cache_path = ?,
          worktree_path = ?, baseline_base64 = ?, approved_base64 = ?, diff = ?,
-         verification_json = ?, error_code = ?, error_message = ?
+         error_message = ?
      WHERE id = ?`,
   );
   try {
@@ -159,8 +159,10 @@ function insertRunSummaryFixtures(stateRoot, browserRunId) {
         assert.equal(result.changes, 1, `fixture run ${index} must clone the valid source run`);
         if (task !== VALID_ARCHIVED_RUN_TASK && task !== ALTERNATE_ARCHIVED_RUN_TASK) {
           const privateValue = `${RUN_SUMMARY_PRIVATE_SENTINEL}:${index}`;
+          // Poison only the heavy columns no browser route may decode. Provider
+          // identity, verification outcome, and error code remain projectable
+          // because the Change Room index legitimately reads only those three.
           const corruptResult = corruptHeavyColumns.run(
-            `${privateValue}:provider`,
             `${privateValue}:base`,
             `${privateValue}:context`,
             `${privateValue}:context-path`,
@@ -173,8 +175,6 @@ function insertRunSummaryFixtures(stateRoot, browserRunId) {
             `${privateValue}:baseline`,
             `${privateValue}:approved`,
             `${privateValue}:diff`,
-            `${privateValue}:verification`,
-            `${privateValue}:error-code`,
             `${privateValue}:error-message`,
             id,
           );
@@ -2069,7 +2069,7 @@ try {
     () => {
       const buttons = Array.from(document.querySelectorAll("button"));
       const older = buttons.find((button) => button.textContent?.trim() === "Older runs");
-      const refresh = document.querySelector(".app-header > button");
+      const refresh = document.querySelector(".app-header__actions > button");
       return older?.disabled === true && refresh?.disabled === true;
     },
     [],
@@ -3614,6 +3614,79 @@ try {
     verificationReadErrors.map(({ status }) => status),
     [503, 409],
   );
+
+  // Change Room evidence: bounded index, eleven-card projection, deterministic
+  // explain packet with receipts, and GET-only read paths.
+  await page.clickButton("Change Rooms");
+  await page.clickButton("Load change rooms");
+  await page.waitFor(
+    (taskText) => document.body.innerText.includes(taskText),
+    [TASK],
+    "the Change Room index to list the selected run",
+  );
+  const openedRoom = await page.call(() => {
+    const section = document.querySelector('section[aria-labelledby="change-rooms-heading"]');
+    const button = Array.from(section?.querySelectorAll("button") ?? []).find((candidate) =>
+      (candidate.getAttribute("aria-label") ?? "").startsWith("Open change room for"),
+    );
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+    button.click();
+    return true;
+  });
+  assert.equal(openedRoom, true, "Could not open the Change Room detail");
+  await page.clickButton("Load change room evidence");
+  await page.waitFor(
+    () => document.body.innerText.includes("Loaded at event revision"),
+    [],
+    "the pinned Change Room event revision",
+  );
+  const roomText = await page.bodyText();
+  for (const expected of [
+    "Task and approved scope",
+    "Pinned base and context egress",
+    "Provider plan (untrusted proposal)",
+    "Plan approval",
+    "PatchSet and diff evidence",
+    "Registered verification checks",
+    "Verification outcomes",
+    "Review decision",
+    "Checkpoint",
+    "Rollback and restoration",
+    "Run state and terminal outcome",
+    "untrusted proposal",
+    "byte binding",
+    "Explain this change",
+  ]) {
+    assert.equal(roomText.includes(expected), true, `Change Room detail is missing ${expected}`);
+  }
+  await page.clickButton("Why is it blocked?");
+  await page.waitFor(
+    () => document.body.innerText.includes("receipt: card plan approval"),
+    [],
+    "the deterministic answer receipts",
+  );
+  const answerText = await page.bodyText();
+  assert.equal(answerText.includes("plan approval"), true);
+  assert.equal(answerText.includes("No model is involved"), true);
+  const changeRoomRequests = networkRequests.filter((request) => request.url?.includes("/change-"));
+  const changeRoomResponses = networkResponses.filter((response) =>
+    response.url?.includes("/change-"),
+  );
+  assert.ok(changeRoomRequests.length >= 3);
+  for (const request of changeRoomRequests) {
+    assert.equal(request.method, "GET", "Change Room reads must stay GET-only");
+  }
+  for (const response of changeRoomResponses) {
+    assert.equal(response.status, 200);
+  }
+  const changeRoomEvidence = {
+    indexLoaded: true,
+    cards: 11,
+    pinnedRevisionVisible: true,
+    explainReceipts: true,
+    requests: changeRoomRequests.length,
+  };
+
   assert.deepEqual(blockedExternalRequests, []);
   assert.deepEqual(browserErrors, []);
   assert.equal((await page.bodyText()).includes(HISTORICAL_EVENT_SENTINEL), false);
@@ -3656,6 +3729,7 @@ try {
         },
         boundedVerificationProvenance: boundedVerificationEvidence,
         boundedRunPageNavigation: boundedRunPageEvidence,
+        changeRoomEvidence,
         historicalEventNavigation: {
           pinnedRevision: historySnapshot,
           firstPageRange: firstHistoryRange,
