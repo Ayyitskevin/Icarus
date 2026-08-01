@@ -65,7 +65,7 @@ describe("real Docker containment", () => {
         runId,
         worktreePath: fixture.repository,
         baseCommit: (await git(fixture.repository, ["rev-parse", "HEAD"])).trim(),
-        target: "src/greeting.txt",
+        targets: ["src/greeting.txt"],
         checks: [{ id: "containment", name: "Containment", argv: ["python", "-c", probe] }],
         sandbox: {
           image: PYTHON_IMAGE,

@@ -3,19 +3,27 @@
 ## Supported operating mode
 
 Milestone 1 guarded execution runs on one Linux host as one OS user and only
-against local repositories explicitly registered by absolute path. The optional
-workspace is a foreground process fixed to `127.0.0.1`; it does not install a
-daemon, accept remote traffic, depend on fleet/homelab/cloud services, or touch
-production systems.
+against local repositories explicitly registered by absolute path. The
+optional workspace is a foreground process bound to exact IPv4 `127.0.0.1`; it
+does not install a daemon, accept remote traffic, depend on
+fleet/homelab/cloud services, or touch production systems.
 
-The HTTP/UI shell, repository import, context preview, draft persistence, and
-loopback planning support Linux, macOS, and Windows using platform-neutral
-Node/browser primitives. Planning creates no private worktree and executes no
-project code. SQLite atomically admits one started operation per run before
-bounded context/provider work and rejects a concurrent planner. Approval and
-execution remain Linux-only because they require the stronger kernel lease
-through `/usr/bin/flock` and `/proc`; execution checks also require a local
-Docker daemon.
+The HTTP server and explicit-port review UI support Linux, macOS, and Windows
+using platform-neutral Node/browser primitives. Mutation-capable
+repository import, context preview, draft persistence, and loopback planning
+are limited to a supported Chromium-family browser. ADR 0040's implementation
+and exact-head technical evidence are complete at
+`eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI `30618041483` and
+native real-Chrome run `30618043377`; explicit human acceptance of the interim
+operator-controlled browser/resolver/proxy residual risk was recorded on
+2026-07-31. Remaining Gate 1 runtime slices still gate release, and this
+acceptance does not change that gate. No live migration, merge, deployment, or
+public release was authorized or performed as part of it. Planning creates no
+private worktree and executes no project code. SQLite atomically admits one
+started operation per run before bounded context/provider work and rejects a
+concurrent planner. Approval and execution remain Linux-only because they
+require the stronger kernel lease through `/usr/bin/flock` and `/proc`;
+execution checks also require a local Docker daemon.
 
 Default state layout:
 
@@ -62,11 +70,54 @@ $env:ICARUS_HOME = Join-Path $HOME ".icarus-state"
 pnpm workspace:start
 ```
 
-The process prints JSON containing its exact URL, fixed binding, and state root.
-The default is `http://127.0.0.1:8787`; `ICARUS_PORT` may select another explicit
-local port. Binding or port conflicts fail closed without address/port fallback.
-Stop the foreground process with `SIGINT` or `SIGTERM`; projects and drafts are
-rediscovered from SQLite on restart.
+The process prints JSON containing its one-time launch URL, exact socket
+binding, and state root. With `ICARUS_PORT` unset, the server binds exact
+`127.0.0.1` on an operating-system-chosen ephemeral port and verifies that IPv4
+address before creating a CSPRNG-selected 16-byte lowercase-hex `.localhost`
+public origin and an independent mutation-session bearer:
+
+```text
+socket bind:   127.0.0.1:<ephemeral-port>
+public origin: http://<32-lowercase-hex-origin-nonce>.localhost:<ephemeral-port>/
+```
+
+Open the fragment-bearing URL exactly as emitted in a supported
+Chromium-family browser and do not copy it into logs. Icarus performs no
+Node/operating-system lookup, hosts-file edit, or browser resolver injection;
+the browser's built-in reserved-name handling must navigate the public origin.
+The client removes the fragment before render and retains the bearer only in
+that origin's `sessionStorage`. Its implementation and native evidence are
+complete, and explicit human acceptance of the interim
+browser/resolver/proxy risk was recorded on 2026-07-31. This accepted operating
+contract does not attest the browser process and does not make Gate 1
+release-complete.
+
+Setting `ICARUS_PORT` to an explicit integer from 1 through 65535 instead starts
+`http://127.0.0.1:<port>` in stable review-only mode: it emits no bearer and
+rejects every POST. An explicit `ICARUS_PORT=0`, invalid value, binding
+conflict, or port conflict fails closed without fallback. Stop the foreground
+process with `SIGINT` or `SIGTERM`; projects and drafts are rediscovered from
+SQLite on restart, but mutation authority requires the newly emitted launch
+URL.
+
+Use that explicit-port review-only mode for Safari, Firefox until separately
+accepted, embedded webviews, and every unverified/default browser. The server
+does not trust `User-Agent`, cannot determine which browser will open a printed
+URL, and cannot automatically downgrade a random `.localhost` navigation that
+never reaches it. Failure to bind exact `127.0.0.1` remains fatal.
+
+The first `SIGINT` or `SIGTERM` closes request admission, drains every HTTP
+handler registered before that boundary, waits for response settlement, and
+then closes residual sockets and SQLite. A second signal keeps the operating
+system's default hard-termination behavior as the manual escape hatch. Icarus
+does not automatically retry an interrupted POST. If a hard termination occurs
+during project registration, draft creation, or planning, restart, reload
+authoritative state, and inspect the resulting project/run before deciding
+whether to submit another action. Guarded approval/execution routes remain
+absent. Their local ADR 0029 ledger foundation refuses orphaned prepared rows
+under the Linux run lease, but admitted-row terminal reconciliation and the
+browser recovery projection are still required before those effects are
+enabled.
 
 The browser golden path is:
 
@@ -92,16 +143,26 @@ The browser golden path is:
 
 With `ICARUS_CHROMIUM_EXECUTABLE` set to an explicit local Chromium binary,
 `pnpm smoke:workspace:browser` drives this path through the compiled application
-in real headless Chromium, reloads before planning, and verifies the source
-fingerprint remains unchanged.
+in real headless Chromium. It proves fragment removal before render,
+session-scoped reload, tokenless GETs, authenticated POSTs, stale/malformed
+revocation, stable review-only suppression, token non-disclosure, and an
+unchanged source fingerprint without a resolver override. That exact-origin
+composition passed at implementation commit
+`eb01b6406c12126c60add7ac83800f8eba8ffdc9` in native run `30618043377`: both
+macOS 15 arm64 and Windows Server 2025 x64 used
+`Chrome/150.0.7871.187` with CDP `1.3` at the pinned Google Chrome paths. A
+Node HTTP client, resolver injection, hosts-file edit, review-only run, or
+mocked browser is not substitute evidence.
 
-Treat the loopback server as same-user local authority. It has no authentication
-because it is not a remote service: do not reverse-proxy it, bind it to a LAN or
-Tailscale address, publish it through a tunnel, or weaken Host/Origin checks. The
-server accepts bounded JSON mutations, serves UI/API from one origin, and grants
-no CORS permission. API presenters omit raw context/source blobs and private
-cache/worktree/artifact paths; explicitly stored diff/check output stays bounded
-and redacted.
+Treat the loopback server and launch URL as same-user local authority. The
+per-start bearer authenticates POST transport but is not a remote-service or
+hostile-local-user security boundary: do not reverse-proxy it, bind it to a LAN
+or Tailscale address, publish it through a tunnel, paste the launch URL into
+shared logs, or weaken Host/Origin checks. Every non-GET/HEAD request requires
+the exact session transport before its bounded strict-JSON body is read; GETs
+and HEADs carry no bearer, and no CORS permission is granted. API presenters omit raw
+context/source blobs and private cache/worktree/artifact paths; explicitly
+stored diff/check output stays bounded and redacted.
 
 The browser accepts loopback Ollama planning only. It has no cloud-provider key
 entry, provider fallback, arbitrary shell, account, telemetry, commit, push,
@@ -146,15 +207,71 @@ Event pages advance strictly after an exclusive sequence cursor and use one
 fixed service-owned maximum. Operators see only sequence, type, a
 host-controlled label, timestamp, and a fixed host-generated `evidenceSection`;
 event payloads are unavailable through this route. Separately, each full run
-response reads its run row, approvals, and the 200 most recent timeline metadata
-rows from one coherent SQLite snapshot. The append-only sequence high-water mark
-is the event cursor and total; CLI history remains complete. When an action's
-prerequisite falls before the bounded tail and the retained suffix cannot
-re-establish it, the browser reports `unknown` and points the operator to CLI
-history instead of guessing. Live links target only fixed Icarus-generated
-evidence anchors, not repository, provider, event, or check text. Only event
-history has the fixed bound; existing approval lists and workspace-wide run
-enumeration remain unpaginated local reads.
+response reads its run row, the newest 12 validated approvals, and the 200 most
+recent timeline metadata rows from one coherent SQLite snapshot. Approval
+coverage and the append-only event high-water mark make both suffixes explicit;
+CLI history remains complete. When an earlier prerequisite falls outside a
+retained suffix, the browser reports truncation or `unknown` and points the
+operator to CLI history instead of guessing. Live links target only fixed
+Icarus-generated evidence anchors, not repository, provider, event, or check
+text. Approval response size is bounded, and a history-sized scan is forbidden:
+`approvals_by_run` must appear in
+`EXPLAIN QUERY PLAN`. Before the first candidate build opens an existing state
+database, take a timestamped backup and explicitly approve the additive index
+build; tests create it only in disposable state. Startup first opens existing
+state read-only, validates the exact index shape, and refuses a missing or
+misdefined index before WAL mode or schema setup can mutate the database.
+
+For an existing state root, stop every Icarus process, back up the SQLite
+database together with any `-wal` and `-shm` companions, and verify the backup
+before migration. Then run exactly one normal CLI invocation with
+`ICARUS_APPROVE_SCHEMA_MIGRATION=approval-index-v1`. Without that exact value,
+startup fails with `DATABASE_MIGRATION_REQUIRED`; any other value fails as
+`INVALID_DATABASE_CONFIGURATION`. Remove the variable immediately after the
+index exists. This is an operator gate, not a persistent configuration.
+
+The ADR 0023 patch-set schema uses the same gate with its own exact token,
+`ICARUS_APPROVE_SCHEMA_MIGRATION=patch-set-v2`. It adds two tables and rewrites
+no existing row, so runs recorded under schema v1 keep their single-file edit
+and checkpoint columns and remain readable. Each migration is approved only by
+its own token: a state root needing both runs two separate invocations, one per
+token, each after its own verified backup. Startup inspects the existing
+database read-only and fails with `DATABASE_MIGRATION_REQUIRED` before opening
+it for writing.
+
+The local Gate 1 ledger foundation adds two further one-shot tokens in an exact
+order:
+
+```text
+ICARUS_APPROVE_SCHEMA_MIGRATION=browser-action-ledger-v1
+ICARUS_APPROVE_SCHEMA_MIGRATION=landing-ledger-v1
+```
+
+Use two separate stopped maintenance processes and take a fresh verified backup
+before each. The browser-action token must run first; the landing token refuses
+while that schema is absent. Each invocation exits immediately after applying
+and re-inspecting only its named schema, before normal runtime startup. Reusing
+a token, racing two copies of one token, supplying a combined value, finding a
+partial/lookalike Gate 1 object, using a permissive state/database/marker mode,
+or placing the state root inside a Git checkout fails closed. This repository
+implementation and its temporary-database tests do not authorize or perform a
+live migration.
+
+Gate 1 preflight never opens the source SQLite family. It fingerprints the
+owned regular main, WAL, and SHM files; copies only the main database and WAL
+into a private `0700` temporary directory with `0600` files; lets SQLite rebuild
+SHM there; and verifies the source fingerprints again before and after exact
+schema inspection. An unexpected journal/sibling or any detected race fails
+closed, and the private snapshot is removed in `finally`. This preserves
+committed uncheckpointed WAL truth without creating or changing source
+sidecars. An uncatchable process termination can leave a private,
+mode-restricted temporary snapshot for host cleanup, but cannot turn it into a
+source-family write.
+
+Because the plan approval digest now binds the approved target set, the policy
+version advances. A run already parked in `awaiting_approval` under the previous
+policy cannot be approved after the upgrade and must be replanned; this is
+deliberate, since the approval no longer describes what it would authorize.
 
 The accepted ADR 0016 implementation adds an explicit selected-run
 older-activity panel pinned to the coherent run revision, backed by a direct
@@ -172,11 +289,13 @@ hydrates every run for its bounded sidebar. Use
 `icarus run list [--project NAME]` for complete run listing beyond the browser
 window.
 
-No migration, dependency install, daemon, watcher, Server-Sent Events, or
-WebSocket setup accompanies these read-only slices. They add no browser approval,
-mutation, execution, command, commit, push, or deployment authority. File/status,
-richer diff or payload-bearing history, and action controls remain deferred, and
-the ADR 0010 release hold remains in force.
+Other than the explicitly operator-gated `approval-index-v1` index build above,
+these observation slices add no table/column migration, dependency install,
+daemon, watcher, Server-Sent Events, or WebSocket setup. They add no browser
+approval, mutation, execution, command, commit, push, or deployment authority.
+Current file/status, multi-file or payload-bearing diff/history, and action
+controls remain deferred, and ADR 0025's third-party review and secret-rotation
+release holds remain in force.
 
 ## Fifth M3 verification-attempt view
 
@@ -217,7 +336,70 @@ uses the verification section as a focus fallback when the launcher is disabled.
 
 This implementation adds one GET-only read and inline presentation. It does not
 alter the payload-free event APIs, schema, dependencies, source repository,
-browser action authority, guarded CLI, or ADR 0010 hold.
+browser action authority, guarded CLI, or ADR 0025's residual release holds.
+
+## Seventh M3 persisted diff review
+
+The selected-run page now groups the persisted run state, latest verification
+outcome, recorded changed path, diff size, physical patch lines, additions,
+deletions, hunks, digest, and digest provenance under “Persisted diff review.”
+This is stored evidence only; it is not current repository status.
+
+For an available patch, `displayed text rehash match` means the local API hashed
+the exact displayed string and it matched the recorded verification digest. It
+does not mean Icarus re-read or revalidated the imported checkout or private
+worktree. Review actions still perform their independent CLI revalidation.
+
+The browser shows complete patch text only at or below 256 KiB. If the status is
+`metadata only`, no patch prefix or suffix was returned. Inspect the complete
+persisted evidence with:
+
+```text
+icarus run status <run-id>
+```
+
+`not produced` means no persisted verification diff exists; it does not mean a
+check passed. A sanitized `DATABASE_ERROR` indicates inconsistent persisted
+diff/verification evidence and requires operator investigation rather than a
+browser workaround.
+
+This view reuses the ordinary selected-run read and adds no route, Git/source
+read, mutation, or action. `verification completed` activity navigates to the
+fixed diff section; `checkpoint saved` continues to navigate to verification.
+
+## Bounded project catalog and JSON transport
+
+The workspace loads at most 12 newest projects. Use the explicit Newer/Older
+buttons within the four-page browser window. The membership snapshot does not
+include projects created after the page session opened; Refresh workspace or a
+successful project registration opens a new newest session. Use
+`icarus project list` when complete catalog output is required.
+
+Direct project and repository lookups use the same storage-class and byte
+projections as catalog pages; they do not decode an unrestricted persisted
+configuration first. While a run is visible, paging or refreshing resolves only
+that run's owning project. An unrelated project is never marked active merely
+because it appears on the newly loaded page.
+
+`INVALID_PROJECT_CURSOR` means the pinned session is stale, malformed, or was
+invalidated by unsupported external SQLite deletion/replacement/`VACUUM`; open
+a fresh page rather than editing cursor values. `DATABASE_ERROR` while loading
+a project page means selected persisted identity/configuration failed its
+storage, byte, JSON, or policy checks. Preserve and back up state for operator
+inspection; do not patch the database in place.
+
+Every API JSON body is serialized before headers and may be at most 8 MiB,
+including its newline. `RESPONSE_TOO_LARGE` is a fixed HTTP 500 safety response,
+not permission to raise the limit or return partial evidence. Use the narrower
+CLI listing/status command and investigate which persisted presentation
+exceeded its intended field bound. Trusted error text is capped at 4 KiB and an
+oversized or unserializable failure uses a fixed pre-serialized internal-error
+response, so the response fail-safe cannot recursively exceed its own bound.
+Static assets are not part of this JSON cap.
+
+The first keyboard focus in the workspace is a skip link. Press Enter to move
+focus to the main workspace landmark; selected project and run controls expose
+their current/pressed state without changing browser authority.
 
 ## Change Room observation
 
@@ -229,7 +411,7 @@ derives the run's eleven-card evidence projection in one SQLite read
 transaction. `GET /api/runs/:id/change-context?question=<question>` accepts
 exactly one of the five fixed questions and returns the deterministic,
 model-free answer packet whose statements carry receipts plus explicit omissions
-and uncertainty. A non-GET verb receives 404, an unknown run 404, and an invalid
+and uncertainty. A non-GET verb is refused by the action-session boundary (401 without it, 404 behind it), an unknown run 404, and an invalid
 query contract 422 (`INVALID_REQUEST` or `INVALID_RUN_CURSOR`).
 
 Restarting the process and re-reading returns byte-identical projections, and
@@ -281,13 +463,18 @@ preserve the state and require explicit operator recovery.
   LAN, Tailscale, and public endpoints are remote: they require HTTPS, explicit
   pricing, and exact context-egress approval.
 - OpenAI defaults to `https://api.openai.com/v1`, reads `OPENAI_API_KEY`, and
-  sends `POST /responses` with `store: false`, no tools, and no redirects.
+  sends `POST /responses` with `store: false`, no provider-native tools, and no
+  redirects. Session call batches remain Icarus-owned structured JSON.
   Remote OpenAI credentials are restricted to `api.openai.com:443`.
 - Provider transport exceptions are converted to bounded Icarus errors and
   sanitized with the adapter's known credential before they can reach state or
   CLI output. Non-success HTTP response bodies are not copied into surfaced or
   durable errors.
 - Model identifiers are explicit. Icarus never silently substitutes a model.
+- A non-loopback session turn is a fresh remote provider call and requires the
+  exact approved context egress digest again. The approved readable-manifest
+  digest is the only additional context authority; a prior provider response
+  cannot widen it.
 - The workspace accepts only an explicit loopback Ollama model/base URL. It
   rejects remote, LAN, Tailscale, public, OpenAI, and other cloud endpoints
   before persisting the draft; the broader CLI provider contract is unchanged.
@@ -335,6 +522,61 @@ preserve the state and require explicit operator recovery.
 - `run annotations <run-id>` lists a run's persisted annotations. The browser
   shows the same annotations read-only inside the room projection; no browser
   annotation route exists.
+
+The approved first execution remains a single strict patch-set proposal and
+formal verification. Only a failure enters the ADR 0026 session, and only when
+the approved plan has explicit grants and `iterationCeiling > 0`; zero is a
+single-shot run. The plan JSON and approval digest are the sole durable grant
+source. No session/grant table or migration is introduced.
+
+A session turn admits `provider.revise` before provider I/O and at most eight
+closed tool operations before their grant checks or host actions. Refused,
+failed, interrupted, and cancelled operations remain charged. The registry is
+limited to `read_file`, `list_tree`, `search`, `get_check_catalog`,
+`propose_patch`, `apply_patchset`, `run_checks`, `report_done`, and
+`request_human_input`; it accepts no shell text or provider-defined tool.
+`read_file` may return exact base-manifest bytes or current bytes recorded as
+written by this session, including a created file. `list_tree` and `search`
+enumerate only the approved base manifest.
+
+`propose_patch` only previews and validates the bounded PatchSet supplied to
+that call. It persists no authority, and a later apply never depends on an
+in-memory proposal. `apply_patchset` carries its own exact PatchSet,
+independently repeats grant, path, preimage, secret, and ceiling validation,
+restores the private baseline, persists the exact new patch/checkpoint intent,
+and only then materializes through the guarded file-write path. If apply is
+interrupted after intent persistence, resume reconciles from that persisted
+intent and records `unavailable`, non-approvable verification rather than
+claiming that checks completed.
+`run_checks` must name the complete approved check list in order and records the
+current formal verification. `report_done` rechecks live bytes, changed paths,
+diff, checkpoint, and passing evidence. A bounded secret-scanned human question
+or iteration exhaustion lands `awaiting_review` with a blocker, so ordinary
+review approval refuses it.
+
+Tool-operation finish and any verification/session-terminal event it produces
+commit in one SQLite transaction. `review.validate`, rollback, and restore
+operation finishes commit with their corresponding state transition. A crash
+cannot leave a successful operation detached from its evidence or state.
+
+On resume, unfinished operations are conservatively charged, the private
+checkpoint is reconciled, and only completed session boundaries are rehydrated.
+Cancellation propagates into provider/tool/check work, then follows the existing
+`cancelling` reconciliation, baseline restore, and emergency-recovery path.
+The default and maximum session budget is two turns. Under the default
+40-operation ceiling, two full turns cost 18 operations: local fresh execution
+tops out at `12 + 18 = 30`, remote fresh execution at `13 + 18 = 31` because
+`egress.validate` is metered, and a remote resumed session at
+`13 + 18 + 1 session.reconcile = 32`. At least eight ordinary operations remain
+for atomic review/rollback settlement and bounded retries. A global
+tool-call/runtime/token/cost ceiling still binds first; admission failure lands
+the session exhausted and non-approvable. The ordinary operation and
+active-runtime ceilings must also retain one `session.reconcile` slot plus
+`commandTimeoutMs` at session entry and after every provider or tool admission.
+If that margin is absent, no new operation is admitted and the session
+exhausts against its persisted evidence. Do not raise
+`MAX_SESSION_ITERATIONS` above 2 without re-measuring every path and
+settlement reserve.
 
 Egress, plan, and review requests validate actor, digest, persisted gate, active
 run ownership, and any verification prerequisite under the run lease before
@@ -405,6 +647,13 @@ timeout message, truncation, and redacted stdout/stderr. Empty output is never
 proof; exit status, containment, changed-path, diff, and checkpoint assertions
 are required.
 
+Session observability uses those same operations/events rather than a parallel
+session row. Provider turns, per-capability/control tool calls, completed
+boundaries, human questions, exhaustion, and done outcomes are explicit.
+Only settled, bounded, secret-scanned tool evidence is eligible for a resumed
+prompt; a started/interrupted operation is visible and charged but never
+presented as a successful result.
+
 A check is failed if it timed out or was cancelled, even if it traps termination
 and eventually exits zero. The historical event evidence and the latest run
 snapshot should agree on the current attempt while preserving earlier attempts.
@@ -412,11 +661,17 @@ snapshot should agree on the current attempt while preserving earlier attempts.
 ## Repository automation and release hold
 
 The inherited `.github/workflows/opencode.yml` is outside the local runtime but
-inside the repository's security posture. It was preserved from remote commit
-`0fb3476787573c1285974c2d53cfa28ec2233fc0`; see ADR 0010. Do not change,
-disable, or bless it without Kevin's explicit decision. Do not treat its current
-upstream collaborator check as a repository-owned gate, and do not claim M0/M1
-security completion while the decision remains pending.
+inside the repository's security posture. ADR 0025 resolved ADR 0010 by choosing
+hardening: a repository-owned `authorize` job admits only `OWNER`, `MEMBER`, or
+`COLLABORATOR`, the privileged job depends on it, permissions default to none,
+third-party actions are commit-SHA pinned, untrusted comment fields enter shell
+only through `env:`, and upstream session sharing is disabled. Do not weaken
+that gate or treat a pin as a supply-chain review.
+
+Two release holds remain: review the exact pinned third-party action and rotate
+the named OpenCode secret that was reachable under the former trigger. Branch
+protection is tracked separately. The hardening decision itself is no longer
+pending.
 
 The deterministic release gate pins actionlint v1.7.12 by the official release
 archive SHA-256 plus an independently recorded extracted-executable SHA-256.
@@ -441,8 +696,8 @@ least one regular `.yml` or `.yaml` workflow, validates every such file, and
 requires the exact binary to reject a generated known-invalid workflow. Missing
 or modified tool state therefore fails `pnpm check`. Hosted `ci` bootstraps
 and runs workflow lint before dependency installation; the later release gate
-repeats it. Syntax-checking the inherited OpenCode workflow does not alter or
-satisfy its separate ADR 0010 security hold.
+repeats it. Syntax-checking the inherited OpenCode workflow does not satisfy ADR
+0025's remaining third-party review or secret-rotation work.
 
 Hosted CI is separate evidence. Workflow lint and a local `pnpm check` do not
 prove that GitHub accepted or executed the workflow. For every candidate release,
@@ -459,10 +714,11 @@ gh api "repos/Ayyitskevin/Icarus/commits/$(git rev-parse HEAD)/check-runs"
 
 The durable review evidence is the named test source plus fresh command output;
 do not replace it with a prose claim. `pnpm smoke:workspace:browser` launches
-real headless Chromium; `pnpm smoke:workspace` separately exercises the API and
-production assets across restart. Run these from a clean candidate tree and
-record the observed exit status and counts in
-`docs/PLANS.md`:
+real headless Chromium without resolver injection;
+`pnpm smoke:workspace` separately exercises the API and production assets
+across restart but cannot prove browser-owned `.localhost` resolution. Run
+these from a clean candidate tree and record the observed exit status and
+counts in `docs/PLANS.md`:
 
 ```text
 pnpm workflow:setup
@@ -487,15 +743,15 @@ credentials, raw secret-bearing output, or private repository content.
 
 ## Upgrade policy
 
-Schema version 2 is additive and forward-only. Its only change is the
-`run_annotations` table, created by the store's existing idempotent
-`CREATE TABLE IF NOT EXISTS` block, so an existing version-1 database gains the
-table on first open with no change to any existing table or index and no
-backfill. The store reads `user_version` and raises it to 2 only when it is
-lower; a database from a newer version fails closed with
-`UNSUPPORTED_DATABASE_VERSION`. A version-1 binary can still open a version-2
-database — it ignores the unknown table — but resets the marker to 1; the next
-version-2 open raises it again. That marker drift is accepted and documented: it
-loses no data and blocks no recovery. Back up before upgrades. Any further
+The `run_annotations` table (ADR 0041) is additive and forward-only. Fresh
+databases always contain it. A database that already has `runs` but lacks the
+table follows the same operator-gated migration contract as the earlier
+additive ledgers: back up `icarus.sqlite3` and its WAL/SHM companions, then
+open state once with exactly
+`ICARUS_APPROVE_SCHEMA_MIGRATION=run-annotations-v1`. One token approves
+exactly one migration; without it the store refuses to open with
+`DATABASE_MIGRATION_REQUIRED` before writing anything, and a table whose shape
+does not match fails closed as `DATABASE_ERROR`. There is no backfill and no
+change to any existing table or index. Back up before upgrades. Any further
 schema change still needs an ADR, migration tests, and explicit operator
 approval before existing state is opened by new code.

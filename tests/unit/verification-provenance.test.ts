@@ -164,7 +164,7 @@ function seedProjection(
     id: UNIT_RUN_ID,
     projectId,
     task: "Inspect bounded verification provenance",
-    target: UNIT_PLAN.target,
+    targets: UNIT_PLAN.targets,
     provider: UNIT_PROVIDER,
   });
 

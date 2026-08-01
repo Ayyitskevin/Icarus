@@ -83,7 +83,7 @@ const TASK_SCOPE_BODY_KEYS = ["task", "target", "projectId", "projectName", "bas
 const BASE_CONTEXT_BODY_KEYS = [
   "baseCommit",
   "contextSha256",
-  "target",
+  "targets",
   "totalBytes",
   "auditPolicyVersion",
   "repositoryMap",
@@ -94,11 +94,22 @@ const CONTEXT_ENTRY_KEYS = ["path", "reason", "bytes", "sha256"];
 const EGRESS_KEYS = ["state", "approval"];
 const EGRESS_APPROVAL_KEYS = ["actor", "digest", "createdAt"];
 const PROVIDER_PLAN_BODY_KEYS = ["provider", "trustLabel", "plan", "planSha256"];
-const PLAN_KEYS = ["summary", "steps", "risks", "target", "checkIds"];
+const PLAN_KEYS = [
+  "summary",
+  "steps",
+  "risks",
+  "target",
+  "targets",
+  "iterationCeiling",
+  "checkIds",
+  "grants",
+];
+const GRANT_KEYS = ["kind", "scope", "maxCalls"];
 const PLAN_APPROVAL_BODY_KEYS = ["approval"];
 const APPROVAL_KEYS = ["actor", "decision", "digest", "createdAt"];
 const PATCHSET_BODY_KEYS = [
-  "action",
+  "patchSet",
+  "patchSetEditsTruncated",
   "actionStatus",
   "diffSha256",
   "diffBytes",
@@ -106,7 +117,21 @@ const PATCHSET_BODY_KEYS = [
   "changedPaths",
   "note",
 ];
-const PATCHSET_ACTION_KEYS = ["path", "expectedPreimageSha256", "rationale"];
+const PATCHSET_SUMMARY_KEYS = ["summary", "edits"];
+const PATCHSET_EDIT_KEYS = [
+  "op",
+  "path",
+  "rationale",
+  "expectedPreimageSha256",
+  "replacementCount",
+];
+const PATCHSET_EDIT_OPS = new Set(["modify", "create", "delete"]);
+const CAPABILITY_KINDS = new Set([
+  "read.manifest",
+  "read.checks",
+  "mutation.patchset",
+  "exec.check",
+]);
 const REGISTERED_CHECKS_BODY_KEYS = ["checks", "sandbox"];
 const REGISTERED_CHECK_KEYS = ["id", "name", "argv"];
 const SANDBOX_KEYS = ["image", "cpus", "memoryMb", "pids", "tmpfsMb"];
@@ -204,7 +229,11 @@ const EXPLAIN_TEXT_MAX_BYTES = 2 * 1024;
 
 const CONTEXT_ENTRY_LIMIT = 4096;
 const CHECK_LIMIT = 64;
-const CHANGED_PATH_LIMIT = 8;
+const CHANGED_PATH_LIMIT = 64;
+const TARGETS_LIMIT = 64;
+const PATCHSET_EDIT_DISPLAY_LIMIT = 32;
+const GRANT_LIMIT = 16;
+const GRANT_SCOPE_LIMIT = 64;
 const RECORD_LIMIT = 64;
 const CARD_REFS_LIMIT = 256;
 const EXPLAIN_LIST_LIMIT = 32;
@@ -616,7 +645,7 @@ function validateBaseContextBody(value: unknown): void {
       (typeof value.baseCommit === "string" && COMMIT_PATTERN.test(value.baseCommit))
     ) ||
     !isNullableDigest(value.contextSha256) ||
-    !isNullableBoundedText(value.target, TARGET_MAX_BYTES) ||
+    !isBoundedStringArray(value.targets, TARGETS_LIMIT, TARGET_MAX_BYTES) ||
     !(value.totalBytes === null || isNonnegativeSafeInteger(value.totalBytes)) ||
     !isNullableBoundedText(value.auditPolicyVersion, AUDIT_POLICY_MAX_BYTES) ||
     !isBoundedStringArray(value.repositoryMap, CONTEXT_ENTRY_LIMIT, TARGET_MAX_BYTES) ||
@@ -658,7 +687,7 @@ function validateBaseContextBody(value: unknown): void {
   }
   if (value.contextSha256 === null) {
     if (
-      value.target !== null ||
+      value.targets.length !== 0 ||
       value.totalBytes !== null ||
       value.auditPolicyVersion !== null ||
       value.repositoryMap.length !== 0 ||
@@ -666,11 +695,7 @@ function validateBaseContextBody(value: unknown): void {
     ) {
       throw new Error("The unpinned base and context card body was inconsistent.");
     }
-  } else if (
-    value.target === null ||
-    value.totalBytes === null ||
-    value.auditPolicyVersion === null
-  ) {
+  } else if (value.totalBytes === null || value.auditPolicyVersion === null) {
     throw new Error("The pinned base and context card body was inconsistent.");
   }
 }
@@ -703,12 +728,29 @@ function validateProviderPlanBody(value: unknown): void {
     value.plan.risks.length > 6 ||
     !value.plan.risks.every((risk: unknown) => isBoundedText(risk, PLAN_ITEM_MAX_BYTES)) ||
     !isBoundedText(value.plan.target, TARGET_MAX_BYTES) ||
+    !isBoundedStringArray(value.plan.targets, TARGETS_LIMIT, TARGET_MAX_BYTES) ||
+    value.plan.targets.length < 1 ||
+    !value.plan.targets.includes(value.plan.target) ||
+    !isNonnegativeSafeInteger(value.plan.iterationCeiling) ||
     !Array.isArray(value.plan.checkIds) ||
     value.plan.checkIds.length < 1 ||
     value.plan.checkIds.length > 8 ||
-    !value.plan.checkIds.every((checkId: unknown) => isBoundedText(checkId, CHECK_ID_MAX_BYTES))
+    !value.plan.checkIds.every((checkId: unknown) => isBoundedText(checkId, CHECK_ID_MAX_BYTES)) ||
+    !Array.isArray(value.plan.grants) ||
+    value.plan.grants.length > GRANT_LIMIT
   ) {
     throw new Error("The provider plan proposal was invalid.");
+  }
+  for (const grant of value.plan.grants) {
+    if (
+      !isExactRecord(grant, GRANT_KEYS) ||
+      typeof grant.kind !== "string" ||
+      !CAPABILITY_KINDS.has(grant.kind) ||
+      !isBoundedStringArray(grant.scope, GRANT_SCOPE_LIMIT, TARGET_MAX_BYTES) ||
+      !isNonnegativeSafeInteger(grant.maxCalls)
+    ) {
+      throw new Error("The provider plan capability grant was invalid.");
+    }
   }
 }
 
@@ -727,8 +769,11 @@ function validatePatchsetBody(value: unknown): void {
   ) {
     throw new Error("The patchset card body metadata was invalid.");
   }
-  if (value.action === null) {
-    if (value.actionStatus !== "not_recorded") {
+  if (typeof value.patchSetEditsTruncated !== "boolean") {
+    throw new Error("The patchset truncation flag was invalid.");
+  }
+  if (value.patchSet === null) {
+    if (value.actionStatus !== "not_recorded" || value.patchSetEditsTruncated) {
       throw new Error("The unrecorded patchset action status was inconsistent.");
     }
   } else {
@@ -736,12 +781,31 @@ function validatePatchsetBody(value: unknown): void {
       throw new Error("The recorded patchset action status was inconsistent.");
     }
     if (
-      !isExactRecord(value.action, PATCHSET_ACTION_KEYS) ||
-      !isBoundedText(value.action.path, TARGET_MAX_BYTES) ||
-      !isDigest(value.action.expectedPreimageSha256) ||
-      !isBoundedText(value.action.rationale, RATIONALE_MAX_BYTES)
+      !isExactRecord(value.patchSet, PATCHSET_SUMMARY_KEYS) ||
+      !isBoundedText(value.patchSet.summary, PLAN_SUMMARY_MAX_BYTES) ||
+      !Array.isArray(value.patchSet.edits) ||
+      value.patchSet.edits.length < 1 ||
+      value.patchSet.edits.length > PATCHSET_EDIT_DISPLAY_LIMIT ||
+      (value.patchSetEditsTruncated && value.patchSet.edits.length !== PATCHSET_EDIT_DISPLAY_LIMIT)
     ) {
-      throw new Error("The patchset action was invalid.");
+      throw new Error("The patchset summary was invalid.");
+    }
+    for (const edit of value.patchSet.edits) {
+      if (
+        !isExactRecord(edit, PATCHSET_EDIT_KEYS) ||
+        typeof edit.op !== "string" ||
+        !PATCHSET_EDIT_OPS.has(edit.op) ||
+        !isBoundedText(edit.path, TARGET_MAX_BYTES) ||
+        !isBoundedText(edit.rationale, RATIONALE_MAX_BYTES) ||
+        (edit.op === "create"
+          ? edit.expectedPreimageSha256 !== null
+          : !isDigest(edit.expectedPreimageSha256)) ||
+        (edit.op === "modify"
+          ? !isNonnegativeSafeInteger(edit.replacementCount)
+          : edit.replacementCount !== null)
+      ) {
+        throw new Error("The patchset edit was invalid.");
+      }
     }
   }
   if (value.diff === null) {

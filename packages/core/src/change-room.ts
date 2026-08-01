@@ -13,6 +13,7 @@ import type {
   CheckOutcomeEntry,
   EventSummaryRecord,
   PatchsetActionStatus,
+  PatchsetEditSummary,
   ProjectRecord,
   RollbackRestorationRecord,
   RunState,
@@ -70,10 +71,13 @@ const ROLLBACK_NOTE =
   "rather than a causal link to one record. CLI history holds the full ordered record.";
 
 const PATCHSET_NOTE =
-  "The edit proposal is untrusted provider output until host validation and the recorded " +
-  "approvals establish the relevant facts. The diff is host-generated, bounded, and " +
-  "redacted evidence from the Icarus-private worktree. Nothing has been committed, " +
-  "pushed, merged, or deployed.";
+  "The PatchSet proposal is untrusted provider output until host validation and the " +
+  "recorded approvals establish the relevant facts. The diff is host-generated, " +
+  "bounded, and redacted evidence from the Icarus-private worktree. Any branch, " +
+  "commit, or draft-PR landing requires a separate recorded landing grant, which " +
+  "this projection does not track.";
+
+const PATCHSET_EDIT_DISPLAY_LIMIT = 32;
 
 function indicators(partial: Partial<ChangeRoomCardIndicators> = {}): ChangeRoomCardIndicators {
   return {
@@ -234,7 +238,7 @@ export function buildChangeRoom(
     body: {
       baseCommit: run.baseCommit.length === 0 ? null : run.baseCommit,
       contextSha256: run.contextSha256.length === 0 ? null : run.contextSha256,
-      target: run.contextSha256.length === 0 ? null : run.context.target,
+      targets: run.contextSha256.length === 0 ? [] : run.context.targets,
       totalBytes: run.contextSha256.length === 0 ? null : run.context.totalBytes,
       auditPolicyVersion: run.contextSha256.length === 0 ? null : run.context.auditPolicyVersion,
       repositoryMap: run.contextSha256.length === 0 ? [] : run.context.repositoryMap,
@@ -320,8 +324,9 @@ export function buildChangeRoom(
     },
   });
 
-  // 5. PatchSet and diff evidence.
-  const status = run.edit === null ? "not_recorded" : actionStatus(snapshot);
+  // 5. PatchSet and diff evidence (ADR 0023 transactional patch sets; legacy
+  // single-file runs read as an equivalent single `modify` edit).
+  const status = run.patchSet === null ? "not_recorded" : actionStatus(snapshot);
   const patchsetRefs = [
     ...eventRefs(events, [
       "edit.intent_recorded",
@@ -334,7 +339,7 @@ export function buildChangeRoom(
       : [{ kind: "digest" as const, label: "diff", sha256: run.verification.diffSha256 }]),
   ];
   const patchsetStatus: ChangeRoomCardStatus =
-    run.edit !== null || run.diff !== null
+    run.patchSet !== null || run.diff !== null
       ? "available"
       : run.state === "preparing" ||
           run.state === "awaiting_egress_approval" ||
@@ -342,6 +347,14 @@ export function buildChangeRoom(
           run.state === "awaiting_approval"
         ? "pending"
         : "unavailable";
+  const patchsetEdits: PatchsetEditSummary[] = (run.patchSet?.edits ?? []).map((edit) => ({
+    op: edit.op,
+    path: edit.path,
+    rationale: edit.rationale,
+    expectedPreimageSha256: edit.op === "create" ? null : edit.expectedPreimageSha256,
+    replacementCount: edit.op === "modify" ? edit.replacements.length : null,
+  }));
+  const patchsetEditsTruncated = patchsetEdits.length > PATCHSET_EDIT_DISPLAY_LIMIT;
   cards.push({
     ...cardBase(
       "patchset",
@@ -349,6 +362,7 @@ export function buildChangeRoom(
       patchsetStatus,
       patchsetRefs,
       indicators({
+        truncated: patchsetEditsTruncated,
         redacted: run.diff !== null,
         unavailableEvidence:
           patchsetStatus === "unavailable" || (truncated && patchsetRefs.length === 0),
@@ -356,14 +370,14 @@ export function buildChangeRoom(
     ),
     kind: "patchset",
     body: {
-      action:
-        run.edit === null
+      patchSet:
+        run.patchSet === null
           ? null
           : {
-              path: run.edit.path,
-              expectedPreimageSha256: run.edit.expectedPreimageSha256,
-              rationale: run.edit.rationale,
+              summary: run.patchSet.summary,
+              edits: patchsetEdits.slice(0, PATCHSET_EDIT_DISPLAY_LIMIT),
             },
+      patchSetEditsTruncated: patchsetEditsTruncated,
       actionStatus: status,
       diffSha256: run.verification?.diffSha256 ?? null,
       diffBytes: run.diff === null ? null : Buffer.byteLength(run.diff, "utf8"),

@@ -1,4 +1,43 @@
 export {
+  assertBrowserActionCancellationParent,
+  assertBrowserActionDescriptorFields,
+  assertBrowserActionIdentity,
+  assertBrowserActionParentShape,
+  assertBrowserActionRunStateEligible,
+  assertBrowserActionSettlement,
+  assertBrowserActionSubject,
+  assertBrowserActionTransition,
+  assertSameBrowserActionIdentity,
+  BROWSER_ACTION_DESCRIPTOR_VERSION,
+  BROWSER_ACTION_EXPECTED_STATES,
+  BROWSER_ACTION_KINDS,
+  BROWSER_ACTION_OUTCOMES,
+  BROWSER_ACTION_STATUSES,
+  type BrowserActionAdmittedRecord,
+  type BrowserActionDescriptorFields,
+  type BrowserActionDescriptorTuple,
+  type BrowserActionIdentity,
+  type BrowserActionIdentityTuple,
+  type BrowserActionKind,
+  type BrowserActionOutcome,
+  type BrowserActionParentSnapshot,
+  type BrowserActionPreparedRecord,
+  type BrowserActionRecord,
+  type BrowserActionSettledRecord,
+  type BrowserActionSettlement,
+  type BrowserActionStatus,
+  browserActionDescriptorDigest,
+  browserActionDescriptorTuple,
+  browserActionIdentityTuple,
+  browserActionRequiresSubject,
+  canTransitionBrowserAction,
+  hasSameBrowserActionIdentity,
+  isBrowserActionKind,
+  isBrowserActionOutcome,
+  isBrowserActionRunStateEligible,
+  isBrowserActionStatus,
+} from "./browser-action-state.js";
+export {
   type ContextPreviewCounts,
   type ContextPreviewEntry,
   createContextPreview,
@@ -13,20 +52,64 @@ export {
 export { buildChangeContext, CHANGE_CONTEXT_QUESTIONS } from "./change-context.js";
 export { IcarusError, invariant } from "./errors.js";
 export {
+  BROWSER_ACTION_LEDGER_MIGRATION,
+  BROWSER_ACTION_LEDGER_SCHEMA,
+  createGate1Schemas,
+  type Gate1MigrationToken,
+  type Gate1SchemaInspection,
+  type Gate1SchemaStatus,
+  inspectGate1Schemas,
+  LANDING_LEDGER_MIGRATION,
+  LANDING_LEDGER_SCHEMA,
+  migrateGate1Schema,
+} from "./gate1-schema.js";
+export {
+  assertOperatorActor,
   checkpointDigest,
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
+  OPERATOR_ACTOR_MAX_BYTES,
   POLICY_VERSION,
   planApprovalDigest,
 } from "./policy.js";
 export { createProviderConfig, parseProviderBaseUrl } from "./provider.js";
+export {
+  type ReadExclusion,
+  type ReadExclusionReason,
+  type ResolvedReadableManifest,
+  resolveReadableManifest,
+} from "./read-manifest.js";
 export {
   assertRegistrationStateSeparation,
   createIcarusRuntime,
   type IcarusRuntime,
 } from "./runtime.js";
 export { IcarusService, type PlanRunInput } from "./service.js";
+export {
+  MAX_TOOL_CALLS_PER_ITERATION,
+  runSessionLoop,
+  type SessionLoopDeps,
+  type SessionOutcome,
+  TOOL_CALL_SCHEMA,
+} from "./session-loop.js";
+export {
+  type ApplyPatchSetOutcome,
+  assertToolCallGranted,
+  executeToolCall,
+  type ProposePatchOutcome,
+  parseToolCall,
+  type RunChecksOutcome,
+  renderToolResult,
+  TOOL_REGISTRY,
+  type ToolCall,
+  type ToolContext,
+  type ToolControl,
+  type ToolDefinition,
+  type ToolName,
+  type ToolResult,
+} from "./tools.js";
 export type {
+  ApprovalCoverage,
   ApprovalRecord,
   BaseContextCardBody,
   ChangeContextComponent,
@@ -90,6 +173,8 @@ export type {
   VerificationAttemptSummary,
   VerificationCheckpointSummary,
   VerificationEvidence,
+  WorkspaceProjectEntry,
+  WorkspaceProjectPage,
   WorkspaceRunPage,
   WorkspaceRunSummary,
 } from "./types.js";

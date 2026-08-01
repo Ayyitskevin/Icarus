@@ -25,7 +25,7 @@ CLI ------------------------\
 React workspace -> HTTP API/                          |-- SQLite run store
                                                      |-- artifact/Git controllers
                                                      |-- deterministic context
-                                                     |-- Ollama/OpenAI adapters
+                                                     |-- Ollama/OpenAI/Anthropic adapters
                                                      `-- Docker check runner
 ```
 
@@ -40,11 +40,44 @@ contract test requires one.
 
 ## Local workspace boundary
 
-The production server binds only to `127.0.0.1` and serves compiled UI assets
-and `/api` from one origin. It rejects non-loopback Host or Origin values,
-accepts only allowlisted methods/routes and bounded JSON mutation bodies, emits
-no CORS permission, and fails rather than choosing a different address or port.
-It is a foreground local process, not a remotely reachable daemon.
+The production server binds exact IPv4 `127.0.0.1` and serves compiled UI
+assets and `/api` from one public origin. Under accepted ADR 0040, an ordinary
+start asks the operating system for an ephemeral port, verifies the exact
+`127.0.0.1` IPv4 binding, then CSPRNG-selects a 16-byte nonce encoded as 32
+lowercase hexadecimal characters. The socket remains
+`127.0.0.1:<ephemeral-port>` while the public origin is
+`http://<nonce>.localhost:<ephemeral-port>/`. The server does not use Node or
+operating-system lookup, a hosts-file edit, or browser resolver injection;
+real-accepted Chromium-family browsers resolve the reserved hostname through
+their own built-in behavior.
+
+Only after the exact bind succeeds does the server create one independent
+fragment-only 32-byte mutation-session bearer. A synchronously bootstrapped
+client stores it only in `sessionStorage` and removes the fragment before
+render. Every non-`GET`/`HEAD` request requires the exact public Host, Origin,
+canonical bearer, JSON content type, and `workspace.mutate` action header before
+body parsing or service work. `GET` and `HEAD` requests remain tokenless. An explicitly configured stable
+port uses `http://127.0.0.1:<port>/`, emits no bearer, and is strictly
+review-only. Bind failures stay loud. The server emits no CORS permission. It
+is a foreground local process, not a remotely reachable daemon.
+
+Mutation support is a browser-family release contract, not a `User-Agent`
+authorization check. Accepted ADR 0040 supports only Chromium-family versions
+covered by real-browser acceptance. Safari and every unverified browser must
+use the explicit-port review-only mode; Icarus cannot automatically downgrade a
+random `.localhost` navigation that never reaches the server. Exact-head real
+Chrome composition passed at implementation commit
+`eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI `30618041483` and
+native run `30618043377` on macOS and Windows. Explicit human acceptance of the
+interim operator-controlled browser/resolver/proxy residual risk was recorded
+on 2026-07-31. That architectural acceptance does not make Gate 1
+release-complete. No live migration, merge, deployment, or public release was
+authorized or performed as part of the acceptance.
+
+The API projects server-side mutation/planning availability separately from
+the client-held session. React combines only those booleans, never the bearer,
+and disables protected controls immediately when the server is stable
+review-only or the tab session is absent, malformed, or rejected as stale.
 
 The first route set can inspect workspace state, register a repository/project,
 preview committed-tree context metadata, persist a task draft, plan that draft
@@ -52,6 +85,17 @@ with loopback Ollama, and read a run. Repository import, preview, draft, and
 planning do not create a private worktree or modify the source checkout. There
 is no HTTP route for approval, edit or check execution, arbitrary commands,
 commit, push, or deployment.
+
+Process shutdown now closes mutation admission synchronously, drains the exact
+set of HTTP handlers registered before that boundary, waits for their response
+settlement, and only then closes residual sockets and the SQLite runtime. The
+local ADR 0029 foundation also creates and exactly inspects the browser-action
+ledger, records prepared/admitted/settled transitions, and refuses orphaned
+prepared rows under the Linux run lease at workspace startup. No guarded
+approval/execution route uses that ledger yet, and admitted-row terminal
+reconciliation plus the bounded browser recovery projection remain required
+before such routes can ship. The drain is therefore a lifecycle guarantee, not
+a claim that an existing unguarded POST is idempotent.
 
 The API presenter allowlists product evidence instead of returning `RunRecord`
 or history rows. It omits raw context/source blobs and private cache, worktree,
@@ -64,11 +108,18 @@ derived phases are `planned`, `awaiting_approval`, `running`, `completed`,
 `failed`, and `cancelled`, while the exact internal state remains visible. An
 approval/recovery state is never flattened into completion.
 
-The HTTP/UI shell, repository import, context preview, draft persistence, and
-loopback planning support Linux, macOS, and Windows with no fleet or cloud
-dependency. Planning creates no private worktree and executes no project code.
-Before each bounded context/provider operation, SQLite atomically admits one
-`started` operation per run; a concurrent planner receives `RUN_BUSY`.
+The HTTP server and explicit-port review shell support Linux, macOS, and Windows
+with no fleet or cloud dependency. Mutation-capable repository import, context
+preview, draft persistence, and loopback planning mutations require a supported
+Chromium-family browser covered by the acceptance record. ADR 0040's exact-head
+native technical gate passed at
+`eb01b6406c12126c60add7ac83800f8eba8ffdc9`, and human acceptance of its interim
+operator-controlled browser/resolver/proxy residual risk was recorded on
+2026-07-31. Remaining Gate 1 runtime slices still gate release. Planning creates
+no private worktree and executes no project code. Before each bounded
+context/provider operation,
+SQLite atomically admits one `started` operation per run; a concurrent planner
+receives `RUN_BUSY`.
 Approval and execution remain Linux-only and use the stronger kernel lease
 through `/usr/bin/flock` and `/proc`; execution checks also require a local
 Docker daemon.
@@ -79,6 +130,27 @@ Authoritative control state lives in one SQLite database under `ICARUS_HOME`
 (default: the platform-local state directory). The database stores projects,
 runs, append-only events, check evidence, provider usage, and checkpoints. It
 does not store credentials or environment snapshots.
+
+Session authority adds no second persistence model. The approved `plan_json`
+and its approval digest are the sole grant source; there is no
+`capability_grants` table. Existing admitted operations plus bounded
+boundary/terminal events are the sole session source; there is no
+`agent_sessions` or `tool_invocations` table. Interrupted operations remain
+charged, while only completed boundary events are eligible for evidence
+rehydration after restart.
+
+Session entry and every provider or tool admission preserve one
+ordinary-operation slot and `commandTimeoutMs` of active runtime for
+`session.reconcile`. A hard-margin refusal admits no effect and lands exhaustion
+from persisted evidence; a started operation is charged conservatively before
+that reserved recovery runs.
+
+Settlement preserves that single source of truth. A tool operation's finish and
+the verification or session-terminal event it produces commit in one SQLite
+transaction. `review.validate`, rollback, and restore operation finishes commit
+with their corresponding state transition. A crash therefore cannot leave a
+settled operation without its boundary or a boundary whose operation still
+appears started.
 
 The run row retains the latest verification for efficient status reads. Every
 completed verification also appends its complete bounded evidence and diff to
@@ -157,6 +229,14 @@ re-enters only a persisted safe stage. Exact writes are replay-safe: a retry may
 accept baseline or identical approved bytes, but unexpected bytes are preserved
 and fail closed.
 
+The ordinary first patch attempt follows `running → verifying`. A failed
+verification may take the dedicated, plan-gated `verifying → running` session
+edge while iterations and all ordinary budgets remain. Inside that session,
+`run_checks` records formal evidence and returns to `running`; only a
+host-validated `report_done` may land an approvable `awaiting_review`. A human
+question or exhaustion also lands `awaiting_review`, but records a blocker that
+review approval must refuse.
+
 ## Guarded CLI golden-path sequence
 
 1. State-root initialization first rejects a location inside any Git checkout,
@@ -175,23 +255,38 @@ and fail closed.
 4. Context persistence atomically lands a non-loopback run at
    `awaiting_egress_approval`; every remote provider call independently checks
    approval of that exact digest before any bytes leave the host.
-5. The provider returns a strict JSON plan. Icarus hashes the full run manifest
-   and stops at `awaiting_approval`.
+5. The provider returns a strict JSON plan with an explicit grant array and
+   iteration ceiling. Icarus resolves any readable scope into an exact
+   base-commit path/digest manifest, hashes the full run manifest, and stops at
+   `awaiting_approval`.
 6. Icarus revalidates source HEAD before recording approval, then copies a private
    Git cache without hardlinks, creates its detached worktree, and captures the
-   approved target preimage.
-7. The provider returns one strict path/hash/find/replace edit. Icarus discards
-   recognizable credential material before persistence, then validates a
-   unique match and atomically applies it. The pre-rename temporary is created
-   in the Icarus-private run directory outside the Git worktree, so a process
-   death cannot strand an extra changed path inside the review surface.
+   approved target preimages.
+7. The provider returns one strict transactional patch set over approved
+   targets. Icarus discards recognizable credential material before persistence,
+   validates every modify/create/delete operation, persists tree intent, and
+   applies the set through private temporaries outside the Git worktree. A
+   partial apply compensates earlier paths and fails closed.
 8. Icarus exports only tracked worktree files to a private snapshot and runs
    exact registered checks in a digest-pinned Docker container with network
    disabled. A timeout or cancellation cannot pass even when the child traps the
    signal and exits zero. Icarus verifies the changed-file set, stores a
    binary-capable Git diff and checkpoint, appends the full bounded verification
-   attempt to history, and stops at `awaiting_review`.
-9. Review approval rereads the live target, changed-path set, diff, source HEAD,
+   attempt to history. Passing evidence stops at `awaiting_review`. Failed
+   evidence enters the approved ADR 0026 session only when
+   `iterationCeiling > 0`; zero remains single-shot.
+9. Each session turn admits `provider.revise` before network I/O and at most
+   eight closed tool operations before grant checks or host actions. Read tools
+   see manifest-pinned base bytes or current session-written bytes;
+   `list_tree`/`search` stay on the enumerated base manifest. `propose_patch` is
+   advisory preview/validation only. `apply_patchset` carries and independently
+   revalidates its own bounded PatchSet, then records exact intent before writes.
+   Interrupted materialization resumes from persisted intent with `unavailable`,
+   non-approvable verification. `run_checks` records a current full-plan
+   verification. `report_done` must revalidate the live checkpoint/diff and
+   passing evidence. Human input or exhaustion records a non-approvable review
+   blocker.
+10. Review approval rereads the live targets, changed-path set, diff, source HEAD,
    and checkpoint binding; it is refused unless those still match passing
    evidence. It then marks the run complete without committing, pushing, or
    deploying. Rejection enters
@@ -269,14 +364,15 @@ or runtime dependency.
    maximum. Each event exposes only sequence, type, a fixed host-controlled label,
    timestamp, and a fixed host-generated `evidenceSection`; `payload_json` is
    neither returned nor used as browser copy.
-4. The full run presenter reads its run row, approvals, and the 200 most recent
-   timeline metadata rows inside one SQLite read transaction/snapshot. It uses
-   the append-only sequence high-water mark as both `eventCursor` and timeline
-   total without decoding or scanning every event payload. Action presentation
-   is derived only from that bounded tail. Event metadata pages are separate
-   requests; their exclusive sequence cursor makes successive pages monotonic
-   and overlap-free. The CLI history path continues to read the complete event
-   history and payloads. If the bounded suffix omits the prerequisite for an
+4. The full run presenter reads its run row, newest 12 validated approvals, and
+   200 most recent timeline metadata rows inside one SQLite read transaction.
+   Approval coverage makes earlier decisions explicit. The append-only sequence
+   high-water mark is both `eventCursor` and timeline total without decoding or
+   scanning every event payload. Action presentation is derived only from that
+   bounded tail. Event metadata pages are separate requests; their exclusive
+   sequence cursor makes successive pages monotonic and overlap-free. CLI
+   history continues to expose complete approval and event history, including
+   event payloads. If the bounded suffix omits the prerequisite for an
    action transition, the browser reports the action status as `unknown` with
    CLI guidance instead of guessing `proposed`, `cancelled`, or `reverted`.
 5. React short-polls only the selected run while `document.visibilityState` is
@@ -291,14 +387,21 @@ or runtime dependency.
 
 This path is observation-only. It adds no Server-Sent Events, WebSocket,
 filesystem watcher, background process, approval, edit, check execution,
-arbitrary command, commit, push, deployment, or other browser authority. Richer
-file/status, diff, and payload-bearing history navigation remains deferred, and
-guarded actions must still revalidate authoritative repository state immediately
-before use.
+arbitrary command, commit, push, deployment, or other browser authority. Current
+file/status and multi-file or payload-bearing diff/history navigation remain
+deferred, and guarded actions must still revalidate authoritative repository
+state immediately before use.
 
-Only the event-history portion of a full run response is fixed-size. Approval
-lists and workspace-wide run enumeration retain their existing unpaginated local
-behavior and are not claimed to have constant work or response size.
+The ordinary full-run response retains at most the newest 12 approval decisions
+and the newest 200 event summaries, with independent truncation metadata.
+Complete approvals and events remain available through CLI history. The
+approval projection bounds selected columns, decoded rows, and response size,
+preflights storage/bytes before materialization, and uses the additive
+`approvals_by_run` index plus reverse rowid seek for fixed per-run work and true
+append ordering. A read-only startup preflight validates the exact index shape
+before opening existing state for mutation. Building that index against existing
+non-test state is a human-gated maintenance action. Workspace-
+wide run enumeration is already a fixed 12-row page.
 
 The helper-config preflight and the following Git subprocess are separate host
 operations. A same-user process can change repository or included config between
@@ -359,8 +462,9 @@ pagination would require a separately approved schema index.
 
 This path adds no write, migration, dependency, Git/source read, disclosure of a
 new run data class, stream, background work, or browser action route. Project and
-repository enumeration plus selected-run approvals remain unpaginated local
-reads and are not claimed bounded by ADR 0017.
+repository enumeration remain unpaginated local reads and are not claimed
+bounded by ADR 0017; ADR 0019 separately bounds ordinary selected-run approval
+responses.
 
 ## Fifth M3 verification-attempt provenance
 
@@ -408,8 +512,72 @@ honest copy, and a defined focus fallback.
 Complete private evidence remains in CLI run history.
 
 This implementation adds no schema, dependency, write, event append, Git/source
-read, raw evidence disclosure, browser mutation, or release authority. ADR 0010
-remains independently unresolved.
+read, raw evidence disclosure, browser mutation, or release authority. ADR
+0025's residual third-party review and secret-rotation work remains independent.
+
+## Sixth and seventh M3 selected-run presentation bounds
+
+ADR 0019 caps the approval suffix inside the existing coherent full-run read.
+ADR 0020 adds no read at all: the API presenter derives `diffReview` from that
+same run record, its verification evidence, the selected target, and the
+registered project ceiling.
+
+The presenter returns complete diff text only at or below a fixed 262,144-byte
+browser cap. It validates paired presence, the project ceiling, one exact target,
+canonical recorded digest, exact displayed-byte rehash, ordered per-file
+Git patch bound to that target, and internally consistent hunk counts. The
+resulting metadata distinguishes absent, available/rehashed, and larger
+recorded-only evidence. A larger recorded diff is not parsed, rehashed, or
+sliced by this projection; only metadata and CLI guidance cross the response
+boundary.
+
+The React page places persisted run state, verification outcome, path, byte and
+patch-line counts, additions, deletions, hunks, digest, provenance, and the exact
+patch together at fixed `#run-diff`. One keyboard-focusable, labelled `<pre>`
+text node sits inside a bounded scroll region; no line-derived nodes, HTML sink,
+link, or action control is created.
+`verification.completed` targets this section, while `checkpoint.saved` remains
+at verification.
+
+The 256 KiB cap bounds response/rendered patch bytes, not the pre-existing full-
+run SQLite hydration. A dedicated scalar projection for every full-run field is
+separate future work. This slice adds no route, query, Git/source read, timing
+source, browser action, or release authority.
+
+## Eighth M3 project-catalog and response bounds
+
+`GET /api/workspace` opens independent project and run insertion snapshots.
+The project half is one newest-first page, not a catalog total. Its data query
+seeks the projects rowid B-tree, joins the repository primary-key index, visits
+13 rows, retains 12, and validates every selected column before presentation.
+Continuation requests carry only the pinned `snapshot` and exclusive `before`;
+external database maintenance invalidates the session rather than being hidden.
+
+Project checks cross the store boundary only as strict TEXT JSON at or below
+1 MiB; sandbox and ceiling profiles are at most 16 KiB. Direct SQL `CASE`,
+`typeof`, `octet_length`, and `json_valid(..., 1)` gates precede JavaScript
+parsing. Exact nested-key and policy validation reconstructs the domain records.
+The same projected gates are used by direct ID/name hydration before create-run
+or selected-run work; indexed lookup never becomes an unbounded decode path.
+The same JSON byte caps apply on supported project writes. API presentation
+omits repository device/inode metadata even though the joined record validates
+it. Indexed exact-name and project-ID paths replace complete-list scans in
+creation.
+
+The React project session mirrors the bounded run session: one current page,
+three newer cursors, one request generation, exact response validation, and
+abort/retry behavior. Project selection is an independent retained object, so
+catalog navigation does not silently erase the detail being inspected. If a
+full run's owner is outside the current page, navigation and refresh retain or
+resolve only that owner and never substitute the first unrelated project.
+
+All API JSON goes through one final serializer. Serialization and the 8 MiB
+UTF-8 check complete before `writeHead`; only then are status and safe headers
+sent. An overflow reaches the ordinary top-level error boundary as
+`RESPONSE_TOO_LARGE`, allowing a small fixed HTTP 500 response instead of a
+partial success. Trusted error messages above 4 KiB are replaced with fixed
+copy, and a pre-serialized internal-error body prevents recursive serializer
+failure. Static assets retain their existing file-serving path.
 
 ## Sixth M3 change-room path
 
@@ -465,14 +633,18 @@ boundaries. A Change Room is not a new entity: the room of a run is the run, and
    table is append-only with no update or delete path anywhere; annotations
    never append lifecycle events, advance event cursors, change run state,
    satisfy gates, or feed digests, approvals, verification, or execution.
-   Schema version 2 adds only that table through the existing idempotent
-   `CREATE TABLE IF NOT EXISTS` block; the store raises `user_version` to 2 only
-   when it is lower and fails closed with `UNSUPPORTED_DATABASE_VERSION` on a
-   newer marker. A version-1 binary still opens a version-2 database, ignores
-   the table, and resets the marker to 1 — an accepted drift that loses no data.
+   The annotation schema is additive and operator-gated: the table lives in
+   `ICARUS_ANNOTATION_SCHEMA`, applied idempotently on every open, and a
+   database with `runs` but no table is refused with
+   `DATABASE_MIGRATION_REQUIRED` until the operator reruns with exactly
+   `ICARUS_APPROVE_SCHEMA_MIGRATION=run-annotations-v1` after a backup. One
+   token approves exactly one migration and an invalid table shape fails
+   closed; there is no backfill and no existing table or index change.
 5. This path adds no schema beyond `run_annotations`, no dependency, no write
    route, no stream, watcher, or daemon, and no browser authority. All three
-   routes are GET-only, non-GET verbs receive 404, and GET reads perform no
+   routes are GET-only reads: mutation verbs are refused by the ADR 0029
+   action-session boundary (401) before routing and match no route even
+   behind it, and GET reads perform no
    durable writes. Restart replay returns byte-identical projections. The React
    workspace gains a Change Rooms section — a bounded newest-first index
    (12-row replace-not-accumulate pages in a four-page window, explicit
@@ -495,20 +667,33 @@ Milestone 1 adapters:
   explicit pricing, and context-egress approval.
 - OpenAI: official `POST /v1/responses` with environment bearer token,
   `store: false`, bounded output, and text extracted from response output items.
+- Anthropic: official `POST /v1/messages`, an origin-pinned `x-api-key`, fixed
+  API version, bounded output, and one forced schema tool whose input is treated
+  only as structured response transport. It does not grant provider-native tool
+  authority to a run.
 
 The browser narrows that provider contract: draft planning accepts only an
 explicitly configured Ollama endpoint that classifies as loopback. Remote, LAN,
 Tailscale, public, OpenAI, and other cloud planning endpoints are rejected by
 the workspace route before a draft is persisted; CLI egress policy is unchanged.
 
+The CLI session loop continues to use typed structured generation rather than
+provider-native tool authority. Its response schema is a closed batch of at most
+eight registered calls with exact per-tool arguments. Every repeated remote
+turn rechecks the exact approved context egress digest; the approved readable
+manifest is the only additional file authority. Completed tool results and
+errors are bounded, secret-scanned, and fenced as untrusted before reuse.
+
 OpenAI request shape follows the official [Responses API reference](https://developers.openai.com/api/reference/resources/responses/methods/create).
-No provider SDK is required for this narrow contract. Tests exercise both
-adapters against deterministic HTTP contracts; an OpenAI lifecycle test uses
-the production adapter from exact egress approval through review without making
-a paid request. Known credentials are supplied to transport-error sanitization,
-so a thrown HTTP transport error cannot copy a bearer value into durable state
-or CLI output. Non-success HTTP bodies are not retained in surfaced errors.
-Tests do not substitute a fake production adapter.
+No provider SDK is required for this narrow contract. Provider contract tests
+exercise all three adapters against deterministic HTTP servers. Separate
+lifecycle coverage currently exists for Ollama and OpenAI; the OpenAI lifecycle
+uses the production adapter from exact egress approval through review without
+making a paid request. An equivalent Anthropic lifecycle is not yet claimed.
+Known credentials are supplied to transport-error sanitization, so a thrown
+HTTP transport error cannot copy a credential into durable state or CLI output.
+Non-success HTTP bodies are not retained in surfaced errors. Tests do not
+substitute a fake production adapter.
 
 ## Context boundary
 
@@ -533,20 +718,39 @@ fail-closed audit or make imported repositories writable.
 
 ## Safety boundary
 
-- The HTTP server has a fixed loopback bind, same-origin UI/API, loopback Host
-  and Origin validation, bounded JSON contracts, no CORS grant, and safe response
-  headers. It fails closed on malformed or unrecognized mutations.
+- The HTTP server binds exact `127.0.0.1`. Accepted interim mutation sessions
+  use a fresh 16-byte `.localhost` public-origin nonce and independent bearer
+  only after the bind succeeds, with no Node/OS lookup or resolver injection.
+  Every non-GET/HEAD request receives exact
+  Host/Origin/authorization/action-header validation,
+  duplicate-member-rejecting bounded JSON contracts, no CORS grant, and safe
+  response headers. Explicit-port numeric origins are bearer-free and GET-only.
+  It fails closed on malformed or unrecognized mutations.
 - Browser repository data is rendered as untrusted text from allowlisted
   presenters. Raw domain records, context/source blobs, private runtime paths,
   and provider credentials do not cross the response boundary.
-- The browser exposes planning and review only; it cannot approve a digest,
-  execute an edit/check/command, or commit, push, or deploy.
+- The browser exposes protected project/draft/planning mutations plus review;
+  it still cannot approve a digest, execute an edit/check/command, or commit,
+  publish a ref/PR, push, or deploy.
 - Remote-context approval gates non-loopback egress, plan approval gates the
   first write/edit call, and human review gates completion.
 - Provider output with recognizable credential material fails before plan/edit
   persistence; known credentials, including credentials reflected by thrown
   transport errors, and command/error output are redacted.
-- A proposal is one exact replacement in an existing tracked UTF-8 text file.
+- A failed first verification may re-enter execution only under explicit,
+  digest-bound plan grants and a positive `iterationCeiling` (ADR 0026). The
+  host maximum is two. `provider.revise` is admitted before provider I/O and
+  each tool operation before grant check or host action; interruption, refusal,
+  and failure remain charged. A patch revision returns the worktree to its
+  immutable baseline, is validated against the same approved target scope and
+  ceilings, persists intent before writes, and supersedes its predecessor in
+  append-only history. Only current full-plan passing evidence plus a
+  host-validated `report_done` is approvable. Human input and exhaustion land
+  `awaiting_review` with a blocker, never a pass.
+- A proposal is a patch set over the operator-approved target subset (ADR 0023):
+  ordered exact replacements in existing tracked UTF-8 text files, complete
+  content for a created path, and preimage-bound removal for a deleted path.
+  Every path is validated independently and protected paths always refuse.
 - Protected edit names include `.git`, non-template `.env*`, credential/key
   configuration; safe `.env.{example,sample,template}` files remain eligible,
   Icarus metadata, and repository rule files. Model visibility and intrinsic

@@ -1,3 +1,10 @@
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, test } from "vitest";
 
 import {
@@ -5,10 +12,14 @@ import {
   presentRunEventHistoryPage,
   presentRunEventPage,
   presentRunVerificationAttempts,
+  presentTimelineEvent,
   presentWorkspaceRunPage,
+  WORKSPACE_DIFF_DISPLAY_MAX_BYTES,
   workspaceRunPhase,
 } from "../../packages/api/src/present.js";
 import type {
+  FileEdit,
+  PatchSet,
   ProjectRecord,
   RunHistory,
   RunPresentationSnapshot,
@@ -17,7 +28,19 @@ import type {
   RunVerificationAttemptsSnapshot,
   WorkspaceRunPage,
 } from "../../packages/core/src/types.js";
+import { CONTEXT_AUDIT_POLICY_VERSION } from "../../packages/core/src/types.js";
+import { ApprovalProvenance } from "../../packages/workspace/src/App.js";
 import { UNIT_CEILING, UNIT_PROVIDER, UNIT_SANDBOX } from "../support/unit-fixtures.js";
+
+const workspaceRequire = createRequire(
+  new URL("../../packages/workspace/package.json", import.meta.url),
+);
+const { createElement } = workspaceRequire("react") as {
+  createElement(type: unknown, props: unknown): unknown;
+};
+const { renderToStaticMarkup } = workspaceRequire("react-dom/server") as {
+  renderToStaticMarkup(element: unknown): string;
+};
 
 const states: readonly [RunState, ReturnType<typeof workspaceRunPhase>][] = [
   ["preparing", "draft"],
@@ -52,9 +75,15 @@ function presentationSnapshot(history: RunHistory): RunPresentationSnapshot {
     createdAt: event.createdAt,
   }));
   const presentationEvents = events.slice(-200);
+  const approvals = history.approvals.slice(-12);
   return {
     run: history.run,
-    approvals: history.approvals,
+    approvals,
+    approvalCoverage: {
+      limit: 12,
+      loaded: approvals.length,
+      earlierApprovalsExcluded: history.approvals.length > approvals.length,
+    },
     events: presentationEvents,
     eventCursor: events.at(-1)?.sequence ?? 0,
     eventCount: events.length,
@@ -63,6 +92,31 @@ function presentationSnapshot(history: RunHistory): RunPresentationSnapshot {
 }
 
 describe("workspace run presentation", () => {
+  test("renders hostile approval actors only as inert text", () => {
+    const actor = '<img data-approval-injection="true"> Recorded digest:';
+    const markup = renderToStaticMarkup(
+      createElement(ApprovalProvenance, {
+        run: {
+          approvalCoverage: { limit: 12, loaded: 1, earlierApprovalsExcluded: false },
+          approvals: [
+            {
+              kind: "plan",
+              digest: "f".repeat(64),
+              actor,
+              decision: "approve",
+              createdAt: "2026-07-22T12:00:00.000Z",
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(markup).toContain("&lt;img");
+    expect(markup).not.toContain("<img");
+    expect(markup).not.toMatch(/<(?:a|button|form|input|textarea)\b/u);
+    expect(markup).toContain("Recorded digest:");
+  });
+
   test.each(states)("maps %s to the truthful workspace phase %s", (state, phase) => {
     expect(workspaceRunPhase(state)).toBe(phase);
   });
@@ -333,9 +387,9 @@ describe("workspace run presentation", () => {
       resumeState: null,
       baseCommit: "",
       context: {
-        auditPolicyVersion: "tracked-tree-secret-audit-v1",
+        auditPolicyVersion: CONTEXT_AUDIT_POLICY_VERSION,
         baseCommit: "",
-        target: "src/greeting.txt",
+        targets: ["src/greeting.txt"],
         repositoryMap: [],
         entries: [],
         totalBytes: 0,
@@ -344,7 +398,7 @@ describe("workspace run presentation", () => {
       contextSha256: "",
       plan: null,
       planSha256: null,
-      edit: null,
+      patchSet: null,
       cachePath: "/private/state/cache.git",
       worktreePath: "/private/state/worktree",
       baselineBase64: "c2VjcmV0LWJhc2VsaW5l",
@@ -375,6 +429,24 @@ describe("workspace run presentation", () => {
       action: null,
       verification: { outcome: "not_run" },
       checks: [{ outcome: "not_run" }],
+      diff: null,
+      diffReview: {
+        status: "not_produced",
+        path: null,
+        sha256: null,
+        byteCount: 0,
+        lineCount: 0,
+        addedLines: 0,
+        deletedLines: 0,
+        hunkCount: 0,
+        browserByteLimit: 262_144,
+        digestProvenance: "not_available",
+      },
+      approvalCoverage: {
+        limit: 12,
+        loaded: 0,
+        earlierApprovalsExcluded: false,
+      },
       outputs: [],
       timestamps: {
         createdAt: "2026-07-20T12:00:00.000Z",
@@ -388,20 +460,30 @@ describe("workspace run presentation", () => {
     expect(serialized).not.toContain("c2VjcmV0");
     expect(serialized).not.toContain("/private/state");
 
-    const withEdit: RunRecord = {
-      ...run,
-      edit: {
-        path: run.target,
-        expectedPreimageSha256: "a".repeat(64),
-        findText: "Hello",
-        replaceText: "Hello, Icarus",
-        rationale: "Apply one exact replacement.",
-      },
+    const greetingEdit: FileEdit = {
+      op: "modify",
+      path: run.target,
+      expectedPreimageSha256: "a".repeat(64),
+      replacements: [{ findText: "Hello", replaceText: "Hello, Icarus" }],
+      rationale: "Apply one exact replacement.",
     };
+    const patchSet: PatchSet = {
+      summary: "Replace the greeting and record the change.",
+      edits: [
+        greetingEdit,
+        {
+          op: "create",
+          path: "src/notes.md",
+          content: "# Notes\n",
+          rationale: "Record the change alongside the greeting.",
+        },
+      ],
+    };
+    const withPatchSet: RunRecord = { ...run, patchSet };
     const proposed = presentRun(
       project,
       presentationSnapshot({
-        run: withEdit,
+        run: withPatchSet,
         approvals: [],
         events: [
           {
@@ -415,12 +497,52 @@ describe("workspace run presentation", () => {
       }),
     );
     expect(proposed).toMatchObject({
-      action: { status: "proposed", path: run.target, allowed: false },
+      action: {
+        status: "proposed",
+        kind: "patch_set",
+        summary: "Patch set across 2 approved paths",
+        path: run.target,
+        files: [run.target, "src/notes.md"],
+        operations: [
+          { path: run.target, op: "modify" },
+          { path: "src/notes.md", op: "create" },
+        ],
+        rationale: patchSet.summary,
+        allowed: false,
+      },
+    });
+    expect(Object.keys(proposed.action as Record<string, unknown>).sort()).toEqual(
+      ["status", "kind", "summary", "path", "files", "operations", "rationale", "allowed"].sort(),
+    );
+    const singlePathAction = presentRun(
+      project,
+      presentationSnapshot({
+        run: { ...run, patchSet: { summary: patchSet.summary, edits: [greetingEdit] } },
+        approvals: [],
+        events: [
+          {
+            sequence: 1,
+            runId: run.id,
+            type: "edit.intent_recorded",
+            payload: {},
+            createdAt: run.createdAt,
+          },
+        ],
+      }),
+    ).action as Record<string, unknown>;
+    expect(singlePathAction).toMatchObject({
+      status: "proposed",
+      kind: "patch_set",
+      summary: "Patch set across 1 approved path",
+      path: run.target,
+      files: [run.target],
+      operations: [{ path: run.target, op: "modify" }],
+      allowed: false,
     });
     const materialized = presentRun(
       project,
       presentationSnapshot({
-        run: withEdit,
+        run: withPatchSet,
         approvals: [],
         events: [
           {
@@ -444,7 +566,7 @@ describe("workspace run presentation", () => {
     const cancelledBeforeMaterialization = presentRun(
       project,
       presentationSnapshot({
-        run: withEdit,
+        run: withPatchSet,
         approvals: [],
         events: [
           {
@@ -470,7 +592,7 @@ describe("workspace run presentation", () => {
     const revertedAfterMaterialization = presentRun(
       project,
       presentationSnapshot({
-        run: withEdit,
+        run: withPatchSet,
         approvals: [],
         events: [
           {
@@ -508,7 +630,7 @@ describe("workspace run presentation", () => {
     }));
     const unknownAfterTruncatedMaterialization = presentRun(
       project,
-      presentationSnapshot({ run: withEdit, approvals: [], events: truncatedActionEvents }),
+      presentationSnapshot({ run: withPatchSet, approvals: [], events: truncatedActionEvents }),
     );
     expect(unknownAfterTruncatedMaterialization).toMatchObject({
       action: { status: "unknown" },
@@ -595,5 +717,371 @@ describe("workspace run presentation", () => {
     expect(serializedHistoryPage).not.toContain("createdAt");
     expect(serializedHistoryPage).not.toContain("/private/state/sentinel");
     expect(serializedHistoryPage).not.toContain("+private diff");
+  });
+
+  test("presents only bounded, rehashed persisted diff evidence", () => {
+    const project: ProjectRecord = {
+      id: "project-id",
+      name: "project",
+      repositoryId: "repository-id",
+      baseRef: "main",
+      checks: [{ id: "verify", name: "Verify", argv: ["node", "--test"] }],
+      sandbox: UNIT_SANDBOX,
+      ceiling: UNIT_CEILING,
+      createdAt: "2026-07-22T12:00:00.000Z",
+    };
+    const diff = [
+      "diff --git a/src/greeting.txt b/src/greeting.txt",
+      "index ce01362..63c704a 100644",
+      "--- a/src/greeting.txt",
+      "+++ b/src/greeting.txt",
+      "@@ -1 +1,2 @@",
+      "-Hello",
+      "+Hello, Icarus 🪽",
+      "+<script>diff text stays text</script>",
+      "",
+    ].join("\n");
+    const digest = createHash("sha256").update(diff, "utf8").digest("hex");
+    const verification = {
+      outcome: "passed",
+      checks: [],
+      changedPaths: ["src/greeting.txt"],
+      diffSha256: digest,
+      checkpointSha256: "c".repeat(64),
+    } as const;
+    const run: RunRecord = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      projectId: project.id,
+      task: "Review a persisted diff",
+      target: "src/greeting.txt",
+      provider: UNIT_PROVIDER,
+      state: "awaiting_review",
+      resumeState: null,
+      baseCommit: "a".repeat(40),
+      context: {
+        auditPolicyVersion: CONTEXT_AUDIT_POLICY_VERSION,
+        baseCommit: "a".repeat(40),
+        targets: ["src/greeting.txt"],
+        repositoryMap: ["src/greeting.txt"],
+        entries: [],
+        totalBytes: 0,
+      },
+      contextArtifactPath: "/private/context.json",
+      contextSha256: "b".repeat(64),
+      plan: null,
+      planSha256: null,
+      patchSet: null,
+      cachePath: "/private/cache.git",
+      worktreePath: "/private/worktree",
+      baselineBase64: "SGVsbG8=",
+      approvedBase64: "SGVsbG8sIEljYXJ1cw==",
+      diff,
+      verification,
+      usage: {
+        toolCalls: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        activeRuntimeMs: 0,
+        estimatedCostUsd: 0,
+        reservedCostUsd: 0,
+      },
+      lastError: null,
+      createdAt: "2026-07-22T12:00:00.000Z",
+      updatedAt: "2026-07-22T12:01:00.000Z",
+    };
+
+    const available = presentRun(project, presentationSnapshot({ run, approvals: [], events: [] }));
+    expect(Buffer.byteLength(diff, "utf8")).toBeGreaterThan(diff.length);
+    expect(available.context).toMatchObject({
+      target: run.target,
+      targets: ["src/greeting.txt"],
+      baseCommit: "a".repeat(40),
+      sha256: "b".repeat(64),
+    });
+    expect(available.diff).toBe(diff);
+    expect(available.diffReview).toEqual({
+      status: "available",
+      path: "src/greeting.txt",
+      paths: ["src/greeting.txt"],
+      sha256: digest,
+      byteCount: Buffer.byteLength(diff, "utf8"),
+      lineCount: 8,
+      addedLines: 2,
+      deletedLines: 1,
+      hunkCount: 1,
+      browserByteLimit: 262_144,
+      digestProvenance: "displayed_text_rehash_match",
+    });
+    expect(Object.keys(available.diffReview as Record<string, unknown>).sort()).toEqual(
+      [
+        "status",
+        "path",
+        "paths",
+        "sha256",
+        "byteCount",
+        "lineCount",
+        "addedLines",
+        "deletedLines",
+        "hunkCount",
+        "browserByteLimit",
+        "digestProvenance",
+      ].sort(),
+    );
+
+    const exactBoundaryPrefix = [
+      "diff --git a/src/greeting.txt b/src/greeting.txt",
+      "index ce01362..63c704a 100644",
+      "--- a/src/greeting.txt",
+      "+++ b/src/greeting.txt",
+      "@@ -1 +1 @@",
+      "-Hello",
+      "+",
+    ].join("\n");
+    const exactBoundaryDiff = `${exactBoundaryPrefix}${"x".repeat(
+      WORKSPACE_DIFF_DISPLAY_MAX_BYTES - Buffer.byteLength(exactBoundaryPrefix, "utf8") - 1,
+    )}\n`;
+    const exactBoundaryDigest = createHash("sha256")
+      .update(exactBoundaryDiff, "utf8")
+      .digest("hex");
+    const exactBoundary = presentRun(
+      project,
+      presentationSnapshot({
+        run: {
+          ...run,
+          diff: exactBoundaryDiff,
+          verification: { ...verification, diffSha256: exactBoundaryDigest },
+        },
+        approvals: [],
+        events: [],
+      }),
+    );
+    expect(Buffer.byteLength(exactBoundaryDiff, "utf8")).toBe(WORKSPACE_DIFF_DISPLAY_MAX_BYTES);
+    expect(exactBoundary.diff).toBe(exactBoundaryDiff);
+    expect(exactBoundary.diffReview).toMatchObject({
+      status: "available",
+      sha256: exactBoundaryDigest,
+      byteCount: WORKSPACE_DIFF_DISPLAY_MAX_BYTES,
+      digestProvenance: "displayed_text_rehash_match",
+    });
+
+    const outsideSentinel = "outside-browser-bound-private-tail";
+    const oversizedDiff = [
+      "diff --git a/src/greeting.txt b/src/greeting.txt",
+      "--- a/src/greeting.txt",
+      "+++ b/src/greeting.txt",
+      "@@ -1 +1 @@",
+      "-Hello",
+      `+${"x".repeat(WORKSPACE_DIFF_DISPLAY_MAX_BYTES)}${outsideSentinel}`,
+      "",
+    ].join("\n");
+    const oversizedDigest = createHash("sha256").update(oversizedDiff, "utf8").digest("hex");
+    const oversized = presentRun(
+      {
+        ...project,
+        ceiling: {
+          ...project.ceiling,
+          maxDiffBytes: Buffer.byteLength(oversizedDiff, "utf8") + 1,
+        },
+      },
+      presentationSnapshot({
+        run: {
+          ...run,
+          diff: oversizedDiff,
+          verification: { ...verification, diffSha256: oversizedDigest },
+        },
+        approvals: [],
+        events: [],
+      }),
+    );
+    expect(oversized.diff).toBeNull();
+    expect(oversized.diffReview).toEqual({
+      status: "outside_browser_bound",
+      path: "src/greeting.txt",
+      paths: ["src/greeting.txt"],
+      sha256: oversizedDigest,
+      byteCount: Buffer.byteLength(oversizedDiff, "utf8"),
+      lineCount: null,
+      addedLines: null,
+      deletedLines: null,
+      hunkCount: null,
+      browserByteLimit: 262_144,
+      digestProvenance: "recorded_only",
+    });
+    expect(JSON.stringify(oversized)).not.toContain(outsideSentinel);
+
+    const quotedTarget = "src/greeting 🪽.txt";
+    const quotedDiff = [
+      'diff --git "a/src/greeting \\360\\237\\252\\275.txt" "b/src/greeting \\360\\237\\252\\275.txt"',
+      "index ce01362..63c704a 100644",
+      '--- "a/src/greeting \\360\\237\\252\\275.txt"',
+      '+++ "b/src/greeting \\360\\237\\252\\275.txt"',
+      "@@ -1 +1 @@",
+      "-Hello",
+      "+Hello, quoted path",
+      "",
+    ].join("\n");
+    const quoted = presentRun(
+      project,
+      presentationSnapshot({
+        run: {
+          ...run,
+          target: quotedTarget,
+          diff: quotedDiff,
+          verification: {
+            ...verification,
+            changedPaths: [quotedTarget],
+            diffSha256: createHash("sha256").update(quotedDiff, "utf8").digest("hex"),
+          },
+        },
+        approvals: [],
+        events: [],
+      }),
+    );
+    expect(quoted.diffReview).toMatchObject({ status: "available", path: quotedTarget });
+
+    const nativeGitRoot = mkdtempSync(path.join(tmpdir(), "icarus-presenter-native-git-"));
+    const nativeGitRepository = path.join(nativeGitRoot, "repository");
+    const nativeGitConfig = path.join(nativeGitRoot, "gitconfig");
+    const nativeTarget = "src/file with space.txt";
+    try {
+      mkdirSync(path.join(nativeGitRepository, "src"), { recursive: true });
+      writeFileSync(nativeGitConfig, "", "utf8");
+      const nativeGit = (args: readonly string[]): string =>
+        execFileSync("git", ["-c", "core.fsmonitor=false", ...args], {
+          cwd: nativeGitRepository,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            GIT_CONFIG_GLOBAL: nativeGitConfig,
+            GIT_CONFIG_NOSYSTEM: "1",
+            GIT_TERMINAL_PROMPT: "0",
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      nativeGit(["init", "-b", "main"]);
+      writeFileSync(path.join(nativeGitRepository, nativeTarget), "Hello\n", "utf8");
+      nativeGit(["add", "--", nativeTarget]);
+      nativeGit([
+        "-c",
+        "user.name=Icarus Presenter Test",
+        "-c",
+        "user.email=presenter@example.invalid",
+        "commit",
+        "-m",
+        "fixture",
+      ]);
+      writeFileSync(path.join(nativeGitRepository, nativeTarget), "Hello, native Git\n", "utf8");
+      const nativeDiff = nativeGit([
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-renames",
+        "--",
+        nativeTarget,
+      ]);
+      expect(nativeDiff).toContain(`diff --git a/${nativeTarget} b/${nativeTarget}`);
+      const nativePresentation = presentRun(
+        project,
+        presentationSnapshot({
+          run: {
+            ...run,
+            target: nativeTarget,
+            diff: nativeDiff,
+            verification: {
+              ...verification,
+              changedPaths: [nativeTarget],
+              diffSha256: createHash("sha256").update(nativeDiff, "utf8").digest("hex"),
+            },
+          },
+          approvals: [],
+          events: [],
+        }),
+      );
+      expect(nativePresentation.diffReview).toMatchObject({
+        status: "available",
+        path: nativeTarget,
+      });
+    } finally {
+      rmSync(nativeGitRoot, { recursive: true, force: true });
+    }
+
+    const persistedRunWithDiff = (candidate: string): RunRecord => ({
+      ...run,
+      diff: candidate,
+      verification: {
+        ...verification,
+        diffSha256: createHash("sha256").update(candidate, "utf8").digest("hex"),
+      },
+    });
+    const wrongTargetDiff = diff.replaceAll("src/greeting.txt", "private/other.txt");
+    const hunkBeforeHeader = [
+      "@@ -1 +1 @@",
+      "-Hello",
+      "+Wrong order",
+      ...diff.trimEnd().split("\n"),
+      "",
+    ].join("\n");
+    const mismatchedFileHeaders = diff.replace(
+      "--- a/src/greeting.txt\n+++ b/src/greeting.txt",
+      "--- a/src/greeting.txt\n+++ b/src/other.txt",
+    );
+    const inconsistentHunkCount = diff.replace("@@ -1 +1,2 @@", "@@ -1,2 +1,2 @@");
+    const trailingSecondPatch = `${diff.trimEnd()}\n${diff}`;
+
+    const corruptRuns: RunRecord[] = [
+      { ...run, verification: null },
+      { ...run, verification: { ...verification, diffSha256: "f".repeat(64) } },
+      { ...run, verification: { ...verification, checkpointSha256: "not-a-digest" } },
+      {
+        ...run,
+        verification: { ...verification, outcome: "invented" },
+      } as unknown as RunRecord,
+      {
+        ...run,
+        verification: { ...verification, changedPaths: null },
+      } as unknown as RunRecord,
+      { ...run, verification: { ...verification, changedPaths: ["src/other.txt"] } },
+      {
+        ...run,
+        diff: "not a patch",
+        verification: {
+          ...verification,
+          diffSha256: createHash("sha256").update("not a patch").digest("hex"),
+        },
+      },
+      persistedRunWithDiff(wrongTargetDiff),
+      persistedRunWithDiff(hunkBeforeHeader),
+      persistedRunWithDiff(mismatchedFileHeaders),
+      persistedRunWithDiff(inconsistentHunkCount),
+      persistedRunWithDiff(trailingSecondPatch),
+      persistedRunWithDiff(
+        diff.replace(
+          "diff --git a/src/greeting.txt b/src/greeting.txt",
+          'diff --git "a/src/greeting\\q.txt" "b/src/greeting\\q.txt"',
+        ),
+      ),
+      { ...run, diff: null },
+    ];
+    for (const corruptRun of corruptRuns) {
+      expect(() =>
+        presentRun(project, presentationSnapshot({ run: corruptRun, approvals: [], events: [] })),
+      ).toThrowError(expect.objectContaining({ code: "DATABASE_ERROR" }));
+    }
+
+    expect(
+      presentTimelineEvent({
+        sequence: 4,
+        type: "verification.completed",
+        createdAt: "2026-07-22T12:01:00.000Z",
+      }),
+    ).toMatchObject({ evidenceSection: "diff" });
+    expect(
+      presentTimelineEvent({
+        sequence: 3,
+        type: "checkpoint.saved",
+        createdAt: "2026-07-22T12:00:59.000Z",
+      }),
+    ).toMatchObject({ evidenceSection: "verification" });
   });
 });

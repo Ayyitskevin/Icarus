@@ -5,14 +5,18 @@ import path from "node:path";
 
 import {
   assertRegistrationStateSeparation,
+  BROWSER_ACTION_LEDGER_MIGRATION,
+  type CheckProfile,
   createIcarusRuntime,
   createProviderConfig,
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
+  type Gate1MigrationToken,
   IcarusError,
   type ChangeRoomAnnotationTarget,
-  type CheckProfile,
   type IcarusRuntime,
+  LANDING_LEDGER_MIGRATION,
+  migrateGate1Schema,
   type RunRecord,
 } from "@icarus/core";
 
@@ -77,6 +81,15 @@ function required(options: ParsedOptions, name: string): string {
     fail("INVALID_ARGUMENT", `${name} must be provided exactly once`);
   }
   return values[0];
+}
+
+/** Repeatable option requiring at least one non-empty value (ADR 0023). */
+function requiredAll(options: ParsedOptions, name: string): readonly string[] {
+  const values = options.values.get(name) ?? [];
+  if (values.length === 0 || values.some((value) => value.length === 0)) {
+    fail("INVALID_ARGUMENT", `${name} must be provided at least once`);
+  }
+  return values;
 }
 
 function optional(options: ParsedOptions, name: string): string | undefined {
@@ -151,6 +164,45 @@ function stateRoot(): string {
   );
 }
 
+/**
+ * Each migration is approved by its own exact token, so approving one never
+ * silently approves another. A database needing both is migrated by two
+ * explicit invocations.
+ */
+function schemaMigrationApproval(): {
+  readonly approvalIndex: boolean;
+  readonly patchSet: boolean;
+  readonly readableManifest: boolean;
+  readonly annotation: boolean;
+  readonly gate1: Gate1MigrationToken | null;
+} {
+  const none = {
+    approvalIndex: false,
+    patchSet: false,
+    readableManifest: false,
+    annotation: false,
+    gate1: null,
+  };
+  const approval = process.env.ICARUS_APPROVE_SCHEMA_MIGRATION;
+  if (approval === undefined) return none;
+  // One token approves exactly one migration. Approving several at once would
+  // let an operator agree to a schema change they never read about.
+  if (approval === "approval-index-v1") return { ...none, approvalIndex: true };
+  if (approval === "patch-set-v2") return { ...none, patchSet: true };
+  if (approval === "readable-manifest-v3") return { ...none, readableManifest: true };
+  if (approval === "run-annotations-v1") return { ...none, annotation: true };
+  if (approval === BROWSER_ACTION_LEDGER_MIGRATION) {
+    return { ...none, gate1: BROWSER_ACTION_LEDGER_MIGRATION };
+  }
+  if (approval === LANDING_LEDGER_MIGRATION) {
+    return { ...none, gate1: LANDING_LEDGER_MIGRATION };
+  }
+  fail(
+    "INVALID_DATABASE_CONFIGURATION",
+    "ICARUS_APPROVE_SCHEMA_MIGRATION must equal one documented one-shot migration token",
+  );
+}
+
 function registrationPathForPreflight(args: readonly string[]): string | undefined {
   const [group, action, ...rest] = args;
   if (group !== "repo" || action !== "add") {
@@ -179,13 +231,17 @@ function publicRun(run: RunRecord): Record<string, unknown> {
     },
     plan: run.plan,
     planSha256: run.planSha256,
-    edit:
-      run.edit === null
+    patchSet:
+      run.patchSet === null
         ? null
         : {
-            path: run.edit.path,
-            expectedPreimageSha256: run.edit.expectedPreimageSha256,
-            rationale: run.edit.rationale,
+            summary: run.patchSet.summary,
+            edits: run.patchSet.edits.map((edit) => ({
+              op: edit.op,
+              path: edit.path,
+              expectedPreimageSha256: edit.op === "create" ? null : edit.expectedPreimageSha256,
+              rationale: edit.rationale,
+            })),
           },
     diff: run.diff,
     verification: run.verification,
@@ -209,7 +265,7 @@ function usage(): never {
       "icarus repo list",
       "icarus project add --name NAME --repo REPO --base-ref REF --sandbox-image IMAGE --check JSON",
       "icarus project list",
-      "icarus run plan --project NAME --task TEXT --target PATH --provider ollama|openai --model MODEL [provider options]",
+      "icarus run plan --project NAME --task TEXT --target PATH [--target PATH ...] --provider ollama|openai|anthropic --model MODEL [provider options]",
       "icarus run approve-egress RUN --context-sha SHA --actor ACTOR",
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
       "icarus run status RUN",
@@ -301,12 +357,15 @@ async function dispatch(
     ]);
     noPositionals(options);
     const kind = required(options, "--provider");
-    if (kind !== "ollama" && kind !== "openai") {
-      fail("INVALID_PROVIDER", "--provider must be ollama or openai");
+    if (kind !== "ollama" && kind !== "openai" && kind !== "anthropic") {
+      fail("INVALID_PROVIDER", "--provider must be ollama, openai, or anthropic");
     }
-    const baseUrl =
-      optional(options, "--base-url") ??
-      (kind === "ollama" ? "http://127.0.0.1:11434/" : "https://api.openai.com/v1/");
+    const defaultBaseUrls: Record<typeof kind, string> = {
+      ollama: "http://127.0.0.1:11434/",
+      openai: "https://api.openai.com/v1/",
+      anthropic: "https://api.anthropic.com/v1/",
+    };
+    const baseUrl = optional(options, "--base-url") ?? defaultBaseUrls[kind];
     const inputRate = numberOption(options, "--input-usd-per-million");
     const outputRate = numberOption(options, "--output-usd-per-million");
     const provider = createProviderConfig({
@@ -322,7 +381,7 @@ async function dispatch(
           {
             projectName: required(options, "--project"),
             task: required(options, "--task"),
-            target: required(options, "--target"),
+            targets: requiredAll(options, "--target"),
             provider,
           },
           signal,
@@ -470,7 +529,18 @@ async function main(): Promise<void> {
     if (registrationPath !== undefined) {
       await assertRegistrationStateSeparation(root, registrationPath);
     }
-    runtime = await createIcarusRuntime(root);
+    const migrationApproval = schemaMigrationApproval();
+    if (migrationApproval.gate1 !== null) {
+      migrateGate1Schema(path.join(root, "icarus.sqlite3"), migrationApproval.gate1);
+      print({ migration: migrationApproval.gate1, status: "applied" });
+      return;
+    }
+    runtime = await createIcarusRuntime(root, {
+      allowApprovalIndexMigration: migrationApproval.approvalIndex,
+      allowPatchSetMigration: migrationApproval.patchSet,
+      allowReadableManifestMigration: migrationApproval.readableManifest,
+      allowAnnotationMigration: migrationApproval.annotation,
+    });
     await dispatch(runtime, args, controller.signal);
   } catch (error) {
     const code = error instanceof IcarusError ? error.code : "INTERNAL_ERROR";

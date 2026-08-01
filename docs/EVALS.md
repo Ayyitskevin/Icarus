@@ -12,12 +12,12 @@ task, expected outcome, required capability/evidence, planned milestone, support
 status, and evaluator. It also declares the ten measurement keys every result
 must carry. Unsupported future capabilities still have representative,
 scenario-specific repositories and paths: a coordinated source/test repair,
-duplicated module behavior, offline schema baseline, failing check, source-level security
+duplicated module behavior, offline schema baseline, source-level security
 issue, and unfamiliar multi-module application. The evaluator validates those
 fixtures without counting unsupported product behavior as a pass.
 
 `pnpm eval` validates the manifest and immutable fixture contracts, creates
-private temporary Git repositories, and exercises five M1 outcomes through
+private temporary Git repositories, and exercises seven M1 outcomes through
 production runtime/service code. Provider-backed cases use the production
 Ollama adapter over a deterministic loopback HTTP contract; this is not a live
 installed model claim. The executable change runs its registered check through
@@ -41,22 +41,44 @@ Required scenario classes:
 9. recover from a failed tool/provider call;
 10. resume an interrupted run.
 
-The catalog has all ten classes. Milestone 1 executes five outcomes:
+The catalog has all ten classes. Milestone 1 executes seven outcomes:
 
 1. a complete single-file production lifecycle, including review,
    rollback, restore, and re-review;
-2. rejection of the schema target before run/provider/workspace creation;
-3. rejection of a traversal target before run/provider/workspace creation;
-4. provider HTTP failure followed by explicit resume and passing verification;
-5. an approval subprocess killed during a real provider operation, followed by explicit resume.
+2. a transactional multi-file source-and-regression-test repair;
+3. an ADR 0026 failed-check session over one operator-selected repair target;
+4. rejection of the schema target before run/provider/workspace creation;
+5. rejection of a traversal target before run/provider/workspace creation;
+6. provider HTTP failure followed by explicit resume and passing verification;
+7. an approval subprocess killed during a real provider operation, followed by explicit resume.
 
 The schema case measures safe rejection; it does not claim schema-edit support.
-Five capabilities remain honestly unsupported: multi-file bug repair,
-behavior-preserving module refactor, failing-test diagnosis/target selection,
-read-only security findings, and read-only codebase explanation. The explanation
-capability is planned for M2; the broader repair/refactor/review contracts are
-planned as M7 dogfood gates. Unsupported contracts validate their fixtures and
-capability classification but are never converted into passes.
+
+Multi-file bug repair became executable with ADR 0023 and is now measured, not
+asserted: one approved patch set spanning a source file and its check file must
+apply transactionally, verify in the sandbox, roll back to a clean baseline,
+restore, and land, with the source checkout unchanged throughout. Its
+`regression_check` evidence is produced by a second contained run that applies
+only the check-file edit and leaves the defect in place — verification must
+fail there, or the added assertions pin nothing. Both runs use the same
+fail-closed sandbox; fixture code is never executed on the host.
+
+The failing-test scenario is executable under ADR 0026. The operator selects
+`src/parser.py`; the ordinary first attempt retains a real failed sandbox
+verification; the first of exactly two charged session turns reads only the
+manifest-approved `checks/test_parser.py`; and the second applies a
+baseline-bound PatchSet, reruns the complete registered check set, reports done,
+and reaches ordinary human review. The evaluator asserts final completion,
+passing evidence, immutable source content and Git metadata, the exact target
+set, durable session boundaries, and bounded operation usage. It measures
+`failed_check_session_repair`, **not** autonomous diagnostic target selection.
+
+Three capabilities remain honestly unsupported: behavior-preserving module
+refactor, read-only security findings, and read-only codebase explanation. ADR
+0036 Gate 2 now governs all three; the manifest retains its integer
+`plannedMilestone` field for schema-v2 compatibility and records `2` for each.
+Unsupported contracts validate their fixtures and capability classification
+but are never converted into passes.
 
 ## Measures
 

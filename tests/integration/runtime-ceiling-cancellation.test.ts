@@ -177,8 +177,48 @@ class ControlledGit {
     return readFile(path.join(worktreePath, target), "utf8");
   }
 
+  async readOptionalRegularUtf8File(
+    worktreePath: string,
+    target: string,
+    _maxBytes: number,
+  ): Promise<string | null> {
+    try {
+      return await readFile(path.join(worktreePath, target), "utf8");
+    } catch {
+      return null;
+    }
+  }
+
   atomicWriteUtf8(worktreePath: string, target: string, value: string): Promise<void> {
     return writeFile(path.join(worktreePath, target), value, "utf8");
+  }
+
+  async applyFileWrites(
+    worktreePath: string,
+    writes: readonly { readonly path: string; readonly content: string | null }[],
+    _maxFileBytes: number,
+  ): Promise<void> {
+    for (const write of writes) {
+      const absolute = path.join(worktreePath, write.path);
+      if (write.content === null) {
+        await rm(absolute, { force: true });
+      } else {
+        await mkdir(path.dirname(absolute), { recursive: true, mode: 0o700 });
+        await writeFile(absolute, write.content, "utf8");
+      }
+    }
+  }
+
+  stageIntentToAdd(
+    _worktreePath: string,
+    _paths: readonly string[],
+    _signal?: AbortSignal,
+  ): Promise<void> {
+    return Promise.resolve();
+  }
+
+  resetIndex(_worktreePath: string, _signal?: AbortSignal): Promise<void> {
+    return Promise.resolve();
   }
 
   async changedPaths(worktreePath: string, _signal?: AbortSignal): Promise<string[]> {
@@ -350,14 +390,22 @@ async function serviceFixture(
           steps: ["Apply one exact replacement.", "Run verification."],
           risks: ["The preimage may differ."],
           target: TARGET,
+          targets: [TARGET],
+          iterationCeiling: 0,
           checkIds: ["verify"],
         },
         {
-          path: TARGET,
-          expectedPreimageSha256: sha256(BASELINE),
-          findText: BASELINE,
-          replaceText: APPROVED,
-          rationale: "Apply the approved greeting.",
+          summary: "Apply the approved greeting.",
+          edits: [
+            {
+              op: "modify",
+              path: TARGET,
+              expectedPreimageSha256: sha256(BASELINE),
+              replacements: [{ findText: BASELINE, replaceText: APPROVED }],
+              content: null,
+              rationale: "Apply the approved greeting.",
+            },
+          ],
         },
       ]),
   });
@@ -387,7 +435,7 @@ async function plan(service: IcarusService, provider: ProviderConfig): Promise<R
   const planned = await service.planRun({
     projectName: "runtime-test",
     task: "Replace the greeting.",
-    target: TARGET,
+    targets: [TARGET],
     provider,
   });
   expect(planned.state).toBe("awaiting_approval");
@@ -473,6 +521,8 @@ describe("aggregate runtime ceilings and signal cancellation", () => {
             steps: ["Apply one exact replacement.", "Run verification."],
             risks: ["The preimage may differ."],
             target: TARGET,
+            targets: [TARGET],
+            iterationCeiling: 0,
             checkIds: ["verify"],
           }),
           usage: {
@@ -490,7 +540,7 @@ describe("aggregate runtime ceilings and signal cancellation", () => {
         fixture.service.planRun({
           projectName: "runtime-test",
           task: "Replace the greeting.",
-          target: TARGET,
+          targets: [TARGET],
           provider: fixture.provider,
         }),
       ).rejects.toEqual(expect.objectContaining({ code: "RUNTIME_BUDGET_EXCEEDED" }));
@@ -547,6 +597,8 @@ describe("aggregate runtime ceilings and signal cancellation", () => {
               steps: ["Apply one exact replacement.", "Run verification."],
               risks: ["The preimage may differ."],
               target: TARGET,
+              targets: [TARGET],
+              iterationCeiling: 0,
               checkIds: ["verify"],
             });
           },
@@ -565,7 +617,7 @@ describe("aggregate runtime ceilings and signal cancellation", () => {
         fixture.service.planRun({
           projectName: "runtime-test",
           task: "Replace the greeting.",
-          target: TARGET,
+          targets: [TARGET],
           provider: fixture.provider,
         }),
       ).rejects.toEqual(expect.objectContaining({ code: "RUNTIME_BUDGET_EXCEEDED" }));

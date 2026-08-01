@@ -97,7 +97,7 @@ describe("Change-context packet", () => {
       id: UNIT_RUN_ID,
       projectId,
       task: "Update the greeting remotely",
-      target: UNIT_PLAN.target,
+      targets: UNIT_PLAN.targets,
       provider: remoteProvider,
     });
     store.store.pinRunBase(UNIT_RUN_ID, UNIT_BASE_COMMIT);
@@ -116,7 +116,8 @@ describe("Change-context packet", () => {
     const text = statements(packet);
     expect(text).toContain("context-egress approval");
     expect(text).toContain(unitContextDigest(context));
-    expect(text).toContain("browser cannot approve");
+    expect(text).toContain("fenced browser mutation session");
+    expect(text).toContain("read-only room cannot approve anything");
     expectReceipts(packet, roomAt(store.store));
     store.store.close();
   });
@@ -131,7 +132,7 @@ describe("Change-context packet", () => {
       task: run.task,
       baseCommit: run.baseCommit,
       contextSha256: run.contextSha256,
-      target: run.target,
+      targets: run.context.targets,
       provider: run.provider,
       checks: projectRecord.checks,
       sandbox: projectRecord.sandbox,
@@ -197,7 +198,7 @@ describe("Change-context packet", () => {
     const fixture = createChangeRoomFixture();
     cleanupRoots.push(fixture.root);
     const packet = packetAt(fixture.store, "what_changed");
-    expect(statements(packet)).toContain("No edit proposal exists yet");
+    expect(statements(packet)).toContain("No PatchSet proposal exists yet");
     expectReceipts(packet, roomAt(fixture.store));
     fixture.store.close();
   });
@@ -208,9 +209,9 @@ describe("Change-context packet", () => {
     const evidence = driveToCompleted(fixture.store);
     const packet = packetAt(fixture.store, "what_changed");
     const text = statements(packet);
-    expect(text).toContain("one exact replacement in src/greeting.txt");
+    expect(text).toContain("a PatchSet of 1 file-scoped edit(s): modify src/greeting.txt");
     expect(text).toContain(evidence.diffSha256);
-    expect(text).toContain("nothing was committed, pushed, merged, or deployed");
+    expect(text).toContain("requires a separate recorded landing grant");
     expectReceipts(packet, roomAt(fixture.store));
     fixture.store.close();
   });

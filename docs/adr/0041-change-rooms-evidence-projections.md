@@ -1,6 +1,6 @@
-# ADR 0019: Change Rooms are evidence projections, not a chat system, workflow engine, or execution authority
+# ADR 0041: Change Rooms are evidence projections, not a chat system, workflow engine, or execution authority
 
-- Status: Accepted
+- Status: Proposed
 - Date: 2026-08-01
 - Extends: [ADR 0014](0014-loopback-api-react-workspace.md)
 - Related: [ADR 0002](0002-sqlite-event-history.md),
@@ -8,7 +8,10 @@
   [ADR 0016](0016-bounded-older-event-navigation.md),
   [ADR 0017](0017-bounded-workspace-run-summaries.md),
   [ADR 0018](0018-bounded-verification-attempt-provenance.md),
-  [ADR 0010](0010-inherited-opencode-workflow-security-hold.md)
+  [ADR 0023](0023-transactional-multi-file-patch-sets.md),
+  [ADR 0026](0026-agent-session-loop-and-tool-registry.md),
+  [ADR 0029](0029-browser-approval-authority.md),
+  [ADR 0036](0036-proof-carrying-software-factory-product-direction.md)
 
 ## Context
 
@@ -30,9 +33,21 @@ browser is review-only, and every guarded fact must come from the persisted
 run, approval, event, verification, and checkpoint records.
 
 Operator review annotations are the one new durable input. They need a home,
-and the only durable local store is the existing SQLite database. Milestone 1
-declared schema version 1 with no automated migration, so adding a table is a
-schema change that this ADR must explicitly approve and bound.
+and the only durable local store is the existing SQLite database, so adding a
+table is a schema change that this ADR must explicitly approve and bound
+through the established one-shot operator-approved migration framework.
+
+This decision is the per-run evidence container named by
+[ADR 0036](0036-proof-carrying-software-factory-product-direction.md)'s
+product promise — the operator reviews one evidence bundle — and by its Gate 3
+"authority/evidence containers." It is deliberately not the ADR 0037 Mission
+Room: there is no membership, no deliberation transcript, and no participant
+provider call here. A Change Room answers "what was requested, proposed,
+approved, changed, verified, decided, and how to land or reverse it" from the
+run's authoritative records; bounded multi-agent deliberation remains the
+separate ADR 0037 collaboration track. Where ADR 0036's Crew track later joins
+decisions, patches, checks, review, and landing receipts in a branch room,
+this per-run projection is the evidence surface those receipts reference.
 
 ## Decision
 
@@ -131,23 +146,30 @@ ACTOR`, and list them with `run annotations RUN`. Annotations:
 - appear in the browser only as durable read-only operator context inside
   the room projection. There is no browser annotation route.
 
-The browser therefore gains no mutation authority of any kind: all three new
-API routes are GET-only, and the route inventory assertions cover them.
+The browser therefore gains no mutation authority of any kind from this
+slice: all three new API routes are GET-only reads on the observation side of
+the boundary, and the route inventory assertions cover them. The ADR 0029
+browser mutation session and its fenced origins are untouched — room copy
+states that approvals are recorded through the CLI or that fenced session,
+while the room itself stays read-only evidence.
 
-### Schema version 2 is additive and forward-only
+### The annotation migration follows the one-shot operator-approved framework
 
-`run_annotations` is the only schema change. It is created by the same
-idempotent `CREATE TABLE IF NOT EXISTS` block the store applies on every
-open, so existing version-1 databases gain the table on first open with no
-data rewrite, and no existing table or index changes. The store then reads
-`user_version` and raises it to 2 only when it is lower; a database from a
-newer version fails closed with `UNSUPPORTED_DATABASE_VERSION`. A version-1
-binary opening a version-2 database keeps working (the unknown table is
-ignored) and resets the marker to 1; the next version-2 open raises it
-again. That marker drift is accepted and documented because it loses no data
-and blocks no recovery. This is the narrowest possible migration: no
-backfill, no destructive step, and no change to the deletion coupling
-invariant. The upgrade policy in `docs/OPERATIONS.md` is amended accordingly.
+`run_annotations` is the only schema change. Its DDL lives beside the other
+schema constants in `core-schema.ts` as `ICARUS_ANNOTATION_SCHEMA` and is
+applied idempotently on every open, so freshly created databases always have
+it. A database that already has `runs` but lacks the table follows the same
+contract as the approval-index, patch-set, and readable-manifest migrations:
+a read-only shape inspection runs before the writable handle opens, and the
+store refuses to open with `DATABASE_MIGRATION_REQUIRED` until the operator
+backs up state and reruns with exactly
+`ICARUS_APPROVE_SCHEMA_MIGRATION=run-annotations-v1`. One token approves
+exactly one migration; an unrelated token changes nothing. A table whose
+shape does not match fails closed as `DATABASE_ERROR`. The annotation objects
+are registered in the closed schema-object set, so no unknown-object
+assertion can mistake them for tampering. There is no backfill, no
+destructive step, and no change to the deletion-coupling invariant. The
+upgrade policy in `docs/OPERATIONS.md` is amended accordingly.
 
 ### Explicit non-goals for this slice
 
@@ -171,8 +193,9 @@ and rollback questions with citations.
 
 The cost is a second derived-read code path per run, which the bounded
 response shapes, fixed card set, fail-closed projection, and replay tests
-keep small, plus the first schema-version increment, which is additive and
-covered by a migration test. Richer questions, live updates, browser-side
-annotation authoring, and any assistant summarization remain separately
-justified future work. ADR 0010 remains an independent release hold and is
-unchanged.
+keep small, plus one additive migration, which follows the established
+operator-approved framework and is covered by refusal, invalid-token,
+shape-validation, and round-trip tests. Richer questions, live updates,
+browser-side annotation authoring, and any assistant summarization remain
+separately justified future work. ADR 0025's residual third-party-review and
+secret-rotation holds remain independent and unchanged.

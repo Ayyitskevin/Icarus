@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -46,10 +46,14 @@ async function responseJson(response: Response): Promise<Record<string, unknown>
   return (await response.json()) as Record<string, unknown>;
 }
 
-async function postJson(url: string, value: unknown): Promise<Response> {
+async function postJson(
+  url: string,
+  value: unknown,
+  headers: Readonly<Record<string, string>> = {},
+): Promise<Response> {
   return fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(value),
   });
 }
@@ -73,16 +77,40 @@ async function rawRequest(
 }
 
 function persistenceSnapshot(database: TestDatabase): Record<string, readonly unknown[]> {
-  return {
-    repositories: database.prepare("SELECT * FROM repositories ORDER BY id").all(),
-    projects: database.prepare("SELECT * FROM projects ORDER BY id").all(),
-    runs: database.prepare("SELECT * FROM runs ORDER BY id").all(),
-    events: database.prepare("SELECT * FROM run_events ORDER BY id").all(),
-    approvals: database.prepare("SELECT * FROM approvals ORDER BY id").all(),
-    operations: database.prepare("SELECT * FROM operations ORDER BY id").all(),
-    checkpoints: database.prepare("SELECT * FROM checkpoints ORDER BY run_id").all(),
-    annotations: database.prepare("SELECT * FROM run_annotations ORDER BY rowid").all(),
+  const tables = (
+    database
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      )
+      .all() as Array<{ readonly name: string }>
+  ).map((entry) => entry.name);
+  const snapshot: Record<string, readonly unknown[]> = {
     sequences: database.prepare("SELECT * FROM sqlite_sequence ORDER BY name").all(),
+  };
+  for (const table of tables) {
+    snapshot[table] = database.prepare(`SELECT * FROM "${table}"`).all();
+  }
+  return snapshot;
+}
+
+function workspaceMutationHeaders(server: {
+  readonly mode: string;
+  readonly launchUrl: string;
+  readonly url: string;
+}): Readonly<Record<string, string>> {
+  if (server.mode !== "mutation-capable") {
+    throw new Error("Review-only workspace has no mutation session");
+  }
+  const launch = new URL(server.launchUrl);
+  const match = /^#icarus-action-session=([A-Za-z0-9_-]{43})$/.exec(launch.hash);
+  if (match === null || launch.origin !== server.url) {
+    throw new Error("Workspace launch URL did not contain one canonical action session");
+  }
+  return {
+    origin: server.url,
+    authorization: `Bearer ${match[1] ?? ""}`,
+    "content-type": "application/json",
+    "x-icarus-action": "workspace.mutate",
   };
 }
 
@@ -298,7 +326,21 @@ describe("Change Room workspace API", () => {
     });
     expect(byKind.patchset).toMatchObject({
       status: "available",
-      body: { actionStatus: "completed", diffSha256: diffSha, changedPaths: ["src/greeting.txt"] },
+      body: {
+        patchSet: {
+          edits: [
+            {
+              op: "modify",
+              path: "src/greeting.txt",
+              replacementCount: 1,
+            },
+          ],
+        },
+        patchSetEditsTruncated: false,
+        actionStatus: "completed",
+        diffSha256: diffSha,
+        changedPaths: ["src/greeting.txt"],
+      },
     });
     const patchsetBody = byKind.patchset?.body as { diff: string };
     expect(String(patchsetBody.diff)).toContain("+Hello, Icarus!");
@@ -354,7 +396,7 @@ describe("Change Room workspace API", () => {
     const statements = (whatChanged.components as readonly { statement: string }[])
       .map((entry) => entry.statement)
       .join("\n");
-    expect(statements).toContain("nothing was committed, pushed, merged, or deployed");
+    expect(statements).toContain("requires a separate recorded landing grant");
     const whyBlocked = await responseJson(
       await fetch(`${server.url}/api/runs/${planned.id}/change-context?question=why_blocked`),
     );
@@ -382,18 +424,21 @@ describe("Change Room workspace API", () => {
       expect(invalid.status).toBe(422);
     }
 
-    // The browser remains read-only: no mutation verb exists for room routes.
+    // The room routes add no authority: mutation verbs are refused by the
+    // action-session boundary before routing, and no matching route exists
+    // even behind the browser's fenced mutation session (ADR 0029).
     for (const method of ["POST", "PUT", "DELETE"]) {
       const roomMutation = await rawRequest(`${server.url}/api/runs/${planned.id}/change-room`, {
         method,
       });
-      expect(roomMutation.status).toBe(404);
+      expect(roomMutation.status).toBe(401);
       const indexMutation = await rawRequest(`${server.url}/api/change-rooms`, { method });
-      expect(indexMutation.status).toBe(404);
+      expect(indexMutation.status).toBe(401);
     }
     const annotationMutation = await postJson(
       `${server.url}/api/runs/${planned.id}/change-room/annotations`,
       { card: "room", text: "browser must not write", actor: "mallory" },
+      workspaceMutationHeaders(server),
     );
     expect(annotationMutation.status).toBe(404);
 
@@ -433,26 +478,39 @@ describe("Change Room workspace API", () => {
     );
     cleanups.push(server.close);
 
-    const projectResponse = await postJson(`${server.url}/api/projects`, {
-      repository: { name: "fixture", path: fixture.repository },
-      project: {
-        name: "golden",
-        baseRef: "main",
-        sandboxImage: PYTHON_IMAGE,
-        checks: [{ id: "verify", name: "Verify greeting", argv: ["python", "checks/verify.py"] }],
+    const mutationHeaders = workspaceMutationHeaders(server);
+    const projectResponse = await postJson(
+      `${server.url}/api/projects`,
+      {
+        repository: { name: "fixture", path: fixture.repository },
+        project: {
+          name: "golden",
+          baseRef: "main",
+          sandboxImage: PYTHON_IMAGE,
+          checks: [{ id: "verify", name: "Verify greeting", argv: ["python", "checks/verify.py"] }],
+        },
       },
-    });
+      mutationHeaders,
+    );
     expect(projectResponse.status).toBe(201);
     const projectId = String((await responseJson(projectResponse)).id);
-    const draftResponse = await postJson(`${server.url}/api/runs`, {
-      projectId,
-      task: "Review one exact greeting replacement.",
-      target: "src/greeting.txt",
-      provider: { model: "contract-model", baseUrl: provider.baseUrl },
-    });
+    const draftResponse = await postJson(
+      `${server.url}/api/runs`,
+      {
+        projectId,
+        task: "Review one exact greeting replacement.",
+        targets: ["src/greeting.txt"],
+        provider: { model: "contract-model", baseUrl: provider.baseUrl },
+      },
+      mutationHeaders,
+    );
     expect(draftResponse.status).toBe(201);
     const runId = String((await responseJson(draftResponse)).id);
-    const plannedResponse = await postJson(`${server.url}/api/runs/${runId}/plan`, {});
+    const plannedResponse = await postJson(
+      `${server.url}/api/runs/${runId}/plan`,
+      {},
+      mutationHeaders,
+    );
     expect(plannedResponse.status).toBe(200);
 
     const room = await responseJson(await fetch(`${server.url}/api/runs/${runId}/change-room`));
@@ -521,5 +579,74 @@ describe("Change Room workspace API", () => {
     // snapshot was taken.
     expect(afterReads).toEqual(persistenceBefore);
     expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+  });
+
+  test("requires the exact one-shot CLI approval before migrating pre-annotation state", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    expect(
+      (
+        await runCli(fixture.stateRoot, [
+          "repo",
+          "add",
+          "--name",
+          "fixture",
+          "--path",
+          fixture.repository,
+        ])
+      ).exitCode,
+    ).toBe(0);
+    const databasePath = path.join(fixture.stateRoot, "icarus.sqlite3");
+    const legacy = new Database(databasePath);
+    legacy.exec("DROP TABLE run_annotations");
+    const repositoryCount = legacy.prepare("SELECT COUNT(*) AS count FROM repositories").get();
+    legacy.close();
+    const digestBeforeRefusal = createHash("sha256")
+      .update(await readFile(databasePath))
+      .digest("hex");
+
+    const missing = await runCli(fixture.stateRoot, ["run", "list"], {
+      ICARUS_APPROVE_SCHEMA_MIGRATION: undefined,
+    });
+    expect(missing.exitCode).toBe(1);
+    expect(missing.stderr).toContain("DATABASE_MIGRATION_REQUIRED");
+    expect(
+      createHash("sha256")
+        .update(await readFile(databasePath))
+        .digest("hex"),
+    ).toBe(digestBeforeRefusal);
+
+    const invalid = await runCli(fixture.stateRoot, ["run", "list"], {
+      ICARUS_APPROVE_SCHEMA_MIGRATION: "approval-index-v1",
+    });
+    expect(invalid.exitCode).toBe(1);
+    expect(invalid.stderr).toContain("DATABASE_MIGRATION_REQUIRED");
+    expect(
+      createHash("sha256")
+        .update(await readFile(databasePath))
+        .digest("hex"),
+    ).toBe(digestBeforeRefusal);
+
+    const approved = await runCli(fixture.stateRoot, ["run", "list"], {
+      ICARUS_APPROVE_SCHEMA_MIGRATION: "run-annotations-v1",
+    });
+    expect(approved.exitCode).toBe(0);
+    const migrated = new Database(databasePath);
+    expect(
+      migrated
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run_annotations'")
+        .get(),
+    ).toBeDefined();
+    expect(migrated.prepare("SELECT COUNT(*) AS count FROM repositories").get()).toEqual(
+      repositoryCount,
+    );
+    migrated.close();
+    expect(
+      (
+        await runCli(fixture.stateRoot, ["run", "list"], {
+          ICARUS_APPROVE_SCHEMA_MIGRATION: undefined,
+        })
+      ).exitCode,
+    ).toBe(0);
   });
 });

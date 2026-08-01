@@ -170,48 +170,58 @@ describe("Run annotations", () => {
     fixture.store.close();
   });
 
-  it("migrates a version-1 database forward without losing existing state", () => {
+  it("requires explicit approval to migrate a pre-annotation database", () => {
     const fixture = createChangeRoomFixture();
     cleanupRoots.push(fixture.root);
     driveToCompleted(fixture.store);
     const runBefore = fixture.store.getRun(UNIT_RUN_ID);
     fixture.store.close();
 
-    // Simulate the version-1 layout: no annotation table and user_version 1.
+    // Simulate the pre-ADR-0041 layout: a database with runs but no
+    // annotation table.
     const database = new Database(fixture.databasePath);
     database.prepare("DROP TABLE run_annotations").run();
-    database.prepare("PRAGMA user_version = 1").run();
     database.close();
 
-    const reopened = new IcarusStore(fixture.databasePath, {
-      now: () => "2026-07-19T12:05:00.000Z",
-      id: makeUnitIdGenerator(),
-    });
-    const version = new Database(fixture.databasePath).prepare("PRAGMA user_version").get() as {
-      readonly user_version: number;
-    };
-    expect(version.user_version).toBe(2);
-    expect(reopened.getRun(UNIT_RUN_ID)).toEqual(runBefore);
-    const annotation = reopened.addRunAnnotation(UNIT_RUN_ID, "room", "kevin", "post-migration");
-    expect(reopened.listRunAnnotations(UNIT_RUN_ID)).toHaveLength(1);
-    expect(reopened.listRunAnnotations(UNIT_RUN_ID)[0]?.id).toBe(annotation.id);
-    reopened.close();
-  });
-
-  it("refuses a database from a newer schema version", () => {
-    const fixture = createChangeRoomFixture();
-    cleanupRoots.push(fixture.root);
-    fixture.store.close();
-    const database = new Database(fixture.databasePath);
-    database.prepare("PRAGMA user_version = 99").run();
-    database.close();
     expectCode(
       () =>
         new IcarusStore(fixture.databasePath, {
           now: () => "2026-07-19T12:05:00.000Z",
           id: makeUnitIdGenerator(),
         }),
-      "UNSUPPORTED_DATABASE_VERSION",
+      "DATABASE_MIGRATION_REQUIRED",
+    );
+
+    const migrated = new IcarusStore(fixture.databasePath, {
+      now: () => "2026-07-19T12:05:00.000Z",
+      id: makeUnitIdGenerator(),
+      allowAnnotationMigration: true,
+    });
+    expect(migrated.getRun(UNIT_RUN_ID)).toEqual(runBefore);
+    const annotation = migrated.addRunAnnotation(UNIT_RUN_ID, "room", "kevin", "post-migration");
+    expect(migrated.listRunAnnotations(UNIT_RUN_ID)).toHaveLength(1);
+    expect(migrated.listRunAnnotations(UNIT_RUN_ID)[0]?.id).toBe(annotation.id);
+    migrated.close();
+  });
+
+  it("fails closed on an annotation table with an invalid shape", () => {
+    const fixture = createChangeRoomFixture();
+    cleanupRoots.push(fixture.root);
+    fixture.store.close();
+    const database = new Database(fixture.databasePath);
+    database.prepare("DROP TABLE run_annotations").run();
+    database
+      .prepare("CREATE TABLE run_annotations (id TEXT PRIMARY KEY, wrong TEXT NOT NULL)")
+      .run();
+    database.close();
+    expectCode(
+      () =>
+        new IcarusStore(fixture.databasePath, {
+          now: () => "2026-07-19T12:05:00.000Z",
+          id: makeUnitIdGenerator(),
+          allowAnnotationMigration: true,
+        }),
+      "DATABASE_ERROR",
     );
   });
 });

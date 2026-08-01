@@ -1,0 +1,160 @@
+# ADR 0022: Explicit native macOS and Windows acceptance
+
+- Status: Accepted — exact-head macOS and Windows jobs passed
+- Date: 2026-07-22
+- Accepted: 2026-07-31 at
+  `802b91e6f6c9b392f56c9ee3660be818a0f74a62`
+- Related: [ADR 0010](0010-inherited-opencode-workflow-security-hold.md),
+  [ADR 0011](0011-kernel-backed-stable-run-leases.md), and
+  [ADR 0014](0014-loopback-api-react-workspace.md)
+
+## Context
+
+Icarus claims that the loopback HTTP/UI shell, repository import, committed-tree
+context preview, draft persistence, loopback planning, and SQLite operation
+admission support Linux, macOS, and Windows. Guarded approval and execution are
+separately Linux-only because they require `/usr/bin/flock`, `/proc`, and the
+Docker containment contract. At authoring/candidate time, existing Linux tests
+simulated portable policy branches but no real macOS or Windows host run had
+been recorded. The accepted exact-head evidence is recorded below.
+
+Running the complete Linux release gate on another operating system would make a
+false claim: that gate intentionally includes Linux lease, filesystem, Git, and
+Docker-containment behavior. A native lane must exercise only the supported
+portable boundary while remaining supply-chain pinned, bounded, and independently
+reviewable.
+
+## Decision
+
+Add `.github/workflows/native-acceptance.yml` as a manually dispatched,
+read-only workflow. A dispatch operates on the exact `github.sha` selected by the
+operator. It has no secret reference, OIDC permission, write permission,
+automatic pull-request trigger, push trigger, schedule, or workflow-call entry.
+Concurrency is scoped to that exact commit and each job has a 20-minute timeout.
+
+The fixed host matrix is:
+
+| Runner label | Expected host | Expected architecture |
+|---|---|---|
+| `macos-15` | `darwin` | `arm64` |
+| `windows-2025` | `win32` | `x64` |
+
+These explicit OS labels avoid the moving `*-latest` aliases. Hosted images
+still receive GitHub's normal weekly image updates, so a successful run is
+evidence for its recorded image, action, dependency lock, and candidate commit;
+it is not permanent proof about future images.
+
+The workflow uses only these reviewed immutable action commits:
+
+| Action release | Immutable commit |
+|---|---|
+| `actions/checkout` v7.0.1 | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
+| `pnpm/action-setup` v6.0.9 | `0ebf47130e4866e96fce0953f49152a61190b271` |
+| `actions/setup-node` v6.4.0 | `48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e` |
+
+The pnpm version remains repository-owned through exact
+`packageManager: pnpm@9.15.4`; Node is exact `22.23.0`; dependency installation
+uses the committed frozen lockfile. Checkout credentials are not persisted, and
+no shared Actions dependency cache is restored or saved.
+
+The repository pins every Git-detected text file to LF and self-pins
+`.gitattributes` through two exact attribute rules. Git-detected binary files
+remain binary. This keeps the byte-reviewed workflow policies, formatter gate,
+and fixture digests portable when Git for Windows would otherwise translate
+text to CRLF; local security tests reject a missing, narrowed, or overridden
+rule.
+
+Each host validates the workflow policy and its own platform/architecture,
+bootstraps and executes the checksum-pinned native actionlint binary, validates
+every workflow plus actionlint's known-invalid negative fixture, installs locked
+dependencies, and runs formatting, lint, type checking, the portable native,
+provider, and selected unit boundaries, one portable workspace composition
+smoke, static security assertions, and the full package build. The native state
+smoke creates and reopens a real marked SQLite state root beneath the current
+user's profile. The composition smoke uses a real temporary Git repository,
+loopback HTTP server and deterministic Ollama fixture to register a project,
+preview committed-tree context, persist and reopen a draft, plan it, verify
+bounded evidence, and prove the source checkout is unchanged.
+
+The selected unit list covers deterministic context preview, provider HTTP
+contracts, policy/state transitions, persisted drafts and portable operation
+admission, SQLite state, bounded JSON responses and project-page navigation,
+verification provenance, and workspace presentation and request lifecycle. The
+draft suite runs only its explicit Darwin and Win32
+admission cases; its mocked Linux kernel-lease case stays in the Linux gate. The
+native lane deliberately excludes the remaining integration and eval suites, POSIX
+symlink/mode tests, kernel leases, Git mutation, Docker checks, approval,
+execution, audit-network calls, and the aggregate `pnpm check`. Those remain the
+Linux release gate and this workflow cannot replace it.
+
+`scripts/native-acceptance-policy.mjs` fails closed on workflow byte drift,
+mutable or changed action refs, host-matrix drift, permission/trigger widening,
+secret use, shared-cache enablement, command widening, missing exact-host
+identity, Node drift, or pnpm drift. Security tests exercise positive and
+adversarial policy cases locally.
+Actionlint remains the syntax/schema validator; the repository policy is an
+additional exact authority boundary, not a YAML parser substitute.
+
+## Consequences
+
+Native acceptance is explicit and repeatable without pretending that Linux-only
+authority is portable. A candidate is not natively accepted until both matrix
+jobs succeed at that exact commit and the resulting run URL, commit, runner
+image versions, and job conclusions are recorded.
+
+That condition is now satisfied. [Native run
+30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
+completed successfully at exact `main`
+`802b91e6f6c9b392f56c9ee3660be818a0f74a62`:
+
+- [macOS 15 arm64 job
+  91069305460](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132/job/91069305460)
+  succeeded on macOS 15.7.7 with runner image `macos-15-arm64`
+  `20260715.0234.1`.
+- [Windows Server 2025 x64 job
+  91069305501](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132/job/91069305501)
+  succeeded on Windows Server 2025 10.0.26100 with runner image
+  `windows-2025-vs2026` `20260714.173.1`.
+
+The matching Linux [run
+30602942008](https://github.com/Ayyitskevin/Icarus/actions/runs/30602942008)
+also succeeded at that exact head. [PR
+#18](https://github.com/Ayyitskevin/Icarus/pull/18) merged the Gate 0 candidate
+as `d4bbcd4aab713bee23237099286e6d9b9f74283b`; the native-fixture correction
+then produced exact main `802b91e6...`. Gate 0 is merged and released, and this
+ADR is Accepted. Forward product work now begins with Gate 1.
+
+At authoring/candidate time, the workflow and policy were already published and
+registered on `main` at `03c27640ffd0e8a377f2a17e64dc2be987a52409`, and the
+exact implementation-head Linux gate had passed, but GitHub reported zero
+native workflow runs. Merging the workflow therefore accepted only its bounded
+manual mechanism, both real host results remained pending, and this ADR remained
+Proposed. The exact-commit jobs above close that historical condition.
+
+The exact workflow digest intentionally makes any change fail the local security
+test until the workflow and policy are reviewed together. Action-release or
+runner-image upgrades require fresh official provenance, policy/test updates,
+and both hosted jobs again. Because the workflow is manual, it controls runner
+spend but does not serve as an automatic branch-protection gate.
+
+This decision adds no runtime/package/schema behavior, provider call, repository
+mutation, browser authority, approval, product execution, arbitrary command,
+product commit/push/deployment, secret, or public endpoint. It does not modify or
+bless the inherited OpenCode workflow. At authoring/candidate time ADR 0010
+remained an independent release hold; ADR 0025 later resolved that decision by
+hardening while retaining its separate third-party review and secret-rotation
+work.
+
+## Upstream provenance
+
+- `actions/checkout` v7.0.1 release and commit:
+  <https://github.com/actions/checkout/releases/tag/v7.0.1> and
+  <https://github.com/actions/checkout/commit/3d3c42e5aac5ba805825da76410c181273ba90b1>
+- `pnpm/action-setup` v6.0.9 release and commit:
+  <https://github.com/pnpm/action-setup/releases/tag/v6.0.9> and
+  <https://github.com/pnpm/action-setup/commit/0ebf47130e4866e96fce0953f49152a61190b271>
+- `actions/setup-node` v6.4.0 release and commit:
+  <https://github.com/actions/setup-node/releases/tag/v6.4.0> and
+  <https://github.com/actions/setup-node/commit/48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e>
+- GitHub-hosted runner labels and image-update policy:
+  <https://github.com/actions/runner-images#available-images>

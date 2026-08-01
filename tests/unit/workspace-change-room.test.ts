@@ -147,7 +147,7 @@ function cards(): ChangeRoomDetailView["cards"] {
       body: {
         baseCommit: BASE_COMMIT,
         contextSha256: CONTEXT_SHA256,
-        target: "src/example.ts",
+        targets: ["src/example.ts"],
         totalBytes: 4096,
         auditPolicyVersion: "tracked-tree-secret-audit-v1",
         repositoryMap: ["src/example.ts", "README.md"],
@@ -186,7 +186,10 @@ function cards(): ChangeRoomDetailView["cards"] {
           steps: ["Read the target", "Replace the line"],
           risks: ["The preimage may have drifted"],
           target: "src/example.ts",
+          targets: ["src/example.ts"],
+          iterationCeiling: 0,
           checkIds: ["check-lint"],
+          grants: [],
         },
         planSha256: PLAN_SHA256,
       },
@@ -217,11 +220,19 @@ function cards(): ChangeRoomDetailView["cards"] {
       refs: [{ kind: "digest", label: "diff", sha256: DIFF_SHA256 }],
       indicators: indicators({ redacted: true }),
       body: {
-        action: {
-          path: "src/example.ts",
-          expectedPreimageSha256: PREIMAGE_SHA256,
-          rationale: "The greeting must match the new copy.",
+        patchSet: {
+          summary: "Replace the greeting line.",
+          edits: [
+            {
+              op: "modify",
+              path: "src/example.ts",
+              rationale: "The greeting must match the new copy.",
+              expectedPreimageSha256: PREIMAGE_SHA256,
+              replacementCount: 1,
+            },
+          ],
         },
+        patchSetEditsTruncated: false,
         actionStatus: "materialized",
         diffSha256: DIFF_SHA256,
         diffBytes: DIFF_BYTES,
@@ -412,7 +423,7 @@ function draftRoom(): ChangeRoomDetailView {
           body: {
             baseCommit: null,
             contextSha256: null,
-            target: null,
+            targets: [],
             totalBytes: null,
             auditPolicyVersion: null,
             repositoryMap: [],
@@ -441,7 +452,8 @@ function draftRoom(): ChangeRoomDetailView {
           refs: [],
           indicators: indicators(),
           body: {
-            action: null,
+            patchSet: null,
+            patchSetEditsTruncated: false,
             actionStatus: "not_recorded" as const,
             diffSha256: null,
             diffBytes: null,
@@ -881,7 +893,7 @@ describe("workspace change room detail contract", () => {
       }),
       withCard(4, { ...patchset.body, actionStatus: "deployed" }),
       // A missing action row means no edit was recorded; the status must agree.
-      withCard(4, { ...patchset.body, action: null }),
+      withCard(4, { ...patchset.body, patchSet: null, patchSetEditsTruncated: false }),
       withCard(4, { ...patchset.body, actionStatus: "not_recorded" }),
       // The diff byte count is recomputed client-side so a host cannot
       // under-report the evidence size.

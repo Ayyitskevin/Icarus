@@ -151,7 +151,7 @@ describe("Change Room projection", () => {
       task: run.task,
       baseCommit: run.baseCommit,
       contextSha256: run.contextSha256,
-      target: run.target,
+      targets: run.context.targets,
       provider: run.provider,
       checks: projectRecord.checks,
       sandbox: projectRecord.sandbox,
@@ -181,7 +181,11 @@ describe("Change Room projection", () => {
     const room = roomAt(fixture.store);
 
     const patchset = cardBody<PatchsetCardBody>(room, "patchset");
-    expect(patchset.action?.path).toBe("src/greeting.txt");
+    expect(patchset.patchSet?.edits).toHaveLength(1);
+    expect(patchset.patchSet?.edits[0]?.path).toBe("src/greeting.txt");
+    expect(patchset.patchSet?.edits[0]?.op).toBe("modify");
+    expect(patchset.patchSet?.edits[0]?.replacementCount).toBe(1);
+    expect(patchset.patchSetEditsTruncated).toBe(false);
     expect(patchset.actionStatus).toBe("materialized");
     expect(patchset.diffSha256).toBe(evidence.diffSha256);
     expect(patchset.diffBytes).toBe(Buffer.byteLength(evidence.diff, "utf8"));

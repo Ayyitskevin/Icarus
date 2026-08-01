@@ -3,6 +3,12 @@
 - Status: Accepted
 - Date: 2026-07-19
 
+> The one-file mutation boundary below is superseded by
+> [ADR 0023](0023-transactional-multi-file-patch-sets.md). The isolation
+> decisions — clean base commit, approval bound to the run manifest,
+> hardlink-free private Git cache, post-approval detached worktree, and the
+> prohibition on modifying the source checkout — remain in force.
+
 ## Context
 
 The golden path must prove isolation, approval, verification, and recovery

@@ -1,13 +1,20 @@
-import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { createRequire } from "node:module";
 import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { startWorkspaceServer } from "../../packages/api/src/server.js";
+import {
+  type StartedWorkspaceServer,
+  startWorkspaceServer as startWorkspaceServerImplementation,
+  type WorkspaceServerOptions,
+} from "../../packages/api/src/server.js";
 import {
   createIcarusRuntime,
+  DEFAULT_CEILING,
+  DEFAULT_SANDBOX_LIMITS,
   IcarusError,
   type IcarusRuntime,
 } from "../../packages/core/src/index.js";
@@ -19,8 +26,11 @@ import {
   repositoryFingerprint,
   startOllamaQueue,
 } from "../support/integration-cli.js";
+import { fetchWorkspace as fetchWorkspaceDirect } from "../support/workspace-http.js";
 
 const cleanups: Array<() => Promise<void>> = [];
+const mutationHeadersByOrigin = new Map<string, Readonly<Record<string, string>>>();
+const workspaceServersByOrigin = new Map<string, StartedWorkspaceServer>();
 
 interface TestDatabase {
   prepare(sql: string): {
@@ -41,16 +51,61 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) {
     await cleanup();
   }
+  mutationHeadersByOrigin.clear();
+  workspaceServersByOrigin.clear();
 });
 
 async function responseJson(response: Response): Promise<Record<string, unknown>> {
   return (await response.json()) as Record<string, unknown>;
 }
 
+function workspaceMutationHeaders(
+  server: StartedWorkspaceServer,
+): Readonly<Record<string, string>> {
+  if (server.mode !== "mutation-capable") {
+    throw new Error("Review-only workspace has no mutation session");
+  }
+  const launch = new URL(server.launchUrl);
+  const match = /^#icarus-action-session=([A-Za-z0-9_-]{43})$/.exec(launch.hash);
+  if (match === null || launch.origin !== server.url) {
+    throw new Error("Workspace launch URL did not contain one canonical action session");
+  }
+  return {
+    origin: server.url,
+    authorization: `Bearer ${match[1] ?? ""}`,
+    "content-type": "application/json",
+    "x-icarus-action": "workspace.mutate",
+  };
+}
+
+async function startWorkspaceServer(
+  options: WorkspaceServerOptions,
+  port: number,
+): Promise<StartedWorkspaceServer> {
+  const server = await startWorkspaceServerImplementation(options, port);
+  workspaceServersByOrigin.set(server.url, server);
+  if (server.mode === "mutation-capable") {
+    mutationHeadersByOrigin.set(server.url, workspaceMutationHeaders(server));
+  }
+  return server;
+}
+
+async function fetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  if (!(input instanceof Request)) {
+    const url = new URL(input);
+    const workspace = workspaceServersByOrigin.get(url.origin);
+    if (workspace !== undefined) {
+      return fetchWorkspaceDirect(workspace, url, init);
+    }
+  }
+  return globalThis.fetch(input, init);
+}
+
 async function postJson(url: string, value: unknown): Promise<Response> {
+  const mutationHeaders = mutationHeadersByOrigin.get(new URL(url).origin);
   return fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...mutationHeaders },
     body: JSON.stringify(value),
   });
 }
@@ -68,8 +123,47 @@ function persistenceSnapshot(database: TestDatabase): Record<string, readonly un
   };
 }
 
+async function filesContainingBytes(root: string, needle: Buffer): Promise<string[]> {
+  const matches: string[] = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    if (directory === undefined) break;
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(entryPath);
+      } else if (entry.isFile() && (await readFile(entryPath)).indexOf(needle) >= 0) {
+        matches.push(path.relative(root, entryPath));
+      }
+    }
+  }
+  return matches.sort();
+}
+
 function workspaceRunId(index: number): string {
   return `10000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+}
+
+function workspaceProjectId(index: number): string {
+  return `20000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+}
+
+function insertWorkspaceProject(database: TestDatabase, repositoryId: string, index: number): void {
+  database
+    .prepare(
+      `INSERT INTO projects
+        (id, name, repository_id, base_ref, checks_json, sandbox_json, ceiling_json, created_at)
+       VALUES (?, ?, ?, 'main', ?, ?, ?, '2026-07-22T12:00:00.000Z')`,
+    )
+    .run(
+      workspaceProjectId(index),
+      `api-project-${index}`,
+      repositoryId,
+      JSON.stringify([{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }]),
+      JSON.stringify({ image: PYTHON_IMAGE, ...DEFAULT_SANDBOX_LIMITS }),
+      JSON.stringify(DEFAULT_CEILING),
+    );
 }
 
 function insertWorkspaceRun(database: TestDatabase, projectId: string, index: number): void {
@@ -99,18 +193,30 @@ async function rawRequest(
   url: string,
   options: {
     readonly method?: string;
-    readonly headers?: Readonly<Record<string, string>>;
-    readonly body?: string;
+    readonly headers?: http.OutgoingHttpHeaders | readonly string[];
+    readonly body?: string | Uint8Array;
   },
 ): Promise<{
   readonly status: number;
   readonly headers: http.IncomingHttpHeaders;
   readonly body: string;
 }> {
+  const target = new URL(url);
+  const workspace = workspaceServersByOrigin.get(target.origin);
+  const configuredHeaders = options.headers;
+  const headers = Array.isArray(configuredHeaders)
+    ? configuredHeaders.some((value, index) => index % 2 === 0 && value.toLowerCase() === "host")
+      ? configuredHeaders
+      : ["Host", target.host, ...configuredHeaders]
+    : { host: target.host, ...configuredHeaders };
   return new Promise((resolve, reject) => {
-    const request = http.request(url, {
+    const request = http.request({
+      hostname: workspace?.host ?? target.hostname,
+      port: target.port,
+      path: `${target.pathname}${target.search}`,
       method: options.method ?? "GET",
-      headers: options.headers,
+      headers,
+      agent: false,
     });
     const chunks: Buffer[] = [];
     request.on("response", (response) => {
@@ -169,17 +275,30 @@ describe("loopback local workspace API", () => {
       runtime = undefined;
     });
 
+    const mutationHostname = new URL(server.url).hostname;
     expect(server.host).toBe("127.0.0.1");
-    expect(server.server.address()).toMatchObject({ address: "127.0.0.1" });
+    expect(mutationHostname).toMatch(/^[a-f0-9]{32}\.localhost$/);
+    expect(server.mode).toBe("mutation-capable");
+    expect(server.url).toBe(`http://${mutationHostname}:${server.port}`);
+    expect(server.launchUrl).toMatch(
+      new RegExp(
+        `^http://${mutationHostname.replaceAll(
+          ".",
+          "\\.",
+        )}:${server.port}/#icarus-action-session=[A-Za-z0-9_-]{43}$`,
+      ),
+    );
+    expect(server.server.address()).toMatchObject({ address: server.host });
     const empty = await fetch(`${server.url}/api/workspace`);
     expect(empty.status).toBe(200);
     expect(await responseJson(empty)).toMatchObject({
       capabilities: {
+        mutation: { status: "available" },
         provider: { status: "unconfigured" },
         planning: { status: "available" },
         execution: { status: "unconfigured" },
       },
-      projects: [],
+      projectPage: { before: 1, snapshot: 0, nextBefore: 1, hasMore: false, projects: [] },
       runPage: { before: 1, snapshot: 0, nextBefore: 1, hasMore: false, runs: [] },
     });
 
@@ -216,7 +335,7 @@ describe("loopback local workspace API", () => {
     const draftResponse = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Review one exact greeting replacement.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "contract-model", baseUrl: provider.baseUrl },
     });
     expect(draftResponse.status).toBe(201);
@@ -270,8 +389,23 @@ describe("loopback local workspace API", () => {
       await responseJson(await fetch(`${server.url}/api/runs/${runId}/events?after=0`)),
     ).toEqual(initialEvents);
 
-    const forbiddenApproval = await postJson(`${server.url}/api/runs/${runId}/approve`, {});
-    expect(forbiddenApproval.status).toBe(404);
+    for (const route of [
+      "approve",
+      "edit",
+      "execute",
+      "checks",
+      "rerun",
+      "review",
+      "rollback",
+      "restore",
+      "commit",
+      "merge",
+      "push",
+      "deploy",
+    ]) {
+      const forbiddenAction = await postJson(`${server.url}/api/runs/${runId}/${route}`, {});
+      expect(forbiddenAction.status).toBe(404);
+    }
     expect(provider.requests).toHaveLength(0);
     expect(runtime.service.getRun(runId).state).toBe("preparing");
 
@@ -310,6 +444,11 @@ describe("loopback local workspace API", () => {
       files: { involved: expect.arrayContaining(["src/greeting.txt"]), changed: [] },
       verification: { outcome: "not_run" },
       approvals: [],
+      approvalCoverage: {
+        limit: 12,
+        loaded: 0,
+        earlierApprovalsExcluded: false,
+      },
       usage: {
         toolCalls: expect.any(Number),
         inputTokens: expect.any(Number),
@@ -332,6 +471,35 @@ describe("loopback local workspace API", () => {
     );
     expect(JSON.stringify(planned)).not.toContain(fixture.stateRoot);
     expect(JSON.stringify(planned)).not.toContain("contextArtifactPath");
+
+    const provenanceDatabase = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    const insertApproval = provenanceDatabase.prepare(
+      `INSERT INTO approvals (id, run_id, kind, digest, actor, decision, created_at)
+       VALUES (?, ?, 'plan', ?, ?, 'approve', ?)`,
+    );
+    for (let index = 1; index <= 13; index += 1) {
+      insertApproval.run(
+        `api-approval-${(14 - index).toString().padStart(2, "0")}`,
+        runId,
+        index.toString(16).padStart(64, "0"),
+        `api-operator-${index}`,
+        "2026-07-22T12:00:00.000Z",
+      );
+    }
+    provenanceDatabase.close();
+
+    const boundedProvenance = await responseJson(await fetch(`${server.url}/api/runs/${runId}`));
+    expect(boundedProvenance.approvalCoverage).toEqual({
+      limit: 12,
+      loaded: 12,
+      earlierApprovalsExcluded: true,
+    });
+    const retainedApprovals = boundedProvenance.approvals as Array<Record<string, unknown>>;
+    expect(retainedApprovals).toHaveLength(12);
+    expect(retainedApprovals.map((approval) => approval.actor)).toEqual(
+      Array.from({ length: 12 }, (_, index) => `api-operator-${index + 2}`),
+    );
+    expect(JSON.stringify(boundedProvenance)).not.toContain("api-approval-");
     expect(provider.requests).toHaveLength(1);
     const providerRequest = JSON.stringify(provider.requests[0]?.body);
     expect(providerRequest).toContain("src/greeting.txt");
@@ -358,7 +526,7 @@ describe("loopback local workspace API", () => {
     const failedDraftResponse = await postJson(`${server.url}/api/runs`, {
       projectId: String(failedProject.id),
       task: "Preserve a provider failure as an honest run state.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "contract-model", baseUrl: provider.baseUrl },
     });
     expect(failedDraftResponse.status).toBe(201);
@@ -397,7 +565,7 @@ describe("loopback local workspace API", () => {
     const excludedDraftResponse = await postJson(`${server.url}/api/runs`, {
       projectId: String(excludedProject.id),
       task: "Reject a generated target inside the guarded lifecycle.",
-      target: "generated/client.ts",
+      targets: ["generated/client.ts"],
       provider: { model: "contract-model", baseUrl: provider.baseUrl },
     });
     expect(excludedDraftResponse.status).toBe(201);
@@ -421,7 +589,7 @@ describe("loopback local workspace API", () => {
     const replacementDraft = await postJson(`${server.url}/api/runs`, {
       projectId: String(excludedProject.id),
       task: "A failed validation must not block a replacement draft.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "contract-model", baseUrl: provider.baseUrl },
     });
     expect(replacementDraft.status).toBe(201);
@@ -441,6 +609,138 @@ describe("loopback local workspace API", () => {
     const index = await fetch(server.url);
     expect(index.status).toBe(200);
     expect(await index.text()).toContain('id="root"');
+  });
+
+  test("serves bounded rehashed persisted diff review without source or state mutation", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const projectResponse = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "diff-review-fixture", path: fixture.repository },
+      project: {
+        name: "diff-review-project",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    const projectId = String((await responseJson(projectResponse)).id);
+    const draftResponse = await postJson(`${server.url}/api/runs`, {
+      projectId,
+      task: "Review persisted diff evidence.",
+      targets: ["src/greeting.txt"],
+      provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
+    });
+    const runId = String((await responseJson(draftResponse)).id);
+    const diff = [
+      "diff --git a/src/greeting.txt b/src/greeting.txt",
+      "index ce01362..63c704a 100644",
+      "--- a/src/greeting.txt",
+      "+++ b/src/greeting.txt",
+      "@@ -1 +1 @@",
+      "-Hello, world!",
+      "+Hello, <img src=x onerror=alert(1)>!",
+      "",
+    ].join("\n");
+    const diffSha256 = createHash("sha256").update(diff, "utf8").digest("hex");
+    const verification = {
+      outcome: "passed",
+      checks: [],
+      changedPaths: ["src/greeting.txt"],
+      diffSha256,
+      checkpointSha256: "c".repeat(64),
+    };
+    const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    database
+      .prepare(
+        `UPDATE runs
+         SET state = 'awaiting_review', diff = ?, verification_json = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(diff, JSON.stringify(verification), "2026-07-22T12:01:00.000Z", runId);
+    database
+      .prepare(
+        `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+         VALUES (?, 2, 'verification.completed', '{}', ?)`,
+      )
+      .run(runId, "2026-07-22T12:01:00.000Z");
+    const persistenceBefore = persistenceSnapshot(database);
+    database.close();
+
+    const response = await fetch(`${server.url}/api/runs/${runId}`);
+    expect(response.status).toBe(200);
+    const projection = await responseJson(response);
+    expect(projection).toMatchObject({
+      id: runId,
+      state: "awaiting_review",
+      verification: { outcome: "passed", diffSha256 },
+      diff,
+      diffReview: {
+        status: "available",
+        path: "src/greeting.txt",
+        sha256: diffSha256,
+        byteCount: Buffer.byteLength(diff, "utf8"),
+        lineCount: 7,
+        addedLines: 1,
+        deletedLines: 1,
+        hunkCount: 1,
+        browserByteLimit: 262_144,
+        digestProvenance: "displayed_text_rehash_match",
+      },
+      timeline: expect.arrayContaining([
+        expect.objectContaining({
+          type: "verification.completed",
+          evidenceSection: "diff",
+        }),
+      ]),
+    });
+    expect(Object.keys(projection.diffReview as Record<string, unknown>).sort()).toEqual(
+      [
+        "status",
+        "path",
+        "sha256",
+        "byteCount",
+        "lineCount",
+        "addedLines",
+        "paths",
+        "deletedLines",
+        "hunkCount",
+        "browserByteLimit",
+        "digestProvenance",
+      ].sort(),
+    );
+    expect(JSON.stringify(projection)).toContain("<img src=x onerror=alert(1)>");
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+    const observer = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    expect(persistenceSnapshot(observer)).toEqual(persistenceBefore);
+    observer
+      .prepare("UPDATE runs SET diff = ? WHERE id = ?")
+      .run(`${diff}corrupt-response-sentinel`, runId);
+    const corruptPersistence = persistenceSnapshot(observer);
+    observer.close();
+
+    const corruptResponse = await fetch(`${server.url}/api/runs/${runId}`);
+    expect(corruptResponse.status).toBe(400);
+    const corruptError = await responseJson(corruptResponse);
+    expect(corruptError).toMatchObject({
+      error: { code: "DATABASE_ERROR", message: "Persisted diff evidence is invalid" },
+    });
+    expect(JSON.stringify(corruptError)).not.toContain("corrupt-response-sentinel");
+    const finalObserver = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    expect(persistenceSnapshot(finalObserver)).toEqual(corruptPersistence);
+    finalObserver.close();
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
   });
 
   test("serves strict pinned workspace run pages with fixed work and no full-run hydration", async () => {
@@ -526,7 +826,9 @@ describe("loopback local workspace API", () => {
     });
 
     const workspace = await responseJson(await fetch(`${server.url}/api/workspace`));
-    expect(Object.keys(workspace).sort()).toEqual(["capabilities", "projects", "runPage"].sort());
+    expect(Object.keys(workspace).sort()).toEqual(
+      ["capabilities", "projectPage", "runPage"].sort(),
+    );
     expect(workspace).not.toHaveProperty("runs");
     expect(workspace.runPage).toEqual(first);
 
@@ -555,7 +857,10 @@ describe("loopback local workspace API", () => {
       });
     }
     const forbiddenPut = await fetch(`${server.url}/api/runs`, { method: "PUT" });
-    expect(forbiddenPut.status).toBe(404);
+    expect(forbiddenPut.status).toBe(401);
+    expect(await responseJson(forbiddenPut)).toMatchObject({
+      error: { code: "ACTION_SESSION_REQUIRED" },
+    });
 
     const afterInitialReads = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
     expect(persistenceSnapshot(afterInitialReads)).toEqual(persistenceBefore);
@@ -564,7 +869,7 @@ describe("loopback local workspace API", () => {
     const createdResponse = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Open a newer workspace page session.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
     });
     expect(createdResponse.status).toBe(201);
@@ -588,6 +893,255 @@ describe("loopback local workspace API", () => {
     expect(persistenceSnapshot(finalObserver)).toEqual(afterCreation);
     finalObserver.close();
     expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+  });
+
+  test("serves strict pinned joined project pages without collection scans", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const initialResponse = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "project-page-fixture", path: fixture.repository },
+      project: {
+        name: "api-project-1",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    expect(initialResponse.status).toBe(201);
+    const initial = await responseJson(initialResponse);
+    const repository = initial.repository as Record<string, unknown>;
+    const repositoryId = String(repository.id);
+
+    const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    for (let index = 2; index <= 205; index += 1) {
+      insertWorkspaceProject(database, repositoryId, index);
+    }
+    database.prepare("DELETE FROM projects WHERE rowid = 100").run();
+    const persistenceBefore = persistenceSnapshot(database);
+    database.close();
+
+    Object.defineProperties(runtime.service, {
+      listProjects: {
+        value: () => {
+          throw new Error("Unbounded project scan was invoked");
+        },
+      },
+      listRepositories: {
+        value: () => {
+          throw new Error("Unbounded repository scan was invoked");
+        },
+      },
+    });
+
+    const firstResponse = await fetch(`${server.url}/api/projects`);
+    expect(firstResponse.status).toBe(200);
+    const first = await responseJson(firstResponse);
+    expect(Object.keys(first).sort()).toEqual(
+      ["before", "snapshot", "nextBefore", "hasMore", "projects"].sort(),
+    );
+    expect(first).toMatchObject({ before: 206, snapshot: 205, nextBefore: 194, hasMore: true });
+    const firstProjects = first.projects as Array<Record<string, unknown>>;
+    expect(firstProjects).toHaveLength(12);
+    expect(firstProjects.map((project) => project.id)).toEqual(
+      Array.from({ length: 12 }, (_, index) => workspaceProjectId(205 - index)),
+    );
+    expect(Object.keys(firstProjects[0] ?? {}).sort()).toEqual(
+      ["id", "name", "repository", "baseRef", "checks", "sandbox", "ceiling", "createdAt"].sort(),
+    );
+    expect(
+      Object.keys((firstProjects[0]?.repository ?? {}) as Record<string, unknown>).sort(),
+    ).toEqual(["id", "name", "path"].sort());
+    expect(JSON.stringify(first)).not.toMatch(/device|inode|repositoryId|private/);
+
+    const second = await responseJson(
+      await fetch(`${server.url}/api/projects?before=${String(first.nextBefore)}&snapshot=205`),
+    );
+    expect(second).toMatchObject({ before: 194, snapshot: 205, nextBefore: 182, hasMore: true });
+    expect(
+      (second.projects as Array<Record<string, unknown>>).map((project) => project.id),
+    ).toEqual(Array.from({ length: 12 }, (_, index) => workspaceProjectId(193 - index)));
+    const acrossGap = await responseJson(
+      await fetch(`${server.url}/api/projects?before=105&snapshot=205`),
+    );
+    expect(
+      (acrossGap.projects as Array<Record<string, unknown>>).map((project) => project.id),
+    ).toEqual([104, 103, 102, 101, 99, 98, 97, 96, 95, 94, 93, 92].map(workspaceProjectId));
+
+    const workspace = await responseJson(await fetch(`${server.url}/api/workspace`));
+    expect(workspace.projectPage).toEqual(first);
+    expect(workspace).not.toHaveProperty("projects");
+
+    for (const query of [
+      "?before=206",
+      "?snapshot=205",
+      "?before=&snapshot=205",
+      "?before=0&snapshot=205",
+      "?before=-1&snapshot=205",
+      "?before=0.5&snapshot=205",
+      "?before=0206&snapshot=205",
+      "?before=2e2&snapshot=205",
+      "?before=9007199254740992&snapshot=205",
+      "?before=206&snapshot=9007199254740991",
+      "?before=206&before=206&snapshot=205",
+      "?before=206&snapshot=205&snapshot=205",
+      "?before=206&snapshot=205&extra=1",
+      "?before=207&snapshot=205",
+      "?before=100&snapshot=205",
+      "?before=208&snapshot=207",
+    ]) {
+      const invalidPage = await fetch(`${server.url}/api/projects${query}`);
+      expect(invalidPage.status).toBe(422);
+      expect(await responseJson(invalidPage)).toMatchObject({
+        error: { code: expect.any(String) },
+      });
+    }
+
+    const afterReads = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    expect(persistenceSnapshot(afterReads)).toEqual(persistenceBefore);
+    afterReads.close();
+
+    const createdResponse = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "project-page-fixture", path: fixture.repository },
+      project: {
+        name: "api-project-206",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    expect(createdResponse.status).toBe(201);
+    const created = await responseJson(createdResponse);
+    expect(
+      await responseJson(await fetch(`${server.url}/api/projects?before=206&snapshot=205`)),
+    ).toEqual(first);
+    const newest = await responseJson(await fetch(`${server.url}/api/projects`));
+    expect(newest).toMatchObject({ before: 207, snapshot: 206, hasMore: true });
+    expect((newest.projects as Array<Record<string, unknown>>)[0]).toMatchObject({
+      id: created.id,
+    });
+
+    const corruptor = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    corruptor
+      .prepare("UPDATE projects SET checks_json = ? WHERE id = ?")
+      .run(`"${"private-project-overflow-sentinel".padEnd(1024 * 1024, "x")}"`, created.id);
+    corruptor.close();
+    const corrupt = await fetch(`${server.url}/api/projects`);
+    expect(corrupt.status).toBe(400);
+    const corruptBody = await responseJson(corrupt);
+    expect(corruptBody).toMatchObject({ error: { code: "DATABASE_ERROR" } });
+    expect(JSON.stringify(corruptBody)).not.toContain("private-project-overflow-sentinel");
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+  });
+
+  test("returns a safe error before headers when a JSON response exceeds 8 MiB", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const projectResponse = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "response-ceiling", path: fixture.repository },
+      project: {
+        name: "response-ceiling",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    const projectId = String((await responseJson(projectResponse)).id);
+    const draftResponse = await postJson(`${server.url}/api/runs`, {
+      projectId,
+      task: "Exercise the response ceiling.",
+      targets: ["src/greeting.txt"],
+      provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
+    });
+    const runId = String((await responseJson(draftResponse)).id);
+    const privateSentinel = "private-response-overflow-sentinel";
+    const diff = [
+      "diff --git a/src/greeting.txt b/src/greeting.txt",
+      "index 1111111..2222222 100644",
+      "--- a/src/greeting.txt",
+      "+++ b/src/greeting.txt",
+      "@@ -1 +1 @@",
+      "-Hello",
+      "+Hello, Icarus",
+      "",
+    ].join("\n");
+    const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    database.prepare("UPDATE runs SET diff = ?, verification_json = ? WHERE id = ?").run(
+      diff,
+      JSON.stringify({
+        outcome: "passed",
+        checks: [
+          {
+            checkId: "verify",
+            argv: ["python", "checks/verify.py"],
+            exitCode: 0,
+            signal: null,
+            durationMs: 1,
+            stdout: privateSentinel.padEnd(4_300_000, "x"),
+            stderr: "",
+            truncated: false,
+            outcome: "passed",
+          },
+        ],
+        changedPaths: ["src/greeting.txt"],
+        diffSha256: createHash("sha256").update(diff, "utf8").digest("hex"),
+        checkpointSha256: "b".repeat(64),
+      }),
+      runId,
+    );
+    database.close();
+
+    const response = await fetch(`${server.url}/api/runs/${runId}`);
+    expect(response.status).toBe(500);
+    const body = await responseJson(response);
+    expect(body).toEqual({
+      error: {
+        code: "RESPONSE_TOO_LARGE",
+        message: "The local workspace response exceeds the 8 MiB JSON limit",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain(privateSentinel);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect((await fetch(`${server.url}/api/health`)).status).toBe(200);
+
+    Object.defineProperty(runtime.service, "openWorkspaceProjectPage", {
+      configurable: true,
+      value: () => {
+        throw new IcarusError("DATABASE_ERROR", privateSentinel.padEnd(9 * 1024 * 1024, "x"));
+      },
+    });
+    const oversizedError = await fetch(`${server.url}/api/workspace`);
+    expect(oversizedError.status).toBe(400);
+    expect(await responseJson(oversizedError)).toEqual({
+      error: {
+        code: "DATABASE_ERROR",
+        message: "The local workspace request failed with an oversized error message.",
+      },
+    });
+    expect(oversizedError.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect((await fetch(`${server.url}/api/health`)).status).toBe(200);
   });
 
   test("serves bounded coherent run snapshots without decoding private event payloads", async () => {
@@ -618,7 +1172,7 @@ describe("loopback local workspace API", () => {
     const draftResponse = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Keep persisted event payloads private.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
     });
     const runId = String((await responseJson(draftResponse)).id);
@@ -840,7 +1394,7 @@ describe("loopback local workspace API", () => {
     const draftResponse = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Inspect scalar verification provenance.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
     });
     const runId = String((await responseJson(draftResponse)).id);
@@ -1384,7 +1938,13 @@ describe("loopback local workspace API", () => {
     );
     cleanups.push(server.close);
 
-    const request = http.get(`${server.url}/api/projects/project-id/repository-status`);
+    const request = http.get({
+      hostname: server.host,
+      port: server.port,
+      path: "/api/projects/project-id/repository-status",
+      headers: { host: new URL(server.url).host },
+      agent: false,
+    });
     request.on("error", () => undefined);
     const propagatedSignal = await signalReceived;
     expect(propagatedSignal.aborted).toBe(false);
@@ -1414,6 +1974,12 @@ describe("loopback local workspace API", () => {
     expect(badHost.body).toContain("INVALID_HOST");
     expect(badHost.headers["access-control-allow-origin"]).toBeUndefined();
 
+    const alternateLoopbackHost = await rawRequest(`${server.url}/api/workspace`, {
+      headers: { host: `127.0.0.1:${server.port}` },
+    });
+    expect(alternateLoopbackHost.status).toBe(422);
+    expect(alternateLoopbackHost.body).toContain("INVALID_HOST");
+
     const badOrigin = await rawRequest(`${server.url}/api/workspace`, {
       headers: { origin: "https://attacker.example" },
     });
@@ -1426,27 +1992,211 @@ describe("loopback local workspace API", () => {
     expect(crossLoopbackOrigin.status).toBe(422);
     expect(crossLoopbackOrigin.body).toContain("INVALID_ORIGIN");
 
+    const preflight = await rawRequest(`${server.url}/api/projects`, {
+      method: "OPTIONS",
+      headers: {
+        origin: server.url,
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization,x-icarus-action",
+      },
+    });
+    expect(preflight.status).toBe(401);
+    expect(preflight.body).toContain("ACTION_SESSION_REQUIRED");
+    expect(preflight.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(preflight.headers["access-control-allow-methods"]).toBeUndefined();
+    expect(preflight.headers["access-control-allow-headers"]).toBeUndefined();
+
+    const mutationHeaders = workspaceMutationHeaders(server);
+    const authorization = mutationHeaders.authorization ?? "";
+    const token = authorization.slice("Bearer ".length);
+    const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    cleanups.push(async () => database.close());
+    const persistenceBeforeTransportRefusals = persistenceSnapshot(database);
+
+    const missingAuthorization = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: {
+        origin: server.url,
+        "content-type": "application/json",
+        "x-icarus-action": "workspace.mutate",
+      },
+      body: "{",
+    });
+    expect(missingAuthorization.status).toBe(401);
+    expect(missingAuthorization.body).toContain("ACTION_SESSION_REQUIRED");
+    expect(missingAuthorization.body).not.toContain(token);
+
+    const wrongAuthorization = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: { ...mutationHeaders, authorization: `Bearer ${"A".repeat(43)}` },
+      body: "{",
+    });
+    expect(wrongAuthorization.status).toBe(401);
+    expect(wrongAuthorization.body).toBe(missingAuthorization.body);
+
+    const unknownPostWithoutAuthorization = await rawRequest(`${server.url}/api/future-mutation`, {
+      method: "POST",
+      headers: {
+        origin: server.url,
+        "content-type": "application/json",
+        "x-icarus-action": "workspace.mutate",
+      },
+      body: "{}",
+    });
+    expect(unknownPostWithoutAuthorization.status).toBe(401);
+    expect(unknownPostWithoutAuthorization.body).toBe(missingAuthorization.body);
+
+    const bearerInQuery = await rawRequest(
+      `${server.url}/api/projects?icarus-action-session=${token}`,
+      {
+        method: "POST",
+        headers: {
+          origin: server.url,
+          "content-type": "application/json",
+          "x-icarus-action": "workspace.mutate",
+        },
+        body: JSON.stringify({ token }),
+      },
+    );
+    expect(bearerInQuery.status).toBe(401);
+    expect(bearerInQuery.body).toBe(missingAuthorization.body);
+
+    const bearerInCookie = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: {
+        origin: server.url,
+        cookie: `icarus-action-session=${token}`,
+        "content-type": "application/json",
+        "x-icarus-action": "workspace.mutate",
+      },
+      body: "{}",
+    });
+    expect(bearerInCookie.status).toBe(401);
+
+    const missingOrigin = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: {
+        authorization,
+        "content-type": "application/json",
+        "x-icarus-action": "workspace.mutate",
+      },
+      body: "{}",
+    });
+    expect(missingOrigin.status).toBe(422);
+    expect(missingOrigin.body).toContain("INVALID_ORIGIN");
+
+    for (const invalidOrigin of ["null", "https://attacker.example"]) {
+      const invalidMutationOrigin = await rawRequest(`${server.url}/api/projects`, {
+        method: "POST",
+        headers: { ...mutationHeaders, origin: invalidOrigin },
+        body: "{}",
+      });
+      expect(invalidMutationOrigin.status).toBe(422);
+      expect(invalidMutationOrigin.body).toContain("INVALID_ORIGIN");
+    }
+
+    const missingActionHeader = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: {
+        origin: server.url,
+        authorization,
+        "content-type": "application/json",
+      },
+      body: "{}",
+    });
+    expect(missingActionHeader.status).toBe(422);
+    expect(missingActionHeader.body).toContain("INVALID_REQUEST");
+
+    const wrongActionHeader = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: { ...mutationHeaders, "x-icarus-action": "plan.approve" },
+      body: "{}",
+    });
+    expect(wrongActionHeader.status).toBe(422);
+    expect(wrongActionHeader.body).toContain("INVALID_REQUEST");
+
+    const authority = new URL(server.url).host;
+    const rawMutationHeaders = [
+      "Host",
+      authority,
+      "Origin",
+      server.url,
+      "Authorization",
+      authorization,
+      "Content-Type",
+      "application/json",
+      "X-Icarus-Action",
+      "workspace.mutate",
+    ] as const;
+    for (const [duplicateName, expectedStatus, expectedCode] of [
+      ["Host", 422, "INVALID_HOST"],
+      ["Origin", 422, "INVALID_ORIGIN"],
+      ["Authorization", 401, "ACTION_SESSION_REQUIRED"],
+      ["Content-Type", 415, "UNSUPPORTED_MEDIA_TYPE"],
+      ["X-Icarus-Action", 422, "INVALID_REQUEST"],
+    ] as const) {
+      const duplicateHeaders = [...rawMutationHeaders];
+      const valueIndex = duplicateHeaders.findIndex(
+        (value) => value.toLowerCase() === duplicateName.toLowerCase(),
+      );
+      const duplicateValue = duplicateHeaders[valueIndex + 1] ?? "";
+      duplicateHeaders.push(duplicateName, duplicateValue);
+      const duplicated = await rawRequest(`${server.url}/api/projects`, {
+        method: "POST",
+        headers: duplicateHeaders,
+        body: "{}",
+      });
+      expect(duplicated.status).toBe(expectedStatus);
+      expect(duplicated.body).toContain(expectedCode);
+      if (duplicateName === "Authorization") {
+        expect(duplicated.body).toBe(missingAuthorization.body);
+      }
+      expect(duplicated.headers["access-control-allow-origin"]).toBeUndefined();
+    }
+
     const wrongType = await rawRequest(`${server.url}/api/projects`, {
       method: "POST",
-      headers: { "content-type": "text/plain" },
+      headers: { ...mutationHeaders, "content-type": "text/plain" },
       body: "{}",
     });
     expect(wrongType.status).toBe(415);
 
     const oversized = await rawRequest(`${server.url}/api/projects`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: mutationHeaders,
       body: JSON.stringify({ padding: "x".repeat(70 * 1024) }),
     });
     expect(oversized.status).toBe(413);
 
     const malformedJson = await rawRequest(`${server.url}/api/projects`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: mutationHeaders,
       body: "{",
     });
     expect(malformedJson.status).toBe(422);
     expect(malformedJson.body).toContain("INVALID_JSON");
+
+    const malformedUtf8 = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: mutationHeaders,
+      body: Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d]),
+    });
+    expect(malformedUtf8.status).toBe(422);
+    expect(malformedUtf8.body).toContain("INVALID_JSON");
+
+    const duplicateJsonMember = await rawRequest(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: mutationHeaders,
+      body: '{"repository":{},"\\u0072epository":{}}',
+    });
+    expect(duplicateJsonMember.status).toBe(422);
+    expect(duplicateJsonMember.body).toContain("INVALID_JSON");
+
+    const workspaceProjection = await rawRequest(`${server.url}/api/workspace`, {});
+    expect(workspaceProjection.status).toBe(200);
+    expect(workspaceProjection.body).not.toContain(token);
+    expect(await filesContainingBytes(fixture.stateRoot, Buffer.from(token, "utf8"))).toEqual([]);
+    expect(persistenceSnapshot(database)).toEqual(persistenceBeforeTransportRefusals);
 
     const unknownField = await postJson(`${server.url}/api/projects`, {
       repository: { name: "unknown-field", path: fixture.repository },
@@ -1521,7 +2271,7 @@ describe("loopback local workspace API", () => {
     const malformedProvider = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Reject a malformed provider URL without creating a draft.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "invalid", baseUrl: "not a URL" },
     });
     expect(malformedProvider.status).toBe(422);
@@ -1533,7 +2283,7 @@ describe("loopback local workspace API", () => {
     const remoteProvider = await postJson(`${server.url}/api/runs`, {
       projectId,
       task: "Do not send this task remotely.",
-      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
       provider: { model: "remote", baseUrl: "https://models.example.invalid/" },
     });
     expect(remoteProvider.status).toBe(422);
@@ -1542,8 +2292,41 @@ describe("loopback local workspace API", () => {
     );
     expect(runtime.service.listRuns()).toEqual([]);
 
+    const reviewOnlyPort = server.port;
     await expect(
       startWorkspaceServer({ runtime, stateRoot: fixture.stateRoot, workspaceDist }, server.port),
     ).rejects.toMatchObject({ code: "EADDRINUSE" });
+
+    await server.close();
+    const reviewOnly = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      reviewOnlyPort,
+    );
+    cleanups.push(reviewOnly.close);
+    expect(reviewOnly).toMatchObject({
+      mode: "review-only",
+      url: `http://127.0.0.1:${reviewOnlyPort}`,
+      launchUrl: `http://127.0.0.1:${reviewOnlyPort}`,
+    });
+    expect(new URL(reviewOnly.launchUrl).hash).toBe("");
+    expect((await fetch(`${reviewOnly.url}/api/health`)).status).toBe(200);
+    expect(await responseJson(await fetch(`${reviewOnly.url}/api/workspace`))).toMatchObject({
+      capabilities: {
+        mutation: { status: "review_only" },
+        planning: { status: "review_only" },
+      },
+    });
+    const persistenceBeforeReviewOnlyMethods = persistenceSnapshot(database);
+    for (const method of ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+      const refusal = await rawRequest(`${reviewOnly.url}/api/future-mutation`, {
+        method,
+        headers: mutationHeaders,
+        body: "{",
+      });
+      expect(refusal.status).toBe(403);
+      expect(refusal.body).toContain("WORKSPACE_REVIEW_ONLY");
+      expect(refusal.headers["access-control-allow-origin"]).toBeUndefined();
+    }
+    expect(persistenceSnapshot(database)).toEqual(persistenceBeforeReviewOnlyMethods);
   });
 });

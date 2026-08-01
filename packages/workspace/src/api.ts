@@ -1,3 +1,5 @@
+import { clearActionSession, getActionSession } from "./action-session.js";
+
 export type RunPhase =
   | "draft"
   | "planned"
@@ -30,6 +32,7 @@ export interface CapabilityView {
 
 export interface WorkspaceCapabilities {
   readonly execution: CapabilityView;
+  readonly mutation: CapabilityView;
   readonly planning: CapabilityView;
   readonly provider: CapabilityView;
 }
@@ -41,9 +44,33 @@ export interface CheckConfiguration {
 }
 
 export interface RepositoryView {
-  readonly id?: string;
+  readonly id: string;
   readonly name: string;
   readonly path: string;
+}
+
+export interface ProjectSandboxView {
+  readonly image: string;
+  readonly cpus: number;
+  readonly memoryMb: number;
+  readonly pids: number;
+  readonly tmpfsMb: number;
+}
+
+export interface ProjectCeilingView {
+  readonly maxToolCalls: number;
+  readonly maxActiveRuntimeMs: number;
+  readonly maxContextBytes: number;
+  readonly maxOutputTokensPerCall: number;
+  readonly maxTotalTokens: number;
+  readonly maxCostUsd: number;
+  readonly maxFilesChanged: number;
+  readonly maxFileBytes: number;
+  readonly maxDiffBytes: number;
+  readonly maxCommandOutputBytes: number;
+  readonly maxRawCommandOutputBytes: number;
+  readonly providerTimeoutMs: number;
+  readonly commandTimeoutMs: number;
 }
 
 export type RepositoryAvailability = "available" | "missing" | "identity_changed" | "unavailable";
@@ -68,10 +95,9 @@ export interface ProjectView {
   readonly baseRef: string;
   readonly repository: RepositoryView;
   readonly checks: readonly CheckConfiguration[];
-  readonly sandboxImage?: string;
-  readonly sandbox?: { readonly image: string };
-  readonly createdAt?: string;
-  readonly updatedAt?: string;
+  readonly sandbox: ProjectSandboxView;
+  readonly ceiling: ProjectCeilingView;
+  readonly createdAt: string;
 }
 
 export interface ContextEntryView {
@@ -89,6 +115,7 @@ export interface ExcludedContextEntryView {
 
 export interface ContextMetadataView {
   readonly target: string;
+  readonly targets?: readonly string[];
   readonly baseCommit?: string;
   readonly sha256?: string;
   readonly digest?: string;
@@ -150,6 +177,7 @@ export interface PlanView {
   readonly steps: readonly string[];
   readonly risks: readonly string[];
   readonly target?: string;
+  readonly targets?: readonly string[];
   readonly checkIds?: readonly string[];
 }
 
@@ -168,6 +196,8 @@ export interface ActionView {
   readonly rationale?: string;
   readonly path?: string;
   readonly files?: readonly string[];
+  /** Per-path patch-set operations (ADR 0023). */
+  readonly operations?: readonly { readonly path: string; readonly op: string }[];
   readonly allowed?: boolean;
 }
 
@@ -428,7 +458,7 @@ export type ChangeRoomContextEntryReason =
 export interface BaseContextCardBodyView {
   readonly baseCommit: string | null;
   readonly contextSha256: string | null;
-  readonly target: string | null;
+  readonly targets: readonly string[];
   readonly totalBytes: number | null;
   readonly auditPolicyVersion: string | null;
   readonly repositoryMap: readonly string[];
@@ -448,6 +478,18 @@ export interface BaseContextCardBodyView {
   };
 }
 
+export type ChangeRoomCapabilityKind =
+  | "read.manifest"
+  | "read.checks"
+  | "mutation.patchset"
+  | "exec.check";
+
+export interface ChangeRoomCapabilityGrantView {
+  readonly kind: ChangeRoomCapabilityKind;
+  readonly scope: readonly string[];
+  readonly maxCalls: number;
+}
+
 export interface ProviderPlanCardBodyView {
   readonly provider: ChangeRoomProviderView;
   readonly trustLabel: "untrusted_proposal";
@@ -456,7 +498,10 @@ export interface ProviderPlanCardBodyView {
     readonly steps: readonly string[];
     readonly risks: readonly string[];
     readonly target: string;
+    readonly targets: readonly string[];
+    readonly iterationCeiling: number;
     readonly checkIds: readonly string[];
+    readonly grants: readonly ChangeRoomCapabilityGrantView[];
   } | null;
   readonly planSha256: string | null;
 }
@@ -474,12 +519,22 @@ export type PatchsetActionStatusView =
   | "cancelled"
   | "unknown";
 
+export type PatchsetEditOperationView = "modify" | "create" | "delete";
+
+export interface PatchsetEditSummaryView {
+  readonly op: PatchsetEditOperationView;
+  readonly path: string;
+  readonly rationale: string;
+  readonly expectedPreimageSha256: string | null;
+  readonly replacementCount: number | null;
+}
+
 export interface PatchsetCardBodyView {
-  readonly action: {
-    readonly path: string;
-    readonly expectedPreimageSha256: string;
-    readonly rationale: string;
+  readonly patchSet: {
+    readonly summary: string;
+    readonly edits: readonly PatchsetEditSummaryView[];
   } | null;
+  readonly patchSetEditsTruncated: boolean;
   readonly actionStatus: PatchsetActionStatusView;
   readonly diffSha256: string | null;
   readonly diffBytes: number | null;
@@ -696,6 +751,12 @@ export interface ApprovalView {
   readonly createdAt: string;
 }
 
+export interface ApprovalCoverageView {
+  readonly limit: 12;
+  readonly loaded: number;
+  readonly earlierApprovalsExcluded: boolean;
+}
+
 export interface UsageView {
   readonly toolCalls: number;
   readonly inputTokens: number;
@@ -716,6 +777,44 @@ export interface RunTimestamps {
   readonly [name: string]: string;
 }
 
+export type PersistedDiffReviewView =
+  | {
+      readonly status: "not_produced";
+      readonly path: null;
+      readonly sha256: null;
+      readonly byteCount: 0;
+      readonly lineCount: 0;
+      readonly addedLines: 0;
+      readonly deletedLines: 0;
+      readonly hunkCount: 0;
+      readonly browserByteLimit: 262_144;
+      readonly digestProvenance: "not_available";
+    }
+  | {
+      readonly status: "available";
+      readonly path: string;
+      readonly sha256: string;
+      readonly byteCount: number;
+      readonly lineCount: number;
+      readonly addedLines: number;
+      readonly deletedLines: number;
+      readonly hunkCount: number;
+      readonly browserByteLimit: 262_144;
+      readonly digestProvenance: "displayed_text_rehash_match";
+    }
+  | {
+      readonly status: "outside_browser_bound";
+      readonly path: string;
+      readonly sha256: string;
+      readonly byteCount: number;
+      readonly lineCount: null;
+      readonly addedLines: null;
+      readonly deletedLines: null;
+      readonly hunkCount: null;
+      readonly browserByteLimit: 262_144;
+      readonly digestProvenance: "recorded_only";
+    };
+
 export interface RunView {
   readonly id: string;
   readonly eventCursor: number;
@@ -735,9 +834,11 @@ export interface RunView {
   readonly checks: readonly CheckEvidenceView[];
   readonly verification: VerificationView;
   readonly diff: string | null;
+  readonly diffReview: PersistedDiffReviewView;
   readonly outputs: readonly OutputView[];
   readonly warnings: readonly (string | WarningView)[];
   readonly approvals: readonly ApprovalView[];
+  readonly approvalCoverage: ApprovalCoverageView;
   readonly usage: UsageView;
   readonly lastError: RunErrorView | null;
   readonly timeline: readonly TimelineEntryView[];
@@ -746,8 +847,21 @@ export interface RunView {
 
 export interface WorkspaceView {
   readonly capabilities: WorkspaceCapabilities;
-  readonly projects: readonly ProjectView[];
+  readonly projectPage: ProjectPageView;
   readonly runPage: RunPageView;
+}
+
+export interface ProjectPageView {
+  readonly before: number;
+  readonly snapshot: number;
+  readonly nextBefore: number;
+  readonly hasMore: boolean;
+  readonly projects: readonly ProjectView[];
+}
+
+export interface ProjectPageCursor {
+  readonly before: number;
+  readonly snapshot: number;
 }
 
 export interface RunPageCursor {
@@ -771,7 +885,7 @@ export interface CreateProjectInput {
 export interface CreateRunInput {
   readonly projectId: string;
   readonly task: string;
-  readonly target: string;
+  readonly targets: readonly string[];
   readonly provider: {
     readonly model: string;
     readonly baseUrl: string;
@@ -799,11 +913,28 @@ export class ApiError extends Error {
   }
 }
 
+const ACTION_SESSION_REQUIRED_MESSAGE =
+  "This workspace is review-only until it is opened from a fresh action-session launch URL.";
+
+function actionSessionRequired(): ApiError {
+  return new ApiError(401, "ACTION_SESSION_REQUIRED", ACTION_SESSION_REQUIRED_MESSAGE);
+}
+
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
+  const method = (init.method ?? "GET").toUpperCase();
   headers.set("accept", "application/json");
-  if (init.body !== undefined) {
+  if (method === "POST") {
+    const actionSession = getActionSession();
+    if (actionSession === null) {
+      throw actionSessionRequired();
+    }
+    headers.set("authorization", `Bearer ${actionSession}`);
+    headers.set("x-icarus-action", "workspace.mutate");
     headers.set("content-type", "application/json");
+  } else {
+    headers.delete("authorization");
+    headers.delete("x-icarus-action");
   }
   let response: Response;
   try {
@@ -828,9 +959,14 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
   }
   if (!response.ok) {
     const body = typeof value === "object" && value !== null ? (value as ApiErrorBody) : undefined;
+    const code = body?.error?.code ?? body?.code ?? "API_ERROR";
+    if (code === "ACTION_SESSION_REQUIRED") {
+      clearActionSession();
+      throw actionSessionRequired();
+    }
     throw new ApiError(
       response.status,
-      body?.error?.code ?? body?.code ?? "API_ERROR",
+      code,
       body?.error?.message ?? body?.message ?? `The local API returned HTTP ${response.status}.`,
     );
   }
@@ -850,6 +986,13 @@ export function getWorkspace(signal?: AbortSignal): Promise<WorkspaceView> {
 
 export function createProject(input: CreateProjectInput): Promise<ProjectView> {
   return postJson<ProjectView>("/api/projects", input);
+}
+
+export function getProjectPage(cursor: ProjectPageCursor, signal?: AbortSignal): Promise<unknown> {
+  return requestJson<unknown>(
+    `/api/projects?before=${encodeURIComponent(String(cursor.before))}&snapshot=${encodeURIComponent(String(cursor.snapshot))}`,
+    signal === undefined ? {} : { signal },
+  );
 }
 
 export function previewProjectContext(

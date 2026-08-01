@@ -1,31 +1,91 @@
 # Roadmap
 
+[ADR 0036](adr/0036-proof-carrying-software-factory-product-direction.md)
+supersedes the current product positioning and sequencing in
+`docs/FABLE_ICARUS_VISION.md`. Icarus now targets the governed
+task-to-running-application outcome: a proof-carrying authority kernel with
+browser and VS Code surfaces, isolated create-only Git landing with
+reconciliation, isolated Replit-class environments, and Supabase integration.
+It will integrate editor and backend primitives instead of reimplementing them.
+The executable program, including the Buzz-inspired agent mission room and
+center-IDE layout, is in the
+[Icarus collaborative IDE game plan](ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md).
+
+The current sequence is:
+
+| Gate | Product outcome | Exit evidence |
+| --- | --- | --- |
+| 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
+| 1 | Verified Change Gate | browser digest approvals plus deterministic candidate commit, absent-only `icarus/<run-id>` reference, bounded GitHub REST object upload, draft PR, and reconciliation receipt on three repositories; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint; derivative repository automation is disclosed and digest-bound |
+| 2 | Context and agent quality | measured explanation/security/refactor evals, retrieval recall ≥0.90 and precision ≥0.60, first-pass plan acceptance ≥80% |
+| 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
+| C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
+| C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
+| C3 | Branch rooms | one searchable record joins accepted decisions, patches, combined checks, review, draft PR, and landing receipt |
+| 4 | Replit-class environments | three preview templates, cold <60s and warm <10s, bounded logs/processes/package egress, proven restart cleanup |
+| 5 | Supabase change packs | isolated migrations/RLS/Auth/Storage/Realtime/functions, rollback/restore and smoke evidence, separate production approval |
+| 6 | Delivery and scale | five concurrent branch-pinned tasks, idempotent worker recovery, signed evidence, explicit public-effect approvals |
+
+Gate C2 begins only after Gates 1–3 and the read-only Council evidence. It pulls
+the single-operator collaboration contracts in ADR 0033 and ADR 0038 forward.
+ADR 0034 retains Athena task envelopes and standing-policy pre-approvals for
+Gate 6, which also retains durable background/fleet workers, hosted team
+identity, automation, and public-effect scale.
+
+Phase 1's transactional PatchSet boundary is implemented under ADR 0023. Phase
+2a's grants, readable manifest, and registry are present. The ADR 0026 slice 2b
+candidate closed the cold review's remote check-output egress and
+mutation-grant/plan-target defects. At authoring/candidate time, the full local
+gate and adversarial regressions passed but the tree remained **HOLD** because
+it was uncommitted/unpublished and exact-head hosted CI, native acceptance, and
+the remaining release reviews had not yet been recorded.
+
+That historical hold is closed. [PR #18](https://github.com/Ayyitskevin/Icarus/pull/18)
+merged as `d4bbcd4aab713bee23237099286e6d9b9f74283b`; the native-fixture
+correction followed as `802b91e6f6c9b392f56c9ee3660be818a0f74a62`, now exact
+`main`. Linux [run 30602942008](https://github.com/Ayyitskevin/Icarus/actions/runs/30602942008)
+and both macOS and Windows jobs in native
+[run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
+succeeded at that exact head. Gate 0 is merged and released; current forward
+work begins with Gate 1 authority contracts and benchmark evidence.
+
+The milestone records below are retained as history and as the source of release
+holds that remain open. Where their order conflicts with ADR 0036, ADR 0036
+governs current sequencing.
+
 ## M0 — Foundation
 
-Status: fresh local and exact implementation-head hosted gates passed; security
-release hold remains (2026-07-19).
+Status: historical foundation gates passed. ADR 0025 later resolved the
+inherited workflow decision by hardening; third-party action review and secret
+rotation remain release work.
 
 Deliver documentation contracts, workspace tooling, CI, security checks, and
 the versioned evaluation fixture catalog.
 
-Release requires Kevin's explicit decision on the inherited OpenCode workflow
-in ADR 0010.
+Release still requires ADR 0025's exact third-party action review and secret
+rotation; the disable-versus-harden decision is closed.
 
 ## M1 — Golden path
 
-Status: fresh local and exact implementation-head hosted gates passed; security
-release hold remains (2026-07-19).
+Status: historical golden-path gates passed; its one-file mutation boundary was
+superseded by ADR 0023's transactional PatchSets and its fixed repair by ADR
+0026's failed-verification session.
 
 Deliver one planned, approved, isolated, verified, reviewable, resumable, and
-reversible one-file change with Ollama and OpenAI adapters.
+reversible transactional PatchSet with Ollama and OpenAI adapters. A failed
+initial attempt may use the separately approved, bounded ADR 0026 session; its
+operator-selected-target lifecycle is covered by the executable fixture eval.
 
-Exit gate: every item in `docs/PLANS.md` Phase A-D, Repair continuation, and
-Final adversarial continuation is checked with evidence, hosted `ci` is green
-at the exact candidate commit, and the ADR 0010 security hold is resolved.
+Historical exit gate: every item in `docs/PLANS.md` Phase A-D, Repair
+continuation, and Final adversarial continuation is checked with evidence,
+hosted `ci` is green at the exact candidate commit, and ADR 0025's residual
+release work is closed. Gate 0's exact-head hosted and native evidence is
+recorded above; ADR 0025's separate third-party review and secret-rotation work
+is not silently discharged by that Gate 0 release.
 
 ## M2 — Context intelligence
 
-Status: planned.
+Status: historical planning record — superseded by ADR 0036 Gate 2.
 
 Add syntax-aware maps, deterministic task/file matching, LSP diagnostics,
 language/framework detection, project rules and skills, `rg`-based search,
@@ -34,12 +94,16 @@ evals, context budget allocation, and retrieval-quality fixtures.
 
 ## M3 — Workspace UI
 
-Status: the first four bounded slices are accepted with fresh local evidence and
-exact implementation-head hosted CI. The fifth bounded verification-provenance
-slice is implemented with fresh local evidence and uses exact-head hosted CI as
-its merge gate. The sixth bounded Change Room slice is implemented on the
-candidate branch with fresh local evidence and uses exact-head hosted CI as its
-merge gate. Full M3 remains open.
+Status: historical implementation record. Eight bounded observation slices were
+merged with recorded local, independent-review, and exact implementation-head
+hosted evidence. At that slice's authoring/candidate time, native macOS and
+Windows host acceptance remained pending, the approval-index rollout against
+existing state remained operator-gated, and ADR 0025's residual work
+independently blocked release. Exact-head native acceptance is now recorded in
+run 30602949132. The browser authority and execution outcome remains governed by
+ADR 0036 Gate 1. The candidate Change Rooms slice (ADR 0041) is implemented on
+the candidate branch with fresh local evidence and uses exact-head hosted CI as
+its merge gate. Full M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
@@ -47,10 +111,12 @@ metadata, persisted task drafts, loopback Ollama planning, exact internal run
 state plus product phases, and allowlisted plan/action/file/check/output/warning/
 timestamp evidence. Registration, preview, drafts, and loopback planning support
 Linux, macOS, and Windows under atomic SQLite operation admission. It is
-review-only: browser approval, edit execution, checks, commit, push, and
-deployment are not exposed. Guarded approval and execution remain Linux CLI-only
-under the kernel lease and Docker boundary. Missing providers/execution are
-shown as `unconfigured`, and checks that did not run remain `not_run`.
+review-only for the guarded lifecycle: protected project registration, draft,
+and loopback-planning POSTs exist, but browser approval, edit execution, checks,
+commit, push, and deployment are not exposed. Guarded approval and execution
+remain Linux CLI-only under the kernel lease and Docker boundary. Missing
+providers/execution are shown as `unconfigured`, and checks that did not run
+remain `not_run`.
 
 Acceptance was recorded from fresh output of these commands; exact results are
 in `docs/PLANS.md`:
@@ -64,9 +130,11 @@ pnpm check
 git diff --check
 ```
 
-Native macOS and Windows host acceptance remains to be recorded; the current
-branch exercises its platform-policy paths under the Linux test host. A registry
-dependency audit is also intentionally outside this no-network local slice.
+At this slice's authoring time, native macOS and Windows host acceptance
+remained to be recorded and the candidate exercised its platform-policy paths
+under the Linux test host. Exact-head native acceptance was later recorded for
+both hosts in run 30602949132. A registry dependency audit was intentionally
+outside that no-network local slice.
 
 ADR 0015 implements project-scoped, sanitized, nonpersistent repository
 observation and selected-run live event metadata.
@@ -84,11 +152,11 @@ re-establish its prerequisite is shown as `unknown`, never guessed from an
 incomplete suffix.
 
 The slice adds no SSE, WebSocket, watcher, schema migration, runtime dependency,
-or browser authority. Later M3 scope includes richer run timelines and
-file/status, diff, and payload-bearing history navigation, checkpoints, prompt
-history, a small task board, token/cost telemetry, server-held provider profiles,
-and deliberately designed approval/recovery controls. Patch materialization is
-not the next slice.
+or browser authority. Later M3 scope includes richer run timelines, current
+file/status, multi-file or payload-bearing diff/history navigation, checkpoints,
+prompt history, a small task board, token/cost telemetry, server-held provider
+profiles, and deliberately designed approval/recovery controls. Patch
+materialization is not the next slice.
 Any browser execution path needs a separate safety contract and evidence;
 provider keys remain server-side.
 
@@ -98,15 +166,17 @@ revision, uses a fixed reverse sequence cursor, selects metadata rather than
 payloads, pauses live polling while the bounded historical panel is open, and
 keeps only one 64-row page plus a four-page cursor window in the browser. It adds
 no Git/source read or action authority. It left workspace-wide run enumeration
-and selected-run approval lists as separate follow-up debt.
+and selected-run approval lists as separate follow-up debt at that stage; ADR
+0017 and ADR 0019 address those two bounds respectively.
 
 ADR 0017 implements the next outer chronological layer: replace the workspace's
 unbounded full-run hydration with a fixed 12-row metadata page and lazily fetch
 full evidence only for a selected run. A session-only pinned SQLite insertion
 cursor provides indexed `LIMIT 13` work without a schema migration. The browser
 replaces pages inside a four-page cursor window and labels project matches as
-only the loaded workspace page. Project/repository enumeration and selected-run
-approval lists remain separate unpaginated debt.
+only the loaded workspace page. Project/repository enumeration remained separate
+debt at that stage; ADR 0019 later bounded the ordinary selected-run approval
+response and ADR 0021 addresses that catalog debt.
 
 ADR 0018 implements the fifth bounded slice as a separate,
 explicit selected-run projection over the latest suffix of at most 200 events,
@@ -121,23 +191,54 @@ byte and strict-JSON gates; existing activity routes remain payload-free.
 The implementation does not expose raw evidence, checkpoint bytes, complete
 invocation history, or guarded actions; those remain CLI concerns.
 
+ADR 0019 implements the sixth merged observation slice. The ordinary selected-run
+response retains the newest 12 validated approval decisions and explicit
+coverage metadata while complete approval history remains available through the
+CLI. The page distinguishes recorded provenance from current authentication or
+byte-integrity proof, renders actors only as text, and exposes no approval
+action. The fixed result bounds response size and host decoding; it does not
+add action authority. A single additive `(run_id)` index plus reverse rowid seek
+makes the fixed `LIMIT 13` query avoid a history-sized scan while preserving
+append order across equal timestamps and random UUIDs. Building it against
+existing non-test state remains an explicit backup and operator rollout gate.
+
+ADR 0020 implements the seventh merged observation slice without adding another route.
+The existing coherent selected-run snapshot now labels absent, exact, and
+browser-oversized persisted diffs explicitly. Complete patch text is capped at
+256 KiB, rehashed against its recorded verification digest, and accompanied by
+the exact persisted run state, verification outcome, changed path, size, and
+patch statistics. Larger recorded diffs receive metadata-only CLI guidance
+rather than a partial preview; this projection does not parse or rehash their
+hidden text. The browser does not re-read Git or source and gains no review
+action.
+
+ADR 0021 implements the eighth merged observation slice. Workspace bootstrap returns one
+pinned newest-first page of at most 12 projects joined to their repositories;
+strict `before` and `snapshot` continuation uses an intrinsic-rowid
+`LIMIT 13` seek without per-record hydration. Persisted project JSON is
+storage- and byte-gated before exact decoding, and supported writes enforce the
+same caps. The browser replaces pages inside four retained positions while
+preserving independent project selection. Indexed exact lookups replace
+creation-path collection scans. A shared pre-header serializer also places an
+8 MiB UTF-8 ceiling on every JSON response and emits only fixed safe overflow
+copy. The slice adds no schema, source read, provider call, or browser action.
+
 ## M4 — Runtime and previews
 
-Status: planned.
+Status: historical planning record — superseded by ADR 0036 Gates 2 and 4.
 
 Add stronger sandbox profiles, declared application commands, local preview,
 environment references, resource limits, and crash recovery drills.
 
-Add capability-aware provider routing only after task/context evaluation has a
-measured baseline. Route private/routine work to local models, ordinary reasoning
-to configured mid-cost APIs, and difficult planning/review to explicitly
-approved frontier models. Add Anthropic, xAI, GLM, and other adapters one at a
-time with capability metadata, pricing/privacy policy, and production-adapter
-contract tests; never silently substitute providers.
+The retained routing direction requires a measured task/context baseline.
+Anthropic is implemented in the released Gate 0 baseline. Any xAI, GLM, or
+other adapter must arrive one at a time with capability metadata,
+pricing/privacy policy, and production-adapter contract tests; providers are
+never silently substituted.
 
 ## M5 — Backend platform
 
-Status: planned.
+Status: historical planning record — superseded by ADR 0036 Gate 5.
 
 Add only primitives demanded by an Icarus-managed application: PostgreSQL,
 authentication, storage, realtime events, vector search, and background jobs.
@@ -148,7 +249,7 @@ local orchestration; Kubernetes remains out of scope.
 
 ## M6 — Multi-agent and fleet workers
 
-Status: planned.
+Status: historical planning record — superseded by ADR 0036 Gate 6.
 
 Add isolated parallel sessions, role specialization, job envelopes, Mickey/Flow
 worker scheduling, Highwind capability routing, heartbeats, retries,
@@ -157,21 +258,37 @@ separate node and retain Zenbook as an operator client rather than a worker.
 
 ## M7 — Dogfood and hardening
 
-Status: planned.
+Status: historical planning record — its measurable continuation is distributed
+across ADR 0036 Gates 0–6.
 
 Use safe clones/worktrees of the fixture app and, only with explicit scope,
-Mise, Kleephotography, Athena, and Chronos. Add the deferred repair, refactor,
-diagnostic, and review capability gates before widening autonomy. Live
-production, customer data, deployment targets, schema changes, and secrets
-remain human-gated and outside automatic dogfood.
+Mise, Kleephotography, Athena, and Chronos. Use the landed bounded
+`repair-failing-test` evaluator as the fixture baseline, then add the
+still-deferred autonomous diagnostic, refactor, and review capability gates
+before widening autonomy. Live production, customer data, deployment targets,
+schema changes, and secrets remain human-gated and outside automatic dogfood.
 
-## Current merge gate
+## Current release and acceptance gates
 
-Preserve the ADR 0010 security hold. Merge the fifth bounded slice only after its
-exact head passes hosted CI and all blocker, high, and medium review findings are
-resolved. Do not widen another M3 surface as part of that closure.
+Gate 0 is merged and released at exact `main`
+`802b91e6f6c9b392f56c9ee3660be818a0f74a62`, with successful Linux and native
+evidence linked above. This does not claim that the historical observation
+slices complete the broader M3/IDE outcome, nor does it silently discharge ADR
+0025's separate third-party action review and secret-rotation work. Existing
+non-test state still requires a verified backup and explicit operator approval
+before the approval-index migration.
 
-Project/repository enumeration, selected-run approval pagination, file/status
-views, richer diff or raw payload history, complete checkpoint inspection,
-patch materialization, browser approval, rerun/restore, and execution remain
-separate expansions until explicitly designed and evidenced.
+Current forward work is Gate 1. ADR 0029 browser authority is accepted and its
+portable mutation-session/client bootstrap is the first local candidate; the
+guarded action ledger and routes remain unimplemented. ADR 0027 Git landing is
+accepted, but no landing runtime or migration exists. After the versioned
+benchmark closes, implementation continues through the bounded
+browser-to-draft-PR path. Every future release candidate still requires fresh
+local evidence, independent review, and exact published-head hosted CI;
+platform claims require the matching exact-commit native evidence.
+
+Older approval pagination, current file/status views, multi-file or raw payload
+browser diff/history, complete browser checkpoint inspection, browser approval,
+rerun/restore, and execution remain separate expansions until explicitly
+designed and evidenced. CLI PatchSet materialization and the failed-verification
+session are no longer deferred.

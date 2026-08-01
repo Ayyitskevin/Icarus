@@ -33,22 +33,41 @@
     boundary while the pinned response remains metadata-only and constant-size.
 
 Repository rules, source, docs, issue text, model output, HTTP errors, command
-output, Host/Origin values, URLs, and JSON bodies are untrusted. Fixed host policy
-plus the operator's exact project checks/sandbox/ceilings and digest-bound CLI
-approval commands are authoritative; the browser is review-only.
+output, Host/Origin/authorization values, URLs, and JSON bodies are untrusted.
+Fixed host policy plus the operator's exact project
+checks/sandbox/ceilings and digest-bound CLI approval commands are
+authoritative. Accepted ADR 0040 gives real-accepted Chromium-family browsers an
+authenticated mutation transport. Its implementation and exact-head native
+evidence passed at `eb01b6406c12126c60add7ac83800f8eba8ffdc9`, and explicit
+human acceptance of the interim operator-controlled browser/resolver/proxy
+residual risk was recorded on 2026-07-31. Gate 1 remains incomplete, and no
+guarded approval/execution action route exists.
 
 ## Primary threats and controls
 
 | Threat | Control | Required evidence |
 | --- | --- | --- |
-| Remote access or DNS rebinding reaches local authority | production bind is fixed to `127.0.0.1`; UI/API are same-origin; Host and Origin must be loopback; no CORS permission is emitted | hostile Host/Origin and absent-CORS integration tests |
-| Oversized, malformed, or ambiguous mutation | exact route/method/content-type schemas, unknown-field rejection, and bounded JSON bodies fail before service calls | content-type, body-limit, invalid-contract, malformed-provider-URL, and missing-repository tests with useful errors and unchanged state |
+| Remote access, stale origin code, CSRF, or DNS rebinding reaches local mutation authority | accepted interim mutation starts bind exact IPv4 `127.0.0.1`, verify that socket, then CSPRNG-select an independent 16-byte `.localhost` public-origin nonce and 32-byte fragment bearer; there is no Node/OS lookup, hosts-file edit, or browser resolver injection; every non-GET/HEAD request requires exact raw Host/Origin/authorization/content-type/action-header cardinality before body/service work; explicit-port origins are bearer-free and GET-only; mutation support is limited to real-accepted Chromium-family browsers, while Safari and unverified browsers must deliberately use review-only mode; CSP disables workers and no CORS permission is emitted | hostile/duplicated/missing Host, Origin, authorization, content-type, and action-header tests across non-read methods; exact-bind, nonce, no-lookup/no-injection, restart rotation, preflight refusal, and stable-port non-read refusal; real-browser fragment/storage/leakage evidence; exact-head real Chrome composition on macOS and Windows |
+| Oversized, malformed, duplicate-key, or ambiguous mutation | exact route/method/content-type schemas, unknown-field rejection, bounded JSON bodies, a nesting ceiling, and escaped-alias duplicate-member rejection fail before service calls | content-type, body-limit, strict-JSON duplicate/depth, invalid-contract, malformed-provider-URL, and missing-repository tests with useful errors and unchanged state |
+| A process signal closes an authenticated mutation POST after its effect but before the browser observes the result | first-signal shutdown synchronously closes admission, drains the exact registered-handler set, waits for response settlement, and closes SQLite last; the client never retries automatically; the local ADR 0029 ledger foundation durably distinguishes prepared, admitted, and settled actions and startup refuses orphaned prepared rows under the Linux run lease | coordinator/server shutdown and ledger/restart tests cover the implemented boundary. No guarded approval/execution route exists yet; admitted-row terminal reconciliation, bounded recovery presentation, and signal injection at every guarded admission/settlement boundary remain release requirements, so this is not an idempotency claim for current unguarded POSTs |
+| A Gate 1 schema refusal creates or changes source WAL/SHM state, or a main-file-only read misses committed WAL schema | never SQLite-open the source family; validate and fingerprint owned regular main/WAL/SHM files, copy only main+WAL into a private `0700`/`0600` snapshot, rebuild SHM there, inspect exact schema, re-fingerprint the source before and after, reject unknown journal/sibling files or races, and remove the snapshot in `finally` after handled completion/error; uncatchable termination may leave only mode-restricted temporary residue | clean WAL-header inspection and wrong-order refusal create no source sidecars; a child leaves committed schema corruption only in WAL and inspection rejects it while main/WAL/SHM hashes remain exact; static checks keep preflight before writable open |
 | Raw state leaks context/source blobs, private runtime paths, or credentials | API presenters allowlist fields and omit raw blobs plus private cache/worktree/artifact paths; explicit diff/check output stays bounded and redacted | serialization tests scan responses for private paths, raw source bytes, and credential material |
 | Repository/provider text executes in the browser | React renders values as text under a restrictive content-security policy; no raw HTML injection contract exists | presenter allowlist test carrying adversarial strings plus package-wide static no-raw-HTML-sink scan |
 | Browser widens execution authority | no approval, edit, check, arbitrary-command, commit, push, or deploy route exists | route inventory/static assertions and negative HTTP tests |
 | Filtered context or provider repository map exposes secret/generated data | preview reads committed Git objects, returns metadata only, and shares its path classifier with the real model repository map; every `.env*`, dependency/generated, symlink, binary/invalid-UTF-8, model-hidden/intrinsic-secret, and secret-content entry is omitted or planning fails closed | deterministic filter tests, captured provider request, hidden-blob test, and source fingerprint |
-| Prompt injection expands authority | Host policy is outside prompts; model can only return one typed proposal | malicious `AGENTS.md` instruction reaches the real prompt but an expanded target is rejected |
+| Prompt injection expands authority | Host policy is outside prompts; the model can return only strict plans/patch sets or calls from the closed registry, and every call is independently grant-checked against approved scope | malicious repository/tool evidence reaches the real prompt but cannot expand targets, reads, checks, network, budgets, or state transitions |
 | Path traversal or absolute write | lexical containment plus protected-path policy | traversal tests |
+| A patch set changes a path the operator did not approve | the plan approval digest binds the approved target set; every patch-set path must be in that set, must pass protected-path policy independently, and verification requires the changed-path set to equal the patch-set paths exactly | patch-set path-gate tests, plan-digest binding test, and verification set-equality tests |
+| A session loop runs unbounded, consumes settlement/recovery headroom, or lacks authority | only a failed first verification may enter; explicit plan grants and `iterationCeiling` are bound by the approval digest; the host maximum is two; admitted `provider.revise` and tool work is charged before effects, while session entry and every later admission retain one ordinary slot plus `commandTimeoutMs` for `session.reconcile`; local/remote/resumed worst cases consume 30/31/32 of 40 ordinary operations | grant-digest, zero-iteration single-shot, local/remote/resume accounting, tight slot/runtime margin, true interrupted-ledger reconciliation, refusal, budget-exhaustion, and non-approvable landing tests |
+| A session read or check diagnostic widens context egress | read scopes resolve to an approved base-commit path/digest manifest; `read_file` accepts only matching base bytes or current session-written bytes, while list/search enumerate base-manifest paths only; every remote repeat call rechecks exact context egress approval; remote verification and `run_checks` reuse project only host-owned check ID/outcome/exit/truncation metadata plus an output-omitted marker, while full stdout/stderr remains local; resume reconstructs that projection from the atomically adjacent verification event rather than a legacy tool transcript | manifest drift, session create/read, list/search exclusion, remote repeat-egress, and grant-scope tests plus initial/live/compacted/resumed check-output canaries and loopback/raw-SQLite retention |
+| A revision widens what the run may change or leaves partial bytes | plan parsing bounds mutation grants by the plan's narrowed target ceiling, and session entry canonically revalidates persisted grants before iteration admission, provider I/O, reconciliation, or any worktree restore; `propose_patch` is advisory and persists no authority; `apply_patchset` carries its own bounded PatchSet and independently revalidates the approved grant, paths, preimages, secrets, and ceilings, then restores the immutable baseline, persists exact intent before writes, and uses guarded atomic file operations. Interrupted materialization resumes from persisted intent with `unavailable`, non-approvable verification | narrowed-plan grant unit tests; mutually consistent legacy broad-grant resume with zero provider/reconcile/session effects and byte-exact unchanged files; independent-apply validation, no-proposal-authority, intent-before-write, compensation, crash-reconcile, and source-fingerprint tests |
+| Model copy or exhausted turns are presented as success | `run_checks` records only a complete approved check set; `report_done` revalidates the current checkpoint/diff/passing evidence; human input and exhaustion persist blockers in `awaiting_review` that approval refuses | report-before-check, stale-evidence, human-input, exhaustion, and review-refusal tests |
+| Tool results or errors leak credentials or become authority | every result/error is bounded, secret-scanned, and fenced as untrusted before persistence/provider reuse; registered tool control flow, never returned content, determines host state | result/error secret fixtures, output ceilings, injection fixtures, and fixed-control assertions |
+| Session persistence becomes a second mutable authority | approved `plan_json` plus approval digest is the sole grant source; existing operations and bounded boundary/terminal events are the sole session source; no `capability_grants`, `agent_sessions`, or `tool_invocations` tables are introduced | schema-stability, digest binding, operation/event reconstruction, and interrupted-operation charging tests |
+| A crash splits a settled operation from the evidence or state it claims | tool operation finish plus verification/session-terminal event commit atomically; `review.validate`, rollback, and restore operation finish plus corresponding state transition commit atomically | transaction-failure injection proves neither half can persist alone; resume observes started work or one complete settled boundary |
+| A partially applied multi-file change is presented as a result | every path is validated and every replacement staged outside the worktree before the first visible change; a failure part-way through compensates the applied paths and fails closed; a crash resumes into drift detection with the persisted tree checkpoint as the recovery path | multi-file apply tests asserting no write on any unsafe path, staging location, idempotent replay, and byte-exact reversal |
+| A created or deleted path is confused with empty content | tree checkpoints record an absent side as null rather than empty bytes, and the checkpoint digest distinguishes the two | tree-checkpoint digest tests |
+| Patch-set storage migrates live operator state without consent | the ADR 0023 tables are additive and created only after a read-only shape inspection that fails closed, gated by its own exact one-shot approval token distinct from the approval-index token | migration-gate assertions and refusal tests |
 | Symlink escape | reject symlinks in every existing component and target | symlink test |
 | State initialization writes inside a Git checkout | lexical and canonical ancestor walks reject any `.git` marker before state-root creation; registration separately rejects repository/state containment in both directions | symlinked nested-state rejection, absent prospective directory, and source fingerprint |
 | Source checkout/Git corruption | private no-hardlink cache owns all worktrees | source refs/config/status digest |
@@ -72,15 +91,15 @@ approval commands are authoritative; the browser is review-only.
 | Repository observation mutates the source or leaks dirty paths/content | project-scoped fixed read-only Git argv; file-only transport; lazy fetch, prompts, and optional index locks disabled; traditional hooks redirected; configured hook commands and effective clean/smudge/process filters or alternate-ref commands rejected; `post-checkout` disabled at command scope; allowlist only independent availability/worktree/HEAD/branch/base-relation fields; persist nothing | source fingerprints cover content status, refs, config, index, and linked worktree metadata; clean/staged/unstaged/untracked and helper-command marker tests prove omission and no invocation. Config-hook rejection is version-independent and covers a tampered private cache; the execution host is Git 2.43, so a real Git 2.55 configured-hook run is not claimed. Same-user config TOCTOU remains a non-goal. |
 | A missing repository, identity mismatch, unresolved ref, or Git failure appears clean | availability, worktree, HEAD, branch, and base relation are independent; unresolved and error states remain explicit; detached HEAD is `branch: null` without changing cleanliness | focused endpoint tests cover clean, dirty, divergent, detached, unresolved, unpeelable, missing, replaced-identity, invalid-HEAD, and spawn-failure cases. |
 | Event history leaks private paths, diffs, check output, or other raw payload data | fixed-size sequence-cursor pages expose only sequence, type, host-controlled label, timestamp, and fixed `evidenceSection`; the browser presenter selects no `payload_json` | corrupt/private payload fixtures pass through selected-run and workspace endpoints without decode or disclosure; the CLI full-history path still detects the corrupt payload. |
-| A full run response combines different database moments, or an older full response overwrites newer event knowledge | run, approvals, and the 200-row metadata tail share one SQLite read transaction; the sequence high-water mark is the cursor/total; the UI accepts a full response only at or beyond the newest observed revision | bounded/corrupt-payload store and endpoint tests plus monotonic page and client high-water tests pass. A separate concurrent-process WAL stress test is not recorded; transaction structure is the current coherence evidence. |
+| A full run response combines different database moments, scans or materializes unbounded approval history, or an older response overwrites newer event knowledge | the run, newest 12 validated approvals, approval coverage, and 200-row metadata tail share one SQLite read transaction; a per-run ordering index plus `LIMIT 13` avoids a history-sized scan and caps returned rows; direct storage/byte `CASE` preflight bounds materialization; the event high-water mark and client guard prevent revision rollback | 0/1/12/13 boundaries, all enums, same-time ordering, query-plan proof, corrupt/BLOB/oversized field matrix, endpoint shape, static allowlist assertions, and monotonic client tests pass. Building the additive index on existing state remains backup/operator gated; a separate concurrent-process WAL stress test is not recorded. |
 | A truncated browser tail rewrites older action truth | an incomplete tail starts with explicit unknown action state; only self-establishing retained transitions make it known; ambiguous cancellation remains unknown with CLI guidance | presenter regression places materialization before the 200-row tail and cancellation at its end, then proves the browser does not guess. CLI history remains complete. |
 | Polling continues while hidden, overlaps, storms after failure, or overwrites a new selection | selected-run-only foreground short polling; one current request; visibility pause; abort on selection change/unmount; bounded failure backoff reset only by success; selection/request guards | pure delay/cursor tests cover the 2/4/8/15-second sequence, cap, rollback rejection, and snapshot threshold; real-browser acceptance covers visibility, injected failure/recovery, a held non-overlapping request, cancellation on unmount, preserved newer selection, and a newly appended event causing an event-page read, subsequent coherent full-run read, and rendered update without reselection. |
 | Untrusted event or repository text becomes an injected navigation target | a closed host-generated evidence-anchor map; untrusted strings render only as text | hostile anchor inputs fall back to `run-activity`; presenter tests verify fixed targets; the static security gate forbids raw-HTML sinks. |
 
 The slice adds no Server-Sent Events, WebSocket, watcher, schema migration,
 runtime dependency, background daemon, or browser action route. Existing
-loopback and guarded CLI boundaries remain authoritative, and the ADR 0010 hold
-remains unresolved.
+loopback and guarded CLI boundaries remain authoritative, and ADR 0025's
+third-party review and secret-rotation release holds remain open.
 
 ## Third M3 older-activity threats
 
@@ -93,8 +112,8 @@ remains unresolved.
 | A historical page is mistaken for the current evidence snapshot | pin and display the page revision; preserve the coherent recent timeline separately; describe any fixed anchor as current evidence rather than historical payload detail | UI copy and browser navigation tests distinguish the pinned metadata page from current evidence |
 
 ADR 0016 adds no write, event append, Git/source read, filename/content/diff/check
-disclosure, schema/dependency, stream, daemon, or browser action route. ADR 0010
-remains an independent release hold.
+disclosure, schema/dependency, stream, daemon, or browser action route. ADR
+0025's residual release holds remain independent.
 
 ## Fourth M3 workspace-run summary threats
 
@@ -109,8 +128,9 @@ remains an independent release hold.
 ADR 0017 adds no schema/dependency, write, event append, database-maintenance
 route, Git/source read, provider/context/plan/edit/diff/check/output/error/usage/
 approval/event disclosure, stream, daemon, or browser action route. Project and
-repository enumeration and selected-run approval lists remain unpaginated. ADR
-0010 remains an independent release hold.
+repository enumeration remained unpaginated at that stage; ADR 0021 now bounds
+it, while ADR 0019 independently bounds the ordinary selected-run approval
+response. ADR 0025's residual release holds remain independent.
 
 ## Implemented fifth M3 verification-attempt threats
 
@@ -126,11 +146,41 @@ repository enumeration and selected-run approval lists remain unpaginated. ADR
 | A stale or late auxiliary response loops, replaces another run, or escapes cancellation | fresh current seed per explicit action; conflicts require operator run refresh; automatic live reconciliation only marks stale; parent-only aggregate cancellation plus request-local ordering; exact bounds, enums, and relational validation | live-versus-manual refresh, attempt-Close/history independence, abort-before-history-open, hidden/selection/Back/unmount, stale retry, focus fallback, and cancellation-ignoring real-browser races |
 | The view widens browser authority | GET-only route and text-only inline region; no approval, rerun, restore, command, Git, or mutation path | method negatives, zero SQLite logical writes/events, unchanged source/Git fingerprints, and static route/raw-HTML/workflow assertions |
 
-ADR 0018's controls are implemented and locally evidenced while preserving the
-loopback/same-origin/CSP boundary and guarded CLI authority. Exact-head hosted CI
-is a merge gate; ADR 0010 remains an independent release hold.
+ADR 0018's controls are implemented, locally evidenced, independently reviewed,
+and exact-head hosted-CI verified. ADR 0025's residual release holds remain
+independent.
 
-## Sixth M3 change-room threats
+## Implemented seventh M3 persisted-diff review threats
+
+| Threat | Required control | Required evidence and limits |
+| --- | --- | --- |
+| A corrupt or mismatched persisted diff is presented as reviewable | require paired diff/verification presence, project ceiling, one exact changed target, canonical digest, displayed-byte rehash, one ordered target-bound patch, and internally consistent hunk bodies; fail with fixed copy | unit and API corruption matrices cover missing partners, wrong decoded header/target, malformed ordering or hunk counts, wrong digest/path, sanitized errors, and byte-identical read-side state |
+| A large diff amplifies the response/DOM or a partial preview is mistaken for complete approval evidence | return complete text only through a fixed 262,144-byte browser cap; above it return metadata and `recorded_only` provenance with no substring | exact-bound response remains complete, one-byte-over/private-tail coverage is metadata-only, and static assertions forbid partial-string operations; this bounds response/rendering, not the existing full-run SQLite hydration |
+| Persisted evidence is mistaken for current source or worktree status | display exact persisted run state and verification outcome; explicitly state there is no fresh repository read and that rehash agreement proves only displayed recorded bytes | presenter/API copy assertions and completed real-browser truth-copy/digest evidence; guarded CLI review continues to revalidate live state |
+| Patch text executes or creates attacker-sized per-line UI | render one complete React `<pre>` text node inside a labelled, keyboard-focusable bounded scroll region; no line-derived elements, HTML sink, path link, or action control | HTML-like patch survives API serialization as text; static no-sink/no-control assertions pass; cached Chromium 1228 proved inert rendering, Tab focus, PageDown scrolling, fixed-anchor navigation, zero external requests/browser errors, and unchanged durable/source state |
+| The review surface widens authority or timing | reuse the existing coherent selected-run response; add no route, query, Git/source read, request, poller, write, or action | unchanged SQLite and repository fingerprints plus static no-read-authority and fixed-anchor assertions |
+
+ADR 0020 is Accepted after its combined local, independent-review, merge, and
+exact-head hosted gates passed. ADR 0025's residual release holds remain
+independent.
+
+## Implemented eighth M3 project-catalog and transport threats
+
+| Threat | Required control | Required evidence and limits |
+| --- | --- | --- |
+| Workspace bootstrap or paging hydrates an unbounded catalog or performs N+1 work | return one newest-first pinned page; use one intrinsic-project-rowid `LIMIT 13` range query joined through repository primary key; creation uses exact indexed lookups | empty and more-than-200-project tests, rowid gaps, insertion-stable snapshots, exact query-plan assertions, collection loaders forced to throw, and at most 12 presented rows |
+| Malformed or oversized persisted project configuration consumes host memory or crosses a private field | preflight SQLite storage class and byte length before strict JSON parsing on both joined pages and indexed direct hydrators; validate exact keys, scalar bounds, and policy; enforce the same checks/sandbox/ceiling caps on supported writes; reconstruct an explicit presenter | TEXT/BLOB, invalid/extra JSON, malformed policy, oversized field/config, direct name/ID/create-run lookup, and excluded-private-column tests; checks at most 1 MiB and sandbox/ceiling at most 16 KiB |
+| Stale or repeated navigation accumulates the catalog or silently replaces the project under review | replace rather than append pages; retain at most four positions; require exact snapshot/cursor identity; abort superseded and lifecycle requests; keep last success for explicit retry; while a run is open, resolve only its owning project | client tests plus a 50-project Chromium fixture cover four-page depth, stale responses, failure/retry, contention, hidden/selection cancellation, and off-page run ownership across page navigation and workspace refresh; no total-count claim |
+| A large aggregate or trusted error response sends success headers, partial JSON, or rejected private bytes before failure | completely serialize with the trailing newline and enforce one 8 MiB UTF-8 ceiling before `writeHead`; cap trusted error messages at 4 KiB; retain fixed `RESPONSE_TOO_LARGE` and pre-serialized internal-error fallback copy | exact-bound and one-byte-over unit tests plus oversized selected-run and 9 MiB trusted-error integration tests prove no success headers, no private sentinel, no recursive failure, no partial JSON, and continued server health |
+| Keyboard users cannot bypass the long sidebar or distinguish the active project/run | first-focus skip link targets a focusable main landmark; global visible link focus; selected project/run buttons expose pressed/current state; diff overflow remains a labelled keyboard region | real Chromium Tab/Enter skip-link acceptance plus catalog ownership and persisted-diff PageDown coverage; static accessibility assertions |
+| The catalog widens browser authority or reads the source checkout | keep the route GET-only and the view text-only; add no Git/source, provider, approval, execution, command, commit, push, deployment, or release path | method/static guards, zero logical SQLite writes, unchanged action routes, and explicit ADR scope |
+
+ADR 0021 is Accepted after its fresh local, independent-review, merge, and exact
+published-head gates passed. ADR 0025's residual release holds remain
+independent.
+
+## Inherited repository automation, hardened
+## Change Room threats (candidate ADR 0041)
 
 | Threat | Required control | Required evidence and limits |
 | --- | --- | --- |
@@ -141,25 +191,50 @@ is a merge gate; ADR 0010 remains an independent release hold.
 | Room, index, or packet responses grow without bound | exactly eleven fixed cards with bounded bodies and references; at most 32 annotations of 1 KiB each; the 200-event metadata tail; twelve retained index rows per page; at most eight change-context components | response shapes are fixed-size by construction; no route enumerates unbounded history, payloads, or free-text search results |
 | A change-context answer invents facts or hides doubt | a pure host function builds the packet over the room projection: host-controlled templates interpolating only bounded facts, per-statement receipts (evidence-card IDs, event sequences, digests), explicit omission and uncertainty lists, and no LLM, provider, network, or external tool | every statement is traceable to recorded evidence; truncated timelines and absent free-text reasons are stated as uncertainty; a completed run's `what_changed` states nothing was committed, pushed, merged, or deployed |
 | Room digests are mistaken for fresh authorization or current integrity | the integrity block declares `digestSemantics: "byte_binding_only"`; the checkpoint card notes its digest is a recorded byte binding, not a fresh rehash; the provider plan is labeled an untrusted proposal | the projection never claims fresh authorization, semantic correctness, or rehashed bytes; rollback completion sequences mark observed completion events, not causal links |
-| The slice widens browser authority | all three routes are GET-only; non-GET verbs receive 404; unknown runs receive 404; invalid query contracts receive 422; no approval, mutation, annotation-authoring, execution, command, commit, push, or deployment route exists | route inventory assertions cover the new routes; the browser remains review-only |
+| The slice widens browser authority | all three routes are GET-only observation reads; mutation verbs are refused by the ADR 0029 action-session boundary (401 without it, 404 behind it); unknown runs receive 404; invalid query contracts receive 422; no approval, mutation, annotation-authoring, execution, command, commit, push, or deployment route is added | route inventory assertions cover the new routes; the ADR 0029 mutation session and its fenced origins are untouched, and no change-room route participates in them |
 
-ADR 0019 adds no schema beyond `run_annotations`, dependency, write route,
-stream, watcher, daemon, or browser action route. ADR 0010 remains an
-independent release hold.
+ADR 0041 adds no schema beyond `run_annotations`, dependency, write route,
+stream, watcher, daemon, or browser action route. ADR 0025's residual
+third-party-review and secret-rotation holds remain independent.
 
-## Inherited repository automation hold
 
 `.github/workflows/opencode.yml` came from the pre-existing remote root and was
 preserved byte-for-byte during history reconciliation. That provenance prevents
 silent shared-state deletion; it does not establish safety.
 
-The public comment trigger begins a job before any repository-owned actor gate.
-The job grants OIDC write authority, passes the named OpenCode secret, invokes a
-mutable third-party action, and does not set `share: false`. The currently
-resolved upstream code later checks collaborator permission, but mutable
-bootstrap code runs first. Kevin must explicitly decide whether to disable the
-workflow or approve a hardened design. Until then, M0/M1 security release status
-is held. ADR 0010 records the options without changing the workflow.
+Before 2026-07-26 the public comment trigger began a job with no
+repository-owned actor gate: the condition tested only four substrings of the
+comment body, so on a public repository with issues enabled — verified
+`visibility: "public"`, `has_issues: true` — any authenticated GitHub user could
+start a job that minted an OIDC token and passed the named OpenCode secret into
+a mutable third-party action. The workflow never fired (`total_count: 0` runs,
+all time), so there is no evidence it was exercised, but the exposure was
+standing and left no in-repository audit trail.
+
+ADR 0025 resolves the ADR 0010 hold by hardening rather than removal. A
+repository-owned `authorize` job now gates on `author_association` of `OWNER`,
+`MEMBER`, or `COLLABORATOR` — never `CONTRIBUTOR`, which means a merged pull
+request rather than write access — holds no permissions and no secrets, and uses
+no third-party code. The privileged job declares `needs: authorize`. Both
+actions are pinned to commit SHAs, `share: false` is set, and top-level
+`permissions: {}` denies by default. Untrusted comment fields reach a shell only
+through `env:`, never through `${{ }}` inside `run:`.
+`inheritedWorkflowIsActorGatedAndPinned` in `scripts/security-check.mjs` fails
+the gate if any of that regresses.
+
+Two requirements ADR 0010 set are **not** met, so the release hold narrows
+rather than lifts: the pinned third-party commit has not been reviewed by this
+repository, and `OPENCODE_API_KEY` must be rotated because it was reachable
+under the previous condition. Pinning removes the silent-update path; it is not
+a review. Causing that unreviewed code to run now requires write access.
+
+| Threat | Boundary | Fails how |
+| --- | --- | --- |
+| Any internet user triggers privileged automation by commenting | Repository-owned `authorize` job evaluated before any third-party step | Non-collaborator comment skips the gate job, so `needs: authorize` skips the privileged job |
+| Mutable third-party action changes what executes with no commit here | Commit-SHA pins on every `uses:` | `inheritedWorkflowIsActorGatedAndPinned` rejects any non-40-hex ref or `@latest` |
+| Comment body evaluated as shell in the runner | Untrusted fields passed only via `env:` | Assertion rejects `${{ github.event.comment… }}` inside `run:` |
+| Session contents of a public repository shared upstream | `share: false` | Assertion requires the input to be present |
+| Pinned third-party code exfiltrates the injected secret | **Unmitigated** — pin is not review | Requires write access to reach; secret rotation and a supply-chain review remain outstanding under ADR 0025 |
 
 ## Residual risks
 
@@ -168,14 +243,28 @@ is held. ADR 0010 records the options without changing the workflow.
   arguments or access its socket inside the container.
 - Full-file model output can contain vulnerable code even when path-safe. Human
   review and project tests remain required.
-- The workspace API has no authentication because loopback plus the current OS
-  user is its boundary. Another process or browser running as that user can call
-  it; it must never be proxied or exposed remotely.
+- The accepted interim workspace POST bearer blocks ambient websites, stale
+  origins, and accidental stable-origin mutation; it does not isolate hostile
+  code already running as the same OS user or trusted browser origin. A
+  same-user process that steals the one-time launch URL can act until server
+  restart. The workspace must never be proxied or exposed remotely.
+  Chromium-family support is a tested product boundary, not authentication by
+  browser identity.
+- Production currently prints the mutation launch URL rather than owning the
+  browser process. Opening that fragment-bearing URL in an unverified browser,
+  resolver configuration, or proxy is outside the accepted interim boundary
+  and could expose the fragment to nonlocal same-origin content. Until an owned
+  Chromium/desktop launch handshake replaces this operator contract, use only a
+  real-accepted Chromium-family browser for mutation and use explicit-port
+  review-only mode everywhere else.
 - A configured loopback model service is trusted only as configured; another
   local process may impersonate it.
 - GitHub-hosted automation and third-party installers remain outside the local
-  runtime boundary. The inherited OpenCode workflow is not approved merely
-  because its current upstream implementation contains a late permission check.
+  runtime boundary. The inherited OpenCode workflow's upstream late permission
+  check is still not the boundary; the repository-owned gate added in ADR 0025
+  is. The pinned upstream commit remains unreviewed by this repository.
+- No branch is protected — `main` reports `protected: false` — so the hosted CI
+  gate is advisory rather than enforced. Tracked separately from ADR 0025.
 - Persistence uses synchronous `better-sqlite3` behind the store boundary; a
   future schema version still needs an explicit migration and recovery drill.
 - Redaction is defense in depth, not proof that arbitrary repository content has
@@ -186,10 +275,17 @@ is held. ADR 0010 records the options without changing the workflow.
   attacker with arbitrary same-user write access to `ICARUS_HOME` during a run.
   POSIX owner/mode checks and Windows current-user-profile containment rely on
   the operating system's local account boundary to prevent that access.
-- The HTTP/UI, import, preview, draft-persistence, and loopback-planning paths
-  support Linux, macOS, and Windows. Support assumes the platform's ordinary
-  local filesystem, user-profile ACL, and SQLite locking semantics. Native
-  macOS/Windows acceptance remains to be recorded.
+- The HTTP server and explicit-port review UI support Linux, macOS, and Windows.
+  Mutation-capable import, preview, draft persistence, and
+  loopback-planning additionally require a supported Chromium-family browser.
+  ADR 0040's exact-head real-Chrome macOS/Windows technical evidence passed at
+  `eb01b6406c12126c60add7ac83800f8eba8ffdc9` in native run `30618043377`, and
+  explicit human acceptance of the interim operator-controlled
+  browser/resolver/proxy residual risk was recorded on 2026-07-31. Gate 1's
+  remaining runtime slices are incomplete. No live migration, merge,
+  deployment, or public release was authorized or performed as part of this
+  acceptance. The server cannot detect or downgrade a browser that fails before
+  resolving the random `.localhost` hostname.
 - Guarded approval and execution remain Linux-only through `/usr/bin/flock` and
   `/proc`; execution also depends on a local Docker daemon.
 - Repository status is an unlocked, point-in-time observation, not proof

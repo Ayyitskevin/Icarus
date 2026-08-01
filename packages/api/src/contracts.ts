@@ -119,19 +119,34 @@ export function contextPreviewRequest(value: unknown): { readonly target: string
 export interface RunDraftRequest {
   readonly projectId: string;
   readonly task: string;
-  readonly target: string;
+  readonly targets: readonly string[];
   readonly provider: { readonly model: string; readonly baseUrl: string };
 }
 
+/** ADR 0023 bounds the browser's candidate selection to the host file ceiling. */
+const MAX_REQUEST_TARGETS = 64;
+
 export function runDraftRequest(value: unknown): RunDraftRequest {
   const body = objectValue(value, "request");
-  exactKeys(body, ["projectId", "task", "target", "provider"], "request");
+  exactKeys(body, ["projectId", "task", "targets", "provider"], "request");
   const provider = objectValue(body.provider, "provider");
   exactKeys(provider, ["model", "baseUrl"], "provider");
+  if (!Array.isArray(body.targets)) {
+    throw new IcarusError("INVALID_REQUEST", "targets must be an array");
+  }
+  if (body.targets.length < 1 || body.targets.length > MAX_REQUEST_TARGETS) {
+    throw new IcarusError("INVALID_REQUEST", "targets has an invalid length");
+  }
+  const targets = body.targets.map((entry, index) =>
+    stringValue(entry, `targets[${index}]`, { maxBytes: 1_024 }),
+  );
+  if (new Set(targets).size !== targets.length) {
+    throw new IcarusError("INVALID_REQUEST", "targets must be unique");
+  }
   return {
     projectId: stringValue(body.projectId, "projectId", { maxBytes: 100 }),
     task: stringValue(body.task, "task", { maxBytes: 8 * 1024 }),
-    target: stringValue(body.target, "target", { maxBytes: 1_024 }),
+    targets,
     provider: {
       model: stringValue(provider.model, "provider.model", { maxBytes: 256 }),
       baseUrl: stringValue(provider.baseUrl, "provider.baseUrl", { maxBytes: 2_048 }),
@@ -157,6 +172,46 @@ export function workspaceRunPageQuery(searchParams: URLSearchParams): WorkspaceR
     snapshotValues.length !== 1
   ) {
     invalid("Run page requests require exactly one before and snapshot query parameter");
+  }
+  const rawBefore = beforeValues[0] ?? "";
+  const rawSnapshot = snapshotValues[0] ?? "";
+  if (!POSITIVE_EVENT_CURSOR_PATTERN.test(rawBefore) || !EVENT_CURSOR_PATTERN.test(rawSnapshot)) {
+    invalid("before and snapshot must be canonical safe integers");
+  }
+  const before = Number(rawBefore);
+  const snapshot = Number(rawSnapshot);
+  if (
+    !Number.isSafeInteger(before) ||
+    before <= 0 ||
+    !Number.isSafeInteger(snapshot) ||
+    snapshot < 0 ||
+    snapshot > SAFE_RUN_SNAPSHOT_MAX
+  ) {
+    invalid("before and snapshot must be canonical safe integers");
+  }
+  return { kind: "continuation", before, snapshot };
+}
+
+export type WorkspaceProjectPageQuery =
+  | { readonly kind: "new" }
+  | { readonly kind: "continuation"; readonly before: number; readonly snapshot: number };
+
+export function workspaceProjectPageQuery(
+  searchParams: URLSearchParams,
+): WorkspaceProjectPageQuery {
+  const keys = Array.from(searchParams.keys());
+  if (keys.length === 0) return { kind: "new" };
+  const beforeValues = searchParams.getAll("before");
+  const snapshotValues = searchParams.getAll("snapshot");
+  if (
+    keys.length !== 2 ||
+    new Set(keys).size !== 2 ||
+    !keys.includes("before") ||
+    !keys.includes("snapshot") ||
+    beforeValues.length !== 1 ||
+    snapshotValues.length !== 1
+  ) {
+    invalid("Project page requests require exactly one before and snapshot query parameter");
   }
   const rawBefore = beforeValues[0] ?? "";
   const rawSnapshot = snapshotValues[0] ?? "";

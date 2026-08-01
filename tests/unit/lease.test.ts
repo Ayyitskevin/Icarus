@@ -135,6 +135,36 @@ describe("run execution leases", () => {
     await firstLease;
   });
 
+  it("reports nonblocking contention without swallowing other lease failures", async () => {
+    const root = await makeTemporaryRoot();
+    const first = new RunLeaseManager(root);
+    const second = new RunLeaseManager(root);
+    const entered = createGate();
+    const release = createGate();
+    const firstLease = first.withLease(UNIT_RUN_ID, async () => {
+      entered.release();
+      await release.promise;
+    });
+
+    await entered.promise;
+    try {
+      let executed = false;
+      await expect(
+        second.tryWithLease(UNIT_RUN_ID, async () => {
+          executed = true;
+        }),
+      ).resolves.toEqual({ acquired: false });
+      expect(executed).toBe(false);
+    } finally {
+      release.release();
+    }
+    await firstLease;
+    await expect(second.tryWithLease(UNIT_RUN_ID, async () => "settled")).resolves.toEqual({
+      acquired: true,
+      value: "settled",
+    });
+  });
+
   it("refuses a live legacy owner that does not hold a kernel lock", async () => {
     const root = await makeTemporaryRoot();
     const manager = new RunLeaseManager(root);

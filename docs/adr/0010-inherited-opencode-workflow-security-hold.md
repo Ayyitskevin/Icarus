@@ -1,7 +1,15 @@
 # ADR 0010: Inherited OpenCode workflow security hold
 
-- Status: Pending operator decision
+- Status: Superseded
 - Date: 2026-07-19
+
+> The decision deferred below was resolved on 2026-07-26 by
+> [ADR 0025](0025-hardened-inherited-opencode-workflow.md), which takes the
+> second option: hardening rather than removal. The analysis in this record
+> remains accurate and in force, including that the upstream action's own
+> collaborator check is not a repository-owned authorization boundary. ADR 0025
+> records which of this ADR's requirements are met and which — third-party
+> review of the pinned action, and secret rotation — remain outstanding.
 
 ## Context
 

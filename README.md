@@ -6,14 +6,33 @@ The name comes from the Greek story of Icarus: the product is designed for
 ambitious capability with an explicit ceiling and a safe landing path.
 
 Icarus is a local-first, self-hosted, model-agnostic AI software factory. The
-current foundation deliberately implements one narrow workflow well: plan one
-controlled replacement in an operator-selected tracked text file, obtain human
-approval, apply it in a private Git worktree, run operator-registered checks in
-a no-network sandbox, present evidence, and retain enough history to review,
-resume, roll back, or restore the run.
+current foundation deliberately implements one bounded workflow well: plan a
+transactional PatchSet over operator-selected paths, obtain human approval,
+apply it in a private Git worktree, run operator-registered checks in a
+no-network sandbox, present evidence, and retain enough history to review,
+resume, roll back, or restore the run. A failed first verification may enter a
+separately approved, two-turn maximum session with a closed host-owned tool
+registry; it never becomes arbitrary shell or deployment authority.
 
 Icarus is not a chatbot shell, an autonomous production deployer, or a claim
 that later roadmap features already exist.
+
+> **Release status:** Gate 0 is released at exact `main`
+> `802b91e6f6c9b392f56c9ee3660be818a0f74a62` with Linux, macOS, and Windows
+> evidence. The current Gate 1 branch carries an implemented interim
+> authenticated browser-mutation session and its client capability state.
+> Random numeric `127/8` origins were rejected after native run `30613980911`
+> passed Windows and failed macOS. ADR 0040's technical gate subsequently
+> passed at exact implementation commit
+> `eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI
+> `30618041483` and native real-Chrome run `30618043377` on both platforms.
+> Explicit human acceptance of the interim operator-controlled
+> browser/resolver/proxy residual risk was recorded on 2026-07-31. This is not
+> a Gate 1 release: the branch has repository-only ledger, shutdown, landing
+> record, and local Git foundations, but guarded browser actions, admitted-row
+> reconciliation, durable landing coordination, and the GitHub gateway remain
+> incomplete. No live migration, merge, deployment, or public release was
+> authorized or performed.
 
 ## Current scope
 
@@ -23,13 +42,16 @@ roadmap contracts plus repeatable quality gates. The Milestone 1 slice supplies:
 - local repository registration and project metadata;
 - deterministic pinned-tree maps and target-applicable `AGENTS.md` context;
 - an explicit persisted run state machine;
-- Ollama and OpenAI Responses planning adapters;
+- Ollama, OpenAI Responses, and Anthropic Messages planning adapters;
 - explicit cloud-context approval before remote egress;
 - a plan-digest approval step before private workspace creation or code mutation;
 - an Icarus-private Git cache and detached worktree;
-- one bounded exact-match replacement in an existing tracked text file;
+- transactional modify/create/delete PatchSets over an approved target subset,
+  with guarded atomic writes, compensation, and tree checkpoints;
 - exact operator-registered verification commands in a no-network Docker
   sandbox with no host fallback;
+- explicit digest-bound capability grants, an enumerated readable manifest, and
+  a bounded failed-verification session using only host-registered tools;
 - diff, event, usage, and checkpoint persistence in SQLite;
 - run resume, review, rollback, and checkpoint restoration.
 
@@ -44,9 +66,20 @@ The first Milestone 3 vertical slice adds a same-origin React workspace and a
 loopback-only local API. It can persist a repository/project, preview a
 deterministic filtered map of the committed tree, save a task as a draft, ask a
 configured loopback Ollama model for a plan, and reopen browser-safe evidence
-after restart. The browser is deliberately review-only: it cannot approve a
-plan, create a worktree, execute checks, mutate the imported repository, or
-claim that unrun work completed.
+after restart. The current Gate 1 candidate binds exact `127.0.0.1` while using
+a fresh 128-bit `.localhost` public origin and an independent authenticated
+mutation session. That mutation path is supported only in real-accepted
+Chromium-family browsers. Its exact-head technical evidence now passes; release
+support remains held because the remaining Gate 1 slices are incomplete, while
+the operator-controlled browser/resolver/proxy residual risk was explicitly
+accepted on 2026-07-31. Explicit-port sessions remain bearer-free and
+review-only for Safari and every unverified browser. The guarded lifecycle
+remains review-only in the browser: it cannot approve a plan, create a worktree,
+execute checks, mutate the imported repository, or claim that unrun work
+completed.
+The workspace reports mutation and planning capability from both the server
+mode and the tab's live session; stable or revoked sessions become visibly
+review-only and disable the corresponding controls.
 
 The second Milestone 3 slice adds project-scoped, nonpersistent repository
 observation with independent
@@ -77,12 +110,63 @@ validated states, sequences, timestamps, digests, coverage, and recorded
 checkpoint relations. Raw payloads, diffs, paths, checks, output, checkpoint
 bytes, complete history, and every guarded action remain CLI-only.
 
-The sixth Milestone 3 slice adds a per-run Change Room: a strict read-only
-projection derived in one SQLite read transaction from the run row, approvals,
-the bounded 200-event metadata tail, safe checkpoint columns, project
-check/sandbox configuration, and CLI annotations — the room is the run, with no
-room table or parallel state machine. Exactly eleven evidence cards in fixed
-lifecycle order carry host-controlled titles, provenance classes, explicit
+The sixth merged observation slice bounds ordinary selected-run approval provenance to
+the newest 12 validated recorded decisions, reports when earlier decisions were
+excluded, and keeps complete history in the CLI. Recorded actors and digests are
+provenance facts, not fresh authentication or byte-integrity checks. Existing
+state requires a verified backup and one explicitly approved
+`approval-index-v1` migration; see `docs/OPERATIONS.md`.
+
+The seventh merged observation slice turns the already persisted one-file verification
+diff into explicit review evidence. At most 256 KiB of complete patch text is
+shown; displayed bytes are rehashed against the recorded digest, while a larger
+recorded diff becomes metadata-only with no partial preview or format validation
+by this projection. Exact persisted run state, verification outcome, path, size,
+patch statistics, and digest provenance
+appear together without another Git/source read or any browser action.
+
+The eighth merged observation slice replaces the workspace's unbounded project catalog
+with one pinned, newest-first page of at most 12 joined project/repository
+records. The browser replaces pages inside a four-position cursor window,
+preserves an independently selected project or the exact owner of a visible
+run, and keeps complete listing in the CLI. Catalog and direct hydration both
+storage- and byte-gate persisted project JSON before strict decoding; creation
+uses exact indexed lookups. Every HTTP JSON response is completely serialized
+under an 8 MiB UTF-8 ceiling before success headers are sent, with bounded error
+copy and a fixed non-recursive fallback.
+
+These bounded observation slices are merged and exact implementation-head
+hosted CI verified. At their original slice checkpoints they did not establish
+native macOS or Windows acceptance; exact-head native acceptance was later
+recorded for the Gate 0 release at `802b91e6`. They still do not complete full
+M3, close ADR 0025's third-party review/secret-rotation work, authorize a live
+approval-index migration, or make Icarus production-ready.
+
+ADR 0026 slice 2b is implemented and released in the Gate 0 baseline: the initial approved
+PatchSet attempt remains, only failed formal verification enters the session,
+and `iterationCeiling: 0` remains single-shot. Provider turns and tool calls are
+durably admitted before effects; completion is host-gated on current passing
+full-plan evidence. The released implementation projects only host-owned
+check metadata to remote session prompts while retaining full raw output in
+local evidence, and it revalidates mutation grants against the plan's narrowed
+targets before session admission or worktree effects. Roomy, compacted, live
+tool, loopback, legacy-resume, and malformed-grant regressions pass with the
+complete local gate. Exact-head Linux and native evidence are linked in
+`docs/PLANS.md`; that Gate 0 evidence does not validate the current Gate 1
+worktree until it is published and rerun at the new exact head.
+
+[ADR 0036](docs/adr/0036-proof-carrying-software-factory-product-direction.md)
+sets the next product direction: Verified Change Gate, browser and VS Code
+surfaces, reversible Git landing, governed preview environments, and Supabase
+change packs. Icarus will own the authority/evidence kernel and integrate editor,
+environment, and backend primitives rather than rebuild them.
+
+The candidate Change Rooms slice (ADR 0041) adds a per-run Change Room: a strict
+read-only projection derived in one SQLite read transaction from the run row,
+approvals, the bounded 200-event metadata tail, safe checkpoint columns,
+project check/sandbox configuration, and CLI annotations — the room is the run,
+with no room table or parallel state machine. Exactly eleven evidence cards in
+fixed lifecycle order carry host-controlled titles, provenance classes, explicit
 statuses, bounded references, and truncation/redaction/unavailable-evidence
 indicators; the integrity block states that digests prove byte binding and
 recorded-evidence integrity only, never fresh authorization or semantic
@@ -92,15 +176,18 @@ change-context questions return deterministic, model-free answers whose
 statements carry evidence receipts plus explicit omissions and uncertainty.
 Annotations are CLI-only and append-only — at most 32 per run with 1 KiB bodies,
 with recognizable credential material rejected before write — and never advance
-run state, events, gates, or digests; schema version 2 additively adds only
-their table. The browser gains three GET-only routes and remains review-only.
+run state, events, gates, or digests. Existing state requires a verified backup
+and one explicitly approved `run-annotations-v1` migration; see
+`docs/OPERATIONS.md`. The three new routes are GET-only reads and add no
+browser authority beyond the existing observation boundary.
 
-Not yet included: browser approval or execution, arbitrary agent tool use,
-model-written shell commands, semantic search, commits or pushes, application
-previews, richer file/status, diff, or history navigation, deployment, backend
-platform primitives, multi-agent orchestration, distributed workers, browser
-annotation authoring, live room polling, change-context packet summarization by
-a future assistant, free-text questions, and room search.
+Not yet included: browser approval or execution, arbitrary/provider-native
+tools, model-written shell commands, semantic search, commits or pushes,
+application previews, current file/status or multi-file and payload-bearing
+browser diff/history navigation, deployment, backend platform primitives,
+multi-agent orchestration, distributed workers, browser annotation authoring,
+live room polling, change-context packet summarization by a future assistant,
+free-text questions, and room search.
 
 ## Requirements
 
@@ -109,12 +196,18 @@ a future assistant, free-text questions, and room search.
 - Git 2.40 or newer
 - a clean local repository with at least one commit for workspace import
 
-The loopback HTTP/UI, repository import, context preview, draft persistence, and
-loopback planning path support Linux, macOS, and Windows and require no homelab,
-cloud service, account, telemetry, or global install. Planning is read-only with
-respect to the imported checkout and uses an atomic SQLite operation admission
-record to reject concurrent provider work. Approval and execution remain
-Linux-only: they use the Milestone 1 kernel lease through util-linux `flock` at
+The loopback server and explicit-port review UI support Linux, macOS, and
+Windows and require no homelab, cloud service, account, telemetry, or global
+install. Browser registration, context preview, draft persistence, and
+loopback planning mutations additionally require a supported Chromium-family
+browser. The required real-Chrome composition passed at exact implementation
+commit `eb01b6406c12126c60add7ac83800f8eba8ffdc9` in native run
+`30618043377`; explicit human acceptance of ADR 0040's interim
+operator-controlled browser/resolver/proxy risk was recorded on 2026-07-31.
+That acceptance does not complete Gate 1. Planning is read-only with respect
+to the imported checkout and uses an atomic SQLite operation admission record
+to reject concurrent provider work. Approval and execution remain Linux-only:
+they use the Milestone 1 kernel lease through util-linux `flock` at
 `/usr/bin/flock`, and execution additionally requires Docker with seccomp
 support and a locally present digest-pinned check image.
 
@@ -145,15 +238,31 @@ $env:ICARUS_HOME = Join-Path $HOME ".icarus-state"
 pnpm workspace:start
 ```
 
-Open `http://127.0.0.1:8787`. The server binds only to `127.0.0.1`,
-validates browser `Host` and `Origin`, and never enables cross-origin
-access. Importing and previewing a repository reads its committed Git objects;
+Open the exact one-time launch URL printed by the process only in a supported
+Chromium-family browser. The default server binds exact IPv4 `127.0.0.1` on an
+ephemeral port and, after verifying that bind, creates a CSPRNG-selected
+16-byte lowercase-hex `.localhost` public origin plus an independent
+fragment-only mutation bearer. It performs no Node/operating-system lookup,
+hosts-file edit, or browser resolver injection. The client removes the
+fragment before render, every non-GET/HEAD request requires the exact session
+headers, and no cross-origin access is enabled. The native technical gate has
+passed, and the residual operator-controlled browser/resolver/proxy risk was
+accepted as an interim boundary on 2026-07-31. Gate 1 remains incomplete and
+unreleased. Importing and previewing a repository reads its committed Git objects;
 it does not copy, edit, check, commit, or push the source. Planning is available
-on Linux, macOS, and Windows only when the chosen model is served by loopback
-Ollama. Until an endpoint and model are entered, the workspace clearly reports
-provider and execution capabilities as `unconfigured`. Saving a configured
-draft contacts no provider; the separate plan action does. Approval and
-execution continue through the Linux CLI only.
+through the candidate mutation session only when the chosen model is served by
+loopback Ollama. Until an endpoint and model are entered, the workspace clearly
+reports provider and execution capabilities as `unconfigured`. Saving a
+configured draft contacts no provider; the separate plan action does. Approval
+and execution continue through the Linux CLI only.
+
+For presentation-only Vite development, start a stable GET-only API with
+`ICARUS_PORT=8787 pnpm workspace:start`, then run `pnpm workspace:ui` in a
+second terminal. Use this explicit-port `127.0.0.1` mode for Safari, Firefox,
+embedded webviews, and every unverified/default browser. It emits no bearer and
+intentionally cannot submit forms; the server cannot detect an unsupported
+browser or automatically downgrade a random `.localhost` navigation that never
+reaches it.
 
 The existing CLI golden path begins with:
 
@@ -183,7 +292,12 @@ and must not be used for Icarus state.
 Set `ICARUS_CHROMIUM_EXECUTABLE` to an explicit local Chromium binary, then
 `pnpm smoke:workspace:browser` builds the production assets and drives the
 project → context → draft → browser reload → plan → evidence path in real
-headless Chromium.
+headless Chromium without a resolver override. The technical acceptance record
+at exact implementation commit `eb01b6406c12126c60add7ac83800f8eba8ffdc9` used real
+`Chrome/150.0.7871.187` with CDP `1.3` at
+`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` and
+`C:\Program Files\Google\Chrome\Application\chrome.exe`; both native jobs
+passed in run `30618043377`.
 Focused integration tests also cover restart before planning, useful errors for
 malformed provider URLs and missing repositories, and populated HTTP evidence
 for an already completed CLI run.
@@ -255,6 +369,7 @@ repository.
 
 ## Documentation
 
+- [Release readiness](docs/README.md)
 - [Product requirements](docs/PRD.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Implementation plan](docs/PLANS.md)

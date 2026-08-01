@@ -292,8 +292,8 @@ function CardBody({ card }: { readonly card: ChangeRoomCardView }) {
               <dd className="digest">{body.contextSha256 ?? "Not pinned"}</dd>
             </div>
             <div>
-              <dt>Context target</dt>
-              <dd>{body.target ?? "Not pinned"}</dd>
+              <dt>Context targets</dt>
+              <dd>{body.targets.length === 0 ? "Not pinned" : body.targets.join(", ")}</dd>
             </div>
             <div>
               <dt>Context size</dt>
@@ -440,8 +440,26 @@ function CardBody({ card }: { readonly card: ChangeRoomCardView }) {
                   <dd>{body.plan.target}</dd>
                 </div>
                 <div>
+                  <dt>Approved target scope</dt>
+                  <dd>{body.plan.targets.join(", ")}</dd>
+                </div>
+                <div>
                   <dt>Selected checks</dt>
                   <dd>{body.plan.checkIds.join(", ")}</dd>
+                </div>
+                <div>
+                  <dt>Iteration ceiling</dt>
+                  <dd>{body.plan.iterationCeiling}</dd>
+                </div>
+                <div>
+                  <dt>Capability grants</dt>
+                  <dd>
+                    {body.plan.grants.length === 0
+                      ? "None requested"
+                      : body.plan.grants
+                          .map((grant) => `${grant.kind} (max ${grant.maxCalls})`)
+                          .join(", ")}
+                  </dd>
                 </div>
               </dl>
             </>
@@ -453,7 +471,7 @@ function CardBody({ card }: { readonly card: ChangeRoomCardView }) {
       return (
         <ApprovalFacts
           approval={card.body.approval}
-          emptyMessage="No plan approval is recorded. Approvals happen only in the CLI; the browser cannot approve."
+          emptyMessage="No plan approval is recorded. Approvals are recorded through the CLI or the fenced browser mutation session; this room is read-only."
         />
       );
     case "patchset": {
@@ -492,23 +510,41 @@ function CardBody({ card }: { readonly card: ChangeRoomCardView }) {
               </dd>
             </div>
           </dl>
-          {body.action === null ? (
-            <p className="empty-state">No edit proposal is recorded for this run.</p>
+          {body.patchSet === null ? (
+            <p className="empty-state">No PatchSet proposal is recorded for this run.</p>
           ) : (
-            <dl className="facts facts--compact">
-              <div>
-                <dt>Proposal path</dt>
-                <dd>{body.action.path}</dd>
+            <>
+              <p>{body.patchSet.summary}</p>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Operation</th>
+                      <th>Path</th>
+                      <th>Preimage digest</th>
+                      <th>Replacements</th>
+                      <th>Provider rationale</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {body.patchSet.edits.map((edit) => (
+                      <tr key={`${edit.op}:${edit.path}`}>
+                        <td>{edit.op}</td>
+                        <td>{edit.path}</td>
+                        <td className="digest">{edit.expectedPreimageSha256 ?? "None"}</td>
+                        <td>{edit.replacementCount ?? "—"}</td>
+                        <td>{edit.rationale}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div>
-                <dt>Expected preimage digest</dt>
-                <dd className="digest">{body.action.expectedPreimageSha256}</dd>
-              </div>
-              <div>
-                <dt>Provider rationale</dt>
-                <dd>{body.action.rationale}</dd>
-              </div>
-            </dl>
+              {body.patchSetEditsTruncated ? (
+                <p className="change-room-card__note">
+                  Only the first {body.patchSet.edits.length} PatchSet edits are shown.
+                </p>
+              ) : null}
+            </>
           )}
           {body.diff === null ? null : (
             <details>
@@ -683,7 +719,7 @@ function CardBody({ card }: { readonly card: ChangeRoomCardView }) {
       return (
         <ApprovalFacts
           approval={card.body.decision}
-          emptyMessage="No review decision is recorded. Review happens only in the CLI; the browser cannot decide."
+          emptyMessage="No review decision is recorded. Review decisions are recorded through the CLI or the fenced browser mutation session; this room is read-only."
         />
       );
     case "checkpoint": {
@@ -1094,7 +1130,8 @@ export function ChangeRoomView({ projects }: ChangeRoomViewProps) {
           A Change Room is the canonical read-only explanation of one guarded run: task and scope,
           pinned base and context, provider plan, approvals, PatchSet and diff evidence,
           verification, review decision, checkpoint, recovery, and terminal state. Nothing here
-          mutates anything; approvals, review, rollback, and restore happen only in the CLI.
+          mutates anything; approvals, review, rollback, and restore are recorded through the CLI or
+          the fenced browser mutation session.
         </p>
         <p className="change-rooms__bounds">
           Pages hold at most {CHANGE_ROOM_PAGE_SIZE} rooms, newest first, and this session keeps a

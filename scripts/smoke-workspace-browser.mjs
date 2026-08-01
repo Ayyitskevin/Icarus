@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import http from "node:http";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -28,9 +37,46 @@ const VERIFICATION_PRIVATE_SENTINEL = "/private/browser-verification-response-se
 const RUN_SUMMARY_PAGE_SIZE = 12;
 const RUN_SUMMARY_MAX_PAGES = 4;
 const RUN_SUMMARY_FIXTURE_COUNT = RUN_SUMMARY_PAGE_SIZE * RUN_SUMMARY_MAX_PAGES;
+const PROJECT_PAGE_SIZE = 12;
+const PROJECT_PAGE_MAX_PAGES = 4;
+const PROJECT_PAGE_FIXTURE_COUNT = PROJECT_PAGE_SIZE * PROJECT_PAGE_MAX_PAGES;
 const RUN_SUMMARY_PRIVATE_SENTINEL = "/private/browser-run-summary-heavy-sentinel";
 const VALID_ARCHIVED_RUN_TASK = "Archived browser run 020";
 const ALTERNATE_ARCHIVED_RUN_TASK = "Archived browser run 021";
+const APPROVAL_HTML_SENTINEL = '<img data-approval-injection="true"> Recorded digest:';
+const DIFF_HTML_SENTINEL = '<img data-diff-injection="true" src=x onerror=alert(1)>';
+const ACTION_SESSION_STORAGE_KEY = "icarus.action-session";
+const WORKSPACE_BIND_HOST = "127.0.0.1";
+
+// These process-wide relaxations exist only inside the disposable compiled-browser
+// smoke profile. Product launches must never inherit this test-only flag set.
+const SMOKE_ONLY_CHROMIUM_FLAGS = Object.freeze([
+  "--headless=new",
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-gpu",
+  "--disable-dev-shm-usage",
+  "--disable-background-networking",
+  "--disable-breakpad",
+  "--disable-client-side-phishing-detection",
+  "--disable-component-extensions-with-background-pages",
+  "--disable-component-update",
+  "--disable-default-apps",
+  "--disable-domain-reliability",
+  "--disable-extensions",
+  "--disable-features=AutofillServerCommunication,MediaRouter,OptimizationHints",
+  "--disable-sync",
+  "--metrics-recording-only",
+  "--no-default-browser-check",
+  "--no-first-run",
+  "--no-proxy-server",
+  "--password-store=basic",
+  "--safebrowsing-disable-auto-update",
+  "--use-mock-keychain",
+  "--remote-allow-origins=*",
+  "--remote-debugging-address=127.0.0.1",
+  "--remote-debugging-port=0",
+]);
 
 const Database = createRequire(new URL("../packages/core/package.json", import.meta.url))(
   "better-sqlite3",
@@ -38,6 +84,87 @@ const Database = createRequire(new URL("../packages/core/package.json", import.m
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function availableLoopbackPort() {
+  const server = http.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    await new Promise((resolve) => server.close(resolve));
+    throw new Error("Could not reserve a review-only browser smoke port");
+  }
+  await new Promise((resolve, reject) => {
+    server.close((error) => (error === undefined ? resolve() : reject(error)));
+  });
+  return address.port;
+}
+
+function actionSessionFromLaunchUrl(launchUrl) {
+  const match = /^#icarus-action-session=([A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$/.exec(
+    new URL(launchUrl).hash,
+  );
+  if (match === null) {
+    throw new Error("The mutation-capable workspace launch URL is missing its canonical session");
+  }
+  return match[1];
+}
+
+/**
+ * Direct Node-side fixture reads to the numeric bind address. The public URL
+ * remains authoritative in Host and Origin, while browser navigation below
+ * resolves the random .localhost hostname without resolver injection.
+ */
+async function directWorkspaceRequest(workspace, url) {
+  const target = new URL(url);
+  if (
+    workspace.host !== WORKSPACE_BIND_HOST ||
+    target.protocol !== "http:" ||
+    target.origin !== workspace.url
+  ) {
+    throw new Error("Browser smoke fixture request escaped its exact local public origin");
+  }
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        agent: false,
+        hostname: workspace.host,
+        port: workspace.port,
+        method: "GET",
+        path: `${target.pathname}${target.search}`,
+        headers: {
+          host: target.host,
+          origin: workspace.url,
+        },
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.once("error", reject);
+        response.once("end", () => {
+          const responseHeaders = new Headers();
+          for (let index = 0; index < response.rawHeaders.length; index += 2) {
+            responseHeaders.append(
+              response.rawHeaders[index] ?? "",
+              response.rawHeaders[index + 1] ?? "",
+            );
+          }
+          resolve(
+            new Response(Buffer.concat(chunks), {
+              status: response.statusCode ?? 500,
+              statusText: response.statusMessage,
+              headers: responseHeaders,
+            }),
+          );
+        });
+      },
+    );
+    request.once("error", reject);
+    request.end();
+  });
 }
 
 async function waitForObserved(predicate, description, timeoutMs = UI_TIMEOUT_MS) {
@@ -123,6 +250,52 @@ function runSummaryFixtureId(index) {
   return `f0000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
 }
 
+function projectPageFixtureId(index) {
+  return `e0000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+}
+
+function projectPageFixtureName(index) {
+  return `browser-project-archive-${String(index).padStart(3, "0")}`;
+}
+
+function insertProjectPageFixtures(stateRoot) {
+  const database = new Database(path.join(stateRoot, "icarus.sqlite3"));
+  const cloneProject = database.prepare(
+    `INSERT INTO projects
+       (id, name, repository_id, base_ref, checks_json, sandbox_json, ceiling_json, created_at)
+     SELECT ?, ?, repository_id, base_ref, checks_json, sandbox_json, ceiling_json, ?
+     FROM projects WHERE name = 'browser-project'`,
+  );
+  try {
+    database.transaction(() => {
+      for (let index = 1; index <= PROJECT_PAGE_FIXTURE_COUNT; index += 1) {
+        const inserted = cloneProject.run(
+          projectPageFixtureId(index),
+          projectPageFixtureName(index),
+          "2026-07-22T11:00:00.000Z",
+        );
+        assert.equal(inserted.changes, 1, `fixture project ${index} must clone the valid project`);
+      }
+      for (const name of ["browser-project-two", "browser-project"]) {
+        const moved = database
+          .prepare(
+            "UPDATE projects SET rowid = (SELECT MAX(rowid) + 1 FROM projects) WHERE name = ?",
+          )
+          .run(name);
+        assert.equal(moved.changes, 1, `${name} must remain on the newest project page`);
+      }
+    })();
+    const aggregate = database
+      .prepare("SELECT COUNT(*) AS count, MAX(rowid) AS snapshot FROM projects")
+      .get();
+    assert.equal(aggregate.count, PROJECT_PAGE_FIXTURE_COUNT + 2);
+    assert.equal(aggregate.snapshot, PROJECT_PAGE_FIXTURE_COUNT + 4);
+    return { snapshot: aggregate.snapshot };
+  } finally {
+    database.close();
+  }
+}
+
 function insertRunSummaryFixtures(stateRoot, browserRunId) {
   const database = new Database(path.join(stateRoot, "icarus.sqlite3"));
   const cloneRun = database.prepare(
@@ -181,6 +354,14 @@ function insertRunSummaryFixtures(stateRoot, browserRunId) {
           assert.equal(corruptResult.changes, 1, `fixture run ${index} must poison heavy columns`);
         }
       }
+      const reassigned = database
+        .prepare("UPDATE runs SET project_id = ? WHERE id = ?")
+        .run(projectPageFixtureId(20), runSummaryFixtureId(21));
+      assert.equal(
+        reassigned.changes,
+        1,
+        "the alternate archived run must belong to a project outside the newest catalog page",
+      );
       const moved = database
         .prepare("UPDATE runs SET rowid = (SELECT MAX(rowid) + 1 FROM runs) WHERE id = ?")
         .run(browserRunId);
@@ -207,6 +388,65 @@ function insertRunSummaryFixtures(stateRoot, browserRunId) {
   }
 }
 
+function installPersistedDiffReviewFixture(stateRoot, runId) {
+  const database = new Database(path.join(stateRoot, "icarus.sqlite3"));
+  const addedLines = Array.from({ length: 80 }, (_, index) =>
+    index === 40 ? DIFF_HTML_SENTINEL : `bounded persisted diff line ${String(index + 1)}`,
+  );
+  const diff = [
+    `diff --git a/${TARGET} b/${TARGET}`,
+    "index ce01362..63c704a 100644",
+    `--- a/${TARGET}`,
+    `+++ b/${TARGET}`,
+    "@@ -1 +1,80 @@",
+    `-${TARGET_CONTENT.trimEnd()}`,
+    ...addedLines.map((line) => `+${line}`),
+    "",
+  ].join("\n");
+  const diffSha256 = createHash("sha256").update(diff, "utf8").digest("hex");
+  const verification = {
+    outcome: "passed",
+    checks: [],
+    changedPaths: [TARGET],
+    diffSha256,
+    checkpointSha256: "d".repeat(64),
+  };
+  try {
+    const secondaryProject = database
+      .prepare("SELECT id FROM projects WHERE name = ?")
+      .get("browser-project-two");
+    assert.equal(
+      typeof secondaryProject?.id,
+      "string",
+      "the persisted diff fixture requires the inactive secondary project",
+    );
+    const updated = database
+      .prepare(
+        `UPDATE runs
+         SET project_id = ?, state = 'awaiting_review', diff = ?, verification_json = ?, updated_at = ?
+         WHERE id = ? AND target = ?`,
+      )
+      .run(
+        secondaryProject.id,
+        diff,
+        JSON.stringify(verification),
+        "2026-07-22T12:30:00.000Z",
+        runId,
+        TARGET,
+      );
+    assert.equal(updated.changes, 1, "the persisted diff browser fixture must update one run");
+    database
+      .prepare(
+        `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+         VALUES (?, 1, 'verification.completed', '{}', ?)`,
+      )
+      .run(runId, "2026-07-22T12:30:00.000Z");
+  } finally {
+    database.close();
+  }
+  return { diff, diffSha256 };
+}
+
 function workspaceStateSnapshot(databasePath) {
   const database = new Database(databasePath);
   try {
@@ -220,6 +460,41 @@ function workspaceStateSnapshot(databasePath) {
       checkpoints: database.prepare("SELECT * FROM checkpoints ORDER BY run_id").all(),
       sequences: database.prepare("SELECT * FROM sqlite_sequence ORDER BY name").all(),
     };
+  } finally {
+    database.close();
+  }
+}
+
+function insertResumeRequestedFixture(stateRoot, runId) {
+  const database = new Database(path.join(stateRoot, "icarus.sqlite3"));
+  try {
+    const transaction = database.transaction(() => {
+      const run = database.prepare("SELECT state, resume_state FROM runs WHERE id = ?").get(runId);
+      assert.equal(typeof run?.state, "string", "the live-refresh fixture requires a valid run");
+      const nextSequence = database
+        .prepare(
+          "SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM run_events WHERE run_id = ?",
+        )
+        .get(runId)?.sequence;
+      assert.equal(
+        Number.isSafeInteger(nextSequence) && nextSequence > 0,
+        true,
+        "the live-refresh fixture requires a valid next event sequence",
+      );
+      const inserted = database
+        .prepare(
+          `INSERT INTO run_events (run_id, sequence, type, payload_json, created_at)
+           VALUES (?, ?, 'resume.requested', ?, ?)`,
+        )
+        .run(
+          runId,
+          nextSequence,
+          JSON.stringify({ state: run.state, resumeState: run.resume_state }),
+          "2026-07-22T12:00:01.000Z",
+        );
+      assert.equal(inserted.changes, 1, "the live-refresh fixture must append one event");
+    });
+    transaction();
   } finally {
     database.close();
   }
@@ -256,6 +531,8 @@ async function startProvider() {
                 ],
                 risks: ["This browser smoke stops before execution"],
                 target: TARGET,
+                targets: [TARGET],
+                iterationCeiling: 0,
                 checkIds: ["verify"],
               }),
             },
@@ -414,6 +691,7 @@ class CdpClient {
 async function waitForDevToolsEndpoint(profile, child, stderr) {
   const activePortPath = path.join(profile, "DevToolsActivePort");
   const deadline = Date.now() + START_TIMEOUT_MS;
+  let lastReadErrorCode = null;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(`Chromium exited before CDP was ready: ${stderr.value}`);
@@ -424,11 +702,17 @@ async function waitForDevToolsEndpoint(profile, child, stderr) {
         return `ws://127.0.0.1:${port}${browserPath}`;
       }
     } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+      const errorCode = error?.code;
+      if (errorCode !== "ENOENT" && !(process.platform === "win32" && errorCode === "EBUSY")) {
+        throw error;
+      }
+      lastReadErrorCode = errorCode;
     }
     await delay(25);
   }
-  throw new Error(`Timed out waiting for Chromium CDP: ${stderr.value}`);
+  throw new Error(
+    `Timed out waiting for Chromium CDP; last active-port read error: ${lastReadErrorCode ?? "none"}; stderr: ${stderr.value}`,
+  );
 }
 
 async function startChromium(executable, profile) {
@@ -436,36 +720,7 @@ async function startChromium(executable, profile) {
   const stderr = { value: "" };
   const child = spawn(
     executable,
-    [
-      "--headless=new",
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-gpu",
-      "--disable-dev-shm-usage",
-      "--disable-background-networking",
-      "--disable-breakpad",
-      "--disable-client-side-phishing-detection",
-      "--disable-component-extensions-with-background-pages",
-      "--disable-component-update",
-      "--disable-default-apps",
-      "--disable-domain-reliability",
-      "--disable-extensions",
-      "--disable-features=AutofillServerCommunication,MediaRouter,OptimizationHints",
-      "--disable-sync",
-      "--metrics-recording-only",
-      "--no-default-browser-check",
-      "--no-first-run",
-      "--no-proxy-server",
-      "--password-store=basic",
-      "--safebrowsing-disable-auto-update",
-      "--use-mock-keychain",
-      "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost",
-      "--remote-allow-origins=*",
-      "--remote-debugging-address=127.0.0.1",
-      "--remote-debugging-port=0",
-      `--user-data-dir=${profile}`,
-      "about:blank",
-    ],
+    [...SMOKE_ONLY_CHROMIUM_FLAGS, `--user-data-dir=${profile}`, "about:blank"],
     { shell: false, stdio: ["ignore", "ignore", "pipe"] },
   );
   let spawnError;
@@ -601,18 +856,49 @@ class BrowserPage {
     assert.equal(clicked, true, `Could not click enabled button ${text}`);
   }
 
-  async clickButtonTwice(text) {
-    const clicked = await this.call((label) => {
-      const normalize = (value) => value.replaceAll(/\s+/g, " ").trim();
-      const button = Array.from(document.querySelectorAll("button")).find(
-        (candidate) => normalize(candidate.textContent ?? "") === label,
-      );
-      if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
-      button.click();
-      button.click();
-      return true;
-    }, text);
-    assert.equal(clicked, true, `Could not contend enabled button ${text}`);
+  async clickContendingButton(text, sectionId) {
+    await this.waitFor(
+      (label, rootId) => {
+        const normalize = (value) => value.replaceAll(/\s+/g, " ").trim();
+        const root = document.querySelector(`#${rootId}`);
+        const button = Array.from(root?.querySelectorAll("button") ?? []).find(
+          (candidate) => normalize(candidate.textContent ?? "") === label,
+        );
+        return (
+          root?.getAttribute("aria-busy") === "true" &&
+          button instanceof HTMLButtonElement &&
+          !button.disabled
+        );
+      },
+      [text, sectionId],
+      `the enabled in-flight control ${text}`,
+    );
+    const clicked = await this.call(
+      (label, rootId) => {
+        const normalize = (value) => value.replaceAll(/\s+/g, " ").trim();
+        const root = document.querySelector(`#${rootId}`);
+        const button = Array.from(root?.querySelectorAll("button") ?? []).find(
+          (candidate) => normalize(candidate.textContent ?? "") === label,
+        );
+        if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+        button.click();
+        return true;
+      },
+      text,
+      sectionId,
+    );
+    assert.equal(clicked, true, `Could not issue the contending request through ${text}`);
+  }
+
+  async pressKey(key, code, virtualKeyCode) {
+    const event = {
+      key,
+      code,
+      windowsVirtualKeyCode: virtualKeyCode,
+      nativeVirtualKeyCode: virtualKeyCode,
+    };
+    await this.cdp.send("Input.dispatchKeyEvent", { type: "keyDown", ...event }, this.sessionId);
+    await this.cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...event }, this.sessionId);
   }
 
   async clickRecentRun(task) {
@@ -650,6 +936,20 @@ class BrowserPage {
       Array.from(document.querySelectorAll("#workspace-run-page .selection-list strong")).map(
         (node) => node.textContent?.trim() ?? "",
       ),
+    );
+  }
+
+  projectPageNames() {
+    return this.call(() =>
+      Array.from(document.querySelectorAll("#workspace-project-page .selection-list strong")).map(
+        (node) => node.textContent?.trim() ?? "",
+      ),
+    );
+  }
+
+  projectPageStatus() {
+    return this.call(() =>
+      document.querySelector("#workspace-project-page .run-page__status")?.textContent?.trim(),
     );
   }
 
@@ -800,6 +1100,58 @@ class BrowserPage {
     assert.equal(installed, true, "Could not install the delayed run-page success fixture");
   }
 
+  async installDelayedProjectPageSuccess(projectPage) {
+    const installed = await this.call((payload) => {
+      if (window.__icarusDelayedProjectPage !== undefined) return false;
+      const originalFetch = window.fetch;
+      const state = {
+        observed: false,
+        originalFetch,
+        release: null,
+      };
+      window.__icarusDelayedProjectPage = state;
+      window.fetch = (input, init) => {
+        const raw =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const url = new URL(raw, window.location.origin);
+        if (
+          !state.observed &&
+          url.origin === window.location.origin &&
+          url.pathname === "/api/projects" &&
+          url.search.length > 0 &&
+          (init?.method ?? "GET") === "GET"
+        ) {
+          state.observed = true;
+          return new Promise((resolve) => {
+            state.release = () => {
+              window.fetch = originalFetch;
+              delete window.__icarusDelayedProjectPage;
+              resolve(
+                new Response(JSON.stringify(payload), {
+                  status: 200,
+                  headers: { "content-type": "application/json; charset=utf-8" },
+                }),
+              );
+            };
+          });
+        }
+        return originalFetch.call(window, input, init);
+      };
+      return true;
+    }, projectPage);
+    assert.equal(installed, true, "Could not install the delayed project-page success fixture");
+  }
+
+  async releaseDelayedProjectPageSuccess() {
+    const released = await this.call(() => {
+      const state = window.__icarusDelayedProjectPage;
+      if (state === undefined || state.release === null) return false;
+      state.release();
+      return true;
+    });
+    assert.equal(released, true, "Could not release the delayed project-page success fixture");
+  }
+
   delayedRunPageObserved() {
     return this.call(() => window.__icarusDelayedRunPage?.observed === true);
   }
@@ -880,7 +1232,8 @@ class BrowserPage {
   }
 }
 
-async function createBrowserPage(chromium, workspaceUrl) {
+async function createBrowserPage(chromium, workspaceUrl, launchUrl) {
+  const actionSession = launchUrl === workspaceUrl ? null : actionSessionFromLaunchUrl(launchUrl);
   const { targetId } = await chromium.cdp.send("Target.createTarget", { url: "about:blank" });
   const { sessionId } = await chromium.cdp.send("Target.attachToTarget", {
     targetId,
@@ -890,6 +1243,82 @@ async function createBrowserPage(chromium, workspaceUrl) {
   await chromium.cdp.send("Runtime.enable", {}, sessionId);
   await chromium.cdp.send("Network.enable", {}, sessionId);
   await chromium.cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*" }] }, sessionId);
+  const responseBodyEvidence = { inspected: 0, leaked: false };
+  await chromium.cdp.send(
+    "Runtime.addBinding",
+    { name: "__icarusRecordResponseBodyEvidence" },
+    sessionId,
+  );
+  chromium.cdp.on(sessionId, "Runtime.bindingCalled", (event) => {
+    if (event.name !== "__icarusRecordResponseBodyEvidence") return;
+    if (event.payload === "inspected") responseBodyEvidence.inspected += 1;
+    if (event.payload === "leaked") responseBodyEvidence.leaked = true;
+  });
+  await chromium.cdp.send(
+    "Page.addScriptToEvaluateOnNewDocument",
+    {
+      source: `(${(
+        (storageKey) => {
+          const evidence = {
+            replaceObserved: false,
+            canonicalFragmentRemoved: false,
+            firstRootMutationAfterReplace: null,
+            hashAtFirstRootMutation: null,
+            responseTextsInspected: 0,
+            responseTokenLeak: false,
+          };
+          Object.defineProperty(window, "__icarusActionSessionSmoke", {
+            configurable: false,
+            enumerable: false,
+            value: evidence,
+            writable: false,
+          });
+
+          const observer = new MutationObserver(() => {
+            if (evidence.firstRootMutationAfterReplace !== null) return;
+            const root = document.getElementById("root");
+            if (root === null || root.childNodes.length === 0) return;
+            evidence.firstRootMutationAfterReplace = evidence.replaceObserved;
+            evidence.hashAtFirstRootMutation = window.location.hash;
+            observer.disconnect();
+          });
+          observer.observe(document, { childList: true, subtree: true });
+
+          const originalReplaceState = window.history.replaceState;
+          window.history.replaceState = function (...args) {
+            const removingCanonicalFragment =
+              /^#icarus-action-session=[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(
+                window.location.hash,
+              );
+            const result = Reflect.apply(originalReplaceState, this, args);
+            if (removingCanonicalFragment) {
+              evidence.replaceObserved = true;
+              evidence.canonicalFragmentRemoved = window.location.hash.length === 0;
+            }
+            return result;
+          };
+
+          const originalResponseText = Response.prototype.text;
+          Response.prototype.text = async function (...args) {
+            const text = await Reflect.apply(originalResponseText, this, args);
+            evidence.responseTextsInspected += 1;
+            window.__icarusRecordResponseBodyEvidence("inspected");
+            try {
+              const token = window.sessionStorage.getItem(storageKey);
+              if (token !== null && text.includes(token)) {
+                evidence.responseTokenLeak = true;
+                window.__icarusRecordResponseBodyEvidence("leaked");
+              }
+            } catch {
+              // Unavailable storage is a fail-closed state; the response remains observable.
+            }
+            return text;
+          };
+        }
+      ).toString()})(${JSON.stringify(ACTION_SESSION_STORAGE_KEY)});`,
+    },
+    sessionId,
+  );
 
   const networkRequests = [];
   const networkResponses = [];
@@ -898,22 +1327,55 @@ async function createBrowserPage(chromium, workspaceUrl) {
   const networkRequestUrls = new Map();
   const blockedExternalRequests = [];
   const browserErrors = [];
+  const localRequestSecurity = [];
+  const tokenLeaks = {
+    requestUrls: false,
+    requestBodies: false,
+    browserErrors: false,
+  };
+  const safeObservedText = (value) => {
+    if (typeof value !== "string" || actionSession === null) return value;
+    if (value.includes(actionSession)) {
+      return value.replaceAll(actionSession, "[REDACTED_ACTION_SESSION]");
+    }
+    return value;
+  };
+  const headerValue = (headers, expectedName) => {
+    const entry = Object.entries(headers ?? {}).find(
+      ([name]) => name.toLowerCase() === expectedName,
+    );
+    return typeof entry?.[1] === "string" ? entry[1] : null;
+  };
+  const recordBrowserError = (value) => {
+    const rendered = typeof value === "string" ? value : String(value);
+    if (actionSession !== null && rendered.includes(actionSession)) {
+      tokenLeaks.browserErrors = true;
+    }
+    browserErrors.push(safeObservedText(rendered));
+  };
   let eventFailuresRemaining = 0;
   let eventHistoryFailuresRemaining = 0;
   let verificationAttemptFailuresRemaining = 0;
+  let projectPageFailuresRemaining = 0;
   let runPageFailuresRemaining = 0;
   let repositoryStatusFailuresRemaining = 0;
   let eventRequestHold = null;
   let historyRequestHold = null;
   let verificationRequestHold = null;
+  let projectPageRequestHold = null;
   let runPageRequestHold = null;
   let workspaceRequestHold = null;
   chromium.cdp.on(sessionId, "Network.requestWillBeSent", (event) => {
-    networkRequestUrls.set(event.requestId, event.request?.url);
+    const rawUrl = event.request?.url;
+    if (actionSession !== null && typeof rawUrl === "string" && rawUrl.includes(actionSession)) {
+      tokenLeaks.requestUrls = true;
+    }
+    const observedUrl = safeObservedText(rawUrl);
+    networkRequestUrls.set(event.requestId, observedUrl);
     networkRequests.push({
       requestId: event.requestId,
       method: event.request?.method,
-      url: event.request?.url,
+      url: observedUrl,
       observedAt: Date.now(),
     });
   });
@@ -921,7 +1383,7 @@ async function createBrowserPage(chromium, workspaceUrl) {
     networkResponses.push({
       requestId: event.requestId,
       status: event.response?.status,
-      url: event.response?.url,
+      url: safeObservedText(event.response?.url),
       observedAt: Date.now(),
     });
   });
@@ -944,19 +1406,24 @@ async function createBrowserPage(chromium, workspaceUrl) {
     networkRequestUrls.delete(event.requestId);
   });
   chromium.cdp.on(sessionId, "Runtime.exceptionThrown", (event) => {
-    browserErrors.push(
+    recordBrowserError(
       event.exceptionDetails?.exception?.description ?? event.exceptionDetails?.text,
     );
   });
   chromium.cdp.on(sessionId, "Runtime.consoleAPICalled", (event) => {
-    if (event.type === "error") browserErrors.push("Browser console error");
+    if (event.type === "error") recordBrowserError("Browser console error");
   });
   chromium.cdp.on(sessionId, "Fetch.requestPaused", (event) => {
     const requestUrl = event.request?.url ?? "";
+    const requestBody = event.request?.postData ?? "";
+    if (actionSession !== null && requestBody.includes(actionSession)) {
+      tokenLeaks.requestBodies = true;
+    }
     let external = false;
     let localEventPoll = false;
     let localEventHistory = false;
     let localVerificationAttempt = false;
+    let localProjectPage = false;
     let localRunPage = false;
     let localRepositoryStatus = false;
     let localWorkspaceRead = false;
@@ -965,6 +1432,35 @@ async function createBrowserPage(chromium, workspaceUrl) {
       external =
         (parsed.protocol === "http:" || parsed.protocol === "https:") &&
         parsed.origin !== workspaceUrl;
+      if (parsed.origin === workspaceUrl) {
+        const authorization = headerValue(event.request?.headers, "authorization");
+        const action = headerValue(event.request?.headers, "x-icarus-action");
+        const contentType = headerValue(event.request?.headers, "content-type");
+        const presentedActionSession =
+          /^Bearer ([A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$/.exec(authorization ?? "")?.[1] ?? null;
+        if (
+          presentedActionSession !== null &&
+          (requestUrl.includes(presentedActionSession) ||
+            requestBody.includes(presentedActionSession))
+        ) {
+          if (requestUrl.includes(presentedActionSession)) tokenLeaks.requestUrls = true;
+          if (requestBody.includes(presentedActionSession)) tokenLeaks.requestBodies = true;
+        }
+        localRequestSecurity.push({
+          method: event.request?.method ?? "",
+          url: safeObservedText(requestUrl),
+          authorizationPresent: authorization !== null,
+          authorizationCanonical:
+            authorization !== null &&
+            /^Bearer [A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(authorization),
+          authorizationMatchesSession:
+            actionSession === null
+              ? authorization === null
+              : authorization === `Bearer ${actionSession}`,
+          action,
+          contentType,
+        });
+      }
       localEventPoll =
         parsed.origin === workspaceUrl &&
         event.request?.method === "GET" &&
@@ -977,6 +1473,10 @@ async function createBrowserPage(chromium, workspaceUrl) {
         parsed.origin === workspaceUrl &&
         event.request?.method === "GET" &&
         parsed.pathname.endsWith("/verification-attempts");
+      localProjectPage =
+        parsed.origin === workspaceUrl &&
+        event.request?.method === "GET" &&
+        parsed.pathname === "/api/projects";
       localRunPage =
         parsed.origin === workspaceUrl &&
         event.request?.method === "GET" &&
@@ -992,7 +1492,7 @@ async function createBrowserPage(chromium, workspaceUrl) {
     } catch {
       external = false;
     }
-    if (external) blockedExternalRequests.push(requestUrl);
+    if (external) blockedExternalRequests.push(safeObservedText(requestUrl));
     if (
       localWorkspaceRead &&
       workspaceRequestHold !== null &&
@@ -1042,6 +1542,22 @@ async function createBrowserPage(chromium, workspaceUrl) {
       verificationRequestHold.observed(observation);
       return;
     }
+    if (
+      localProjectPage &&
+      projectPageRequestHold !== null &&
+      projectPageRequestHold.event === null
+    ) {
+      const observation = {
+        requestId: event.requestId,
+        networkId: event.networkId ?? null,
+        url: requestUrl,
+        observedAt: Date.now(),
+      };
+      projectPageRequestHold.event = event;
+      projectPageRequestHold.observation = observation;
+      projectPageRequestHold.observed(observation);
+      return;
+    }
     if (localRunPage && runPageRequestHold !== null && runPageRequestHold.event === null) {
       const observation = {
         requestId: event.requestId,
@@ -1058,17 +1574,20 @@ async function createBrowserPage(chromium, workspaceUrl) {
     const failEventHistory = localEventHistory && eventHistoryFailuresRemaining > 0;
     const failVerificationAttempt =
       localVerificationAttempt && verificationAttemptFailuresRemaining > 0;
+    const failProjectPage = localProjectPage && projectPageFailuresRemaining > 0;
     const failRunPage = localRunPage && runPageFailuresRemaining > 0;
     const failRepositoryStatus = localRepositoryStatus && repositoryStatusFailuresRemaining > 0;
     if (failEventPoll) eventFailuresRemaining -= 1;
     if (failEventHistory) eventHistoryFailuresRemaining -= 1;
     if (failVerificationAttempt) verificationAttemptFailuresRemaining -= 1;
+    if (failProjectPage) projectPageFailuresRemaining -= 1;
     if (failRunPage) runPageFailuresRemaining -= 1;
     if (failRepositoryStatus) repositoryStatusFailuresRemaining -= 1;
     if (
       failEventPoll ||
       failEventHistory ||
       failVerificationAttempt ||
+      failProjectPage ||
       failRunPage ||
       failRepositoryStatus
     ) {
@@ -1090,7 +1609,7 @@ async function createBrowserPage(chromium, workspaceUrl) {
           },
           sessionId,
         )
-        .catch((error) => browserErrors.push(error.message));
+        .catch((error) => recordBrowserError(error.message));
       return;
     }
     void chromium.cdp
@@ -1101,11 +1620,11 @@ async function createBrowserPage(chromium, workspaceUrl) {
           : { requestId: event.requestId },
         sessionId,
       )
-      .catch((error) => browserErrors.push(error.message));
+      .catch((error) => recordBrowserError(error.message));
   });
 
   const loaded = chromium.cdp.waitForEvent(sessionId, "Page.loadEventFired");
-  await chromium.cdp.send("Page.navigate", { url: workspaceUrl }, sessionId);
+  await chromium.cdp.send("Page.navigate", { url: launchUrl }, sessionId);
   await loaded;
   const page = new BrowserPage(chromium.cdp, sessionId);
   await page.waitFor(
@@ -1115,6 +1634,7 @@ async function createBrowserPage(chromium, workspaceUrl) {
   );
   return {
     page,
+    targetId,
     sessionId,
     networkRequests,
     networkResponses,
@@ -1122,6 +1642,9 @@ async function createBrowserPage(chromium, workspaceUrl) {
     networkFailures,
     blockedExternalRequests,
     browserErrors,
+    localRequestSecurity,
+    responseBodyEvidence,
+    tokenLeaks,
     failNextEventPoll: () => {
       eventFailuresRemaining += 1;
     },
@@ -1130,6 +1653,9 @@ async function createBrowserPage(chromium, workspaceUrl) {
     },
     failNextVerificationAttempt: () => {
       verificationAttemptFailuresRemaining += 1;
+    },
+    failNextProjectPage: () => {
+      projectPageFailuresRemaining += 1;
     },
     failNextRunPage: () => {
       runPageFailuresRemaining += 1;
@@ -1343,6 +1869,82 @@ async function createBrowserPage(chromium, workspaceUrl) {
         finish,
       };
     },
+    holdNextProjectPage: () => {
+      if (projectPageRequestHold !== null) {
+        throw new Error("A project-page request is already held");
+      }
+      let markObserved;
+      const observed = new Promise((resolve) => {
+        markObserved = resolve;
+      });
+      const hold = {
+        event: null,
+        observation: null,
+        observed: markObserved,
+      };
+      projectPageRequestHold = hold;
+      let finishPromise = null;
+      const finish = () => {
+        if (finishPromise !== null) return finishPromise;
+        finishPromise = (async () => {
+          if (projectPageRequestHold === hold) projectPageRequestHold = null;
+          const held = hold.event;
+          if (held === null) return "not_observed";
+          try {
+            await chromium.cdp.send(
+              "Fetch.continueRequest",
+              { requestId: held.requestId },
+              sessionId,
+            );
+            return "continued";
+          } catch (releaseError) {
+            const sawCancellation = () =>
+              held.networkId !== null &&
+              held.networkId !== undefined &&
+              networkFailures.some(
+                (failure) => failure.requestId === held.networkId && failure.canceled,
+              );
+            if (!sawCancellation()) {
+              await waitForObserved(
+                sawCancellation,
+                "the browser cancellation for an aborted held project-page request",
+                500,
+              ).catch(() => undefined);
+            }
+            if (sawCancellation()) return "cancelled";
+            if (
+              releaseError instanceof Error &&
+              releaseError.message.includes("Invalid InterceptionId")
+            ) {
+              return "invalidated";
+            }
+            try {
+              await chromium.cdp.send(
+                "Fetch.failRequest",
+                { requestId: held.requestId, errorReason: "Aborted" },
+                sessionId,
+              );
+              return "failed";
+            } catch (cleanupError) {
+              if (sawCancellation()) return "cancelled";
+              throw new Error(
+                `Could not release or fail the held project-page request: ${
+                  releaseError instanceof Error ? releaseError.message : String(releaseError)
+                }; cleanup failed: ${
+                  cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+                }`,
+              );
+            }
+          }
+        })();
+        return finishPromise;
+      };
+      return {
+        observed,
+        observation: () => hold.observation,
+        finish,
+      };
+    },
     holdNextRunPage: () => {
       if (runPageRequestHold !== null) throw new Error("A run-page request is already held");
       let markObserved;
@@ -1459,16 +2061,21 @@ const chromiumExecutable = process.env.ICARUS_CHROMIUM_EXECUTABLE;
 if (chromiumExecutable === undefined || chromiumExecutable.trim().length === 0) {
   throw new Error("ICARUS_CHROMIUM_EXECUTABLE must name an explicit local Chromium executable");
 }
+const selectedChromiumExecutable = path.resolve(chromiumExecutable);
 
-const root = await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-browser-smoke-"));
+const root = await realpath(
+  await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-browser-smoke-")),
+);
 let runtime;
 let workspace;
+let reviewWorkspace;
 let provider;
 let chromium;
 let releaseProviderResponse;
 let finishHeldBrowserEventPoll;
 let finishHeldBrowserHistoryRequest;
 let finishHeldBrowserVerificationRequest;
+let finishHeldBrowserProjectPageRequest;
 let finishHeldBrowserRunPageRequest;
 try {
   const repository = path.join(root, "repository");
@@ -1500,8 +2107,18 @@ try {
     },
     0,
   );
-  chromium = await startChromium(path.resolve(chromiumExecutable), profile);
-  const browserPage = await createBrowserPage(chromium, workspace.url);
+  assert.equal(workspace.host, WORKSPACE_BIND_HOST);
+  assert.match(new URL(workspace.url).hostname, /^[a-f0-9]{32}\.localhost$/);
+  chromium = await startChromium(selectedChromiumExecutable, profile);
+  const chromiumVersion = await chromium.cdp.send("Browser.getVersion");
+  for (const field of ["product", "protocolVersion", "userAgent"]) {
+    assert.equal(
+      typeof chromiumVersion[field] === "string" && chromiumVersion[field].length > 0,
+      true,
+      `Chromium Browser.getVersion omitted ${field}`,
+    );
+  }
+  const browserPage = await createBrowserPage(chromium, workspace.url, workspace.launchUrl);
   const {
     page,
     networkRequests,
@@ -1510,6 +2127,9 @@ try {
     networkFailures,
     blockedExternalRequests,
     browserErrors,
+    localRequestSecurity,
+    responseBodyEvidence,
+    tokenLeaks,
   } = browserPage;
 
   await page.waitFor(
@@ -1519,8 +2139,102 @@ try {
     [],
     "the initial empty workspace",
   );
+  assert.deepEqual(
+    await page.call(() => ({
+      hostname: window.location.hostname,
+      origin: window.location.origin,
+    })),
+    { hostname: new URL(workspace.url).hostname, origin: workspace.url },
+  );
+  assert.equal(
+    networkRequests
+      .filter((request) => typeof request.url === "string" && /^https?:/.test(request.url))
+      .every((request) => new URL(request.url).origin === workspace.url),
+    true,
+    "initial browser requests must retain the exact random .localhost origin",
+  );
   assert.equal(await page.capability("Provider"), "unconfigured");
   assert.equal(await page.capability("Execution"), "unconfigured");
+
+  const initialActionSessionEvidence = await page.call((storageKey) => {
+    const evidence = window.__icarusActionSessionSmoke;
+    const stored = window.sessionStorage.getItem(storageKey);
+    const localStorageValues = Object.values(window.localStorage);
+    return {
+      replaceObserved: evidence?.replaceObserved === true,
+      canonicalFragmentRemoved: evidence?.canonicalFragmentRemoved === true,
+      firstRootMutationAfterReplace: evidence?.firstRootMutationAfterReplace === true,
+      hashAtFirstRootMutation: evidence?.hashAtFirstRootMutation ?? null,
+      responseTextsInspected: evidence?.responseTextsInspected ?? 0,
+      responseTokenLeak: evidence?.responseTokenLeak === true,
+      hash: window.location.hash,
+      sessionStorageKeys: Object.keys(window.sessionStorage).sort(),
+      storedCanonical: stored !== null && /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(stored),
+      tokenAbsentFromDom: stored !== null && !document.documentElement.outerHTML.includes(stored),
+      tokenAbsentFromLocalStorage:
+        stored !== null && localStorageValues.every((value) => !value.includes(stored)),
+      tokenAbsentFromCookies: stored !== null && !document.cookie.includes(stored),
+      tokenAbsentFromLocation: stored !== null && !window.location.href.includes(stored),
+    };
+  }, ACTION_SESSION_STORAGE_KEY);
+  assert.deepEqual(initialActionSessionEvidence, {
+    replaceObserved: true,
+    canonicalFragmentRemoved: true,
+    firstRootMutationAfterReplace: true,
+    hashAtFirstRootMutation: "",
+    responseTextsInspected: 1,
+    responseTokenLeak: false,
+    hash: "",
+    sessionStorageKeys: [ACTION_SESSION_STORAGE_KEY],
+    storedCanonical: true,
+    tokenAbsentFromDom: true,
+    tokenAbsentFromLocalStorage: true,
+    tokenAbsentFromCookies: true,
+    tokenAbsentFromLocation: true,
+  });
+
+  await reloadPage(chromium, browserPage);
+  const reloadedActionSessionEvidence = await page.call((storageKey) => {
+    const stored = window.sessionStorage.getItem(storageKey);
+    return {
+      hash: window.location.hash,
+      sessionStorageKeys: Object.keys(window.sessionStorage).sort(),
+      storedCanonical: stored !== null && /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(stored),
+      tokenAbsentFromDom: stored !== null && !document.documentElement.outerHTML.includes(stored),
+      tokenAbsentFromLocalStorage:
+        stored !== null &&
+        Object.values(window.localStorage).every((value) => !value.includes(stored)),
+      tokenAbsentFromCookies: stored !== null && !document.cookie.includes(stored),
+      tokenAbsentFromLocation: stored !== null && !window.location.href.includes(stored),
+    };
+  }, ACTION_SESSION_STORAGE_KEY);
+  assert.deepEqual(reloadedActionSessionEvidence, {
+    hash: "",
+    sessionStorageKeys: [ACTION_SESSION_STORAGE_KEY],
+    storedCanonical: true,
+    tokenAbsentFromDom: true,
+    tokenAbsentFromLocalStorage: true,
+    tokenAbsentFromCookies: true,
+    tokenAbsentFromLocation: true,
+  });
+
+  await page.pressKey("Tab", "Tab", 9);
+  assert.equal(
+    await page.call(
+      () =>
+        document.activeElement?.classList.contains("skip-link") === true &&
+        getComputedStyle(document.activeElement).transform !== "none",
+    ),
+    true,
+    "the first keyboard stop must expose the skip link",
+  );
+  await page.pressKey("Enter", "Enter", 13);
+  await page.waitFor(
+    () => document.activeElement?.id === "workspace-main" && location.hash === "#workspace-main",
+    [],
+    "keyboard entry into the workspace main landmark",
+  );
+  const skipLinkKeyboardAccepted = true;
 
   await page.setField("Repository name", "browser-repository");
   await page.setField("Absolute repository path", repository);
@@ -1660,6 +2374,283 @@ try {
     "a deferred project-created refresh must not overwrite the newer project selection",
   );
 
+  const projectPageFixture = insertProjectPageFixtures(stateRoot);
+  const projectPageFirstResponse = await directWorkspaceRequest(
+    workspace,
+    `${workspace.url}/api/projects`,
+  );
+  assert.equal(projectPageFirstResponse.status, 200);
+  const projectPageFirst = await projectPageFirstResponse.json();
+  assert.equal(projectPageFirst.snapshot, projectPageFixture.snapshot);
+  assert.equal(projectPageFirst.projects.length, PROJECT_PAGE_SIZE);
+  const projectPageSecondResponse = await directWorkspaceRequest(
+    workspace,
+    workspace.url +
+      "/api/projects?before=" +
+      String(projectPageFirst.nextBefore) +
+      "&snapshot=" +
+      String(projectPageFixture.snapshot),
+  );
+  assert.equal(projectPageSecondResponse.status, 200);
+  const projectPageSecond = await projectPageSecondResponse.json();
+  const projectPagePersistenceBefore = persistenceSnapshot(stateRoot);
+  const projectPageSourceBefore = await fingerprint(repository);
+  const projectPageRequestCount = () =>
+    networkRequests.filter((request) => {
+      if (request.method !== "GET" || request.url === undefined) return false;
+      const url = new URL(request.url);
+      return (
+        url.origin === workspace.url && url.pathname === "/api/projects" && url.search.length > 0
+      );
+    }).length;
+  const settleHeldProjectPageRequest = async (held, observation, description) => {
+    const releaseOutcome = await held.finish();
+    finishHeldBrowserProjectPageRequest = undefined;
+    assert.notEqual(releaseOutcome, "not_observed");
+    if (releaseOutcome === "invalidated") return "invalidated";
+    const matches = (record) =>
+      observation.networkId === null
+        ? record.url === observation.url && record.observedAt >= observation.observedAt
+        : record.requestId === observation.networkId;
+    await waitForObserved(
+      () => networkFinished.some(matches) || networkFailures.some(matches),
+      description,
+    );
+    assert.equal(
+      networkFailures.some((failure) => matches(failure) && failure.canceled === true),
+      true,
+      `${description} must end as a transport cancellation`,
+    );
+    return "cancelled";
+  };
+
+  await reloadPage(chromium, browserPage);
+  await page.waitFor(
+    () =>
+      document
+        .querySelector("#workspace-project-page .run-page__status")
+        ?.textContent?.includes("Page 1"),
+    [],
+    "the newest bounded project page",
+  );
+  const firstProjectPageNames = await page.projectPageNames();
+  assert.equal(firstProjectPageNames.length, PROJECT_PAGE_SIZE);
+  assert.deepEqual(firstProjectPageNames.slice(0, 2), ["browser-project", "browser-project-two"]);
+  assert.match(
+    (await page.projectPageStatus()) ?? "",
+    /^Page 1 in a pinned session window of at most 4/,
+  );
+
+  browserPage.failNextProjectPage();
+  await page.clickButton("Older projects");
+  await page.waitFor(
+    () =>
+      document.querySelector("#workspace-project-page")?.getAttribute("aria-busy") === "false" &&
+      document.body.innerText.includes("Controlled browser smoke read failure."),
+    [],
+    "the truthful failed project-page read",
+  );
+  assert.deepEqual(await page.projectPageNames(), firstProjectPageNames);
+  await page.clickButton("Retry project page");
+  await page.waitFor(
+    () =>
+      document
+        .querySelector("#workspace-project-page .run-page__status")
+        ?.textContent?.includes("Page 2"),
+    [],
+    "the retried second project page",
+  );
+  assert.equal((await page.projectPageNames()).length, PROJECT_PAGE_SIZE);
+  await page.clickButton("Newer projects");
+  await page.waitFor(
+    () =>
+      document
+        .querySelector("#workspace-project-page .run-page__status")
+        ?.textContent?.includes("Page 1"),
+    [],
+    "newer navigation back to the first project page",
+  );
+
+  const contendedProjectPageRequest = browserPage.holdNextProjectPage();
+  finishHeldBrowserProjectPageRequest = contendedProjectPageRequest.finish;
+  const contendedProjectPageBaseline = projectPageRequestCount();
+  await page.clickButton("Older projects");
+  const contendedProjectPageObservation = await contendedProjectPageRequest.observed;
+  await page.clickContendingButton("Older projects", "workspace-project-page");
+  await page.waitFor(
+    () =>
+      document
+        .querySelector("#workspace-project-page .run-page__status")
+        ?.textContent?.includes("Page 2"),
+    [],
+    "the replacement second project-page request",
+  );
+  assert.equal(
+    projectPageRequestCount(),
+    contendedProjectPageBaseline + 2,
+    "a contending project-page request must replace its held predecessor",
+  );
+  const contendedProjectPageOutcome = await settleHeldProjectPageRequest(
+    contendedProjectPageRequest,
+    contendedProjectPageObservation,
+    "the superseded project-page request",
+  );
+  assert.notEqual(contendedProjectPageOutcome, "continued");
+
+  const hiddenProjectPageRequest = browserPage.holdNextProjectPage();
+  finishHeldBrowserProjectPageRequest = hiddenProjectPageRequest.finish;
+  await page.clickButton("Older projects");
+  const hiddenProjectPageObservation = await hiddenProjectPageRequest.observed;
+  await page.setVisibility("hidden");
+  await page.waitFor(
+    () =>
+      document.querySelector("#workspace-project-page")?.getAttribute("aria-busy") === "false" &&
+      document.body.innerText.includes(
+        "Project-page navigation paused while this document is hidden",
+      ),
+    [],
+    "the hidden-document project-page cancellation",
+  );
+  const hiddenProjectPageOutcome = await settleHeldProjectPageRequest(
+    hiddenProjectPageRequest,
+    hiddenProjectPageObservation,
+    "the hidden project-page request",
+  );
+  assert.match((await page.projectPageStatus()) ?? "", /^Page 2 /);
+  await page.setVisibility("visible");
+  await page.clickButton("Retry project page");
+  await page.waitFor(
+    () =>
+      document
+        .querySelector("#workspace-project-page .run-page__status")
+        ?.textContent?.includes("Page 3"),
+    [],
+    "the third project page after hidden-request retry",
+  );
+
+  const selectionProjectPageRequest = browserPage.holdNextProjectPage();
+  finishHeldBrowserProjectPageRequest = selectionProjectPageRequest.finish;
+  await page.clickButton("Older projects");
+  const selectionProjectPageObservation = await selectionProjectPageRequest.observed;
+  await page.clickProject(projectPageFixtureName(26));
+  await page.waitFor(
+    (name) => document.querySelector("#project-detail-heading")?.textContent === name,
+    [projectPageFixtureName(26)],
+    "the project selection that cancels catalog navigation",
+  );
+  const selectionProjectPageOutcome = await settleHeldProjectPageRequest(
+    selectionProjectPageRequest,
+    selectionProjectPageObservation,
+    "the selection-cancelled project-page request",
+  );
+  assert.match((await page.projectPageStatus()) ?? "", /^Page 3 /);
+
+  await page.clickButton("Newer projects");
+  await page.waitFor(
+    () =>
+      document
+        .querySelector("#workspace-project-page .run-page__status")
+        ?.textContent?.includes("Page 2"),
+    [],
+    "the second project page before delayed-response acceptance",
+  );
+  await page.clickButton("Newer projects");
+  await page.waitFor(
+    () =>
+      document
+        .querySelector("#workspace-project-page .run-page__status")
+        ?.textContent?.includes("Page 1"),
+    [],
+    "the first project page before delayed-response acceptance",
+  );
+  await page.installDelayedProjectPageSuccess(projectPageSecond);
+  await page.clickButton("Older projects");
+  await page.waitFor(
+    () => window.__icarusDelayedProjectPage?.observed === true,
+    [],
+    "the cancellation-ignoring delayed project-page success",
+  );
+  await page.clickButton("Refresh workspace");
+  await page.waitFor(
+    () =>
+      document
+        .querySelector("#workspace-project-page .run-page__status")
+        ?.textContent?.includes("Page 1") &&
+      Array.from(document.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Refresh workspace" && !button.disabled,
+      ),
+    [],
+    "the refreshed newest project-page session",
+  );
+  await page.releaseDelayedProjectPageSuccess();
+  await delay(100);
+  assert.match((await page.projectPageStatus()) ?? "", /^Page 1 /);
+  const lateProjectPageSuccessRejected = true;
+
+  for (const pageNumber of [2, 3, 4]) {
+    await page.clickButton("Older projects");
+    await page.waitFor(
+      (expectedPage) =>
+        document
+          .querySelector("#workspace-project-page .run-page__status")
+          ?.textContent?.includes(`Page ${String(expectedPage)}`),
+      [pageNumber],
+      `bounded project page ${String(pageNumber)}`,
+    );
+    assert.equal((await page.projectPageNames()).length, PROJECT_PAGE_SIZE);
+  }
+  assert.equal(await page.buttonDisabled("Older projects"), true);
+  assert.equal(
+    (await page.bodyText()).includes("This browser session keeps four project pages."),
+    true,
+  );
+  for (const expectedPage of [3, 2, 1]) {
+    await page.clickButton("Newer projects");
+    await page.waitFor(
+      (pageNumber) =>
+        document
+          .querySelector("#workspace-project-page .run-page__status")
+          ?.textContent?.includes(`Page ${String(pageNumber)}`),
+      [expectedPage],
+      `newer project navigation to page ${String(expectedPage)}`,
+    );
+  }
+  await page.clickProject("browser-project");
+  await page.waitFor(
+    () => document.querySelector("#project-detail-heading")?.textContent === "browser-project",
+    [],
+    "the original project after bounded catalog navigation",
+  );
+
+  const browserProjectPageRequests = networkRequests.filter((request) => {
+    if (request.method !== "GET" || request.url === undefined) return false;
+    const url = new URL(request.url);
+    return (
+      url.origin === workspace.url && url.pathname === "/api/projects" && url.search.length > 0
+    );
+  });
+  assert.ok(browserProjectPageRequests.length >= 10);
+  for (const request of browserProjectPageRequests) {
+    const url = new URL(request.url);
+    assert.deepEqual([...url.searchParams.keys()].sort(), ["before", "snapshot"]);
+    assert.equal(url.searchParams.get("snapshot"), String(projectPageFixture.snapshot));
+    assert.match(url.searchParams.get("before") ?? "", /^[1-9][0-9]*$/);
+  }
+  assert.deepEqual(persistenceSnapshot(stateRoot), projectPagePersistenceBefore);
+  assert.deepEqual(await fingerprint(repository), projectPageSourceBefore);
+  const boundedProjectPageEvidence = {
+    snapshot: projectPageFixture.snapshot,
+    pageSize: PROJECT_PAGE_SIZE,
+    maximumPages: PROJECT_PAGE_MAX_PAGES,
+    requests: browserProjectPageRequests.length,
+    contentionCancellation: contendedProjectPageOutcome,
+    hiddenCancellation: hiddenProjectPageOutcome,
+    selectionCancellation: selectionProjectPageOutcome,
+    latePageSuccessRejected: lateProjectPageSuccessRejected,
+    durableStateUnchanged: true,
+    sourceUnchanged: true,
+  };
+
   await page.setField("Tracked target path", "src/missing.txt");
   await page.clickButton("Preview context");
   await page.waitFor(
@@ -1704,7 +2695,7 @@ try {
   assert.equal(await page.contextFact("Digest"), firstDigest);
 
   await page.setField("Task", TASK);
-  await page.setField("Tracked target", TARGET);
+  await page.setField("Candidate targets (one path per line)", TARGET);
   await page.setField("Model", "browser-contract-model");
   await page.setField("Loopback provider URL", "not-a-url");
   await page.waitFor(
@@ -1770,13 +2761,21 @@ try {
   }
 
   const runSummaryFixture = insertRunSummaryFixtures(stateRoot, browserRunId);
+  const diffReviewFixture = installPersistedDiffReviewFixture(
+    stateRoot,
+    runSummaryFixture.validArchivedRunId,
+  );
 
-  const runSummaryFirstResponse = await fetch(`${workspace.url}/api/runs`);
+  const runSummaryFirstResponse = await directWorkspaceRequest(
+    workspace,
+    `${workspace.url}/api/runs`,
+  );
   assert.equal(runSummaryFirstResponse.status, 200);
   const runSummaryFirstPage = await runSummaryFirstResponse.json();
   assert.equal(runSummaryFirstPage.snapshot, runSummaryFixture.snapshot);
   assert.equal(runSummaryFirstPage.runs.length, RUN_SUMMARY_PAGE_SIZE);
-  const runSummarySecondResponse = await fetch(
+  const runSummarySecondResponse = await directWorkspaceRequest(
+    workspace,
     workspace.url +
       "/api/runs?before=" +
       String(runSummaryFirstPage.nextBefore) +
@@ -1785,7 +2784,8 @@ try {
   );
   assert.equal(runSummarySecondResponse.status, 200);
   const runSummarySecondPage = await runSummarySecondResponse.json();
-  const delayedRunDetailResponse = await fetch(
+  const delayedRunDetailResponse = await directWorkspaceRequest(
+    workspace,
     `${workspace.url}/api/runs/${encodeURIComponent(runSummaryFixture.validArchivedRunId)}`,
   );
   assert.equal(delayedRunDetailResponse.status, 200);
@@ -1877,8 +2877,9 @@ try {
   const contendedRunPageRequest = browserPage.holdNextRunPage();
   finishHeldBrowserRunPageRequest = contendedRunPageRequest.finish;
   const contendedRunPageBaseline = runPageRequestCount();
-  await page.clickButtonTwice("Older runs");
+  await page.clickButton("Older runs");
   const contendedRunPageObservation = await contendedRunPageRequest.observed;
+  await page.clickContendingButton("Older runs", "workspace-run-page");
   await page.waitFor(
     () =>
       document
@@ -1976,12 +2977,77 @@ try {
     true,
     "summary selection must use the existing full selected-run route",
   );
+  assert.equal(
+    await page.call(
+      () => document.querySelectorAll("#workspace-project-page button[aria-pressed='true']").length,
+    ),
+    0,
+    "an open run outside the loaded catalog page must not select an unrelated project",
+  );
+  for (const expectedPage of [2, 3]) {
+    await page.clickButton("Older projects");
+    await page.waitFor(
+      (pageNumber) =>
+        document
+          .querySelector("#workspace-project-page .run-page__status")
+          ?.textContent?.includes(`Page ${String(pageNumber)}`),
+      [expectedPage],
+      `project navigation while an off-page run remains open on page ${String(expectedPage)}`,
+    );
+    assert.equal(await page.runFact("Run ID"), runSummaryFixture.alternateArchivedRunId);
+  }
+  assert.equal(
+    await page.call(
+      (name) =>
+        Array.from(document.querySelectorAll("#workspace-project-page button")).some(
+          (button) =>
+            button.getAttribute("aria-pressed") === "true" &&
+            button.querySelector("strong")?.textContent?.trim() === name,
+        ),
+      projectPageFixtureName(20),
+    ),
+    true,
+    "the catalog may select only the project that owns the visible run",
+  );
+  await page.clickButton("Refresh workspace");
+  await page.waitFor(
+    (runId) =>
+      document
+        .querySelector("#workspace-project-page .run-page__status")
+        ?.textContent?.includes("Page 1") &&
+      Array.from(document.querySelectorAll(".run-evidence dt")).some(
+        (term) =>
+          term.textContent?.trim() === "Run ID" &&
+          term.parentElement?.querySelector("dd")?.textContent?.trim() === runId,
+      ),
+    [runSummaryFixture.alternateArchivedRunId],
+    "workspace refresh while an off-page project run remains visible",
+  );
+  assert.equal(
+    await page.call(
+      () => document.querySelectorAll("#workspace-project-page button[aria-pressed='true']").length,
+    ),
+    0,
+    "refresh must not mark a first-page project unrelated to the visible run",
+  );
+  const offPageRunSelectionPreserved = true;
   await page.clickButton("← Back to project");
   await page.waitFor(
-    () => document.querySelector("#project-detail-heading")?.textContent === "browser-project",
-    [],
+    (name) => document.querySelector("#project-detail-heading")?.textContent === name,
+    [projectPageFixtureName(20)],
     "the project after lazy older-run detail",
   );
+  for (const expectedPage of [2, 3]) {
+    await page.clickButton("Older runs");
+    await page.waitFor(
+      (pageNumber) =>
+        document
+          .querySelector("#workspace-run-page .run-page__status")
+          ?.textContent?.includes(`Page ${String(pageNumber)}`),
+      [expectedPage],
+      `restored run page ${String(expectedPage)} after workspace refresh`,
+    );
+  }
 
   await page.installDelayedRunDetailSuccess(runSummaryFixture.validArchivedRunId, delayedRunDetail);
   await page.clickRecentRun(VALID_ARCHIVED_RUN_TASK);
@@ -2007,9 +3073,111 @@ try {
   const lateRunDetailRejected = true;
   await page.clickButton("← Back to project");
   await page.waitFor(
+    (name) => document.querySelector("#project-detail-heading")?.textContent === name,
+    [projectPageFixtureName(20)],
+    "the project after the selected-run generation guard",
+  );
+
+  await page.clickRecentRun(VALID_ARCHIVED_RUN_TASK);
+  await page.waitFor(
+    (runId) =>
+      Array.from(document.querySelectorAll(".run-evidence dt")).some(
+        (term) =>
+          term.textContent?.trim() === "Run ID" &&
+          term.parentElement?.querySelector("dd")?.textContent?.trim() === runId,
+      ),
+    [runSummaryFixture.validArchivedRunId],
+    "the bounded persisted diff review fixture",
+  );
+  const diffReviewBrowserEvidence = await page.call((expectedDiff) => {
+    const root = document.querySelector("#run-diff");
+    const fact = (label) => {
+      const term = Array.from(root?.querySelectorAll("dt") ?? []).find(
+        (candidate) => candidate.textContent?.trim() === label,
+      );
+      return term?.parentElement?.querySelector("dd")?.textContent?.trim() ?? null;
+    };
+    return {
+      heading: root?.querySelector("h3")?.textContent?.trim() ?? null,
+      status: root?.querySelector(".status")?.textContent?.trim() ?? null,
+      runState: fact("Exact persisted run state"),
+      verification: fact("Verification outcome"),
+      path: fact("Recorded changed path"),
+      digest: fact("Recorded diff digest"),
+      digestRelationship: fact("Digest relationship"),
+      detailsOpen: root?.querySelector("details")?.open ?? null,
+      exactPatch: root?.querySelector("pre")?.textContent === expectedDiff,
+      injectedElement: root?.querySelector('[data-diff-injection="true"]') !== null,
+      buttonCount: root?.querySelectorAll("button").length ?? -1,
+      tabIndex: root?.getAttribute("tabindex") ?? null,
+      patchTabIndex: root?.querySelector("pre")?.getAttribute("tabindex") ?? null,
+      patchRole: root?.querySelector("pre")?.getAttribute("role") ?? null,
+      patchLabelledBy: root?.querySelector("pre")?.getAttribute("aria-labelledby") ?? null,
+      truthCopy:
+        root?.textContent?.includes("This does not prove current repository bytes.") ?? false,
+    };
+  }, diffReviewFixture.diff);
+  assert.deepEqual(diffReviewBrowserEvidence, {
+    heading: "Persisted diff review",
+    status: "exact persisted text",
+    runState: "awaiting_review",
+    verification: "passed",
+    path: TARGET,
+    digest: diffReviewFixture.diffSha256,
+    digestRelationship: "displayed text rehash match",
+    detailsOpen: true,
+    exactPatch: true,
+    injectedElement: false,
+    buttonCount: 0,
+    tabIndex: "-1",
+    patchTabIndex: "0",
+    patchRole: "region",
+    patchLabelledBy: "persisted-diff-patch-heading",
+    truthCopy: true,
+  });
+  const keyboardStart = await page.call(() => {
+    const summary = document.querySelector("#persisted-diff-patch-heading");
+    const patch = document.querySelector(".diff-review__patch");
+    if (!(summary instanceof HTMLElement) || !(patch instanceof HTMLElement)) return null;
+    summary.focus();
+    return {
+      summaryFocused: document.activeElement === summary,
+      overflow: patch.scrollHeight > patch.clientHeight,
+      scrollTop: patch.scrollTop,
+    };
+  });
+  assert.deepEqual(keyboardStart, { summaryFocused: true, overflow: true, scrollTop: 0 });
+  await page.pressKey("Tab", "Tab", 9);
+  await page.waitFor(
+    () => document.activeElement?.classList.contains("diff-review__patch") === true,
+    [],
+    "keyboard focus on the persisted diff scroll region",
+  );
+  await page.pressKey("PageDown", "PageDown", 34);
+  await page.waitFor(
+    () => (document.querySelector(".diff-review__patch")?.scrollTop ?? 0) > 0,
+    [],
+    "keyboard scrolling in the persisted diff region",
+  );
+  assert.equal((await page.bodyText()).includes(DIFF_HTML_SENTINEL), true);
+  const diffEvidenceHref = await page.clickTimelineEvidence("verification completed");
+  assert.equal(diffEvidenceHref, "#run-diff");
+  await page.waitFor(
+    () => window.location.hash === "#run-diff" && document.querySelector("#run-diff") !== null,
+    [],
+    "timeline-to-diff evidence anchor navigation",
+  );
+  await page.clickButton("← Back to project");
+  await page.waitFor(
+    () => document.querySelector("#project-detail-heading")?.textContent === "browser-project-two",
+    [],
+    "the persisted diff fixture project after bounded diff review",
+  );
+  await page.clickProject("browser-project");
+  await page.waitFor(
     () => document.querySelector("#project-detail-heading")?.textContent === "browser-project",
     [],
-    "the project after the selected-run generation guard",
+    "the project after bounded diff review",
   );
 
   const unmountedRunPageRequest = browserPage.holdNextRunPage();
@@ -2173,6 +3341,7 @@ try {
     refreshNavigationBlocked,
     lateDetailRejected: lateRunDetailRejected,
     privateHeavyColumns: "not rendered",
+    persistedDiffReview: diffReviewBrowserEvidence,
     durableStateUnchanged: true,
     sourceUnchanged: true,
   };
@@ -2213,7 +3382,8 @@ try {
     0,
     "verification provenance must remain lazy until the operator opens it",
   );
-  const directVerificationResponse = await fetch(
+  const directVerificationResponse = await directWorkspaceRequest(
+    workspace,
     `${workspace.url}${verificationRequestPath}?snapshot=${HISTORICAL_EVENT_HIGH_WATER}`,
   );
   assert.equal(directVerificationResponse.status, 200);
@@ -2248,7 +3418,7 @@ try {
   assert.equal(await page.verificationFact("Events examined"), "200 of 200 maximum");
   assert.equal(await page.verificationFact("Attempt intervals"), "0 of 8 maximum");
   assert.equal(verificationRequests().length, 1);
-  let verificationUrl = new URL(verificationRequests()[0].url);
+  const verificationUrl = new URL(verificationRequests()[0].url);
   assert.deepEqual([...verificationUrl.searchParams.keys()], ["snapshot"]);
   assert.equal(verificationUrl.searchParams.get("snapshot"), "500");
   body = await page.bodyText();
@@ -2652,9 +3822,6 @@ try {
   await historyVerificationRequest.observed;
   const verificationHistoryRequestBaseline = networkRequests.length;
   await page.clickButton("Load older activity");
-  const historyVerificationOutcome = await historyVerificationRequest.finish();
-  finishHeldBrowserVerificationRequest = undefined;
-  assert.equal(historyVerificationOutcome, "cancelled");
   await page.waitFor(
     () =>
       document.querySelector(".history-panel")?.getAttribute("aria-busy") === "false" &&
@@ -2662,6 +3829,9 @@ try {
     [],
     "abort-before-history verification ordering with retained evidence",
   );
+  const historyVerificationOutcome = await historyVerificationRequest.finish();
+  finishHeldBrowserVerificationRequest = undefined;
+  assert.equal(historyVerificationOutcome, "cancelled");
   assert.equal(await page.verificationFact("Pinned revision"), "502");
   const verificationHistoryNetworkRequest = networkRequests
     .slice(verificationHistoryRequestBaseline)
@@ -3461,15 +4631,36 @@ try {
   body = await page.bodyText();
   assert.equal(body.includes("No action was proposed or allowed."), true);
   assert.equal(body.includes("not run"), true);
-  assert.equal(body.includes("No diff was produced."), true);
+  assert.equal(
+    body.includes("No verification diff exists. This does not imply that verification passed."),
+    true,
+  );
   assert.equal(body.includes("Context egress approval"), false);
   assert.equal(body.includes("Plan approval"), true);
+
+  const approvalDatabase = new Database(path.join(stateRoot, "icarus.sqlite3"));
+  try {
+    approvalDatabase
+      .prepare(
+        `INSERT INTO approvals (id, run_id, kind, digest, actor, decision, created_at)
+         VALUES (?, ?, 'plan', ?, ?, 'approve', ?)`,
+      )
+      .run(
+        "b0000000-0000-4000-8000-000000000001",
+        browserRunId,
+        "f".repeat(64),
+        APPROVAL_HTML_SENTINEL,
+        "2026-07-22T12:00:00.000Z",
+      );
+  } finally {
+    approvalDatabase.close();
+  }
 
   const exactSelectedRunUrl = `${workspace.url}/api/runs/${encodeURIComponent(browserRunId)}`;
   const automaticEventResponseBaseline = networkResponses.length;
   const automaticRunReadBaseline = networkRequests.length;
   const automaticRefreshStartedAt = Date.now();
-  await runtime.service.resume(browserRunId);
+  insertResumeRequestedFixture(stateRoot, browserRunId);
   await page.waitFor(
     (eventLabel) =>
       Array.from(document.querySelectorAll("#run-activity .timeline__evidence-link")).some(
@@ -3477,6 +4668,22 @@ try {
       ),
     ["resume requested"],
     "a newly appended event rendered by automatic refresh while the run stays selected",
+  );
+  await page.waitFor(
+    (actor) => document.querySelector("#run-approvals")?.textContent?.includes(actor) === true,
+    [APPROVAL_HTML_SENTINEL],
+    "hostile approval actor rendered as inert provenance text",
+  );
+  assert.deepEqual(
+    await page.call((actor) => {
+      const section = document.querySelector("#run-approvals");
+      return {
+        literalText: section?.textContent?.includes(actor) === true,
+        injectedElement: section?.querySelector('[data-approval-injection="true"]') !== null,
+        actionControls: section?.querySelectorAll("a, button, form, input, textarea").length ?? -1,
+      };
+    }, APPROVAL_HTML_SENTINEL),
+    { literalText: true, injectedElement: false, actionControls: 0 },
   );
   const automaticFullRunRead = networkRequests
     .slice(automaticRunReadBaseline)
@@ -3586,6 +4793,7 @@ try {
   }
   const selectedRunEventPaths = new Set([
     `/api/runs/${encodeURIComponent(browserRunId)}/events`,
+    `/api/runs/${encodeURIComponent(runSummaryFixture.validArchivedRunId)}/events`,
     `/api/runs/${encodeURIComponent(runSummaryFixture.alternateArchivedRunId)}/events`,
   ]);
   let sawArchivedRunPoll = false;
@@ -3686,14 +4894,268 @@ try {
     explainReceipts: true,
     requests: changeRoomRequests.length,
   };
+  // Restore the workspace view so the remaining run-detail flow finds its
+  // controls where the projection left them.
+  await page.clickButton("Workspace");
+  await page.waitFor(
+    () => document.querySelector('button[aria-pressed="true"]') !== null,
+    [],
+    "the workspace view to resume",
+  );
 
   assert.deepEqual(blockedExternalRequests, []);
   assert.deepEqual(browserErrors, []);
   assert.equal((await page.bodyText()).includes(HISTORICAL_EVENT_SENTINEL), false);
 
+  const successfulPostSecurity = localRequestSecurity.filter(
+    (request) => request.method === "POST",
+  );
+  assert.ok(successfulPostSecurity.length > 0);
+  assert.equal(
+    successfulPostSecurity.every(
+      (request) =>
+        request.authorizationPresent &&
+        request.authorizationCanonical &&
+        request.authorizationMatchesSession &&
+        request.action === "workspace.mutate" &&
+        request.contentType === "application/json",
+    ),
+    true,
+    "every browser POST must carry the exact workspace action-session transport",
+  );
+  assert.equal(
+    localRequestSecurity
+      .filter((request) => request.method === "GET")
+      .every((request) => !request.authorizationPresent && request.action === null),
+    true,
+    "browser GETs must remain tokenless",
+  );
+  assert.deepEqual(tokenLeaks, {
+    requestUrls: false,
+    requestBodies: false,
+    browserErrors: false,
+  });
+  const latestDocumentResponseTokenEvidence = await page.call(() => ({
+    inspected: window.__icarusActionSessionSmoke?.responseTextsInspected ?? 0,
+    leaked: window.__icarusActionSessionSmoke?.responseTokenLeak === true,
+  }));
+  assert.ok(latestDocumentResponseTokenEvidence.inspected > 0);
+  assert.equal(latestDocumentResponseTokenEvidence.leaked, false);
+  assert.ok(responseBodyEvidence.inspected > latestDocumentResponseTokenEvidence.inspected);
+  assert.equal(responseBodyEvidence.leaked, false);
+
+  await page.clickButton("← Back to project");
+  await page.waitFor(
+    () => document.querySelector("#project-detail-heading")?.textContent === "browser-project",
+    [],
+    "the project view before stale-session rejection",
+  );
+  await page.setField("Tracked target path", TARGET);
+  const stalePostBaseline = localRequestSecurity.filter(
+    (request) => request.method === "POST",
+  ).length;
+  assert.equal(
+    await page.call((storageKey) => {
+      window.sessionStorage.setItem(storageKey, "A".repeat(43));
+      return window.sessionStorage.getItem(storageKey) === "A".repeat(43);
+    }, ACTION_SESSION_STORAGE_KEY),
+    true,
+  );
+  await page.clickButton("Preview context");
+  await page.waitFor(
+    () =>
+      document.body.innerText.includes(
+        "ACTION_SESSION_REQUIRED: This workspace is review-only until it is opened from a fresh action-session launch URL.",
+      ),
+    [],
+    "the fixed stale action-session error",
+  );
+  assert.equal(
+    localRequestSecurity.filter((request) => request.method === "POST").length,
+    stalePostBaseline + 1,
+  );
+  const stalePostSecurity = localRequestSecurity.at(-1);
+  assert.deepEqual(
+    {
+      method: stalePostSecurity?.method,
+      authorizationPresent: stalePostSecurity?.authorizationPresent,
+      authorizationCanonical: stalePostSecurity?.authorizationCanonical,
+      action: stalePostSecurity?.action,
+      contentType: stalePostSecurity?.contentType,
+    },
+    {
+      method: "POST",
+      authorizationPresent: true,
+      authorizationCanonical: true,
+      action: "workspace.mutate",
+      contentType: "application/json",
+    },
+  );
+  const staleSessionEvidence = await page.call(
+    (storageKey) => ({
+      storageCleared: window.sessionStorage.getItem(storageKey) === null,
+      staleTokenAbsentFromDom: !document.documentElement.outerHTML.includes("A".repeat(43)),
+      staleTokenAbsentFromLocalStorage: Object.values(window.localStorage).every(
+        (value) => !value.includes("A".repeat(43)),
+      ),
+      staleTokenAbsentFromCookies: !document.cookie.includes("A".repeat(43)),
+      staleTokenAbsentFromLocation: !window.location.href.includes("A".repeat(43)),
+      responseTokenLeak: window.__icarusActionSessionSmoke?.responseTokenLeak === true,
+    }),
+    ACTION_SESSION_STORAGE_KEY,
+  );
+  assert.deepEqual(staleSessionEvidence, {
+    storageCleared: true,
+    staleTokenAbsentFromDom: true,
+    staleTokenAbsentFromLocalStorage: true,
+    staleTokenAbsentFromCookies: true,
+    staleTokenAbsentFromLocation: true,
+    responseTokenLeak: false,
+  });
+  await page.waitFor(
+    () =>
+      document.body.innerText.includes(
+        "This tab has no current action session. Open a fresh action-session launch URL to make bounded changes.",
+      ),
+    [],
+    "the stale tab to become truthfully review-only",
+  );
+  assert.equal(await page.buttonDisabled("Preview context"), true);
+  assert.deepEqual(tokenLeaks, {
+    requestUrls: false,
+    requestBodies: false,
+    browserErrors: false,
+  });
+  assert.equal(responseBodyEvidence.leaked, false);
+
+  reviewWorkspace = await startWorkspaceServer(
+    {
+      runtime,
+      stateRoot,
+      workspaceDist: path.resolve("packages/workspace/dist"),
+    },
+    await availableLoopbackPort(),
+  );
+  assert.equal(reviewWorkspace.mode, "review-only");
+  assert.equal(reviewWorkspace.launchUrl, reviewWorkspace.url);
+  const reviewBrowserPage = await createBrowserPage(
+    chromium,
+    reviewWorkspace.url,
+    reviewWorkspace.launchUrl,
+  );
+  await reviewBrowserPage.page.waitFor(
+    () => document.querySelector("#projects-heading") !== null,
+    [],
+    "the stable-origin review-only workspace",
+  );
+  const malformedLoaded = chromium.cdp.waitForEvent(
+    reviewBrowserPage.sessionId,
+    "Page.loadEventFired",
+  );
+  await chromium.cdp.send(
+    "Page.navigate",
+    {
+      url: `${reviewWorkspace.url}/malformed-fragment#icarus-action-session=malformed`,
+    },
+    reviewBrowserPage.sessionId,
+  );
+  await malformedLoaded;
+  await reviewBrowserPage.page.waitFor(
+    () => document.querySelector("#projects-heading") !== null,
+    [],
+    "the review-only workspace after malformed-fragment rejection",
+  );
+  assert.deepEqual(
+    await reviewBrowserPage.page.call(
+      (storageKey) => ({
+        hash: window.location.hash,
+        sessionStorageKeys: Object.keys(window.sessionStorage),
+        actionSessionAbsent: window.sessionStorage.getItem(storageKey) === null,
+      }),
+      ACTION_SESSION_STORAGE_KEY,
+    ),
+    {
+      hash: "",
+      sessionStorageKeys: [],
+      actionSessionAbsent: true,
+    },
+  );
+  await reviewBrowserPage.page.setField("Repository name", "review-only-repository");
+  await reviewBrowserPage.page.setField("Absolute repository path", repository);
+  await reviewBrowserPage.page.setField("Project name", "review-only-project");
+  await reviewBrowserPage.page.setField("Digest-pinned sandbox image", SANDBOX_IMAGE);
+  await reviewBrowserPage.page.setField(
+    "Exact check argv (JSON array, never shell text)",
+    JSON.stringify(["node", "--test"]),
+  );
+  const reviewPostBaseline = reviewBrowserPage.networkRequests.filter(
+    (request) => request.method === "POST",
+  ).length;
+  await reviewBrowserPage.page.waitFor(
+    () =>
+      document.body.innerText.includes(
+        "This stable-origin workspace is review-only. Relaunch without an explicit port to make bounded changes.",
+      ),
+    [],
+    "the stable workspace mutation capability",
+  );
+  assert.deepEqual(
+    await reviewBrowserPage.page.call(() =>
+      Object.fromEntries(
+        Array.from(document.querySelectorAll(".capability-card")).map((card) => [
+          card.querySelector("h3")?.textContent?.trim(),
+          card.querySelector(".status")?.textContent?.trim(),
+        ]),
+      ),
+    ),
+    {
+      Provider: "unconfigured",
+      Mutation: "review_only",
+      Planning: "review_only",
+      Execution: "unconfigured",
+    },
+  );
+  assert.equal(await reviewBrowserPage.page.buttonDisabled("Register project"), true);
+  assert.equal(
+    reviewBrowserPage.networkRequests.filter((request) => request.method === "POST").length,
+    reviewPostBaseline,
+    "a tokenless review-only page must expose no enabled POST control",
+  );
+  assert.equal(
+    reviewBrowserPage.localRequestSecurity.every(
+      (request) =>
+        request.method !== "GET" || (!request.authorizationPresent && request.action === null),
+    ),
+    true,
+  );
+  assert.deepEqual(reviewBrowserPage.tokenLeaks, {
+    requestUrls: false,
+    requestBodies: false,
+    browserErrors: false,
+  });
+  assert.ok(reviewBrowserPage.responseBodyEvidence.inspected > 0);
+  assert.equal(reviewBrowserPage.responseBodyEvidence.leaked, false);
+  assert.deepEqual(reviewBrowserPage.browserErrors, []);
+  assert.equal(
+    networkRequests
+      .filter((request) => typeof request.url === "string" && /^https?:/.test(request.url))
+      .every((request) => new URL(request.url).origin === workspace.url),
+    true,
+    "mutation browser requests must retain the exact random .localhost origin",
+  );
+  assert.equal(
+    reviewBrowserPage.networkRequests
+      .filter((request) => typeof request.url === "string" && /^https?:/.test(request.url))
+      .every((request) => new URL(request.url).origin === reviewWorkspace.url),
+    true,
+    "review browser requests must retain the exact stable numeric-loopback origin",
+  );
+
   const projects = runtime.service.listProjects();
+  const browserProject = projects.find((project) => project.name === "browser-project");
   const run = runtime.service.getRun(browserRunId);
-  assert.equal(projects.length, 2);
+  assert.equal(projects.length, PROJECT_PAGE_FIXTURE_COUNT + 2);
+  assert.notEqual(browserProject, undefined);
   assert.equal(run.id, browserRunId);
   assert.equal(run.state, "awaiting_approval");
   const after = await fingerprint(repository);
@@ -3703,11 +5165,17 @@ try {
     `${JSON.stringify(
       {
         binding: workspace.host,
-        browser: path.basename(chromiumExecutable),
+        origin: workspace.url,
+        browser: {
+          executable: selectedChromiumExecutable,
+          product: chromiumVersion.product,
+          protocolVersion: chromiumVersion.protocolVersion,
+          userAgent: chromiumVersion.userAgent,
+        },
         initialProvider: "unconfigured",
         initialExecution: "unconfigured",
         validationErrors: ["invalid_check_argv", "missing_context_target", "invalid_provider_url"],
-        projectId: projects[0]?.id,
+        projectId: browserProject?.id,
         contextDigest: firstDigest,
         runId: run.id,
         draftSurvivedReload: true,
@@ -3717,6 +5185,7 @@ try {
         providerRequests: provider.requests.length,
         planSurvivedReload: true,
         repositoryStatus: ["not_observed", "clean", "dirty", "clean"],
+        skipLinkKeyboardAccepted,
         deferredWorkspaceSelectionGuard: true,
         automaticEventRefresh: true,
         visibilityPolling: ["visible", "hidden", "visible"],
@@ -3727,6 +5196,8 @@ try {
           terminal: heldEventTerminal,
           selectionPreserved: true,
         },
+        boundedProjectPageNavigation: boundedProjectPageEvidence,
+        offPageRunSelectionPreserved,
         boundedVerificationProvenance: boundedVerificationEvidence,
         boundedRunPageNavigation: boundedRunPageEvidence,
         changeRoomEvidence,
@@ -3762,6 +5233,16 @@ try {
         eventRequests: eventRequests.length,
         browserErrors: browserErrors.length,
         blockedExternalRequests: blockedExternalRequests.length,
+        actionSessionSecurity: {
+          fragmentStrippedBeforeRender: true,
+          sessionSurvivedReload: true,
+          successfulProtectedPosts: successfulPostSecurity.length,
+          getRequestsTokenless: true,
+          staleSessionCleared: true,
+          malformedFragmentRejected: true,
+          reviewOnlyPostSuppressed: true,
+          tokenAbsentFromDomStorageCookiesUrlsBodiesResponsesAndErrors: true,
+        },
         sourceUnchanged: true,
       },
       null,
@@ -3769,6 +5250,8 @@ try {
     )}\n`,
   );
 } finally {
+  await finishHeldBrowserProjectPageRequest?.().catch(() => undefined);
+  finishHeldBrowserProjectPageRequest = undefined;
   await finishHeldBrowserRunPageRequest?.().catch(() => undefined);
   finishHeldBrowserRunPageRequest = undefined;
   await finishHeldBrowserHistoryRequest?.().catch(() => undefined);
@@ -3780,6 +5263,7 @@ try {
   releaseProviderResponse?.();
   releaseProviderResponse = undefined;
   await stopChromium(chromium);
+  await reviewWorkspace?.close();
   await workspace?.close();
   runtime?.close();
   await provider?.close();

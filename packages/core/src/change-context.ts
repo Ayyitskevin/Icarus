@@ -78,7 +78,7 @@ function whyBlocked(room: ChangeRoomProjection): {
         component(
           `The run is waiting for explicit context-egress approval of context digest ${shortDigest(
             base.kind === "base_context" ? base.body.contextSha256 : null,
-          )}. Approve it in the CLI with run approve-egress; the browser cannot approve it.`,
+          )}. Approve it with run approve-egress in the CLI or through the fenced browser mutation session (ADR 0029); this read-only room cannot approve anything.`,
           base,
         ),
       );
@@ -97,7 +97,7 @@ function whyBlocked(room: ChangeRoomProjection): {
         component(
           `The run is waiting for plan approval of plan digest ${shortDigest(
             plan.kind === "provider_plan" ? plan.body.planSha256 : null,
-          )}. Approve it in the CLI with run approve; no private worktree, edit call, or mutation may precede it.`,
+          )}. Approve it with run approve in the CLI or through the fenced browser mutation session; no private worktree, edit call, or mutation may precede it.`,
           plan,
           planApproval,
         ),
@@ -119,7 +119,7 @@ function whyBlocked(room: ChangeRoomProjection): {
       const outcome = outcomes.kind === "check_outcomes" ? outcomes.body.outcome : "not_run";
       components.push(
         component(
-          `Verification outcome is ${outcome}; the run is waiting for a CLI review decision bound to diff digest ${shortDigest(
+          `Verification outcome is ${outcome}; the run is waiting for a review decision bound to diff digest ${shortDigest(
             outcomes.kind === "check_outcomes" ? outcomes.body.diffSha256 : null,
           )}.`,
           outcomes,
@@ -184,28 +184,28 @@ function whatChanged(room: ChangeRoomProjection): {
   if (patchset.kind !== "patchset") {
     return { components, omissions, uncertainty };
   }
-  const { action, actionStatus, diffSha256, diffBytes, changedPaths } = patchset.body;
-  if (action === null) {
+  const { patchSet, actionStatus, diffSha256, diffBytes, changedPaths } = patchset.body;
+  if (patchSet === null) {
     components.push(
       component(
-        "No edit proposal exists yet, so nothing has changed. The run has not passed the plan-approval gate.",
+        "No PatchSet proposal exists yet, so nothing has changed. The run has not passed the plan-approval gate.",
         card(room, "provider_plan"),
         card(room, "plan_approval"),
       ),
     );
   } else {
+    const editSummary = patchSet.edits.map((edit) => `${edit.op} ${edit.path}`).join("; ");
     components.push(
       component(
-        `The provider proposed one exact replacement in ${action.path}. The proposal remains untrusted until host validation and recorded approvals establish it.`,
+        `The provider proposed a PatchSet of ${patchSet.edits.length} file-scoped edit(s): ${editSummary}. The proposal remains untrusted until host validation and recorded approvals establish it.`,
         patchset,
       ),
     );
     const statusText: Record<Exclude<PatchsetActionStatus, "not_recorded">, string> = {
       proposed: "The proposal was recorded but is not known to be materialized.",
-      materialized: "The replacement was applied inside the Icarus-private worktree.",
-      reverted:
-        "The replacement was reverted; baseline bytes were restored in the private worktree.",
-      completed: "The replacement was applied and the review accepted the verified evidence.",
+      materialized: "The PatchSet was applied inside the Icarus-private worktree.",
+      reverted: "The PatchSet was reverted; baseline bytes were restored in the private worktree.",
+      completed: "The PatchSet was applied and the review accepted the verified evidence.",
       cancelled: "The run was cancelled before the proposal completed.",
       unknown:
         "Whether the proposal is currently materialized predates the bounded browser timeline; use CLI run history for complete evidence.",
@@ -227,13 +227,13 @@ function whatChanged(room: ChangeRoomProjection): {
   if (decision !== null && decision.decision === "approve") {
     components.push(
       component(
-        "Review accepted the change. It exists only in the Icarus-private worktree; nothing was committed, pushed, merged, or deployed.",
+        "Review accepted the change. It exists in the Icarus-private worktree; any branch, commit, or draft-PR landing requires a separate recorded landing grant, which this projection does not track.",
         review,
         patchset,
       ),
     );
   }
-  if (action !== null && diffSha256 === null) {
+  if (patchSet !== null && diffSha256 === null) {
     omissions.push("No verified diff evidence exists; verification has not completed.");
   }
   return { components, omissions, uncertainty };
@@ -340,7 +340,7 @@ function whatRemains(room: ChangeRoomProjection): {
       const outcome = outcomes.kind === "check_outcomes" ? outcomes.body.outcome : "not_run";
       components.push(
         component(
-          "Nothing remains before review: verification evidence is persisted and the run awaits a CLI review decision.",
+          "Nothing remains before review: verification evidence is persisted and the run awaits a review decision (CLI or fenced browser session).",
           outcomes,
           review,
         ),

@@ -1,28 +1,59 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, lstatSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync } from "node:fs";
 import path from "node:path";
 
 import Database from "better-sqlite3";
+import {
+  assertBrowserActionCancellationParent,
+  assertBrowserActionIdentity,
+  assertBrowserActionSettlement,
+  assertSameBrowserActionIdentity,
+  type BrowserActionAdmittedRecord,
+  type BrowserActionIdentity,
+  type BrowserActionPreparedRecord,
+  type BrowserActionRecord,
+  type BrowserActionSettledRecord,
+  type BrowserActionSettlement,
+  isBrowserActionKind,
+  isBrowserActionOutcome,
+  isBrowserActionStatus,
+} from "./browser-action-state.js";
 import { CHANGE_ROOM_ANNOTATION_TARGETS, changeRoomTerminalReason } from "./change-room.js";
 import { containsSecretShapedContent } from "./context.js";
+import {
+  ICARUS_ANNOTATION_SCHEMA,
+  ICARUS_APPROVAL_INDEX_SCHEMA,
+  ICARUS_CORE_SCHEMA,
+  ICARUS_PATCH_SET_SCHEMA,
+  ICARUS_READABLE_MANIFEST_SCHEMA,
+} from "./core-schema.js";
 import { digestJson, sha256 } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
+import { assertGate1SchemasForStartup, createGate1Schemas } from "./gate1-schema.js";
 import {
   assertCheckProfiles,
+  assertOperatorActor,
+  assertReadableManifest,
+  assertRepositoryRelativePath,
   assertSandboxProfile,
   assertSunCeiling,
   checkpointDigest,
+  MAX_SESSION_ITERATIONS,
   planApprovalDigest,
+  readableManifestDigest,
+  treeCheckpointDigest,
 } from "./policy.js";
 import { assertTransition } from "./state-machine.js";
 import type {
   ApprovalRecord,
+  CapabilityGrant,
   ChangeRoomAnnotationTarget,
   ChangeRoomIndexPage,
   ChangeRoomIndexSummary,
   ChangeRoomSnapshot,
   ChangeRoomVerificationOutcome,
   CheckProfile,
+  CheckpointFile,
   ContextManifest,
   EditProposal,
   EventRecord,
@@ -30,11 +61,14 @@ import type {
   JsonValue,
   OperationFinish,
   OperationToken,
+  PatchSet,
   PlanProposal,
   ProjectRecord,
   ProviderConfig,
   ProviderKind,
   ProviderLocality,
+  ReadableManifest,
+  ReadableManifestEntry,
   RepositoryRecord,
   RunAnnotationRecord,
   RunEventHistoryPage,
@@ -47,6 +81,8 @@ import type {
   SandboxProfile,
   SunCeiling,
   VerificationEvidence,
+  WorkspaceProjectEntry,
+  WorkspaceProjectPage,
   WorkspaceRunPage,
   WorkspaceRunSummary,
 } from "./types.js";
@@ -56,21 +92,85 @@ import { readRunVerificationAttempts } from "./verification-provenance.js";
 type Row = Record<string, unknown>;
 
 export const CANCELLATION_RECOVERY_OPERATION_KIND = "cancellation.recovery";
+/** Operation kind whose ledger rows count spent repair attempts (ADR 0024). */
+/**
+ * The counted kind for a session iteration (ADR 0026, superseding the ADR 0024
+ * repair grant). The exported name changed with the concept; the string did
+ * not, because ledger rows already charged under it must keep counting. A
+ * rename here would silently reset every in-flight run's spent iterations.
+ */
+export const SESSION_ITERATION_OPERATION_KIND = "provider.revise";
 export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
+const SESSION_CHECK_OPERATION_KIND = "session.tool.exec.check";
+const SESSION_PATCH_OPERATION_KIND = "session.tool.mutation.patchset";
+const SESSION_RECONCILE_OPERATION_KIND = "session.reconcile";
+const SESSION_REPORT_DONE_OPERATION_KIND = "session.control.report_done";
+const SESSION_REQUEST_HUMAN_OPERATION_KIND = "session.control.request_human_input";
+const REVIEW_VALIDATION_OPERATION_KIND = "review.validate";
+const CHECKPOINT_ROLLBACK_OPERATION_KIND = "checkpoint.rollback";
+const CHECKPOINT_RESTORE_OPERATION_KIND = "checkpoint.restore";
 export const RUN_EVENT_PAGE_LIMIT = 64;
 export const RUN_PRESENTATION_EVENT_LIMIT = 200;
+export const RUN_PRESENTATION_APPROVAL_LIMIT = 12;
 export const WORKSPACE_RUN_PAGE_LIMIT = 12;
+export const WORKSPACE_PROJECT_PAGE_LIMIT = 12;
+export const WORKSPACE_PROJECT_CHECKS_MAX_BYTES = 1024 * 1024;
+export const WORKSPACE_PROJECT_PROFILE_MAX_BYTES = 16 * 1024;
 export const CHANGE_ROOM_PAGE_LIMIT = 12;
 export const RUN_ANNOTATION_LIMIT = 32;
 export const RUN_ANNOTATION_BODY_MAX_BYTES = 1_024;
-const SCHEMA_VERSION = 2;
+const APPROVAL_RUN_ID_MAX_BYTES = 64;
+const APPROVAL_KIND_MAX_BYTES = 16;
+const APPROVAL_DIGEST_MAX_BYTES = 64;
+const APPROVAL_ACTOR_MAX_BYTES = 200;
+const APPROVAL_DECISION_MAX_BYTES = 16;
 const EVENT_TYPE_MAX_BYTES = 128;
 const EVENT_TIMESTAMP_MAX_BYTES = 64;
 const RUN_SUMMARY_TASK_MAX_BYTES = 8 * 1024;
 const RUN_SUMMARY_TARGET_MAX_BYTES = 1_024;
+const PROJECT_NAME_MAX_BYTES = 100;
+const PROJECT_BASE_REF_MAX_BYTES = 256;
+const REPOSITORY_PATH_MAX_BYTES = 4_096;
+const BOUNDED_PROJECT_COLUMNS = `
+  CASE WHEN typeof(p.id) = 'text' AND octet_length(p.id) <= 64
+       THEN p.id END AS project_id,
+  CASE WHEN typeof(p.name) = 'text' AND octet_length(p.name) <= ${PROJECT_NAME_MAX_BYTES}
+       THEN p.name END AS project_name,
+  CASE WHEN typeof(p.repository_id) = 'text' AND octet_length(p.repository_id) <= 64
+       THEN p.repository_id END AS repository_id,
+  CASE WHEN typeof(p.base_ref) = 'text' AND octet_length(p.base_ref) <= ${PROJECT_BASE_REF_MAX_BYTES}
+       THEN p.base_ref END AS base_ref,
+  CASE WHEN typeof(p.checks_json) = 'text'
+         AND octet_length(p.checks_json) <= ${WORKSPACE_PROJECT_CHECKS_MAX_BYTES}
+         AND json_valid(p.checks_json, 1)
+       THEN p.checks_json END AS checks_json,
+  CASE WHEN typeof(p.sandbox_json) = 'text'
+         AND octet_length(p.sandbox_json) <= ${WORKSPACE_PROJECT_PROFILE_MAX_BYTES}
+         AND json_valid(p.sandbox_json, 1)
+       THEN p.sandbox_json END AS sandbox_json,
+  CASE WHEN typeof(p.ceiling_json) = 'text'
+         AND octet_length(p.ceiling_json) <= ${WORKSPACE_PROJECT_PROFILE_MAX_BYTES}
+         AND json_valid(p.ceiling_json, 1)
+       THEN p.ceiling_json END AS ceiling_json,
+  CASE WHEN typeof(p.created_at) = 'text'
+         AND octet_length(p.created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
+       THEN p.created_at END AS project_created_at`;
+const BOUNDED_REPOSITORY_COLUMNS = `
+  CASE WHEN typeof(r.id) = 'text' AND octet_length(r.id) <= 64
+       THEN r.id END AS repository_record_id,
+  CASE WHEN typeof(r.name) = 'text' AND octet_length(r.name) <= ${PROJECT_NAME_MAX_BYTES}
+       THEN r.name END AS repository_name,
+  CASE WHEN typeof(r.path) = 'text' AND octet_length(r.path) <= ${REPOSITORY_PATH_MAX_BYTES}
+       THEN r.path END AS repository_path,
+  CASE WHEN typeof(r.device) = 'integer' THEN r.device END AS repository_device,
+  CASE WHEN typeof(r.inode) = 'integer' THEN r.inode END AS repository_inode,
+  CASE WHEN typeof(r.created_at) = 'text'
+         AND octet_length(r.created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
+       THEN r.created_at END AS repository_created_at`;
 const RUN_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const SAFE_RUN_SNAPSHOT_MAX = Number.MAX_SAFE_INTEGER - 1;
+const SAFE_WORKSPACE_SNAPSHOT_MAX = Number.MAX_SAFE_INTEGER - 1;
+const PROJECT_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
 const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 const EVENT_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const RUN_STATES: ReadonlySet<string> = new Set<RunState>([
@@ -90,6 +190,14 @@ const RUN_STATES: ReadonlySet<string> = new Set<RunState>([
   "restoring",
 ]);
 const RUN_PRESENTATION_ACTION_EVENT_LIMIT = 2;
+const APPROVAL_KINDS: ReadonlySet<ApprovalRecord["kind"]> = new Set([
+  "egress",
+  "plan",
+  "review",
+  "rollback",
+  "restore",
+]);
+const APPROVAL_DECISIONS: ReadonlySet<ApprovalRecord["decision"]> = new Set(["approve", "reject"]);
 const RUN_PRESENTATION_ACTION_EVENT_TYPES = [
   "edit.materialized",
   "restore.completed",
@@ -97,6 +205,142 @@ const RUN_PRESENTATION_ACTION_EVENT_TYPES = [
   "cancellation.completed",
   "review.accepted",
 ] as const;
+const BROWSER_ACTION_DOMAIN_EVENT_TYPES: Readonly<
+  Record<BrowserActionIdentity["kind"], ReadonlySet<string>>
+> = {
+  "egress.approve": new Set([
+    "egress.approved",
+    "plan.created",
+    "run.failed",
+    "cancellation.completed",
+  ]),
+  "plan.approve": new Set([
+    "plan.approved",
+    "verification.completed",
+    "session.completed",
+    "session.awaiting_human",
+    "session.exhausted",
+    "run.failed",
+    "cancellation.completed",
+  ]),
+  "review.approve": new Set(["review.accepted", "run.failed", "cancellation.completed"]),
+  "review.reject": new Set(["review.rejected", "rollback.completed", "run.failed"]),
+  "rollback.approve": new Set(["rollback.approved", "rollback.completed", "run.failed"]),
+  "restore.approve": new Set([
+    "restore.approved",
+    "verification.completed",
+    "session.completed",
+    "session.awaiting_human",
+    "session.exhausted",
+    "run.failed",
+  ]),
+  "run.resume": new Set([
+    "resume.requested",
+    "run.resumed",
+    "egress.requested",
+    "plan.created",
+    "verification.completed",
+    "session.completed",
+    "session.awaiting_human",
+    "session.exhausted",
+    "rollback.completed",
+    "restore.completed",
+    "cancellation.completed",
+    "run.failed",
+  ]),
+  "run.cancel": new Set(["cancellation.requested", "run.failed"]),
+};
+const BROWSER_ACTION_DOMAIN_OPERATION_KINDS: Readonly<
+  Record<BrowserActionIdentity["kind"], ReadonlySet<string>>
+> = {
+  "egress.approve": new Set(["egress.validate"]),
+  "plan.approve": new Set(["approval.validate"]),
+  "review.approve": new Set(["review.validate"]),
+  "review.reject": new Set(["checkpoint.rollback"]),
+  "rollback.approve": new Set(["checkpoint.rollback"]),
+  "restore.approve": new Set(["checkpoint.restore"]),
+  "run.resume": new Set([
+    "context.prepare",
+    "provider.plan",
+    "provider.edit",
+    "sandbox.verify",
+    "checkpoint.rollback",
+    "checkpoint.restore",
+    "cancellation.recovery",
+  ]),
+  "run.cancel": new Set([]),
+};
+const BROWSER_ACTION_FAILED_OPERATION_BOUNDARIES: Readonly<
+  Record<BrowserActionIdentity["kind"], ReadonlySet<string>>
+> = {
+  "egress.approve": new Set(["egress.validate"]),
+  "plan.approve": new Set(["approval.validate"]),
+  "review.approve": new Set(["review.validate"]),
+  "review.reject": new Set([]),
+  "rollback.approve": new Set([]),
+  "restore.approve": new Set([]),
+  "run.resume": new Set([]),
+  "run.cancel": new Set([]),
+};
+const BROWSER_ACTION_RESUME_STAGE_OPERATION_KIND: Readonly<Partial<Record<RunState, string>>> = {
+  preparing: "context.prepare",
+  planned: "provider.plan",
+  running: "provider.edit",
+  verifying: "sandbox.verify",
+  rolling_back: "checkpoint.rollback",
+  restoring: "checkpoint.restore",
+  cancelling: "cancellation.recovery",
+};
+const BROWSER_ACTION_RESUME_STAGES: ReadonlySet<RunState> = new Set(
+  Object.keys(BROWSER_ACTION_RESUME_STAGE_OPERATION_KIND) as RunState[],
+);
+const BROWSER_ACTION_RESUME_CANCELLABLE_STAGES: ReadonlySet<RunState> = new Set([
+  "preparing",
+  "planned",
+  "running",
+  "verifying",
+]);
+const BROWSER_ACTION_SUCCESS_BOUNDARIES: Readonly<
+  Record<BrowserActionIdentity["kind"], Readonly<Record<string, readonly RunState[]>>>
+> = {
+  "egress.approve": {
+    "plan.created": ["awaiting_approval"],
+  },
+  "plan.approve": {
+    "verification.completed": ["awaiting_review"],
+    "session.completed": ["awaiting_review"],
+    "session.awaiting_human": ["awaiting_review"],
+    "session.exhausted": ["awaiting_review"],
+  },
+  "review.approve": {
+    "review.accepted": ["completed"],
+  },
+  "review.reject": {
+    "rollback.completed": ["rolled_back"],
+  },
+  "rollback.approve": {
+    "rollback.completed": ["rolled_back"],
+  },
+  "restore.approve": {
+    "verification.completed": ["awaiting_review"],
+    "session.completed": ["awaiting_review"],
+    "session.awaiting_human": ["awaiting_review"],
+    "session.exhausted": ["awaiting_review"],
+  },
+  "run.resume": {
+    "egress.requested": ["awaiting_egress_approval"],
+    "plan.created": ["awaiting_approval"],
+    "verification.completed": ["awaiting_review"],
+    "session.completed": ["awaiting_review"],
+    "session.awaiting_human": ["awaiting_review"],
+    "session.exhausted": ["awaiting_review"],
+    "rollback.completed": ["rolled_back"],
+    "cancellation.completed": ["cancelled"],
+  },
+  "run.cancel": {
+    "cancellation.requested": ["cancelling", "cancelled", "failed"],
+  },
+};
 
 function isSqliteBusy(error: unknown): boolean {
   return (
@@ -108,6 +352,36 @@ function isSqliteBusy(error: unknown): boolean {
   );
 }
 
+function isSqliteConstraint(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { readonly code?: unknown }).code === "string" &&
+    (error as { readonly code: string }).code.startsWith("SQLITE_CONSTRAINT")
+  );
+}
+
+function sqliteErrorCode(error: unknown): string | null {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { readonly code?: unknown }).code === "string"
+    ? (error as { readonly code: string }).code
+    : null;
+}
+
+function runBrowserActionImmediate<T>(transaction: { immediate(): T }): T {
+  try {
+    return transaction.immediate();
+  } catch (error) {
+    if (isSqliteBusy(error)) {
+      throw new IcarusError("RUN_BUSY", "Another process is updating browser action state");
+    }
+    throw error;
+  }
+}
+
 function emergencyOperationDetail(detail: JsonValue): JsonValue {
   if (typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
     return { ...detail, budgetClass: "emergency" };
@@ -115,112 +389,223 @@ function emergencyOperationDetail(detail: JsonValue): JsonValue {
   return { budgetClass: "emergency", detail };
 }
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS repositories (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  path TEXT NOT NULL UNIQUE,
-  device INTEGER NOT NULL,
-  inode INTEGER NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS projects (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  repository_id TEXT NOT NULL REFERENCES repositories(id),
-  base_ref TEXT NOT NULL,
-  checks_json TEXT NOT NULL,
-  sandbox_json TEXT NOT NULL,
-  ceiling_json TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS runs (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id),
-  task TEXT NOT NULL,
-  target TEXT NOT NULL,
-  provider_json TEXT NOT NULL,
-  state TEXT NOT NULL,
-  resume_state TEXT,
-  base_commit TEXT NOT NULL,
-  context_json TEXT NOT NULL,
-  context_artifact_path TEXT NOT NULL,
-  context_sha256 TEXT NOT NULL,
-  plan_json TEXT,
-  plan_sha256 TEXT,
-  edit_json TEXT,
-  cache_path TEXT,
-  worktree_path TEXT,
-  baseline_base64 TEXT,
-  approved_base64 TEXT,
-  diff TEXT,
-  verification_json TEXT,
-  tool_calls INTEGER NOT NULL DEFAULT 0,
-  input_tokens INTEGER NOT NULL DEFAULT 0,
-  output_tokens INTEGER NOT NULL DEFAULT 0,
-  active_runtime_ms INTEGER NOT NULL DEFAULT 0,
-  estimated_cost_usd REAL NOT NULL DEFAULT 0,
-  reserved_cost_usd REAL NOT NULL DEFAULT 0,
-  error_code TEXT,
-  error_message TEXT,
-  version INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_project
-ON runs(project_id)
-WHERE state NOT IN ('completed', 'failed', 'cancelled', 'rolled_back');
-CREATE TABLE IF NOT EXISTS run_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id TEXT NOT NULL REFERENCES runs(id),
-  sequence INTEGER NOT NULL,
-  type TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  UNIQUE(run_id, sequence)
-);
-CREATE TABLE IF NOT EXISTS approvals (
-  id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES runs(id),
-  kind TEXT NOT NULL,
-  digest TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  decision TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  CHECK(decision IN ('approve', 'reject'))
-);
-CREATE TABLE IF NOT EXISTS operations (
-  id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES runs(id),
-  kind TEXT NOT NULL,
-  status TEXT NOT NULL,
-  reserved_cost_usd REAL NOT NULL,
-  reserved_tokens INTEGER NOT NULL,
-  reserved_runtime_ms INTEGER NOT NULL,
-  result_json TEXT,
-  started_at TEXT NOT NULL,
-  finished_at TEXT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS one_started_operation_per_run
-ON operations(run_id)
-WHERE status = 'started';
-CREATE TABLE IF NOT EXISTS checkpoints (
-  run_id TEXT PRIMARY KEY REFERENCES runs(id),
-  baseline_base64 TEXT NOT NULL,
-  approved_base64 TEXT NOT NULL,
-  checkpoint_sha256 TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS run_annotations (
-  id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES runs(id),
-  card TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  body TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS run_annotations_by_run ON run_annotations(run_id);
-`;
+const BROWSER_ACTION_SELECT = `
+SELECT action_id, run_id, kind, expected_state, expected_event_revision,
+       subject_digest, action_digest, parent_action_id, parent_action_digest,
+       actor, status, outcome, admission_event_sequence, domain_event_sequence,
+       domain_operation_id, error_code, created_at, updated_at
+FROM browser_action_requests`;
+
+type ReadableManifestSchemaStatus = "not_applicable" | "missing" | "valid";
+
+function inspectReadableManifestSchema(databasePath: string): ReadableManifestSchemaStatus {
+  if (!existsSync(databasePath)) return "not_applicable";
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const runsTableExists =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runs'")
+        .get() !== undefined;
+    if (!runsTableExists) return "not_applicable";
+
+    const present =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'readable_manifests'")
+        .get() !== undefined;
+    if (!present) return "missing";
+
+    const expectedColumns = [
+      "run_id",
+      "base_commit",
+      "manifest_sha256",
+      "entries_json",
+      "created_at",
+    ];
+    const columns = (
+      database.prepare("PRAGMA table_info('readable_manifests')").all() as unknown[]
+    ).map((entry) =>
+      text(row(entry, "readable manifest column").name, "readable manifest column.name"),
+    );
+    invariant(
+      columns.length === expectedColumns.length &&
+        expectedColumns.every((column, index) => columns[index] === column),
+      "DATABASE_ERROR",
+      "Readable manifest table has an invalid shape",
+    );
+    return "valid";
+  } finally {
+    database.close();
+  }
+}
+
+type ApprovalIndexStatus = "not_applicable" | "missing" | "valid";
+
+function inspectApprovalIndex(databasePath: string): ApprovalIndexStatus {
+  if (!existsSync(databasePath)) return "not_applicable";
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const approvalTableExists =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'approvals'")
+        .get() !== undefined;
+    if (!approvalTableExists) return "not_applicable";
+
+    const indexEntry = database
+      .prepare(
+        "SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND name = 'approvals_by_run'",
+      )
+      .get();
+    if (indexEntry === undefined) return "missing";
+
+    const index = row(indexEntry, "approval index");
+    invariant(
+      text(index.name, "approval index.name") === "approvals_by_run" &&
+        text(index.tbl_name, "approval index.table") === "approvals",
+      "DATABASE_ERROR",
+      "Approval index metadata is invalid",
+    );
+
+    const indexList = database.prepare("PRAGMA index_list('approvals')").all() as unknown[];
+    const definition = indexList
+      .map((entry) => row(entry, "approval index definition"))
+      .find((entry) => entry.name === "approvals_by_run");
+    invariant(
+      definition !== undefined &&
+        definition.unique === 0 &&
+        definition.origin === "c" &&
+        definition.partial === 0,
+      "DATABASE_ERROR",
+      "Approval index definition is invalid",
+    );
+
+    const keyColumns = (
+      database.prepare("PRAGMA index_xinfo('approvals_by_run')").all() as unknown[]
+    )
+      .map((entry) => row(entry, "approval index column"))
+      .filter((entry) => entry.key === 1);
+    const expectedColumns = [{ name: "run_id", desc: 0 }] as const;
+    invariant(
+      keyColumns.length === expectedColumns.length &&
+        expectedColumns.every(
+          (expected, index) =>
+            keyColumns[index]?.seqno === index &&
+            keyColumns[index]?.name === expected.name &&
+            keyColumns[index]?.desc === expected.desc &&
+            keyColumns[index]?.coll === "BINARY",
+        ),
+      "DATABASE_ERROR",
+      "Approval index columns are invalid",
+    );
+    return "valid";
+  } finally {
+    database.close();
+  }
+}
+
+type PatchSetSchemaStatus = "not_applicable" | "missing" | "valid";
+
+type AnnotationSchemaStatus = "not_applicable" | "missing" | "valid";
+
+/**
+ * Read-only shape inspection performed before the writable handle is opened, so
+ * a refusal cannot have mutated the database. A database that predates the
+ * `runs` table is not a migration candidate; a database that has `runs` but
+ * lacks the ADR 0041 annotation table requires explicit operator approval.
+ */
+function inspectAnnotationSchema(databasePath: string): AnnotationSchemaStatus {
+  if (!existsSync(databasePath)) return "not_applicable";
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const runsTableExists =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runs'")
+        .get() !== undefined;
+    if (!runsTableExists) return "not_applicable";
+
+    const present =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run_annotations'")
+        .get() !== undefined;
+    if (!present) return "missing";
+
+    const expectedColumns = ["id", "run_id", "card", "actor", "body", "created_at"];
+    const columns = (
+      database.prepare("PRAGMA table_info('run_annotations')").all() as unknown[]
+    ).map((entry) => text(row(entry, "run annotation column").name, "run annotation column.name"));
+    invariant(
+      columns.length === expectedColumns.length &&
+        expectedColumns.every((column, index) => columns[index] === column),
+      "DATABASE_ERROR",
+      "Run annotation table has an invalid shape",
+    );
+    return "valid";
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Read-only shape inspection performed before the writable handle is opened, so
+ * a refusal cannot have mutated the database. A database that predates the
+ * `runs` table is not a migration candidate; a database that has `runs` but
+ * lacks the ADR 0023 tables requires explicit operator approval.
+ */
+function inspectPatchSetSchema(databasePath: string): PatchSetSchemaStatus {
+  if (!existsSync(databasePath)) return "not_applicable";
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const runsTableExists =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runs'")
+        .get() !== undefined;
+    if (!runsTableExists) return "not_applicable";
+
+    const present = new Set(
+      (
+        database
+          .prepare(
+            `SELECT name FROM sqlite_master WHERE type = 'table'
+             AND name IN ('patch_sets', 'checkpoint_files')`,
+          )
+          .all() as unknown[]
+      ).map((entry) => text(row(entry, "patch set table").name, "patch set table.name")),
+    );
+    if (present.size === 0) return "missing";
+    invariant(
+      present.has("patch_sets") && present.has("checkpoint_files"),
+      "DATABASE_ERROR",
+      "Patch-set schema is partially present",
+    );
+
+    const expectedTables = [
+      { table: "patch_sets", columns: ["run_id", "patch_set_json", "created_at"] },
+      {
+        table: "checkpoint_files",
+        columns: ["run_id", "path", "op", "baseline_base64", "approved_base64"],
+      },
+    ] as const;
+    for (const expected of expectedTables) {
+      const columns = (
+        database.prepare(`PRAGMA table_info('${expected.table}')`).all() as unknown[]
+      ).map((entry) =>
+        text(row(entry, `${expected.table} column`).name, `${expected.table} column.name`),
+      );
+      invariant(
+        columns.length === expected.columns.length &&
+          expected.columns.every((column, index) => columns[index] === column),
+        "DATABASE_ERROR",
+        `Patch-set table ${expected.table} has an invalid shape`,
+      );
+    }
+    return "valid";
+  } finally {
+    database.close();
+  }
+}
 
 function row(value: unknown, name: string): Row {
   invariant(
@@ -261,6 +646,33 @@ function nullableJson<T>(value: unknown, name: string): T | null {
   return value === null ? null : parseJson<T>(value, name);
 }
 
+/**
+ * Decodes a persisted plan without casting past its shape. Plans are stored as
+ * JSON, so a row written before a plan field existed decodes with that field
+ * absent while the type claims it is present — `plan.grants.length` then throws
+ * and `Math.min(plan.iterationCeiling, n)` yields NaN.
+ *
+ * A pre-ADR 0026 row carries `repairIterations`; it decodes to the same
+ * `iterationCeiling`, preserving exactly the allowance the operator approved
+ * rather than widening it to the new default or discarding it.
+ *
+ * Both fields normalize to the no-capability reading, which is what a plan
+ * authored before the field meant: no repair attempts and no granted
+ * capability. Neither default can widen authority, so an old row stays
+ * readable without becoming more permissive than it was approved to be.
+ */
+function decodeNullablePlan(value: unknown, name: string): PlanProposal | null {
+  const decoded = nullableJson<Record<string, unknown>>(value, name);
+  if (decoded === null) return null;
+  const ceiling = decoded.iterationCeiling ?? decoded.repairIterations;
+  const grants = decoded.grants;
+  return {
+    ...(decoded as unknown as PlanProposal),
+    iterationCeiling: typeof ceiling === "number" ? ceiling : 0,
+    grants: Array.isArray(grants) ? (grants as readonly CapabilityGrant[]) : [],
+  };
+}
+
 function json(value: unknown): string {
   return JSON.stringify(value);
 }
@@ -282,6 +694,167 @@ function isCanonicalTimestamp(value: string): boolean {
   );
 }
 
+function approvalRecordRow(entry: unknown, expectedRunId: string): ApprovalRecord {
+  const value = row(entry, "approval");
+  const runId = text(value.run_id, "approval.run_id");
+  const kind = text(value.kind, "approval.kind");
+  const digest = text(value.digest, "approval.digest");
+  const actor = text(value.actor, "approval.actor");
+  const decision = text(value.decision, "approval.decision");
+  const createdAt = text(value.created_at, "approval.created_at");
+  invariant(
+    runId === expectedRunId && RUN_ID_PATTERN.test(runId),
+    "DATABASE_ERROR",
+    "Approval identity is invalid",
+  );
+  invariant(
+    APPROVAL_KINDS.has(kind as ApprovalRecord["kind"]),
+    "DATABASE_ERROR",
+    "Approval kind is invalid",
+  );
+  invariant(/^[a-f0-9]{64}$/.test(digest), "DATABASE_ERROR", "Approval digest is invalid");
+  try {
+    assertOperatorActor(actor);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Approval actor is invalid");
+  }
+  invariant(
+    APPROVAL_DECISIONS.has(decision as ApprovalRecord["decision"]),
+    "DATABASE_ERROR",
+    "Approval decision is invalid",
+  );
+  invariant(
+    decision === "approve" || kind === "review",
+    "DATABASE_ERROR",
+    "Approval kind and decision are inconsistent",
+  );
+  invariant(isCanonicalTimestamp(createdAt), "DATABASE_ERROR", "Approval timestamp is invalid");
+  return {
+    runId,
+    kind: kind as ApprovalRecord["kind"],
+    digest,
+    actor,
+    decision: decision as ApprovalRecord["decision"],
+    createdAt,
+  };
+}
+
+function browserActionRecordRow(entry: unknown): BrowserActionRecord {
+  const value = row(entry, "browser action");
+  const identity: BrowserActionIdentity = {
+    actionId: text(value.action_id, "browser action.action_id"),
+    version: 1,
+    kind: text(value.kind, "browser action.kind") as BrowserActionIdentity["kind"],
+    runId: text(value.run_id, "browser action.run_id"),
+    expectedState: text(
+      value.expected_state,
+      "browser action.expected_state",
+    ) as BrowserActionIdentity["expectedState"],
+    eventRevision: numberValue(
+      value.expected_event_revision,
+      "browser action.expected_event_revision",
+    ),
+    subjectDigest: nullableText(value.subject_digest, "browser action.subject_digest"),
+    activeActionId: nullableText(value.parent_action_id, "browser action.parent_action_id"),
+    activeActionDigest: nullableText(
+      value.parent_action_digest,
+      "browser action.parent_action_digest",
+    ),
+    actionDigest: text(value.action_digest, "browser action.action_digest"),
+  };
+  const actor = text(value.actor, "browser action.actor");
+  const status = text(value.status, "browser action.status");
+  const outcome = nullableText(value.outcome, "browser action.outcome");
+  const admissionEventSequence =
+    value.admission_event_sequence === null
+      ? null
+      : numberValue(value.admission_event_sequence, "browser action.admission_event_sequence");
+  const domainEventSequence =
+    value.domain_event_sequence === null
+      ? null
+      : numberValue(value.domain_event_sequence, "browser action.domain_event_sequence");
+  const domainOperationId = nullableText(
+    value.domain_operation_id,
+    "browser action.domain_operation_id",
+  );
+  const errorCode = nullableText(value.error_code, "browser action.error_code");
+  const createdAt = text(value.created_at, "browser action.created_at");
+  const updatedAt = text(value.updated_at, "browser action.updated_at");
+  try {
+    assertBrowserActionIdentity(identity);
+    assertOperatorActor(actor);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Browser action identity is invalid");
+  }
+  invariant(
+    isBrowserActionKind(identity.kind) &&
+      isBrowserActionStatus(status) &&
+      (outcome === null || isBrowserActionOutcome(outcome)) &&
+      isCanonicalTimestamp(createdAt) &&
+      isCanonicalTimestamp(updatedAt),
+    "DATABASE_ERROR",
+    "Browser action row is invalid",
+  );
+  const base = { ...identity, actor, createdAt, updatedAt };
+  if (status === "prepared") {
+    invariant(
+      outcome === null &&
+        admissionEventSequence === null &&
+        domainEventSequence === null &&
+        domainOperationId === null &&
+        errorCode === null,
+      "DATABASE_ERROR",
+      "Prepared browser action row is invalid",
+    );
+    return {
+      ...base,
+      status,
+      outcome,
+      admissionEventSequence,
+      domainEventSequence,
+      domainOperationId,
+      errorCode,
+    } satisfies BrowserActionPreparedRecord;
+  }
+  if (status === "admitted") {
+    invariant(
+      outcome === null &&
+        admissionEventSequence !== null &&
+        Number.isSafeInteger(admissionEventSequence) &&
+        admissionEventSequence >= 1 &&
+        errorCode === null,
+      "DATABASE_ERROR",
+      "Admitted browser action row is invalid",
+    );
+    return {
+      ...base,
+      status,
+      outcome,
+      admissionEventSequence,
+      domainEventSequence,
+      domainOperationId,
+      errorCode,
+    } satisfies BrowserActionAdmittedRecord;
+  }
+  invariant(outcome !== null, "DATABASE_ERROR", "Settled browser action outcome is missing");
+  const settlement = {
+    outcome,
+    admissionEventSequence,
+    domainEventSequence,
+    domainOperationId,
+    errorCode,
+  } as BrowserActionSettlement;
+  try {
+    assertBrowserActionSettlement(
+      admissionEventSequence === null ? "prepared" : "admitted",
+      settlement,
+    );
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Settled browser action row is invalid");
+  }
+  return { ...base, status, ...settlement } as BrowserActionSettledRecord;
+}
+
 function sqliteRowid(value: unknown, name: string, allowZero: boolean): number {
   const raw = text(value, name);
   invariant(
@@ -294,10 +867,265 @@ function sqliteRowid(value: unknown, name: string, allowZero: boolean): number {
   return Number(parsed);
 }
 
-function sqliteMaximumRowid(value: unknown): bigint {
-  const raw = text(value, "run snapshot");
-  invariant(/^(0|[1-9][0-9]*)$/.test(raw), "DATABASE_ERROR", "Run snapshot is invalid");
+function sqliteMaximumRowid(value: unknown, name: string): bigint {
+  const raw = text(value, name);
+  invariant(/^(0|[1-9][0-9]*)$/.test(raw), "DATABASE_ERROR", `${name} is invalid`);
   return BigInt(raw);
+}
+
+function exactRecord(
+  value: unknown,
+  keys: readonly string[],
+  name: string,
+): Record<string, unknown> {
+  invariant(
+    typeof value === "object" && value !== null && !Array.isArray(value),
+    "DATABASE_ERROR",
+    `${name} is not an object`,
+  );
+  const record = value as Record<string, unknown>;
+  const actual = Object.keys(record);
+  invariant(
+    actual.length === keys.length && keys.every((key) => actual.includes(key)),
+    "DATABASE_ERROR",
+    `${name} has invalid fields`,
+  );
+  return record;
+}
+
+function workspaceCheckProfiles(
+  value: unknown,
+  preservePolicyErrorCodes = false,
+): readonly CheckProfile[] {
+  if (preservePolicyErrorCodes) {
+    const checks = value as readonly CheckProfile[];
+    assertCheckProfiles(checks);
+    return checks;
+  }
+  invariant(
+    Array.isArray(value) && value.length > 0,
+    "DATABASE_ERROR",
+    "Project checks are invalid",
+  );
+  const checks = value.map((entry, index): CheckProfile => {
+    const check = exactRecord(entry, ["id", "name", "argv"], `project.checks[${index}]`);
+    invariant(
+      typeof check.id === "string" &&
+        check.id.length > 0 &&
+        typeof check.name === "string" &&
+        check.name.length > 0 &&
+        Array.isArray(check.argv) &&
+        check.argv.length > 0 &&
+        check.argv.every(
+          (part) =>
+            typeof part === "string" &&
+            part.length > 0 &&
+            !part.includes("\0") &&
+            !/[\r\n]/.test(part),
+        ),
+      "DATABASE_ERROR",
+      "Project checks are invalid",
+    );
+    return {
+      id: check.id,
+      name: check.name,
+      argv: check.argv as string[],
+    };
+  });
+  try {
+    assertCheckProfiles(checks);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Project checks are invalid");
+  }
+  return checks;
+}
+
+function workspaceSandboxProfile(value: unknown, preservePolicyErrorCodes = false): SandboxProfile {
+  if (preservePolicyErrorCodes) {
+    const sandbox = value as SandboxProfile;
+    assertSandboxProfile(sandbox);
+    return sandbox;
+  }
+  const profile = exactRecord(
+    value,
+    ["image", "cpus", "memoryMb", "pids", "tmpfsMb"],
+    "project.sandbox",
+  );
+  invariant(
+    typeof profile.image === "string" &&
+      typeof profile.cpus === "number" &&
+      typeof profile.memoryMb === "number" &&
+      typeof profile.pids === "number" &&
+      typeof profile.tmpfsMb === "number",
+    "DATABASE_ERROR",
+    "Project sandbox is invalid",
+  );
+  const sandbox: SandboxProfile = {
+    image: profile.image,
+    cpus: profile.cpus,
+    memoryMb: profile.memoryMb,
+    pids: profile.pids,
+    tmpfsMb: profile.tmpfsMb,
+  };
+  try {
+    assertSandboxProfile(sandbox);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Project sandbox is invalid");
+  }
+  return sandbox;
+}
+
+const SUN_CEILING_KEYS = [
+  "maxToolCalls",
+  "maxActiveRuntimeMs",
+  "maxContextBytes",
+  "maxOutputTokensPerCall",
+  "maxTotalTokens",
+  "maxCostUsd",
+  "maxFilesChanged",
+  "maxFileBytes",
+  "maxDiffBytes",
+  "maxCommandOutputBytes",
+  "maxRawCommandOutputBytes",
+  "providerTimeoutMs",
+  "commandTimeoutMs",
+] as const satisfies readonly (keyof SunCeiling)[];
+
+function workspaceSunCeiling(value: unknown, preservePolicyErrorCodes = false): SunCeiling {
+  if (preservePolicyErrorCodes) {
+    const ceiling = value as SunCeiling;
+    assertSunCeiling(ceiling);
+    return ceiling;
+  }
+  const record = exactRecord(value, SUN_CEILING_KEYS, "project.ceiling");
+  invariant(
+    SUN_CEILING_KEYS.every((key) => typeof record[key] === "number"),
+    "DATABASE_ERROR",
+    "Project ceiling is invalid",
+  );
+  const ceiling = Object.fromEntries(
+    SUN_CEILING_KEYS.map((key) => [key, record[key]]),
+  ) as unknown as SunCeiling;
+  try {
+    assertSunCeiling(ceiling);
+  } catch {
+    throw new IcarusError("DATABASE_ERROR", "Project ceiling is invalid");
+  }
+  return ceiling;
+}
+
+function boundedRepositoryRow(value: Row): RepositoryRecord {
+  const repositoryId = text(value.repository_record_id, "repository.id");
+  const repositoryName = text(value.repository_name, "repository.name");
+  const repositoryPath = text(value.repository_path, "repository.path");
+  const repositoryCreatedAt = text(value.repository_created_at, "repository.created_at");
+  const repositoryDevice = numberValue(value.repository_device, "repository.device");
+  const repositoryInode = numberValue(value.repository_inode, "repository.inode");
+  invariant(RUN_ID_PATTERN.test(repositoryId), "DATABASE_ERROR", "Repository identity is invalid");
+  invariant(
+    PROJECT_NAME_PATTERN.test(repositoryName),
+    "DATABASE_ERROR",
+    "Repository name metadata is invalid",
+  );
+  invariant(
+    repositoryPath.trim().length > 0 &&
+      !repositoryPath.includes("\0") &&
+      Buffer.byteLength(repositoryPath, "utf8") <= REPOSITORY_PATH_MAX_BYTES,
+    "DATABASE_ERROR",
+    "Repository path is invalid",
+  );
+  invariant(
+    Number.isSafeInteger(repositoryDevice) &&
+      repositoryDevice >= 0 &&
+      Number.isSafeInteger(repositoryInode) &&
+      repositoryInode >= 0,
+    "DATABASE_ERROR",
+    "Repository identity metadata is invalid",
+  );
+  invariant(
+    isCanonicalTimestamp(repositoryCreatedAt),
+    "DATABASE_ERROR",
+    "Repository timestamp metadata is invalid",
+  );
+  return {
+    id: repositoryId,
+    name: repositoryName,
+    path: repositoryPath,
+    device: repositoryDevice,
+    inode: repositoryInode,
+    createdAt: repositoryCreatedAt,
+  };
+}
+
+function boundedProjectRow(value: Row, preservePolicyErrorCodes = false): ProjectRecord {
+  const projectId = text(value.project_id, "project.id");
+  const projectName = text(value.project_name, "project.name");
+  const repositoryId = text(value.repository_id, "repository.id");
+  const baseRef = text(value.base_ref, "project.base_ref");
+  const projectCreatedAt = text(value.project_created_at, "project.created_at");
+  invariant(
+    RUN_ID_PATTERN.test(projectId) && RUN_ID_PATTERN.test(repositoryId),
+    "DATABASE_ERROR",
+    "Project identity is invalid",
+  );
+  invariant(
+    PROJECT_NAME_PATTERN.test(projectName),
+    "DATABASE_ERROR",
+    "Project name metadata is invalid",
+  );
+  invariant(
+    baseRef.length > 0 &&
+      !baseRef.startsWith("-") &&
+      !/[\r\n\0]/.test(baseRef) &&
+      Buffer.byteLength(baseRef, "utf8") <= PROJECT_BASE_REF_MAX_BYTES,
+    "DATABASE_ERROR",
+    "Project base ref is invalid",
+  );
+  invariant(
+    isCanonicalTimestamp(projectCreatedAt),
+    "DATABASE_ERROR",
+    "Project timestamp is invalid",
+  );
+  const checks = workspaceCheckProfiles(
+    parseJson<unknown>(value.checks_json, "project.checks_json"),
+    preservePolicyErrorCodes,
+  );
+  const sandbox = workspaceSandboxProfile(
+    parseJson<unknown>(value.sandbox_json, "project.sandbox_json"),
+    preservePolicyErrorCodes,
+  );
+  const ceiling = workspaceSunCeiling(
+    parseJson<unknown>(value.ceiling_json, "project.ceiling_json"),
+    preservePolicyErrorCodes,
+  );
+  return {
+    id: projectId,
+    name: projectName,
+    repositoryId,
+    baseRef,
+    checks,
+    sandbox,
+    ceiling,
+    createdAt: projectCreatedAt,
+  };
+}
+
+function workspaceProjectEntryRow(
+  entry: unknown,
+  before: number,
+  snapshot: number,
+): { readonly cursor: number; readonly entry: WorkspaceProjectEntry } {
+  const value = row(entry, "workspace project");
+  const cursor = sqliteRowid(value.cursor, "project cursor", false);
+  invariant(cursor < before && cursor <= snapshot, "DATABASE_ERROR", "Project cursor is invalid");
+  const project = boundedProjectRow(value);
+  const repository = boundedRepositoryRow(value);
+  invariant(
+    project.repositoryId === repository.id,
+    "DATABASE_ERROR",
+    "Project repository identity is inconsistent",
+  );
+  return { cursor, entry: { project, repository } };
 }
 
 function workspaceRunSummaryRow(
@@ -378,7 +1206,12 @@ export interface NewRunInput {
   readonly id: string;
   readonly projectId: string;
   readonly task: string;
-  readonly target: string;
+  /**
+   * The operator's candidate selection (ADR 0023). The first entry anchors the
+   * rules chain and is persisted as the run's target column; the complete
+   * selection travels in the context manifest.
+   */
+  readonly targets: readonly string[];
   readonly provider: ProviderConfig;
 }
 
@@ -465,7 +1298,15 @@ export class IcarusStore {
 
   constructor(
     databasePath: string,
-    options: { now?: () => string; id?: () => string; busyTimeoutMs?: number } = {},
+    options: {
+      now?: () => string;
+      id?: () => string;
+      busyTimeoutMs?: number;
+      allowApprovalIndexMigration?: boolean;
+      allowPatchSetMigration?: boolean;
+      allowReadableManifestMigration?: boolean;
+      allowAnnotationMigration?: boolean;
+    } = {},
   ) {
     const parent = path.dirname(databasePath);
     const parentStat = lstatSync(parent);
@@ -480,29 +1321,51 @@ export class IcarusStore {
       "INVALID_DATABASE_CONFIGURATION",
       "SQLite busy timeout is invalid",
     );
+    const gate1Schemas = assertGate1SchemasForStartup(databasePath);
+    const approvalIndexStatus = inspectApprovalIndex(databasePath);
+    if (approvalIndexStatus === "missing" && options.allowApprovalIndexMigration !== true) {
+      throw new IcarusError(
+        "DATABASE_MIGRATION_REQUIRED",
+        "Approval index migration requires a state backup and explicit operator approval",
+      );
+    }
+    const patchSetStatus = inspectPatchSetSchema(databasePath);
+    if (patchSetStatus === "missing" && options.allowPatchSetMigration !== true) {
+      throw new IcarusError(
+        "DATABASE_MIGRATION_REQUIRED",
+        "Patch-set migration requires a state backup and explicit operator approval",
+      );
+    }
+    const readableManifestStatus = inspectReadableManifestSchema(databasePath);
+    if (readableManifestStatus === "missing" && options.allowReadableManifestMigration !== true) {
+      throw new IcarusError(
+        "DATABASE_MIGRATION_REQUIRED",
+        "Readable manifest migration requires a state backup and explicit operator approval",
+      );
+    }
+    const annotationStatus = inspectAnnotationSchema(databasePath);
+    if (annotationStatus === "missing" && options.allowAnnotationMigration !== true) {
+      throw new IcarusError(
+        "DATABASE_MIGRATION_REQUIRED",
+        "Run annotation migration requires a state backup and explicit operator approval",
+      );
+    }
     this.#database = new Database(databasePath);
     chmodSync(databasePath, 0o600);
     this.#database.pragma(`busy_timeout = ${busyTimeoutMs}`);
     this.#database.pragma("foreign_keys = ON");
     this.#database.pragma("journal_mode = WAL");
     this.#database.pragma("synchronous = FULL");
-    this.#database.exec(SCHEMA);
-    // Schema version 2 is additive and forward-only: it introduces the append-only
-    // run_annotations table through CREATE TABLE IF NOT EXISTS above. Existing
-    // version-1 databases gain the table on first open; no existing table changes.
-    const schemaVersion = Number(this.#database.pragma("user_version", { simple: true }));
-    invariant(
-      Number.isSafeInteger(schemaVersion) && schemaVersion >= 0,
-      "DATABASE_ERROR",
-      "Database schema version is invalid",
-    );
-    invariant(
-      schemaVersion <= SCHEMA_VERSION,
-      "UNSUPPORTED_DATABASE_VERSION",
-      "Database schema version is newer than this Icarus build",
-    );
-    if (schemaVersion < SCHEMA_VERSION) {
-      this.#database.pragma(`user_version = ${SCHEMA_VERSION}`);
+    this.#database.exec(ICARUS_CORE_SCHEMA);
+    this.#database.exec(ICARUS_APPROVAL_INDEX_SCHEMA);
+    this.#database.exec(ICARUS_PATCH_SET_SCHEMA);
+    this.#database.exec(ICARUS_READABLE_MANIFEST_SCHEMA);
+    this.#database.exec(ICARUS_ANNOTATION_SCHEMA);
+    if (
+      gate1Schemas.browserActions === "not_applicable" &&
+      gate1Schemas.landing === "not_applicable"
+    ) {
+      createGate1Schemas(this.#database);
     }
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#id = options.id ?? randomUUID;
@@ -510,6 +1373,262 @@ export class IcarusStore {
 
   close(): void {
     this.#database.close();
+  }
+
+  getBrowserAction(actionId: string): BrowserActionRecord {
+    const entry = this.#database
+      .prepare(`${BROWSER_ACTION_SELECT} WHERE action_id = ?`)
+      .get(actionId);
+    invariant(entry !== undefined, "NOT_FOUND", "Browser action request was not found");
+    return browserActionRecordRow(entry);
+  }
+
+  listActiveBrowserActions(runId?: string): readonly BrowserActionRecord[] {
+    const entries =
+      runId === undefined
+        ? (this.#database
+            .prepare(
+              `${BROWSER_ACTION_SELECT}
+               WHERE status IN ('prepared', 'admitted')
+               ORDER BY run_id, created_at, action_id`,
+            )
+            .all() as unknown[])
+        : (this.#database
+            .prepare(
+              `${BROWSER_ACTION_SELECT}
+               WHERE run_id = ? AND status IN ('prepared', 'admitted')
+               ORDER BY created_at, action_id`,
+            )
+            .all(runId) as unknown[]);
+    return entries.map(browserActionRecordRow);
+  }
+
+  prepareBrowserAction(identity: BrowserActionIdentity, actor: string): BrowserActionRecord {
+    assertBrowserActionIdentity(identity);
+    assertOperatorActor(actor);
+    const transaction = this.#database.transaction((): BrowserActionRecord => {
+      const existing = this.#database
+        .prepare(`${BROWSER_ACTION_SELECT} WHERE action_id = ?`)
+        .get(identity.actionId);
+      if (existing !== undefined) {
+        const record = browserActionRecordRow(existing);
+        assertSameBrowserActionIdentity(record, identity);
+        return record;
+      }
+      invariant(
+        this.#database.prepare("SELECT 1 FROM runs WHERE id = ?").get(identity.runId) !== undefined,
+        "NOT_FOUND",
+        "Run was not found",
+      );
+      const now = this.#now();
+      try {
+        this.#database
+          .prepare(
+            `INSERT INTO browser_action_requests
+             (action_id, run_id, kind, expected_state, expected_event_revision,
+              subject_digest, action_digest, parent_action_id, parent_action_digest,
+              actor, status, outcome, admission_event_sequence,
+              domain_event_sequence, domain_operation_id, error_code, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+          )
+          .run(
+            identity.actionId,
+            identity.runId,
+            identity.kind,
+            identity.expectedState,
+            identity.eventRevision,
+            identity.subjectDigest,
+            identity.actionDigest,
+            identity.activeActionId,
+            identity.activeActionDigest,
+            actor,
+            now,
+            now,
+          );
+      } catch (error) {
+        const code = sqliteErrorCode(error);
+        if (code === "SQLITE_CONSTRAINT_UNIQUE") {
+          throw new IcarusError(
+            "ACTION_IN_PROGRESS",
+            "Another browser action is already active for this run",
+            { runId: identity.runId },
+          );
+        }
+        if (isSqliteConstraint(error)) {
+          throw new IcarusError(
+            "INVALID_BROWSER_ACTION",
+            "Browser action request violates the durable ledger contract",
+          );
+        }
+        if (isSqliteBusy(error)) {
+          throw new IcarusError("RUN_BUSY", "Another process is updating browser action state");
+        }
+        throw error;
+      }
+      return this.getBrowserAction(identity.actionId);
+    });
+    return runBrowserActionImmediate(transaction);
+  }
+
+  admitBrowserAction(actionId: string): BrowserActionAdmittedRecord | BrowserActionSettledRecord {
+    const transaction = this.#database.transaction(
+      (): BrowserActionAdmittedRecord | BrowserActionSettledRecord => {
+        const record = this.getBrowserAction(actionId);
+        if (record.status === "settled") return record;
+        if (record.status === "admitted") return record;
+        const current = this.getRun(record.runId);
+        const revision = numberValue(
+          row(
+            this.#database
+              .prepare(
+                "SELECT COALESCE(MAX(sequence), 0) AS revision FROM run_events WHERE run_id = ?",
+              )
+              .get(record.runId),
+            "browser action event revision",
+          ).revision,
+          "browser action event revision.revision",
+        );
+        const activeNonCancelEntry =
+          record.kind === "run.cancel"
+            ? this.#database
+                .prepare(
+                  `${BROWSER_ACTION_SELECT}
+                   WHERE run_id = ? AND kind <> 'run.cancel'
+                     AND status IN ('prepared', 'admitted')`,
+                )
+                .get(record.runId)
+            : undefined;
+        const activeNonCancel =
+          activeNonCancelEntry === undefined ? null : browserActionRecordRow(activeNonCancelEntry);
+        let cancellationParentMatches = true;
+        try {
+          assertBrowserActionCancellationParent(record, activeNonCancel);
+        } catch {
+          cancellationParentMatches = false;
+        }
+        if (
+          current.state !== record.expectedState ||
+          revision !== record.eventRevision ||
+          this.#browserActionSubjectDigest(current, record.kind) !== record.subjectDigest ||
+          !cancellationParentMatches
+        ) {
+          return this.#refusePreparedBrowserActionRecord(actionId, "STALE_ACTION");
+        }
+        const admissionEventSequence = this.#appendEvent(record.runId, "browser.action.admitted", {
+          browserActionId: record.actionId,
+          kind: record.kind,
+          actionDigest: record.actionDigest,
+        });
+        const updatedAt = this.#now();
+        const result = this.#database
+          .prepare(
+            `UPDATE browser_action_requests
+             SET status = 'admitted', admission_event_sequence = ?, updated_at = ?
+             WHERE action_id = ? AND status = 'prepared'`,
+          )
+          .run(admissionEventSequence, updatedAt, actionId);
+        invariant(
+          result.changes === 1,
+          "CONCURRENT_BROWSER_ACTION_UPDATE",
+          "Browser action changed during admission",
+        );
+        const admitted = this.getBrowserAction(actionId);
+        invariant(
+          admitted.status === "admitted",
+          "DATABASE_ERROR",
+          "Browser action admission did not persist",
+        );
+        return admitted;
+      },
+    );
+    return runBrowserActionImmediate(transaction);
+  }
+
+  refusePreparedBrowserAction(actionId: string, errorCode: string): BrowserActionSettledRecord {
+    const transaction = this.#database.transaction(() =>
+      this.#refusePreparedBrowserActionRecord(actionId, errorCode),
+    );
+    return runBrowserActionImmediate(transaction);
+  }
+
+  settleAdmittedBrowserAction(
+    actionId: string,
+    settlement: BrowserActionSettlement,
+  ): BrowserActionSettledRecord {
+    const transaction = this.#database.transaction((): BrowserActionSettledRecord => {
+      const record = this.getBrowserAction(actionId);
+      if (record.status === "settled") {
+        invariant(
+          record.outcome === settlement.outcome &&
+            record.admissionEventSequence === settlement.admissionEventSequence &&
+            record.domainEventSequence === settlement.domainEventSequence &&
+            record.domainOperationId === settlement.domainOperationId &&
+            record.errorCode === settlement.errorCode,
+          "INVALID_BROWSER_ACTION_TRANSITION",
+          "Browser action is already settled differently",
+        );
+        return record;
+      }
+      invariant(
+        record.status === "admitted",
+        "INVALID_BROWSER_ACTION_TRANSITION",
+        "Browser action must be admitted before this settlement",
+      );
+      assertBrowserActionSettlement("admitted", settlement);
+      invariant(
+        settlement.admissionEventSequence === record.admissionEventSequence,
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        "Settlement admission event does not match the durable action",
+      );
+      this.#assertBrowserActionAnchors(record, settlement);
+      const updatedAt = this.#now();
+      const result = this.#database
+        .prepare(
+          `UPDATE browser_action_requests
+           SET status = 'settled', outcome = ?, domain_event_sequence = ?,
+               domain_operation_id = ?, error_code = ?, updated_at = ?
+           WHERE action_id = ? AND status = 'admitted'`,
+        )
+        .run(
+          settlement.outcome,
+          settlement.domainEventSequence,
+          settlement.domainOperationId,
+          settlement.errorCode,
+          updatedAt,
+          actionId,
+        );
+      invariant(
+        result.changes === 1,
+        "CONCURRENT_BROWSER_ACTION_UPDATE",
+        "Browser action changed during settlement",
+      );
+      const settled = this.getBrowserAction(actionId);
+      invariant(
+        settled.status === "settled",
+        "DATABASE_ERROR",
+        "Browser settlement did not persist",
+      );
+      return settled;
+    });
+    return runBrowserActionImmediate(transaction);
+  }
+
+  /**
+   * Prepared rows prove that no domain action was admitted, so startup may
+   * refuse them without replaying work. Admitted rows deliberately remain
+   * untouched here: settling one requires the exact ADR 0029 terminal-boundary
+   * reconciliation that the guarded action runtime will own.
+   */
+  settleOrphanedPreparedBrowserActions(runId: string): readonly BrowserActionSettledRecord[] {
+    const transaction = this.#database.transaction((): readonly BrowserActionSettledRecord[] => {
+      const prepared = this.listActiveBrowserActions(runId).filter(
+        (record): record is BrowserActionPreparedRecord => record.status === "prepared",
+      );
+      return prepared.map((record) =>
+        this.refusePreparedBrowserAction(record.actionId, "ACTION_NOT_ADMITTED"),
+      );
+    });
+    return runBrowserActionImmediate(transaction);
   }
 
   addRepository(input: {
@@ -535,34 +1654,40 @@ export class IcarusStore {
   }
 
   getRepository(id: string): RepositoryRecord {
-    const value = row(
-      this.#database.prepare("SELECT * FROM repositories WHERE id = ?").get(id),
-      "repository",
-    );
-    return {
-      id: text(value.id, "repository.id"),
-      name: text(value.name, "repository.name"),
-      path: text(value.path, "repository.path"),
-      device: numberValue(value.device, "repository.device"),
-      inode: numberValue(value.inode, "repository.inode"),
-      createdAt: text(value.created_at, "repository.created_at"),
-    };
+    const result = this.#database
+      .prepare(`SELECT ${BOUNDED_REPOSITORY_COLUMNS} FROM repositories AS r WHERE r.id = ?`)
+      .get(id);
+    invariant(result !== undefined, "NOT_FOUND", "Repository was not found");
+    return boundedRepositoryRow(row(result, "repository"));
   }
 
   listRepositories(): RepositoryRecord[] {
     return (
       this.#database
-        .prepare("SELECT id FROM repositories ORDER BY created_at, id")
+        .prepare(
+          `SELECT CASE WHEN typeof(id) = 'text' AND octet_length(id) <= 64 THEN id END AS id
+           FROM repositories ORDER BY created_at, id`,
+        )
         .all() as unknown[]
     ).map((value) => this.getRepository(text(row(value, "repository list").id, "repository.id")));
   }
 
   getRepositoryByName(name: string): RepositoryRecord {
-    const value = row(
-      this.#database.prepare("SELECT id FROM repositories WHERE name = ?").get(name),
-      "repository",
-    );
-    return this.getRepository(text(value.id, "repository.id"));
+    const repository = this.findRepositoryByName(name);
+    invariant(repository !== null, "NOT_FOUND", "Repository was not found");
+    return repository;
+  }
+
+  findRepositoryByName(name: string): RepositoryRecord | null {
+    const value = this.#database
+      .prepare(
+        `SELECT CASE WHEN typeof(id) = 'text' AND octet_length(id) <= 64 THEN id END AS id
+         FROM repositories WHERE name = ?`,
+      )
+      .get(name);
+    return value === undefined
+      ? null
+      : this.getRepository(text(row(value, "repository").id, "repository.id"));
   }
 
   addProject(input: {
@@ -576,6 +1701,16 @@ export class IcarusStore {
     assertCheckProfiles(input.checks);
     assertSandboxProfile(input.sandbox);
     assertSunCeiling(input.ceiling);
+    const checksJson = json(input.checks);
+    const sandboxJson = json(input.sandbox);
+    const ceilingJson = json(input.ceiling);
+    invariant(
+      Buffer.byteLength(checksJson, "utf8") <= WORKSPACE_PROJECT_CHECKS_MAX_BYTES &&
+        Buffer.byteLength(sandboxJson, "utf8") <= WORKSPACE_PROJECT_PROFILE_MAX_BYTES &&
+        Buffer.byteLength(ceilingJson, "utf8") <= WORKSPACE_PROJECT_PROFILE_MAX_BYTES,
+      "PROJECT_CONFIGURATION_TOO_LARGE",
+      "Project configuration exceeds the persisted workspace byte limits",
+    );
     this.getRepository(input.repositoryId);
     const record: ProjectRecord = {
       id: this.#id(),
@@ -598,9 +1733,9 @@ export class IcarusStore {
         record.name,
         record.repositoryId,
         record.baseRef,
-        json(record.checks),
-        json(record.sandbox),
-        json(record.ceiling),
+        checksJson,
+        sandboxJson,
+        ceilingJson,
         record.createdAt,
       );
     return record;
@@ -636,39 +1771,134 @@ export class IcarusStore {
   }
 
   getProject(id: string): ProjectRecord {
-    const result = this.#database.prepare("SELECT * FROM projects WHERE id = ?").get(id);
+    const result = this.#database
+      .prepare(`SELECT ${BOUNDED_PROJECT_COLUMNS} FROM projects AS p WHERE p.id = ?`)
+      .get(id);
     invariant(result !== undefined, "NOT_FOUND", "Project was not found");
-    const value = row(result, "project");
-    const checks = parseJson<CheckProfile[]>(value.checks_json, "project.checks_json");
-    const sandbox = parseJson<SandboxProfile>(value.sandbox_json, "project.sandbox_json");
-    const ceiling = parseJson<SunCeiling>(value.ceiling_json, "project.ceiling_json");
-    assertCheckProfiles(checks);
-    assertSandboxProfile(sandbox);
-    assertSunCeiling(ceiling);
-    return {
-      id: text(value.id, "project.id"),
-      name: text(value.name, "project.name"),
-      repositoryId: text(value.repository_id, "project.repository_id"),
-      baseRef: text(value.base_ref, "project.base_ref"),
-      checks,
-      sandbox,
-      ceiling,
-      createdAt: text(value.created_at, "project.created_at"),
-    };
+    return boundedProjectRow(row(result, "project"), true);
   }
 
   listProjects(): ProjectRecord[] {
     return (
-      this.#database.prepare("SELECT id FROM projects ORDER BY created_at, id").all() as unknown[]
+      this.#database
+        .prepare(
+          `SELECT CASE WHEN typeof(id) = 'text' AND octet_length(id) <= 64 THEN id END AS id
+           FROM projects ORDER BY created_at, id`,
+        )
+        .all() as unknown[]
     ).map((value) => this.getProject(text(row(value, "project list").id, "project.id")));
   }
 
   getProjectByName(name: string): ProjectRecord {
-    const value = row(
-      this.#database.prepare("SELECT id FROM projects WHERE name = ?").get(name),
-      "project",
+    const project = this.findProjectByName(name);
+    invariant(project !== null, "NOT_FOUND", "Project was not found");
+    return project;
+  }
+
+  findProjectByName(name: string): ProjectRecord | null {
+    const value = this.#database
+      .prepare(
+        `SELECT CASE WHEN typeof(id) = 'text' AND octet_length(id) <= 64 THEN id END AS id
+         FROM projects WHERE name = ?`,
+      )
+      .get(name);
+    return value === undefined
+      ? null
+      : this.getProject(text(row(value, "project").id, "project.id"));
+  }
+
+  openWorkspaceProjectPage(): WorkspaceProjectPage {
+    return this.#workspaceProjectPage(null);
+  }
+
+  listWorkspaceProjectPage(before: number, snapshot: number): WorkspaceProjectPage {
+    invariant(
+      Number.isSafeInteger(before) && before > 0,
+      "INVALID_PROJECT_CURSOR",
+      "Workspace project cursor must be a positive safe integer",
     );
-    return this.getProject(text(value.id, "project.id"));
+    invariant(
+      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_WORKSPACE_SNAPSHOT_MAX,
+      "INVALID_PROJECT_CURSOR",
+      "Workspace project snapshot must be a nonnegative safe integer",
+    );
+    return this.#workspaceProjectPage({ before, snapshot });
+  }
+
+  #workspaceProjectPage(
+    requested: { readonly before: number; readonly snapshot: number } | null,
+  ): WorkspaceProjectPage {
+    const transaction = this.#database.transaction((): WorkspaceProjectPage => {
+      const maximum = sqliteMaximumRowid(
+        row(
+          this.#database
+            .prepare("SELECT CAST(COALESCE(MAX(rowid), 0) AS TEXT) AS snapshot FROM projects")
+            .get(),
+          "project snapshot",
+        ).snapshot,
+        "project snapshot",
+      );
+      let before: number;
+      let snapshot: number;
+      if (requested === null) {
+        invariant(
+          maximum <= BigInt(SAFE_WORKSPACE_SNAPSHOT_MAX),
+          "DATABASE_ERROR",
+          "Workspace project snapshot is unsafe",
+        );
+        snapshot = Number(maximum);
+        before = snapshot + 1;
+      } else {
+        before = requested.before;
+        snapshot = requested.snapshot;
+        invariant(
+          BigInt(snapshot) <= maximum,
+          "INVALID_PROJECT_CURSOR",
+          "Workspace project snapshot is ahead of persisted history",
+        );
+        if (snapshot > 0) {
+          invariant(
+            this.#database.prepare("SELECT 1 FROM projects WHERE rowid = ?").get(snapshot) !==
+              undefined,
+            "INVALID_PROJECT_CURSOR",
+            "Workspace project snapshot anchor is missing",
+          );
+        }
+        const pageOneBefore = snapshot + 1;
+        if (before !== pageOneBefore) {
+          invariant(
+            before <= snapshot &&
+              this.#database.prepare("SELECT 1 FROM projects WHERE rowid = ?").get(before) !==
+                undefined,
+            "INVALID_PROJECT_CURSOR",
+            "Workspace project cursor anchor is missing",
+          );
+        }
+      }
+      const rows = this.#database
+        .prepare(
+          `SELECT CAST(p.rowid AS TEXT) AS cursor,
+                  ${BOUNDED_PROJECT_COLUMNS},
+                  ${BOUNDED_REPOSITORY_COLUMNS}
+           FROM projects AS p
+           LEFT JOIN repositories AS r ON r.id = p.repository_id
+           WHERE p.rowid < ? AND p.rowid <= ?
+           ORDER BY p.rowid DESC
+           LIMIT 13`,
+        )
+        .all(before, snapshot) as unknown[];
+      const entries = rows.map((entry) => workspaceProjectEntryRow(entry, before, snapshot));
+      const hasMore = entries.length > WORKSPACE_PROJECT_PAGE_LIMIT;
+      const retained = entries.slice(0, WORKSPACE_PROJECT_PAGE_LIMIT);
+      return {
+        before,
+        snapshot,
+        nextBefore: retained.at(-1)?.cursor ?? before,
+        hasMore,
+        projects: retained.map((entry) => entry.entry),
+      };
+    });
+    return transaction();
   }
 
   createRun(input: NewRunInput): RunRecord {
@@ -680,10 +1910,22 @@ export class IcarusStore {
       "Run ID is invalid",
     );
     const now = this.#now();
+    const targets = [...new Set(input.targets)].sort();
+    const anchor = input.targets[0];
+    invariant(
+      anchor !== undefined && targets.length === input.targets.length,
+      "INVALID_TARGET_SELECTION",
+      "Run target selection must be a non-empty set of unique paths",
+    );
+    invariant(
+      targets.length <= project.ceiling.maxFilesChanged,
+      "FILE_BUDGET_EXCEEDED",
+      "Run selects more targets than the ceiling permits",
+    );
     const emptyContext: ContextManifest = {
       auditPolicyVersion: CONTEXT_AUDIT_POLICY_VERSION,
       baseCommit: "",
-      target: input.target,
+      targets,
       repositoryMap: [],
       entries: [],
       totalBytes: 0,
@@ -701,7 +1943,7 @@ export class IcarusStore {
           id,
           input.projectId,
           input.task,
-          input.target,
+          anchor,
           json(input.provider),
           "",
           json(emptyContext),
@@ -712,7 +1954,7 @@ export class IcarusStore {
         );
       this.#appendEvent(id, "run.created", {
         state: "preparing",
-        target: input.target,
+        target: anchor,
       });
     });
     transaction();
@@ -767,7 +2009,9 @@ export class IcarusStore {
       invariant(current.state === "preparing", "INVALID_STATE", "Run is not being prepared");
       invariant(current.baseCommit.length > 0, "MISSING_BASE", "Run base is not pinned");
       invariant(
-        context.baseCommit === current.baseCommit && context.target === current.target,
+        context.baseCommit === current.baseCommit &&
+          context.targets.length === current.context.targets.length &&
+          context.targets.every((target, index) => target === current.context.targets[index]),
         "CONTEXT_MISMATCH",
         "Context does not match the prepared run",
       );
@@ -821,9 +2065,9 @@ export class IcarusStore {
       context: parseJson<ContextManifest>(value.context_json, "run.context_json"),
       contextArtifactPath: text(value.context_artifact_path, "run.context_artifact_path"),
       contextSha256: text(value.context_sha256, "run.context_sha256"),
-      plan: nullableJson<PlanProposal>(value.plan_json, "run.plan_json"),
+      plan: decodeNullablePlan(value.plan_json, "run.plan_json"),
       planSha256: nullableText(value.plan_sha256, "run.plan_sha256"),
-      edit: nullableJson<EditProposal>(value.edit_json, "run.edit_json"),
+      patchSet: this.#readPatchSet(id, value),
       cachePath: nullableText(value.cache_path, "run.cache_path"),
       worktreePath: nullableText(value.worktree_path, "run.worktree_path"),
       baselineBase64: nullableText(value.baseline_base64, "run.baseline_base64"),
@@ -873,7 +2117,7 @@ export class IcarusStore {
       "Workspace run cursor must be a positive safe integer",
     );
     invariant(
-      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_RUN_SNAPSHOT_MAX,
+      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_WORKSPACE_SNAPSHOT_MAX,
       "INVALID_RUN_CURSOR",
       "Workspace run snapshot must be a nonnegative safe integer",
     );
@@ -891,12 +2135,13 @@ export class IcarusStore {
             .get(),
           "run snapshot",
         ).snapshot,
+        "run snapshot",
       );
       let before: number;
       let snapshot: number;
       if (requested === null) {
         invariant(
-          maximum <= BigInt(SAFE_RUN_SNAPSHOT_MAX),
+          maximum <= BigInt(SAFE_WORKSPACE_SNAPSHOT_MAX),
           "DATABASE_ERROR",
           "Workspace run snapshot is unsafe",
         );
@@ -984,10 +2229,36 @@ export class IcarusStore {
     return this.getRun(runId);
   }
 
-  recordPlanAndAwaitApproval(runId: string, plan: PlanProposal, planSha256: string): RunRecord {
+  /**
+   * `readableManifest` is the resolved enumeration backing a `read.manifest`
+   * grant (ADR 0026). The two must agree: a plan that requests the capability
+   * without a resolved manifest would put a glob in front of the operator
+   * instead of a file list, and a manifest with no grant asking for it would
+   * bind authority nobody requested.
+   */
+  recordPlanAndAwaitApproval(
+    runId: string,
+    plan: PlanProposal,
+    planSha256: string,
+    readableManifest: ReadableManifest | null = null,
+  ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
       invariant(current.state === "planned", "INVALID_STATE", "Run is not ready to store a plan");
+      const requestsRead = plan.grants.some((grant) => grant.kind === "read.manifest");
+      invariant(
+        requestsRead === (readableManifest !== null),
+        "READ_MANIFEST_UNRESOLVED",
+        "A read.manifest grant requires exactly one resolved readable manifest",
+      );
+      if (readableManifest !== null) {
+        assertReadableManifest(readableManifest);
+        invariant(
+          readableManifest.baseCommit === current.baseCommit,
+          "READ_MANIFEST_UNRESOLVED",
+          "Readable manifest was resolved against a different base commit",
+        );
+      }
       if (current.provider.capabilities.locality === "remote") {
         invariant(
           this.#hasApproval(runId, "egress", current.contextSha256, "approve"),
@@ -1001,12 +2272,13 @@ export class IcarusStore {
           task: current.task,
           baseCommit: current.baseCommit,
           contextSha256: current.contextSha256,
-          target: current.target,
+          targets: current.context.targets,
           provider: current.provider,
           checks: project.checks,
           sandbox: project.sandbox,
           ceiling: project.ceiling,
           plan,
+          readableManifest,
         }) === planSha256,
         "PLAN_DIGEST_MISMATCH",
         "Plan approval digest does not bind the complete persisted manifest",
@@ -1019,14 +2291,70 @@ export class IcarusStore {
            version = version + 1, updated_at = ? WHERE id = ? AND state = 'planned'`,
         )
         .run(json(plan), planSha256, now, runId);
+      if (readableManifest !== null) {
+        // Persisted in the same transaction that records the plan, so a run
+        // can never reach `awaiting_approval` carrying a grant whose manifest
+        // is absent — the state the store refuses to accept on the way in must
+        // also be unreachable by a crash on the way out.
+        this.#database
+          .prepare(
+            `INSERT INTO readable_manifests
+              (run_id, base_commit, manifest_sha256, entries_json, created_at)
+             VALUES (?, ?, ?, ?, ?)`,
+          )
+          .run(
+            runId,
+            readableManifest.baseCommit,
+            readableManifestDigest(readableManifest),
+            json(readableManifest.entries),
+            now,
+          );
+      }
       this.#appendEvent(runId, "plan.created", {
         from: "planned",
         to: "awaiting_approval",
         planSha256,
+        readableFiles: readableManifest === null ? 0 : readableManifest.entries.length,
       });
     });
     transaction();
     return this.getRun(runId);
+  }
+
+  /**
+   * The enumerated readable set this run's approval bound, or null when the
+   * run was approved with no read grant (ADR 0026).
+   *
+   * The stored digest is recomputed from the stored entries rather than
+   * trusted, so a row edited underneath Icarus fails closed instead of
+   * silently widening what a read may return. Callers still hold the returned
+   * manifest to `assertReadableBytes`; this only guarantees the manifest is
+   * the one that was approved.
+   */
+  readableManifest(runId: string): ReadableManifest | null {
+    const stored = this.#database
+      .prepare(
+        `SELECT base_commit, manifest_sha256, entries_json FROM readable_manifests
+         WHERE run_id = ?`,
+      )
+      .get(runId);
+    if (stored === undefined) return null;
+    const value = row(stored, "readable manifest");
+    const manifest: ReadableManifest = {
+      baseCommit: text(value.base_commit, "readable_manifests.base_commit"),
+      entries: parseJson<readonly ReadableManifestEntry[]>(
+        value.entries_json,
+        "readable_manifests.entries_json",
+      ),
+    };
+    invariant(
+      readableManifestDigest(manifest) ===
+        text(value.manifest_sha256, "readable_manifests.manifest_sha256"),
+      "READ_MANIFEST_DRIFT",
+      "Persisted readable manifest does not match its recorded digest",
+    );
+    assertReadableManifest(manifest);
+    return manifest;
   }
 
   preflightEgressApproval(runId: string, digest: string, actor: string): RunRecord {
@@ -1051,6 +2379,9 @@ export class IcarusStore {
     actor: string,
     decision: "approve" | "reject",
   ): RunRecord {
+    if (decision === "approve") {
+      this.#assertSessionCompletedForApproval(runId);
+    }
     return this.#validateApprovalRequest(runId, reviewApprovalTransition(digest, actor, decision));
   }
 
@@ -1060,7 +2391,11 @@ export class IcarusStore {
     actor: string,
     decision: "approve" | "reject",
   ): RunRecord {
-    return this.#approveAndTransition(runId, reviewApprovalTransition(digest, actor, decision));
+    return this.#approveAndTransition(
+      runId,
+      reviewApprovalTransition(digest, actor, decision),
+      decision === "approve" ? () => this.#assertSessionCompletedForApproval(runId) : undefined,
+    );
   }
 
   approveRollback(runId: string, digest: string, actor: string): RunRecord {
@@ -1133,26 +2468,16 @@ export class IcarusStore {
   listApprovals(runId: string): ApprovalRecord[] {
     return (
       this.#database
-        .prepare("SELECT * FROM approvals WHERE run_id = ? ORDER BY created_at, id")
+        .prepare("SELECT * FROM approvals WHERE run_id = ? ORDER BY rowid")
         .all(runId) as unknown[]
-    ).map((entry) => {
-      const value = row(entry, "approval");
-      return {
-        runId: text(value.run_id, "approval.run_id"),
-        kind: text(value.kind, "approval.kind") as ApprovalRecord["kind"],
-        digest: text(value.digest, "approval.digest"),
-        actor: text(value.actor, "approval.actor"),
-        decision: text(value.decision, "approval.decision") as ApprovalRecord["decision"],
-        createdAt: text(value.created_at, "approval.created_at"),
-      };
-    });
+    ).map((entry) => approvalRecordRow(entry, runId));
   }
 
   recordWorkspace(
     runId: string,
     cachePath: string,
     worktreePath: string,
-    baselineBase64: string,
+    baselineBase64: string | null,
   ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
@@ -1170,109 +2495,759 @@ export class IcarusStore {
     return this.getRun(runId);
   }
 
-  recordEditIntent(runId: string, edit: EditProposal, approvedBase64: string): RunRecord {
+  /**
+   * Persists the proposed change and every affected path's baseline and
+   * approved bytes in one transaction, before any worktree byte is written, so
+   * an interrupted application is always recoverable from durable state.
+   */
+  recordPatchSetIntent(
+    runId: string,
+    patchSet: PatchSet,
+    files: readonly CheckpointFile[],
+  ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
       invariant(current.state === "running", "INVALID_STATE", "Run is not executing");
+      invariant(
+        current.plan !== null,
+        "MISSING_PLAN",
+        "Patch set intent requires an approved plan",
+      );
+      const approved = new Set(current.plan.targets);
+      invariant(
+        patchSet.edits.every((edit) => approved.has(edit.path)),
+        "TARGET_MISMATCH",
+        "Patch set changes a path outside the approved targets",
+      );
+      const project = this.getProject(current.projectId);
+      invariant(
+        patchSet.edits.length <= project.ceiling.maxFilesChanged,
+        "FILE_BUDGET_EXCEEDED",
+        "Patch set changes more files than the ceiling permits",
+      );
+      const editPaths = patchSet.edits.map((edit) => edit.path).sort();
+      const filePaths = files.map((file) => file.path).sort();
+      invariant(
+        editPaths.length === filePaths.length &&
+          editPaths.every((editPath, index) => editPath === filePaths[index]),
+        "CHECKPOINT_MISMATCH",
+        "Checkpoint files do not match the patch set paths",
+      );
+
+      // A patch set is immutable within its revision. A repair iteration
+      // (ADR 0024) supersedes it, and the superseded digest is appended to the
+      // event stream before the replacement is written so the history stays in
+      // the append-only log rather than in a second table.
+      const existing = this.#database
+        .prepare("SELECT patch_set_json FROM patch_sets WHERE run_id = ?")
+        .get(runId);
+      const supersedes = existing === undefined ? null : current.patchSet;
+      invariant(
+        existing === undefined || this.#supersessionIsAuthorized(current),
+        "IMMUTABLE_ARTIFACT_CONFLICT",
+        "A patch set is already recorded for this run",
+      );
+      const now = this.#now();
+      if (supersedes !== null) {
+        this.#appendEvent(runId, "patch_set.superseded", {
+          digest: digestJson(asJsonValue(supersedes)),
+          paths: supersedes.edits.map((edit) => edit.path).sort(),
+        });
+        this.#database.prepare("DELETE FROM patch_sets WHERE run_id = ?").run(runId);
+        this.#database.prepare("DELETE FROM checkpoint_files WHERE run_id = ?").run(runId);
+        this.#database.prepare("DELETE FROM checkpoints WHERE run_id = ?").run(runId);
+      }
+      this.#database
+        .prepare("INSERT INTO patch_sets (run_id, patch_set_json, created_at) VALUES (?, ?, ?)")
+        .run(runId, json(patchSet), now);
+      const insertFile = this.#database.prepare(
+        `INSERT INTO checkpoint_files (run_id, path, op, baseline_base64, approved_base64)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
+      for (const file of files) {
+        insertFile.run(runId, file.path, file.op, file.baselineBase64, file.approvedBase64);
+      }
       const result = this.#database
         .prepare(
-          `UPDATE runs SET edit_json = ?, approved_base64 = ?, version = version + 1,
-           updated_at = ? WHERE id = ? AND state = 'running'`,
+          `UPDATE runs SET diff = CASE WHEN ? THEN NULL ELSE diff END,
+           verification_json = CASE WHEN ? THEN NULL ELSE verification_json END,
+           version = version + 1, updated_at = ?
+           WHERE id = ? AND state = 'running'`,
         )
-        .run(json(edit), approvedBase64, this.#now(), runId);
+        .run(supersedes === null ? 0 : 1, supersedes === null ? 0 : 1, now, runId);
       invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
-      this.#appendEvent(runId, "edit.intent_recorded", {
-        path: edit.path,
-        expectedPreimageSha256: edit.expectedPreimageSha256,
+      this.#appendEvent(runId, "patch_set.intent_recorded", {
+        paths: editPaths,
+        operations: patchSet.edits.map((edit) => edit.op),
       });
     });
     transaction();
     return this.getRun(runId);
   }
 
+  /**
+   * Repair attempts already spent, counted from the durable operation ledger
+   * (ADR 0024) so the count survives a crash and cannot drift from the work
+   * actually charged.
+   */
+  countSessionIterations(runId: string): number {
+    const value = row(
+      this.#database
+        .prepare(
+          `SELECT COUNT(*) AS used FROM operations
+           WHERE run_id = ? AND kind = '${SESSION_ITERATION_OPERATION_KIND}'`,
+        )
+        .get(runId),
+      "repair iteration count",
+    );
+    return numberValue(value.used, "repair.used");
+  }
+
+  /** Remaining approved repair attempts for a run (ADR 0024). */
+  remainingIterationBudget(runId: string): number {
+    return this.#iterationBudgetRemaining(this.getRun(runId));
+  }
+  /**
+   * True only when a completed failing verification is the latest event that
+   * established the verifying state. This lets crash recovery enter the
+   * already-earned repair session without rerunning checks, while a later
+   * restore still forces fresh verification.
+   */
+  sessionRepairReady(runId: string): boolean {
+    const run = this.getRun(runId);
+    if (
+      run.state !== "verifying" ||
+      run.verification?.outcome !== "failed" ||
+      this.#iterationBudgetRemaining(run) === 0
+    ) {
+      return false;
+    }
+    const latest = this.#database
+      .prepare(
+        `SELECT type, payload_json FROM run_events
+         WHERE run_id = ?
+           AND type IN ('verification.completed', 'restore.completed')
+         ORDER BY sequence DESC LIMIT 1`,
+      )
+      .get(runId);
+    if (latest === undefined) return false;
+    const event = row(latest, "session repair boundary");
+    if (text(event.type, "run_events.type") !== "verification.completed") return false;
+    const payload = parseJson<unknown>(event.payload_json, "run_events.payload_json");
+    invariant(
+      typeof payload === "object" && payload !== null && !Array.isArray(payload),
+      "DATABASE_ERROR",
+      "Session repair boundary payload is invalid",
+    );
+    const boundary = payload as Record<string, unknown>;
+    return boundary.to === "verifying" && boundary.outcome === "failed";
+  }
+
+  #iterationBudgetRemaining(run: RunRecord): number {
+    if (run.plan === null) return 0;
+    const granted = Math.min(run.plan.iterationCeiling, MAX_SESSION_ITERATIONS);
+    return Math.max(0, granted - this.countSessionIterations(run.id));
+  }
+
+  /**
+   * A recorded patch set may be replaced only by a repair iteration that has
+   * already been charged (ADR 0024). The grant is spent by the revise call
+   * itself, so the replacement is authorized by that charge rather than by the
+   * grant still remaining after it — otherwise a grant of one could never
+   * record the revision it paid for. Exactly one supersession per charged
+   * iteration, and never more iterations than the approved plan granted.
+   */
+  #supersessionIsAuthorized(run: RunRecord): boolean {
+    if (run.plan === null) return false;
+    const granted = Math.min(run.plan.iterationCeiling, MAX_SESSION_ITERATIONS);
+    const charged = this.countSessionIterations(run.id);
+    if (charged < 1 || charged > granted) return false;
+    return this.#countEvents(run.id, "patch_set.superseded") < charged;
+  }
+
+  #countEvents(runId: string, type: string): number {
+    const value = row(
+      this.#database
+        .prepare("SELECT COUNT(*) AS total FROM run_events WHERE run_id = ? AND type = ?")
+        .get(runId, type),
+      "run event count",
+    );
+    return numberValue(value.total, "run_events.total");
+  }
+
+  /**
+   * Tool-grant spend is derived from durable operation admission, including
+   * refused, failed, and interrupted calls. Counting started rows means a
+   * process crash cannot resurrect capability budget.
+   */
+  countOperationsByKind(runId: string, kind: string): number {
+    invariant(
+      kind.length > 0 && kind.length <= 128 && !/[\r\n\0]/.test(kind),
+      "INVALID_OPERATION_KIND",
+      "Operation kind is invalid",
+    );
+    this.getRun(runId);
+    const value = row(
+      this.#database
+        .prepare("SELECT COUNT(*) AS total FROM operations WHERE run_id = ? AND kind = ?")
+        .get(runId, kind),
+      "operation kind count",
+    );
+    return numberValue(value.total, "operations.total");
+  }
+
+  /**
+   * Appends an iteration boundary only after its complete emitted batch has
+   * settled. Provider/tool operations remain the source of spend; this event
+   * is resumable evidence, not another counter.
+   */
+  recordSessionIterationBoundary(runId: string, iterations: number): RunRecord {
+    invariant(
+      Number.isSafeInteger(iterations) && iterations > 0,
+      "INVALID_SESSION_ITERATION",
+      "Session iteration boundary is invalid",
+    );
+    const transaction = this.#database.transaction(() => {
+      const current = this.getRun(runId);
+      invariant(
+        current.state === "running" || current.state === "awaiting_review",
+        "INVALID_STATE",
+        "Session iteration is not active",
+      );
+      invariant(
+        iterations === this.countSessionIterations(runId),
+        "INVALID_SESSION_ITERATION",
+        "Session iteration boundary does not match durable provider admission",
+      );
+      const latest = this.#latestSessionIterationBoundary(runId);
+      invariant(
+        latest === null || latest < iterations,
+        "INVALID_SESSION_ITERATION",
+        "Session iteration boundary is duplicate or nonmonotonic",
+      );
+      this.#appendEvent(runId, "session.iteration_completed", { iterations });
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+  /**
+   * Lands a failed verification directly in non-approvable review when a
+   * session cannot retain the ordinary reconciliation margin at entry.
+   */
+  recordSessionAdmissionExhausted(runId: string): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const current = this.getRun(runId);
+      invariant(current.state === "verifying", "INVALID_STATE", "Run is not verifying");
+      invariant(
+        current.verification !== null && current.verification.outcome === "failed",
+        "VERIFICATION_NOT_PASSED",
+        "Session admission exhaustion requires failing verification",
+      );
+      invariant(
+        this.#iterationBudgetRemaining(current) > 0,
+        "ITERATION_BUDGET_EXHAUSTED",
+        "Session admission has no approved iteration remaining",
+      );
+      assertTransition(current.state, "awaiting_review");
+      const now = this.#now();
+      const result = this.#database
+        .prepare(
+          `UPDATE runs SET state = 'awaiting_review', version = version + 1, updated_at = ?
+           WHERE id = ? AND state = 'verifying'`,
+        )
+        .run(now, runId);
+      invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+      this.#appendEvent(runId, "session.exhausted", {
+        iterations: this.countSessionIterations(runId),
+        reason: "recovery_margin",
+      });
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
+  /**
+   * Lands a terminal agent-session disposition. A human question or exhausted
+   * budget is intentionally non-approvable; review approval checks the latest
+   * disposition before accepting otherwise-passing evidence.
+   */
+  recordSessionOutcome(
+    runId: string,
+    kind: "completed" | "awaiting_human" | "exhausted",
+    textValue: string | null,
+    iterations: number,
+  ): RunRecord {
+    this.#assertSessionOutcomeInput(kind, textValue, iterations);
+    const transaction = this.#database.transaction(() => {
+      this.#recordSessionOutcomeInTransaction(runId, kind, textValue, iterations);
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
+  #assertSessionOutcomeInput(
+    kind: "completed" | "awaiting_human" | "exhausted",
+    textValue: string | null,
+    iterations: number,
+  ): void {
+    invariant(
+      Number.isSafeInteger(iterations) && iterations >= 0,
+      "INVALID_SESSION_ITERATION",
+      "Session outcome iteration count is invalid",
+    );
+    invariant(
+      (kind === "exhausted" && textValue === null) ||
+        (kind !== "exhausted" &&
+          textValue !== null &&
+          textValue.trim().length > 0 &&
+          Buffer.byteLength(textValue, "utf8") <= 2_000 &&
+          !/[\r\0]/.test(textValue)),
+      "INVALID_SESSION_OUTCOME",
+      "Session outcome text is invalid",
+    );
+  }
+
+  #recordSessionOutcomeInTransaction(
+    runId: string,
+    kind: "completed" | "awaiting_human" | "exhausted",
+    textValue: string | null,
+    iterations: number,
+    operationId?: string,
+  ): void {
+    const current = this.getRun(runId);
+    invariant(current.state === "running", "INVALID_STATE", "Agent session is not running");
+    invariant(
+      iterations === this.countSessionIterations(runId),
+      "INVALID_SESSION_ITERATION",
+      "Session outcome does not match durable provider admission",
+    );
+    if (kind === "completed") {
+      invariant(
+        current.verification !== null &&
+          current.verification.outcome === "passed" &&
+          current.diff !== null,
+        "VERIFICATION_NOT_PASSED",
+        "Agent session cannot complete without current passing verification",
+      );
+      invariant(
+        this.getCheckpoint(runId).checkpointSha256 === current.verification.checkpointSha256,
+        "CHECKPOINT_MISMATCH",
+        "Agent session verification is not bound to the current checkpoint",
+      );
+    }
+    const now = this.#now();
+    const result = this.#database
+      .prepare(
+        `UPDATE runs SET state = 'awaiting_review', version = version + 1, updated_at = ?
+         WHERE id = ? AND state = 'running'`,
+      )
+      .run(now, runId);
+    invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+    const eventType =
+      kind === "completed"
+        ? "session.completed"
+        : kind === "awaiting_human"
+          ? "session.awaiting_human"
+          : "session.exhausted";
+    this.#appendEvent(runId, eventType, {
+      iterations,
+      ...(operationId === undefined ? {} : { operationId }),
+      ...(kind === "completed"
+        ? { summary: textValue as string }
+        : kind === "awaiting_human"
+          ? { question: textValue as string }
+          : {}),
+    });
+  }
+
+  #latestSessionIterationBoundary(runId: string): number | null {
+    const latest = this.#database
+      .prepare(
+        `SELECT payload_json FROM run_events
+         WHERE run_id = ? AND type = 'session.iteration_completed'
+         ORDER BY sequence DESC LIMIT 1`,
+      )
+      .get(runId);
+    if (latest === undefined) return null;
+    const payload = parseJson<unknown>(
+      row(latest, "session iteration boundary").payload_json,
+      "run_events.payload_json",
+    );
+    invariant(
+      typeof payload === "object" && payload !== null && !Array.isArray(payload),
+      "DATABASE_ERROR",
+      "Session iteration boundary payload is invalid",
+    );
+    const iterations = (payload as Record<string, unknown>).iterations;
+    invariant(
+      typeof iterations === "number" && Number.isSafeInteger(iterations) && iterations > 0,
+      "DATABASE_ERROR",
+      "Session iteration boundary count is invalid",
+    );
+    return iterations;
+  }
+
+  #assertSessionCompletedForApproval(runId: string): void {
+    const latest = this.#database
+      .prepare(
+        `SELECT sequence, type, payload_json FROM run_events
+         WHERE run_id = ?
+           AND type IN ('session.completed', 'session.awaiting_human', 'session.exhausted')
+         ORDER BY sequence DESC LIMIT 1`,
+      )
+      .get(runId);
+    if (latest === undefined) {
+      invariant(
+        this.countSessionIterations(runId) === 0,
+        "SESSION_NOT_COMPLETED",
+        "This agent session has no completed terminal disposition",
+      );
+      return;
+    }
+    const disposition = row(latest, "session disposition");
+    invariant(
+      text(disposition.type, "run_events.type") === "session.completed",
+      "SESSION_NOT_COMPLETED",
+      "This agent session paused or exhausted its budget and cannot be approved",
+    );
+    const sequence = numberValue(disposition.sequence, "run_events.sequence");
+    const payload = parseJson<unknown>(disposition.payload_json, "run_events.payload_json");
+    invariant(
+      typeof payload === "object" && payload !== null && !Array.isArray(payload),
+      "DATABASE_ERROR",
+      "Session completion payload is invalid",
+    );
+    const completion = payload as Record<string, unknown>;
+    invariant(
+      Number.isSafeInteger(completion.iterations) &&
+        (completion.iterations as number) > 0 &&
+        completion.iterations === this.countSessionIterations(runId) &&
+        typeof completion.operationId === "string" &&
+        completion.operationId.length > 0,
+      "SESSION_NOT_COMPLETED",
+      "Session completion is not bound to its durable provider iteration",
+    );
+    const operation = this.#database
+      .prepare("SELECT kind, status FROM operations WHERE id = ? AND run_id = ?")
+      .get(completion.operationId, runId);
+    invariant(
+      operation !== undefined &&
+        text(row(operation, "session completion operation").kind, "operations.kind") ===
+          SESSION_REPORT_DONE_OPERATION_KIND &&
+        text(row(operation, "session completion operation").status, "operations.status") ===
+          "succeeded",
+      "SESSION_NOT_COMPLETED",
+      "Session completion is not paired with a succeeded report_done operation",
+    );
+    const finished = this.#database
+      .prepare(
+        `SELECT type, payload_json FROM run_events
+         WHERE run_id = ? AND sequence = ?`,
+      )
+      .get(runId, sequence - 1);
+    const finishedPayload =
+      finished === undefined
+        ? null
+        : parseJson<unknown>(
+            row(finished, "session completion operation event").payload_json,
+            "run_events.payload_json",
+          );
+    invariant(
+      finished !== undefined &&
+        text(row(finished, "session completion operation event").type, "run_events.type") ===
+          "operation.finished" &&
+        typeof finishedPayload === "object" &&
+        finishedPayload !== null &&
+        !Array.isArray(finishedPayload) &&
+        (finishedPayload as Record<string, unknown>).operationId === completion.operationId &&
+        (finishedPayload as Record<string, unknown>).kind === SESSION_REPORT_DONE_OPERATION_KIND &&
+        (finishedPayload as Record<string, unknown>).outcome === "succeeded",
+      "SESSION_NOT_COMPLETED",
+      "Session completion was not atomically paired after report_done settlement",
+    );
+  }
+
+  /**
+   * Re-enters execution after a failed verification. Requires an approved plan
+   * carrying an unspent repair grant and a recorded failing verification; the
+   * generic transition path stays closed to this edge.
+   */
+  beginSessionIteration(runId: string): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const current = this.getRun(runId);
+      invariant(current.state === "verifying", "INVALID_STATE", "Run is not verifying");
+      invariant(current.plan !== null, "MISSING_PLAN", "Repair requires an approved plan");
+      invariant(
+        current.planSha256 !== null &&
+          this.#hasApproval(runId, "plan", current.planSha256, "approve"),
+        "MISSING_APPROVAL",
+        "Repair requires the exact approved plan",
+      );
+      invariant(
+        current.verification !== null && current.verification.outcome === "failed",
+        "VERIFICATION_NOT_PASSED",
+        "Repair requires a recorded failing verification",
+      );
+      const remaining = this.#iterationBudgetRemaining(current);
+      invariant(
+        remaining > 0,
+        "ITERATION_BUDGET_EXHAUSTED",
+        "The approved iteration budget is exhausted",
+      );
+      const project = this.getProject(current.projectId);
+      invariant(
+        current.usage.toolCalls + 1 <= project.ceiling.maxToolCalls,
+        "TOOL_BUDGET_EXCEEDED",
+        "Session entry requires one ordinary operation slot for recovery",
+      );
+      invariant(
+        current.usage.activeRuntimeMs + project.ceiling.commandTimeoutMs <=
+          project.ceiling.maxActiveRuntimeMs,
+        "RUNTIME_BUDGET_EXCEEDED",
+        "Session entry requires command runtime for recovery",
+      );
+      assertTransition(current.state, "running");
+      const now = this.#now();
+      const result = this.#database
+        .prepare(
+          `UPDATE runs SET state = 'running', resume_state = NULL, error_code = NULL,
+           error_message = NULL, version = version + 1, updated_at = ?
+           WHERE id = ? AND state = 'verifying'`,
+        )
+        .run(now, runId);
+      invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+      this.#appendEvent(runId, "repair.requested", {
+        from: "verifying",
+        to: "running",
+        remaining,
+      });
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
+  listCheckpointFiles(runId: string): CheckpointFile[] {
+    const rows = this.#database
+      .prepare(
+        `SELECT path, op, baseline_base64, approved_base64 FROM checkpoint_files
+         WHERE run_id = ? ORDER BY path ASC`,
+      )
+      .all(runId) as unknown[];
+    return rows.map((entry) => {
+      const value = row(entry, "checkpoint file");
+      const op = text(value.op, "checkpoint file.op");
+      invariant(
+        op === "modify" || op === "create" || op === "delete",
+        "DATABASE_ERROR",
+        "checkpoint file.op is invalid",
+      );
+      return {
+        path: assertRepositoryRelativePath(text(value.path, "checkpoint file.path")),
+        op,
+        baselineBase64: nullableText(value.baseline_base64, "checkpoint file.baseline_base64"),
+        approvedBase64: nullableText(value.approved_base64, "checkpoint file.approved_base64"),
+      };
+    });
+  }
+
+  #readPatchSet(runId: string, value: Row): PatchSet | null {
+    const stored = this.#database
+      .prepare("SELECT patch_set_json FROM patch_sets WHERE run_id = ?")
+      .get(runId);
+    if (stored !== undefined) {
+      return parseJson<PatchSet>(
+        row(stored, "patch set").patch_set_json,
+        "patch_sets.patch_set_json",
+      );
+    }
+    // Schema v1 rows are presented as the equivalent single modify edit rather
+    // than rewritten in place (ADR 0023).
+    const legacy = nullableJson<EditProposal>(value.edit_json, "run.edit_json");
+    if (legacy === null) return null;
+    return {
+      summary: legacy.rationale,
+      edits: [
+        {
+          op: "modify",
+          path: legacy.path,
+          expectedPreimageSha256: legacy.expectedPreimageSha256,
+          replacements: [{ findText: legacy.findText, replaceText: legacy.replaceText }],
+          rationale: legacy.rationale,
+        },
+      ],
+    };
+  }
+
+  /**
+   * Records a completed verification attempt. `nextState` is `awaiting_review`
+   * for a landing attempt, `verifying` for an initial failure an approved
+   * session will retry, and `running` for a tool-led session check. Either way
+   * the complete evidence and diff are appended to the event stream.
+   */
   recordVerificationAndAwaitReview(
     runId: string,
     diff: string,
     verification: VerificationEvidence,
+    nextState: "awaiting_review" | "verifying" | "running" = "awaiting_review",
   ): RunRecord {
     const transaction = this.#database.transaction(() => {
-      const current = this.getRun(runId);
-      invariant(current.state === "verifying", "INVALID_STATE", "Run is not verifying");
-      invariant(current.plan !== null, "MISSING_PLAN", "Run has no approved plan");
-      const project = this.getProject(current.projectId);
-      invariant(diff.length > 0, "EMPTY_DIFF", "Verification diff is empty");
-      invariant(
-        Buffer.byteLength(diff, "utf8") <= project.ceiling.maxDiffBytes,
-        "DIFF_BUDGET_EXCEEDED",
-        "Verification diff exceeds the byte ceiling",
-      );
-      invariant(
-        sha256(diff) === verification.diffSha256,
-        "VERIFICATION_DIGEST_MISMATCH",
-        "Verification digest does not match the persisted diff",
-      );
-      invariant(
-        verification.changedPaths.length === 1 && verification.changedPaths[0] === current.target,
-        "CHANGED_PATH_MISMATCH",
-        "Verification must contain exactly the approved target",
-      );
-      const expectedChecks = current.plan.checkIds.map((checkId) => {
-        const check = project.checks.find((candidate) => candidate.id === checkId);
-        invariant(
-          check !== undefined,
-          "CHECK_MISMATCH",
-          "Approved plan references an unknown check",
-        );
-        return check;
-      });
-      invariant(
-        verification.checks.length === expectedChecks.length &&
-          verification.checks.every(
-            (evidence, index) =>
-              evidence.checkId === expectedChecks[index]?.id &&
-              JSON.stringify(evidence.argv) === JSON.stringify(expectedChecks[index]?.argv) &&
-              Buffer.byteLength(evidence.stdout, "utf8") +
-                Buffer.byteLength(evidence.stderr, "utf8") <=
-                project.ceiling.maxCommandOutputBytes,
-          ),
-        "CHECK_EVIDENCE_MISMATCH",
-        "Verification evidence does not match the approved check profile",
-      );
-      const derivedOutcome = verification.checks.every((evidence) => evidence.outcome === "passed")
-        ? "passed"
-        : verification.checks.some((evidence) => evidence.outcome === "failed")
-          ? "failed"
-          : "unavailable";
-      invariant(
-        verification.outcome === derivedOutcome,
-        "VERIFICATION_OUTCOME_MISMATCH",
-        "Verification outcome does not match its check evidence",
-      );
-      invariant(
-        this.getCheckpoint(runId).checkpointSha256 === verification.checkpointSha256,
-        "CHECKPOINT_MISMATCH",
-        "Verification is not bound to the immutable checkpoint",
-      );
-      const now = this.#now();
-      this.#database
-        .prepare(
-          `UPDATE runs SET diff = ?, verification_json = ?, state = 'awaiting_review',
-           version = version + 1, updated_at = ? WHERE id = ? AND state = 'verifying'`,
-        )
-        .run(diff, json(verification), now, runId);
-      this.#appendEvent(runId, "verification.completed", {
-        from: "verifying",
-        to: "awaiting_review",
-        outcome: verification.outcome,
-        diffSha256: verification.diffSha256,
-        diff,
-        verification,
-      });
+      this.#recordVerificationInTransaction(runId, diff, verification, nextState);
     });
     transaction();
     return this.getRun(runId);
   }
 
+  #recordVerificationInTransaction(
+    runId: string,
+    diff: string,
+    verification: VerificationEvidence,
+    nextState: "awaiting_review" | "verifying" | "running",
+  ): void {
+    const current = this.getRun(runId);
+    invariant(
+      current.state === "verifying" || (current.state === "running" && nextState === "running"),
+      "INVALID_STATE",
+      "Run is not verifying",
+    );
+    invariant(current.plan !== null, "MISSING_PLAN", "Run has no approved plan");
+    const project = this.getProject(current.projectId);
+    invariant(diff.length > 0, "EMPTY_DIFF", "Verification diff is empty");
+    invariant(
+      Buffer.byteLength(diff, "utf8") <= project.ceiling.maxDiffBytes,
+      "DIFF_BUDGET_EXCEEDED",
+      "Verification diff exceeds the byte ceiling",
+    );
+    invariant(
+      sha256(diff) === verification.diffSha256,
+      "VERIFICATION_DIGEST_MISMATCH",
+      "Verification digest does not match the persisted diff",
+    );
+    invariant(
+      this.#changedPathsMatchPatchSet(current, verification.changedPaths),
+      "CHANGED_PATH_MISMATCH",
+      "Verification must contain exactly the patch-set paths",
+    );
+    const expectedChecks = current.plan.checkIds.map((checkId) => {
+      const check = project.checks.find((candidate) => candidate.id === checkId);
+      invariant(check !== undefined, "CHECK_MISMATCH", "Approved plan references an unknown check");
+      return check;
+    });
+    invariant(
+      verification.checks.length === expectedChecks.length &&
+        verification.checks.every(
+          (evidence, index) =>
+            evidence.checkId === expectedChecks[index]?.id &&
+            JSON.stringify(evidence.argv) === JSON.stringify(expectedChecks[index]?.argv) &&
+            Buffer.byteLength(evidence.stdout, "utf8") +
+              Buffer.byteLength(evidence.stderr, "utf8") <=
+              project.ceiling.maxCommandOutputBytes,
+        ),
+      "CHECK_EVIDENCE_MISMATCH",
+      "Verification evidence does not match the approved check profile",
+    );
+    const derivedOutcome = verification.checks.every((evidence) => evidence.outcome === "passed")
+      ? "passed"
+      : verification.checks.some((evidence) => evidence.outcome === "failed")
+        ? "failed"
+        : "unavailable";
+    invariant(
+      verification.outcome === derivedOutcome,
+      "VERIFICATION_OUTCOME_MISMATCH",
+      "Verification outcome does not match its check evidence",
+    );
+    invariant(
+      this.getCheckpoint(runId).checkpointSha256 === verification.checkpointSha256,
+      "CHECKPOINT_MISMATCH",
+      "Verification is not bound to the immutable checkpoint",
+    );
+    if (nextState === "verifying") {
+      invariant(
+        verification.outcome === "failed",
+        "VERIFICATION_OUTCOME_MISMATCH",
+        "Only a failing verification may be retained for repair",
+      );
+      invariant(
+        this.#iterationBudgetRemaining(current) > 0,
+        "ITERATION_BUDGET_EXHAUSTED",
+        "The approved iteration budget is exhausted",
+      );
+    }
+    const now = this.#now();
+    const result = this.#database
+      .prepare(
+        `UPDATE runs SET diff = ?, verification_json = ?, state = ?,
+         version = version + 1, updated_at = ? WHERE id = ? AND state = ?`,
+      )
+      .run(diff, json(verification), nextState, now, runId, current.state);
+    invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+    this.#appendEvent(runId, "verification.completed", {
+      from: current.state,
+      to: nextState,
+      outcome: verification.outcome,
+      diffSha256: verification.diffSha256,
+      diff,
+      verification,
+    });
+  }
+
+  /**
+   * A patch-set run's changed paths must equal its patch-set paths exactly. A
+   * run recorded before ADR 0023 keeps the single-target rule.
+   */
+  #changedPathsMatchPatchSet(run: RunRecord, changedPaths: readonly string[]): boolean {
+    if (run.patchSet === null) {
+      return changedPaths.length === 1 && changedPaths[0] === run.target;
+    }
+    const expected = [...run.patchSet.edits.map((edit) => edit.path)].sort();
+    const observed = [...changedPaths].sort();
+    return (
+      expected.length === observed.length &&
+      expected.every((expectedPath, index) => expectedPath === observed[index])
+    );
+  }
+
+  /**
+   * Anchors a patch-set run's restorable state. Per-path bytes live in
+   * `checkpoint_files`; the legacy byte columns are stored empty because they
+   * describe a shape this run does not have.
+   */
+  saveTreeCheckpoint(runId: string, checkpointSha256: string): CheckpointRecord {
+    const run = this.getRun(runId);
+    invariant(run.patchSet !== null, "MISSING_EDIT_STATE", "Run has no recorded patch set");
+    const files = this.listCheckpointFiles(runId);
+    invariant(files.length > 0, "MISSING_CHECKPOINT", "Run has no persisted checkpoint files");
+    invariant(
+      treeCheckpointDigest({ runId, baseCommit: run.baseCommit, files }) === checkpointSha256,
+      "CHECKPOINT_MISMATCH",
+      "Checkpoint digest does not match its persisted bytes",
+    );
+    const existing = this.#database
+      .prepare("SELECT * FROM checkpoints WHERE run_id = ?")
+      .get(runId);
+    if (existing !== undefined) {
+      const checkpoint = this.getCheckpoint(runId);
+      invariant(
+        checkpoint.checkpointSha256 === checkpointSha256,
+        "CHECKPOINT_MISMATCH",
+        "An immutable checkpoint already exists with different contents",
+      );
+      return checkpoint;
+    }
+    const createdAt = this.#now();
+    const transaction = this.#database.transaction(() => {
+      this.#database
+        .prepare(
+          `INSERT INTO checkpoints (run_id, baseline_base64, approved_base64, checkpoint_sha256, created_at)
+           VALUES (?, '', '', ?, ?)`,
+        )
+        .run(runId, checkpointSha256, createdAt);
+      this.#appendEvent(runId, "checkpoint.saved", { checkpointSha256 });
+    });
+    transaction();
+    return { runId, baselineBase64: "", approvedBase64: "", checkpointSha256, createdAt };
+  }
+
+  /** Retained for runs recorded before ADR 0023. */
   saveCheckpoint(
     runId: string,
     baselineBase64: string,
@@ -1393,12 +3368,49 @@ export class IcarusStore {
         current.resumeState === "restoring"
       ) {
         invariant(
-          current.worktreePath !== null &&
-            current.baselineBase64 !== null &&
-            current.approvedBase64 !== null,
+          current.worktreePath !== null,
           "MISSING_CHECKPOINT",
-          "Run cannot resume verification without applied edit state",
+          "Run cannot resume recovery without its private worktree",
         );
+        const modernPatchSet =
+          this.#database.prepare("SELECT 1 FROM patch_sets WHERE run_id = ?").get(runId) !==
+          undefined;
+        if (modernPatchSet) {
+          const checkpointFileCount = numberValue(
+            row(
+              this.#database
+                .prepare("SELECT COUNT(*) AS total FROM checkpoint_files WHERE run_id = ?")
+                .get(runId),
+              "checkpoint file count",
+            ).total,
+            "checkpoint_files.total",
+          );
+          invariant(
+            checkpointFileCount > 0,
+            "MISSING_CHECKPOINT",
+            "Patch-set run cannot resume without persisted checkpoint files",
+          );
+        } else {
+          const legacy = row(
+            this.#database.prepare("SELECT edit_json FROM runs WHERE id = ?").get(runId),
+            "legacy edit state",
+          );
+          invariant(
+            typeof legacy.edit_json === "string" &&
+              current.baselineBase64 !== null &&
+              current.approvedBase64 !== null,
+            "MISSING_CHECKPOINT",
+            "Legacy run cannot resume without its applied edit bytes",
+          );
+        }
+        if (current.resumeState === "rolling_back" || current.resumeState === "restoring") {
+          invariant(
+            this.#database.prepare("SELECT 1 FROM checkpoints WHERE run_id = ?").get(runId) !==
+              undefined,
+            "MISSING_CHECKPOINT",
+            "Recovery state cannot resume without its immutable checkpoint",
+          );
+        }
       }
       const now = this.#now();
       const result = this.#database
@@ -1594,6 +3606,148 @@ export class IcarusStore {
     return this.#finishOperation(token, finish, false);
   }
 
+  /**
+   * Atomically settles a session check or patch application and persists the
+   * resulting current verification snapshot. A validation failure rolls the
+   * operation back to `started` together with every usage/event write.
+   */
+  finishSessionVerificationOperation(
+    token: OperationToken,
+    finish: OperationFinish,
+    diff: string,
+    verification: VerificationEvidence,
+  ): RunRecord {
+    this.#assertAtomicOperationSettlementInput(token, finish, [
+      SESSION_CHECK_OPERATION_KIND,
+      SESSION_PATCH_OPERATION_KIND,
+      SESSION_RECONCILE_OPERATION_KIND,
+    ]);
+    const transaction = this.#database.transaction(() => {
+      invariant(
+        this.getRun(token.runId).state === "running",
+        "INVALID_STATE",
+        "Session verification can only settle while the session is running",
+      );
+      this.#finishOperationInTransaction(token, finish, false);
+      this.#recordVerificationInTransaction(token.runId, diff, verification, "running");
+    });
+    transaction();
+    return this.getRun(token.runId);
+  }
+  /**
+   * Atomically records a patch action that changed durable intent but missed
+   * its operation boundary. Only an unavailable snapshot may accompany the
+   * failed/cancelled patch operation, so the state remains non-authoritative
+   * while still exposing a rollback digest.
+   */
+  finishFailedSessionPatchVerificationOperation(
+    token: OperationToken,
+    finish: OperationFinish,
+    diff: string,
+    verification: VerificationEvidence,
+  ): RunRecord {
+    invariant(
+      token.kind === SESSION_PATCH_OPERATION_KIND,
+      "OPERATION_TOKEN_MISMATCH",
+      "Only a session patch operation can settle a failed patch snapshot",
+    );
+    invariant(
+      finish.outcome === "failed" || finish.outcome === "cancelled",
+      "INVALID_OPERATION_OUTCOME",
+      "Failed patch settlement requires a failed or cancelled operation",
+    );
+    invariant(
+      verification.outcome === "unavailable",
+      "VERIFICATION_OUTCOME_MISMATCH",
+      "Failed patch settlement can only persist unavailable verification",
+    );
+    this.#assertOperationFinishInput(finish);
+    const transaction = this.#database.transaction(() => {
+      invariant(
+        this.getRun(token.runId).state === "running",
+        "INVALID_STATE",
+        "Failed session patch can only settle while the session is running",
+      );
+      this.#finishOperationInTransaction(token, finish, false);
+      this.#recordVerificationInTransaction(token.runId, diff, verification, "running");
+    });
+    transaction();
+    return this.getRun(token.runId);
+  }
+
+  /** Atomically settles report_done/request_human_input and its disposition. */
+  finishSessionControlOperation(
+    token: OperationToken,
+    finish: OperationFinish,
+    kind: "completed" | "awaiting_human",
+    textValue: string,
+    iterations: number,
+  ): RunRecord {
+    const expectedKind =
+      kind === "completed"
+        ? SESSION_REPORT_DONE_OPERATION_KIND
+        : SESSION_REQUEST_HUMAN_OPERATION_KIND;
+    this.#assertAtomicOperationSettlementInput(token, finish, [expectedKind]);
+    this.#assertSessionOutcomeInput(kind, textValue, iterations);
+    const transaction = this.#database.transaction(() => {
+      invariant(
+        this.getRun(token.runId).state === "running",
+        "INVALID_STATE",
+        "Session control can only settle while the session is running",
+      );
+      this.#finishOperationInTransaction(token, finish, false);
+      this.#recordSessionOutcomeInTransaction(token.runId, kind, textValue, iterations, token.id);
+    });
+    transaction();
+    return this.getRun(token.runId);
+  }
+
+  /** Atomically settles review.validate and records the bound approval. */
+  finishReviewValidationAndApprove(
+    token: OperationToken,
+    finish: OperationFinish,
+    digest: string,
+    actor: string,
+  ): RunRecord {
+    this.#assertAtomicOperationSettlementInput(token, finish, [REVIEW_VALIDATION_OPERATION_KIND]);
+    const approval = reviewApprovalTransition(digest, actor, "approve");
+    const transaction = this.#database.transaction(() => {
+      invariant(
+        this.getRun(token.runId).state === "awaiting_review",
+        "INVALID_STATE",
+        "Review validation can only settle at the review gate",
+      );
+      this.#finishOperationInTransaction(token, finish, false);
+      this.#assertSessionCompletedForApproval(token.runId);
+      this.#approveAndTransitionInTransaction(token.runId, approval);
+    });
+    transaction();
+    return this.getRun(token.runId);
+  }
+
+  /** Atomically settles checkpoint rollback/restore and its state transition. */
+  finishCheckpointRecoveryOperation(token: OperationToken, finish: OperationFinish): RunRecord {
+    this.#assertAtomicOperationSettlementInput(token, finish, [
+      CHECKPOINT_ROLLBACK_OPERATION_KIND,
+      CHECKPOINT_RESTORE_OPERATION_KIND,
+    ]);
+    const rollback = token.kind === CHECKPOINT_ROLLBACK_OPERATION_KIND;
+    const expectedState: RunState = rollback ? "rolling_back" : "restoring";
+    const to: RunState = rollback ? "rolled_back" : "verifying";
+    const eventType = rollback ? "rollback.completed" : "restore.completed";
+    const transaction = this.#database.transaction(() => {
+      invariant(
+        this.getRun(token.runId).state === expectedState,
+        "INVALID_STATE",
+        "Checkpoint recovery operation is not at its expected state",
+      );
+      this.#finishOperationInTransaction(token, finish, false);
+      this.#finishInternalTransitionInTransaction(token.runId, expectedState, to, eventType);
+    });
+    transaction();
+    return this.getRun(token.runId);
+  }
+
   finishCancellationRecoveryOperation(token: OperationToken, finish: OperationFinish): RunRecord {
     invariant(
       token.kind === CANCELLATION_RECOVERY_OPERATION_KIND,
@@ -1610,7 +3764,34 @@ export class IcarusStore {
     );
   }
 
+  #assertAtomicOperationSettlementInput(
+    token: OperationToken,
+    finish: OperationFinish,
+    expectedKinds: readonly string[],
+  ): void {
+    invariant(
+      expectedKinds.includes(token.kind),
+      "OPERATION_TOKEN_MISMATCH",
+      "Operation token kind cannot settle this durable action",
+    );
+    invariant(
+      finish.outcome === "succeeded",
+      "INVALID_OPERATION_OUTCOME",
+      "Only a succeeded operation can settle a durable action",
+    );
+    this.#assertOperationFinishInput(finish);
+  }
+
   #finishOperation(token: OperationToken, finish: OperationFinish, emergency: boolean): RunRecord {
+    this.#assertOperationFinishInput(finish);
+    const transaction = this.#database.transaction(() => {
+      this.#finishOperationInTransaction(token, finish, emergency);
+    });
+    transaction();
+    return this.getRun(token.runId);
+  }
+
+  #assertOperationFinishInput(finish: OperationFinish): void {
     invariant(
       Number.isFinite(finish.activeRuntimeMs) && finish.activeRuntimeMs >= 0,
       "INVALID_OPERATION_USAGE",
@@ -1632,101 +3813,104 @@ export class IcarusStore {
       "INVALID_OPERATION_USAGE",
       "Operation cost is invalid",
     );
-    const transaction = this.#database.transaction(() => {
-      const operation = row(
-        this.#database
-          .prepare("SELECT * FROM operations WHERE id = ? AND run_id = ?")
-          .get(token.id, token.runId),
-        "operation",
-      );
-      const persistedKind = text(operation.kind, "operation.kind");
+  }
+
+  #finishOperationInTransaction(
+    token: OperationToken,
+    finish: OperationFinish,
+    emergency: boolean,
+  ): void {
+    const operation = row(
+      this.#database
+        .prepare("SELECT * FROM operations WHERE id = ? AND run_id = ?")
+        .get(token.id, token.runId),
+      "operation",
+    );
+    const persistedKind = text(operation.kind, "operation.kind");
+    invariant(
+      persistedKind === token.kind &&
+        numberValue(operation.reserved_cost_usd, "operation.reserved_cost_usd") ===
+          token.reservedCostUsd &&
+        numberValue(operation.reserved_tokens, "operation.reserved_tokens") ===
+          token.reservedTokens &&
+        numberValue(operation.reserved_runtime_ms, "operation.reserved_runtime_ms") ===
+          token.reservedRuntimeMs,
+      "OPERATION_TOKEN_MISMATCH",
+      "Operation token does not match its persisted reservation",
+    );
+    invariant(
+      emergency === (persistedKind === CANCELLATION_RECOVERY_OPERATION_KIND),
+      "INVALID_EMERGENCY_OPERATION",
+      "Cancellation recovery must use its dedicated finish path",
+    );
+    invariant(
+      text(operation.status, "operation.status") === "started",
+      "OPERATION_ALREADY_FINISHED",
+      "Operation is not active",
+    );
+    const actualCost = finish.estimatedCostUsd ?? token.reservedCostUsd;
+    invariant(
+      actualCost <= token.reservedCostUsd + Number.EPSILON,
+      "OPERATION_COST_EXCEEDED",
+      "Provider reported a cost above its reserved worst case",
+    );
+    const actualTokens =
+      finish.inputTokens === null || finish.outputTokens === null
+        ? token.reservedTokens
+        : finish.inputTokens + finish.outputTokens;
+    invariant(
+      actualTokens <= token.reservedTokens,
+      "OPERATION_TOKENS_EXCEEDED",
+      "Provider reported token usage above its reservation",
+    );
+    invariant(
+      finish.activeRuntimeMs <= token.reservedRuntimeMs,
+      "OPERATION_RUNTIME_EXCEEDED",
+      "Operation exceeded its runtime reservation",
+    );
+    const run = this.getRun(token.runId);
+    if (emergency) {
       invariant(
-        persistedKind === token.kind &&
-          numberValue(operation.reserved_cost_usd, "operation.reserved_cost_usd") ===
-            token.reservedCostUsd &&
-          numberValue(operation.reserved_tokens, "operation.reserved_tokens") ===
-            token.reservedTokens &&
-          numberValue(operation.reserved_runtime_ms, "operation.reserved_runtime_ms") ===
-            token.reservedRuntimeMs,
-        "OPERATION_TOKEN_MISMATCH",
-        "Operation token does not match its persisted reservation",
+        run.state === "cancelling",
+        "INVALID_STATE",
+        "Cancellation recovery can only finish while the run is cancelling",
       );
+    } else {
+      const project = this.getProject(run.projectId);
       invariant(
-        emergency === (persistedKind === CANCELLATION_RECOVERY_OPERATION_KIND),
-        "INVALID_EMERGENCY_OPERATION",
-        "Cancellation recovery must use its dedicated finish path",
+        run.usage.activeRuntimeMs + finish.activeRuntimeMs <= project.ceiling.maxActiveRuntimeMs,
+        "RUNTIME_BUDGET_EXCEEDED",
+        "Operation exceeded the active-runtime ceiling",
       );
-      invariant(
-        text(operation.status, "operation.status") === "started",
-        "OPERATION_ALREADY_FINISHED",
-        "Operation is not active",
-      );
-      const actualCost = finish.estimatedCostUsd ?? token.reservedCostUsd;
-      invariant(
-        actualCost <= token.reservedCostUsd + Number.EPSILON,
-        "OPERATION_COST_EXCEEDED",
-        "Provider reported a cost above its reserved worst case",
-      );
-      const actualTokens =
+    }
+    const now = this.#now();
+    this.#database
+      .prepare("UPDATE operations SET status = ?, result_json = ?, finished_at = ? WHERE id = ?")
+      .run(finish.outcome, json(finish.detail), now, token.id);
+    this.#database
+      .prepare(
+        `UPDATE runs SET reserved_cost_usd = MAX(0, reserved_cost_usd - ?),
+         estimated_cost_usd = estimated_cost_usd + ?, input_tokens = input_tokens + ?,
+         output_tokens = output_tokens + ?, active_runtime_ms = active_runtime_ms + ?,
+         updated_at = ? WHERE id = ?`,
+      )
+      .run(
+        token.reservedCostUsd,
+        actualCost,
         finish.inputTokens === null || finish.outputTokens === null
-          ? token.reservedTokens
-          : finish.inputTokens + finish.outputTokens;
-      invariant(
-        actualTokens <= token.reservedTokens,
-        "OPERATION_TOKENS_EXCEEDED",
-        "Provider reported token usage above its reservation",
+          ? actualTokens
+          : finish.inputTokens,
+        finish.inputTokens === null || finish.outputTokens === null ? 0 : finish.outputTokens,
+        finish.activeRuntimeMs,
+        now,
+        token.runId,
       );
-      invariant(
-        finish.activeRuntimeMs <= token.reservedRuntimeMs,
-        "OPERATION_RUNTIME_EXCEEDED",
-        "Operation exceeded its runtime reservation",
-      );
-      const run = this.getRun(token.runId);
-      if (emergency) {
-        invariant(
-          run.state === "cancelling",
-          "INVALID_STATE",
-          "Cancellation recovery can only finish while the run is cancelling",
-        );
-      } else {
-        const project = this.getProject(run.projectId);
-        invariant(
-          run.usage.activeRuntimeMs + finish.activeRuntimeMs <= project.ceiling.maxActiveRuntimeMs,
-          "RUNTIME_BUDGET_EXCEEDED",
-          "Operation exceeded the active-runtime ceiling",
-        );
-      }
-      const now = this.#now();
-      this.#database
-        .prepare("UPDATE operations SET status = ?, result_json = ?, finished_at = ? WHERE id = ?")
-        .run(finish.outcome, json(finish.detail), now, token.id);
-      this.#database
-        .prepare(
-          `UPDATE runs SET reserved_cost_usd = MAX(0, reserved_cost_usd - ?),
-           estimated_cost_usd = estimated_cost_usd + ?, input_tokens = input_tokens + ?,
-           output_tokens = output_tokens + ?, active_runtime_ms = active_runtime_ms + ?,
-           updated_at = ? WHERE id = ?`,
-        )
-        .run(
-          token.reservedCostUsd,
-          actualCost,
-          finish.inputTokens === null || finish.outputTokens === null
-            ? actualTokens
-            : finish.inputTokens,
-          finish.inputTokens === null || finish.outputTokens === null ? 0 : finish.outputTokens,
-          finish.activeRuntimeMs,
-          now,
-          token.runId,
-        );
-      this.#appendEvent(token.runId, "operation.finished", {
-        operationId: token.id,
-        kind: token.kind,
-        outcome: finish.outcome,
-        detail: finish.detail,
-      });
+    this.#appendEvent(token.runId, "operation.finished", {
+      operationId: token.id,
+      kind: token.kind,
+      outcome: finish.outcome,
+      detail: finish.detail,
     });
-    transaction();
-    return this.getRun(token.runId);
   }
 
   markStartedOperationsInterrupted(runId: string): RunRecord {
@@ -1824,7 +4008,39 @@ export class IcarusStore {
     };
     const transaction = this.#database.transaction((): RunPresentationSnapshot => {
       const run = this.getRun(runId);
-      const approvals = this.listApprovals(runId);
+      const approvalRows = this.#database
+        .prepare(
+          `SELECT
+             CASE WHEN typeof(run_id) = 'text'
+                    AND octet_length(run_id) <= ${APPROVAL_RUN_ID_MAX_BYTES}
+                  THEN run_id ELSE NULL END AS run_id,
+             CASE WHEN typeof(kind) = 'text'
+                    AND octet_length(kind) <= ${APPROVAL_KIND_MAX_BYTES}
+                  THEN kind ELSE NULL END AS kind,
+             CASE WHEN typeof(digest) = 'text'
+                    AND octet_length(digest) <= ${APPROVAL_DIGEST_MAX_BYTES}
+                  THEN digest ELSE NULL END AS digest,
+             CASE WHEN typeof(actor) = 'text'
+                    AND octet_length(actor) <= ${APPROVAL_ACTOR_MAX_BYTES}
+                  THEN actor ELSE NULL END AS actor,
+             CASE WHEN typeof(decision) = 'text'
+                    AND octet_length(decision) <= ${APPROVAL_DECISION_MAX_BYTES}
+                  THEN decision ELSE NULL END AS decision,
+             CASE WHEN typeof(created_at) = 'text'
+                    AND octet_length(created_at) <= ${EVENT_TIMESTAMP_MAX_BYTES}
+                  THEN created_at ELSE NULL END AS created_at
+           FROM approvals WHERE run_id = ?
+           ORDER BY approvals.rowid DESC LIMIT ?`,
+        )
+        .all(runId, RUN_PRESENTATION_APPROVAL_LIMIT + 1) as unknown[];
+      const earlierApprovalsExcluded = approvalRows.length > RUN_PRESENTATION_APPROVAL_LIMIT;
+      const validatedApprovalRows = approvalRows.map((entry) => approvalRecordRow(entry, runId));
+      const approvals = validatedApprovalRows.slice(0, RUN_PRESENTATION_APPROVAL_LIMIT).reverse();
+      const approvalCoverage = {
+        limit: RUN_PRESENTATION_APPROVAL_LIMIT,
+        loaded: approvals.length,
+        earlierApprovalsExcluded,
+      } as const;
       const aggregate = row(
         this.#database
           .prepare(
@@ -1871,7 +4087,15 @@ export class IcarusStore {
           ),
         )
         .slice(-RUN_PRESENTATION_ACTION_EVENT_LIMIT);
-      return { run, approvals, events, eventCursor, eventCount, actionEvents };
+      return {
+        run,
+        approvals,
+        approvalCoverage,
+        events,
+        eventCursor,
+        eventCount,
+        actionEvents,
+      };
     });
     return transaction();
   }
@@ -2154,7 +4378,7 @@ export class IcarusStore {
       "Change Room cursor must be a positive safe integer",
     );
     invariant(
-      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_RUN_SNAPSHOT_MAX,
+      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_WORKSPACE_SNAPSHOT_MAX,
       "INVALID_RUN_CURSOR",
       "Change Room snapshot must be a nonnegative safe integer",
     );
@@ -2172,12 +4396,13 @@ export class IcarusStore {
             .get(),
           "run snapshot",
         ).snapshot,
+        "run snapshot",
       );
       let before: number;
       let snapshot: number;
       if (requested === null) {
         invariant(
-          maximum <= BigInt(SAFE_RUN_SNAPSHOT_MAX),
+          maximum <= BigInt(SAFE_WORKSPACE_SNAPSHOT_MAX),
           "DATABASE_ERROR",
           "Change Room snapshot is unsafe",
         );
@@ -2433,7 +4658,498 @@ export class IcarusStore {
     return transaction();
   }
 
-  #appendEvent(runId: string, type: string, payload: unknown): void {
+  #browserActionSubjectDigest(run: RunRecord, kind: BrowserActionIdentity["kind"]): string | null {
+    switch (kind) {
+      case "egress.approve":
+        return run.contextSha256;
+      case "plan.approve":
+        return run.planSha256;
+      case "review.approve":
+      case "review.reject":
+      case "rollback.approve":
+        return run.verification?.diffSha256 ?? null;
+      case "restore.approve": {
+        const checkpoint = this.#database
+          .prepare("SELECT checkpoint_sha256 FROM checkpoints WHERE run_id = ?")
+          .get(run.id);
+        if (checkpoint === undefined) return null;
+        const digest = text(
+          row(checkpoint, "browser action checkpoint").checkpoint_sha256,
+          "browser action checkpoint.checkpoint_sha256",
+        );
+        invariant(
+          /^[a-f0-9]{64}$/.test(digest),
+          "DATABASE_ERROR",
+          "Browser action checkpoint digest is invalid",
+        );
+        return digest;
+      }
+      case "run.resume":
+      case "run.cancel":
+        return null;
+    }
+  }
+
+  #refusePreparedBrowserActionRecord(
+    actionId: string,
+    errorCode: string,
+  ): BrowserActionSettledRecord {
+    const record = this.getBrowserAction(actionId);
+    const settlement: BrowserActionSettlement = {
+      outcome: "refused",
+      admissionEventSequence: null,
+      domainEventSequence: null,
+      domainOperationId: null,
+      errorCode,
+    };
+    assertBrowserActionSettlement("prepared", settlement);
+    if (record.status === "settled") {
+      invariant(
+        record.outcome === "refused" && record.errorCode === errorCode,
+        "INVALID_BROWSER_ACTION_TRANSITION",
+        "Browser action is already settled differently",
+      );
+      return record;
+    }
+    invariant(
+      record.status === "prepared",
+      "INVALID_BROWSER_ACTION_TRANSITION",
+      "An admitted browser action cannot be refused as unadmitted",
+    );
+    const updatedAt = this.#now();
+    const result = this.#database
+      .prepare(
+        `UPDATE browser_action_requests
+         SET status = 'settled', outcome = 'refused', error_code = ?, updated_at = ?
+         WHERE action_id = ? AND status = 'prepared'`,
+      )
+      .run(errorCode, updatedAt, actionId);
+    invariant(
+      result.changes === 1,
+      "CONCURRENT_BROWSER_ACTION_UPDATE",
+      "Browser action changed during refusal",
+    );
+    const settled = this.getBrowserAction(actionId);
+    invariant(settled.status === "settled", "DATABASE_ERROR", "Browser refusal did not persist");
+    return settled;
+  }
+
+  #assertBrowserActionAnchors(
+    record: BrowserActionAdmittedRecord,
+    settlement: BrowserActionSettlement,
+  ): void {
+    const admission = row(
+      this.#database
+        .prepare(
+          "SELECT run_id, type, payload_json FROM run_events WHERE run_id = ? AND sequence = ?",
+        )
+        .get(record.runId, record.admissionEventSequence),
+      "browser action admission event",
+    );
+    const admissionPayload = parseJson<Record<string, unknown>>(
+      admission.payload_json,
+      "browser action admission event.payload_json",
+    );
+    invariant(
+      text(admission.run_id, "browser action admission event.run_id") === record.runId &&
+        text(admission.type, "browser action admission event.type") === "browser.action.admitted" &&
+        admissionPayload.browserActionId === record.actionId,
+      "DATABASE_ERROR",
+      "Browser action admission event is invalid",
+    );
+
+    let domainType: string | null = null;
+    let operationKind: string | null = null;
+    let operationStartSequence: number | null = null;
+
+    if (
+      settlement.outcome === "failed" &&
+      settlement.domainEventSequence === null &&
+      settlement.domainOperationId === null
+    ) {
+      invariant(
+        !this.#hasPostAdmissionBrowserActionAnchor(record),
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        "An unanchored failure is invalid after a browser action domain effect",
+      );
+    }
+
+    if (settlement.domainEventSequence !== null) {
+      const runState = text(
+        row(
+          this.#database.prepare("SELECT state FROM runs WHERE id = ?").get(record.runId),
+          "browser action run state",
+        ).state,
+        "browser action run state.state",
+      ) as RunState;
+      invariant(RUN_STATES.has(runState), "DATABASE_ERROR", "Browser action run state is invalid");
+      const domainEvent = row(
+        this.#database
+          .prepare(
+            "SELECT run_id, type, payload_json FROM run_events WHERE run_id = ? AND sequence = ?",
+          )
+          .get(record.runId, settlement.domainEventSequence),
+        "browser action domain event",
+      );
+      domainType = text(domainEvent.type, "browser action domain event.type");
+      const domainPayload = parseJson<Record<string, unknown>>(
+        domainEvent.payload_json,
+        "browser action domain event.payload_json",
+      );
+      invariant(
+        text(domainEvent.run_id, "browser action domain event.run_id") === record.runId &&
+          settlement.domainEventSequence > record.admissionEventSequence &&
+          BROWSER_ACTION_DOMAIN_EVENT_TYPES[record.kind].has(domainType) &&
+          domainPayload.browserActionId === record.actionId,
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        "Browser action domain event is not an allowed action-linked boundary",
+      );
+      if (settlement.outcome === "succeeded") {
+        const allowedStates = BROWSER_ACTION_SUCCESS_BOUNDARIES[record.kind][domainType];
+        invariant(
+          allowedStates?.includes(runState) === true,
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser action success does not name its exact terminal event and run state",
+        );
+      } else if (settlement.outcome === "cancelled") {
+        invariant(
+          record.kind !== "run.cancel" &&
+            domainType === "cancellation.completed" &&
+            runState === "cancelled",
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser action cancellation does not name its exact terminal event and run state",
+        );
+      } else if (settlement.outcome === "failed") {
+        invariant(
+          record.kind !== "run.cancel" && domainType === "run.failed" && runState === "failed",
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser action failure does not name its exact terminal event and run state",
+        );
+      }
+    }
+
+    if (settlement.domainOperationId !== null) {
+      const operation = row(
+        this.#database
+          .prepare(
+            "SELECT run_id, kind, status, result_json, finished_at FROM operations WHERE id = ?",
+          )
+          .get(settlement.domainOperationId),
+        "browser action domain operation",
+      );
+      const operationStatus = text(operation.status, "browser action domain operation.status");
+      operationKind = text(operation.kind, "browser action domain operation.kind");
+      const operationFinishedAt = nullableText(
+        operation.finished_at,
+        "browser action domain operation.finished_at",
+      );
+      const result =
+        operation.result_json === null
+          ? null
+          : parseJson<Record<string, unknown>>(
+              operation.result_json,
+              "browser action domain operation.result_json",
+            );
+      const operationStartSequences: number[] = [];
+      const operationStartRows = this.#database
+        .prepare(
+          `SELECT sequence, payload_json
+           FROM run_events
+           WHERE run_id = ? AND type = 'operation.started'
+           ORDER BY sequence`,
+        )
+        .all(record.runId) as unknown[];
+      for (const entry of operationStartRows) {
+        const start = row(entry, "browser action operation start event");
+        const payload = parseJson<Record<string, unknown>>(
+          start.payload_json,
+          "browser action operation start event.payload_json",
+        );
+        if (payload.operationId === settlement.domainOperationId) {
+          invariant(
+            payload.kind === operationKind && payload.browserActionId === record.actionId,
+            "INVALID_BROWSER_ACTION_SETTLEMENT",
+            "Browser action operation start is not exactly action-linked",
+          );
+          operationStartSequences.push(
+            numberValue(start.sequence, "browser action operation start event.sequence"),
+          );
+        }
+      }
+      operationStartSequence = operationStartSequences[0] ?? null;
+      const operationIsClosed = ["succeeded", "failed", "cancelled", "interrupted"].includes(
+        operationStatus,
+      );
+      const operationHasClosedDetail =
+        operationIsClosed &&
+        operationFinishedAt !== null &&
+        isCanonicalTimestamp(operationFinishedAt) &&
+        result?.browserActionId === record.actionId;
+      const operationIsOpenReconciliation =
+        settlement.outcome === "reconciliation_required" &&
+        operationStatus === "started" &&
+        operationFinishedAt === null &&
+        result === null;
+      invariant(
+        text(operation.run_id, "browser action domain operation.run_id") === record.runId &&
+          BROWSER_ACTION_DOMAIN_OPERATION_KINDS[record.kind].has(operationKind) &&
+          operationStartSequences.length === 1 &&
+          operationStartSequence !== null &&
+          operationStartSequence > record.admissionEventSequence &&
+          (settlement.domainEventSequence === null ||
+            operationStartSequence < settlement.domainEventSequence) &&
+          (operationHasClosedDetail || operationIsOpenReconciliation),
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        "Browser action domain operation is not an allowed action-linked boundary",
+      );
+      if (settlement.outcome === "failed" && settlement.domainEventSequence === null) {
+        invariant(
+          operationStatus === "failed" &&
+            BROWSER_ACTION_FAILED_OPERATION_BOUNDARIES[record.kind].has(operationKind),
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser action operation is not an allowed direct failure boundary",
+        );
+        invariant(
+          !this.#hasPostAdmissionBrowserActionAnchor(record, {
+            beforeSequence: operationStartSequence,
+            ignoredOperationId: settlement.domainOperationId,
+          }),
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser action direct failure operation was not its first domain effect",
+        );
+      }
+    }
+
+    if (
+      record.kind === "run.resume" &&
+      (settlement.domainEventSequence !== null || settlement.domainOperationId !== null)
+    ) {
+      const resumedStage = this.#assertBrowserResumeActionChain(
+        record,
+        settlement.domainEventSequence,
+        settlement.domainOperationId,
+        operationKind,
+        operationStartSequence,
+      );
+      if (settlement.outcome === "cancelled") {
+        invariant(
+          BROWSER_ACTION_RESUME_CANCELLABLE_STAGES.has(resumedStage),
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser resume cancellation is not valid for the resumed stage",
+        );
+      }
+      if (domainType === "cancellation.completed") {
+        invariant(
+          (resumedStage === "cancelling" && settlement.outcome === "succeeded") ||
+            (BROWSER_ACTION_RESUME_CANCELLABLE_STAGES.has(resumedStage) &&
+              settlement.outcome === "cancelled"),
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser resume cancellation completion has the wrong outcome for its resumed stage",
+        );
+      }
+    }
+  }
+
+  #assertBrowserResumeActionChain(
+    record: BrowserActionAdmittedRecord,
+    terminalEventSequence: number | null,
+    namedOperationId: string | null,
+    namedOperationKind: string | null,
+    namedOperationStartSequence: number | null,
+  ): RunState {
+    const upperSequence =
+      terminalEventSequence ??
+      namedOperationStartSequence ??
+      (() => {
+        throw new IcarusError(
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser resume settlement has no domain anchor",
+        );
+      })();
+    const events = this.#database
+      .prepare(
+        `SELECT sequence, type, payload_json
+         FROM run_events
+         WHERE run_id = ? AND sequence > ? AND sequence <= ?
+         ORDER BY sequence`,
+      )
+      .all(record.runId, record.admissionEventSequence, upperSequence) as unknown[];
+    let resumedStage: RunState | null =
+      record.expectedState === "failed" ? null : record.expectedState;
+    let hasFirstAnchor = false;
+    let firstActionOperation:
+      | { readonly id: string; readonly kind: string; readonly sequence: number }
+      | undefined;
+
+    const bindStage = (candidate: unknown, source: string): void => {
+      invariant(
+        typeof candidate === "string" &&
+          RUN_STATES.has(candidate) &&
+          BROWSER_ACTION_RESUME_STAGES.has(candidate as RunState),
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        `Browser resume ${source} names an invalid resumed stage`,
+      );
+      invariant(
+        resumedStage === null || resumedStage === candidate,
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        "Browser resume action-linked anchors disagree on the resumed stage",
+      );
+      resumedStage = candidate as RunState;
+    };
+
+    for (const entry of events) {
+      const event = row(entry, "browser resume chain event");
+      const sequence = numberValue(event.sequence, "browser resume chain event.sequence");
+      const eventType = text(event.type, "browser resume chain event.type");
+      const payload = parseJson<Record<string, unknown>>(
+        event.payload_json,
+        "browser resume chain event.payload_json",
+      );
+      if (payload.browserActionId !== record.actionId) continue;
+
+      if (eventType === "resume.requested") {
+        invariant(
+          payload.state === record.expectedState,
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser resume request does not match the admitted state",
+        );
+        bindStage(
+          record.expectedState === "failed" ? payload.resumeState : record.expectedState,
+          "request",
+        );
+        if (record.expectedState !== "failed") {
+          invariant(
+            payload.resumeState === null,
+            "INVALID_BROWSER_ACTION_SETTLEMENT",
+            "Browser resume request has an unexpected recovery state",
+          );
+        }
+        hasFirstAnchor = true;
+        continue;
+      }
+
+      if (eventType === "run.resumed") {
+        invariant(
+          record.expectedState === "failed" && payload.from === "failed",
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser run-resumed event does not match the admitted failed state",
+        );
+        bindStage(payload.to, "transition");
+        hasFirstAnchor = true;
+        continue;
+      }
+
+      if (eventType === "operation.started" && firstActionOperation === undefined) {
+        invariant(
+          typeof payload.operationId === "string" && typeof payload.kind === "string",
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser resume operation anchor is malformed",
+        );
+        firstActionOperation = {
+          id: payload.operationId,
+          kind: payload.kind,
+          sequence,
+        };
+        const operationStage = Object.entries(BROWSER_ACTION_RESUME_STAGE_OPERATION_KIND).find(
+          ([, kind]) => kind === payload.kind,
+        )?.[0];
+        bindStage(operationStage, "operation");
+        hasFirstAnchor = true;
+      }
+    }
+
+    invariant(
+      hasFirstAnchor && resumedStage !== null,
+      "INVALID_BROWSER_ACTION_SETTLEMENT",
+      "Browser resume settlement lacks its action-linked first-anchor chain",
+    );
+    if (
+      namedOperationId !== null ||
+      namedOperationKind !== null ||
+      namedOperationStartSequence !== null
+    ) {
+      invariant(
+        firstActionOperation !== undefined &&
+          firstActionOperation.id === namedOperationId &&
+          firstActionOperation.kind === namedOperationKind &&
+          firstActionOperation.sequence === namedOperationStartSequence &&
+          BROWSER_ACTION_RESUME_STAGE_OPERATION_KIND[resumedStage] === namedOperationKind,
+        "INVALID_BROWSER_ACTION_SETTLEMENT",
+        "Browser resume operation does not match the resumed stage's first operation",
+      );
+    }
+    return resumedStage;
+  }
+
+  #hasPostAdmissionBrowserActionAnchor(
+    record: BrowserActionAdmittedRecord,
+    options: {
+      readonly beforeSequence?: number | null;
+      readonly ignoredOperationId?: string | null;
+    } = {},
+  ): boolean {
+    const events = this.#database
+      .prepare(
+        `SELECT sequence, type, payload_json
+         FROM run_events
+         WHERE run_id = ? AND sequence > ?
+         ORDER BY sequence`,
+      )
+      .all(record.runId, record.admissionEventSequence) as unknown[];
+    for (const entry of events) {
+      const event = row(entry, "browser action post-admission event");
+      const eventSequence = numberValue(
+        event.sequence,
+        "browser action post-admission event.sequence",
+      );
+      if (
+        options.beforeSequence !== undefined &&
+        options.beforeSequence !== null &&
+        eventSequence >= options.beforeSequence
+      ) {
+        continue;
+      }
+      const eventType = text(event.type, "browser action post-admission event.type");
+      const payload = parseJson<Record<string, unknown>>(
+        event.payload_json,
+        "browser action post-admission event.payload_json",
+      );
+      const actionLinked = payload.browserActionId === record.actionId;
+      const permittedEffect =
+        BROWSER_ACTION_DOMAIN_EVENT_TYPES[record.kind].has(eventType) ||
+        (eventType === "operation.started" &&
+          typeof payload.kind === "string" &&
+          BROWSER_ACTION_DOMAIN_OPERATION_KINDS[record.kind].has(payload.kind));
+      if (actionLinked || permittedEffect) {
+        return true;
+      }
+    }
+    const operations = this.#database
+      .prepare(
+        `SELECT id, kind, result_json
+         FROM operations
+         WHERE run_id = ? AND result_json IS NOT NULL`,
+      )
+      .all(record.runId) as unknown[];
+    for (const entry of operations) {
+      const operation = row(entry, "browser action linked operation");
+      const operationId = text(operation.id, "browser action linked operation.id");
+      if (operationId === options.ignoredOperationId) {
+        continue;
+      }
+      text(operation.kind, "browser action linked operation.kind");
+      const result = parseJson<Record<string, unknown>>(
+        operation.result_json,
+        "browser action linked operation.result_json",
+      );
+      if (result.browserActionId === record.actionId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  #appendEvent(runId: string, type: string, payload: unknown): number {
     const sequenceRow = row(
       this.#database
         .prepare(
@@ -2442,17 +5158,13 @@ export class IcarusStore {
         .get(runId),
       "event sequence",
     );
+    const sequence = numberValue(sequenceRow.next_sequence, "event.next_sequence");
     this.#database
       .prepare(
         "INSERT INTO run_events (run_id, sequence, type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
       )
-      .run(
-        runId,
-        numberValue(sequenceRow.next_sequence, "event.next_sequence"),
-        type,
-        json(asJsonValue(payload)),
-        this.#now(),
-      );
+      .run(runId, sequence, type, json(asJsonValue(payload)), this.#now());
+    return sequence;
   }
 
   #hasApproval(
@@ -2470,47 +5182,56 @@ export class IcarusStore {
     );
   }
 
-  #approveAndTransition(runId: string, approval: ApprovalTransition): RunRecord {
-    this.#assertApprovalInput(approval);
+  #approveAndTransition(
+    runId: string,
+    approval: ApprovalTransition,
+    precondition?: () => void,
+  ): RunRecord {
     const transaction = this.#database.transaction(() => {
-      const current = this.getRun(runId);
-      this.#assertApprovalGate(runId, current, approval);
-      assertTransition(current.state, approval.to);
-      const now = this.#now();
-      this.#database
-        .prepare(
-          `INSERT INTO approvals
-           (id, run_id, kind, digest, actor, decision, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          this.#id(),
-          runId,
-          approval.kind,
-          approval.digest,
-          approval.actor,
-          approval.decision,
-          now,
-        );
-      const result = this.#database
-        .prepare(
-          `UPDATE runs SET state = ?, resume_state = NULL, error_code = NULL,
-           error_message = NULL, version = version + 1, updated_at = ?
-           WHERE id = ? AND state = ?`,
-        )
-        .run(approval.to, now, runId, approval.expectedState);
-      invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
-      this.#appendEvent(runId, approval.eventType, {
-        from: current.state,
-        to: approval.to,
-        kind: approval.kind,
-        digest: approval.digest,
-        actor: approval.actor,
-        decision: approval.decision,
-      });
+      precondition?.();
+      this.#approveAndTransitionInTransaction(runId, approval);
     });
     transaction();
     return this.getRun(runId);
+  }
+
+  #approveAndTransitionInTransaction(runId: string, approval: ApprovalTransition): void {
+    this.#assertApprovalInput(approval);
+    const current = this.getRun(runId);
+    this.#assertApprovalGate(runId, current, approval);
+    assertTransition(current.state, approval.to);
+    const now = this.#now();
+    this.#database
+      .prepare(
+        `INSERT INTO approvals
+         (id, run_id, kind, digest, actor, decision, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        this.#id(),
+        runId,
+        approval.kind,
+        approval.digest,
+        approval.actor,
+        approval.decision,
+        now,
+      );
+    const result = this.#database
+      .prepare(
+        `UPDATE runs SET state = ?, resume_state = NULL, error_code = NULL,
+         error_message = NULL, version = version + 1, updated_at = ?
+         WHERE id = ? AND state = ?`,
+      )
+      .run(approval.to, now, runId, approval.expectedState);
+    invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+    this.#appendEvent(runId, approval.eventType, {
+      from: current.state,
+      to: approval.to,
+      kind: approval.kind,
+      digest: approval.digest,
+      actor: approval.actor,
+      decision: approval.decision,
+    });
   }
 
   #validateApprovalRequest(runId: string, approval: ApprovalTransition): RunRecord {
@@ -2526,18 +5247,7 @@ export class IcarusStore {
       "INVALID_APPROVAL",
       "Approval digest is invalid",
     );
-    invariant(
-      approval.actor.trim().length > 0 &&
-        approval.actor.length <= 200 &&
-        !/[\r\n\0]/.test(approval.actor),
-      "INVALID_APPROVAL",
-      "Approval actor is invalid",
-    );
-    invariant(
-      !containsSecretShapedContent(Buffer.from(approval.actor, "utf8")),
-      "SECRET_INPUT_DETECTED",
-      "Approval actor contains recognizable credential material",
-    );
+    assertOperatorActor(approval.actor, "INVALID_APPROVAL");
   }
 
   #assertApprovalGate(runId: string, current: RunRecord, approval: ApprovalTransition): void {
@@ -2561,26 +5271,35 @@ export class IcarusStore {
     eventType: string,
   ): RunRecord {
     const transaction = this.#database.transaction(() => {
-      const current = this.getRun(runId);
-      invariant(
-        current.state === expectedState,
-        "INVALID_STATE",
-        "Run is not at the expected recovery step",
-      );
-      assertTransition(current.state, to);
-      const now = this.#now();
-      const result = this.#database
-        .prepare(
-          `UPDATE runs SET state = ?, resume_state = NULL, error_code = NULL,
-           error_message = NULL, version = version + 1, updated_at = ?
-           WHERE id = ? AND state = ?`,
-        )
-        .run(to, now, runId, expectedState);
-      invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
-      this.#appendEvent(runId, eventType, { from: expectedState, to });
+      this.#finishInternalTransitionInTransaction(runId, expectedState, to, eventType);
     });
     transaction();
     return this.getRun(runId);
+  }
+
+  #finishInternalTransitionInTransaction(
+    runId: string,
+    expectedState: RunState,
+    to: RunState,
+    eventType: string,
+  ): void {
+    const current = this.getRun(runId);
+    invariant(
+      current.state === expectedState,
+      "INVALID_STATE",
+      "Run is not at the expected recovery step",
+    );
+    assertTransition(current.state, to);
+    const now = this.#now();
+    const result = this.#database
+      .prepare(
+        `UPDATE runs SET state = ?, resume_state = NULL, error_code = NULL,
+         error_message = NULL, version = version + 1, updated_at = ?
+         WHERE id = ? AND state = ?`,
+      )
+      .run(to, now, runId, expectedState);
+    invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+    this.#appendEvent(runId, eventType, { from: expectedState, to });
   }
 
   #assertNoOtherActiveRun(projectId: string, runId: string): void {

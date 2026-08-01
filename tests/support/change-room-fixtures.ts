@@ -1,7 +1,7 @@
 import { sha256 } from "../../packages/core/src/digest.js";
-import { checkpointDigest, planApprovalDigest } from "../../packages/core/src/policy.js";
+import { planApprovalDigest, treeCheckpointDigest } from "../../packages/core/src/policy.js";
 import type { IcarusStore } from "../../packages/core/src/store.js";
-import type { VerificationEvidence } from "../../packages/core/src/types.js";
+import type { CheckpointFile, VerificationEvidence } from "../../packages/core/src/types.js";
 import {
   createUnitStore,
   seedUnitProject,
@@ -28,7 +28,7 @@ export function createChangeRoomFixture(): ChangeRoomFixture {
     id: UNIT_RUN_ID,
     projectId,
     task: "Update the greeting",
-    target: UNIT_PLAN.target,
+    targets: UNIT_PLAN.targets,
     provider: UNIT_PROVIDER,
   });
   return { ...fixture, projectId, runId: UNIT_RUN_ID };
@@ -52,7 +52,7 @@ export function approveChangeRoomPlan(store: IcarusStore): string {
     task: run.task,
     baseCommit: run.baseCommit,
     contextSha256: run.contextSha256,
-    target: run.target,
+    targets: run.context.targets,
     provider: run.provider,
     checks: project.checks,
     sandbox: project.sandbox,
@@ -85,26 +85,37 @@ export function finishToAwaitingReview(
 ): VerifiedRunEvidence {
   const baselineBase64 = Buffer.from("hello\n").toString("base64");
   const approvedBase64 = Buffer.from("goodbye\n").toString("base64");
-  store.recordWorkspace(UNIT_RUN_ID, "/tmp/unit-cache.git", "/tmp/unit-worktree", baselineBase64);
-  store.recordEditIntent(
-    UNIT_RUN_ID,
+  store.recordWorkspace(UNIT_RUN_ID, "/tmp/unit-cache.git", "/tmp/unit-worktree", null);
+  const checkpointFiles: readonly CheckpointFile[] = [
     {
       path: UNIT_PLAN.target,
-      expectedPreimageSha256: sha256("hello\n"),
-      findText: "hello",
-      replaceText: "goodbye",
-      rationale: "Exercise the Change Room projection.",
+      op: "modify",
+      baselineBase64,
+      approvedBase64,
     },
-    approvedBase64,
+  ];
+  store.recordPatchSetIntent(
+    UNIT_RUN_ID,
+    {
+      summary: "Exercise the Change Room projection.",
+      edits: [
+        {
+          op: "modify",
+          path: UNIT_PLAN.target,
+          expectedPreimageSha256: sha256("hello\n"),
+          replacements: [{ findText: "hello", replaceText: "goodbye" }],
+          rationale: "Exercise the Change Room projection.",
+        },
+      ],
+    },
+    checkpointFiles,
   );
-  const checkpointSha256 = checkpointDigest({
+  const checkpointSha256 = treeCheckpointDigest({
     runId: UNIT_RUN_ID,
     baseCommit: UNIT_BASE_COMMIT,
-    target: UNIT_PLAN.target,
-    baselineBase64,
-    approvedBase64,
+    files: checkpointFiles,
   });
-  store.saveCheckpoint(UNIT_RUN_ID, baselineBase64, approvedBase64, checkpointSha256);
+  store.saveTreeCheckpoint(UNIT_RUN_ID, checkpointSha256);
   store.transition(UNIT_RUN_ID, "verifying", "edit.materialized");
   const diff = "diff --git a/src/greeting.txt b/src/greeting.txt\n-hello\n+goodbye\n";
   store.recordVerificationAndAwaitReview(UNIT_RUN_ID, diff, {

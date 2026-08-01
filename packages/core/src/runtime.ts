@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -222,7 +222,14 @@ async function prepareStateRoot(requestedRoot: string, platform: NodeJS.Platform
 
 export async function createIcarusRuntime(
   stateRoot: string,
-  options: { readonly dockerBinary?: string; readonly gatewayFactory?: GatewayFactory } = {},
+  options: {
+    readonly dockerBinary?: string;
+    readonly gatewayFactory?: GatewayFactory;
+    readonly allowApprovalIndexMigration?: boolean;
+    readonly allowPatchSetMigration?: boolean;
+    readonly allowReadableManifestMigration?: boolean;
+    readonly allowAnnotationMigration?: boolean;
+  } = {},
 ): Promise<IcarusRuntime> {
   const root = await prepareStateRoot(stateRoot, process.platform);
   const controllerHome = path.join(root, "controller-home");
@@ -230,7 +237,12 @@ export async function createIcarusRuntime(
   await mkdir(controllerHome, { recursive: true, mode: 0o700 });
   await mkdir(runsRoot, { recursive: true, mode: 0o700 });
 
-  const store = new IcarusStore(path.join(root, "icarus.sqlite3"));
+  const store = new IcarusStore(path.join(root, "icarus.sqlite3"), {
+    allowApprovalIndexMigration: options.allowApprovalIndexMigration === true,
+    allowPatchSetMigration: options.allowPatchSetMigration === true,
+    allowReadableManifestMigration: options.allowReadableManifestMigration === true,
+    allowAnnotationMigration: options.allowAnnotationMigration === true,
+  });
   const artifacts = new ArtifactStore(root);
   const git = new GitController(controllerHome, runsRoot);
   const checks = new DockerSandboxRunner(root, git, options.dockerBinary ?? "docker");

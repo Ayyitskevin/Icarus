@@ -1,9 +1,9 @@
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
 
 export const PYTHON_IMAGE =
   "python:3.12-slim@sha256:c3d81d25b3154142b0b42eb1e61300024426268edeb5b5a26dd7ddf64d9daf28";
@@ -70,7 +70,7 @@ export async function createFixtureRepository(): Promise<{
   readonly stateRoot: string;
   cleanup(): Promise<void>;
 }> {
-  const root = await mkdtemp(path.join(os.tmpdir(), "icarus-integration-"));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "icarus-integration-")));
   const repository = path.join(root, "repository");
   const stateRoot = path.join(root, "state");
   await cp(path.resolve("fixtures/evals/repos/basic"), repository, { recursive: true });
@@ -92,9 +92,13 @@ export async function runCli(
   args: readonly string[],
   extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<ProcessResult> {
+  const environment = { ...process.env, ...extraEnv, ICARUS_HOME: stateRoot };
+  for (const [name, value] of Object.entries(extraEnv)) {
+    if (value === undefined) delete environment[name];
+  }
   return run(process.execPath, [path.resolve("packages/cli/dist/main.js"), ...args], {
     cwd: path.resolve("."),
-    env: { ...process.env, ...extraEnv, ICARUS_HOME: stateRoot },
+    env: environment,
     timeoutMs: 180_000,
   });
 }
@@ -179,26 +183,37 @@ export async function startOllamaQueue(initial: readonly QueuedProviderResponse[
   };
 }
 
-export function planResponse(): QueuedProviderResponse {
+export function planResponse(
+  targets: readonly string[] = ["src/greeting.txt"],
+): QueuedProviderResponse {
   return {
     content: {
       summary: "Replace the operator-selected greeting.",
       steps: ["Apply one exact replacement", "Run the registered verification check"],
       risks: ["The exact preimage may have changed"],
-      target: "src/greeting.txt",
+      target: targets[0] ?? "src/greeting.txt",
+      targets: [...targets],
+      iterationCeiling: 0,
       checkIds: ["verify"],
     },
   };
 }
 
+/** A single-file patch set, the ADR 0023 successor of the one-edit response. */
 export function editResponse(preimageSha256: string): QueuedProviderResponse {
   return {
     content: {
-      path: "src/greeting.txt",
-      expectedPreimageSha256: preimageSha256,
-      findText: "Hello, world!\n",
-      replaceText: "Hello, Icarus!\n",
-      rationale: "Implement the approved greeting change only.",
+      summary: "Implement the approved greeting change only.",
+      edits: [
+        {
+          op: "modify",
+          path: "src/greeting.txt",
+          expectedPreimageSha256: preimageSha256,
+          replacements: [{ findText: "Hello, world!\n", replaceText: "Hello, Icarus!\n" }],
+          content: null,
+          rationale: "Implement the approved greeting change only.",
+        },
+      ],
     },
   };
 }

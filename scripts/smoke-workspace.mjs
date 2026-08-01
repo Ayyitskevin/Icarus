@@ -1,6 +1,6 @@
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,11 @@ import { startWorkspaceServer } from "../packages/api/dist/server.js";
 import { createIcarusRuntime } from "../packages/core/dist/index.js";
 
 const SANDBOX_IMAGE = `python:3.12-slim@sha256:${"c".repeat(64)}`;
+const WORKSPACE_BIND_HOST = "127.0.0.1";
+
+function isWorkspaceMutationHostname(hostname) {
+  return /^[a-f0-9]{32}\.localhost$/.test(hostname);
+}
 
 function git(cwd, args) {
   return execFileSync("git", args, {
@@ -42,10 +47,80 @@ async function fingerprint(repository) {
   };
 }
 
-async function post(url, value) {
-  const response = await fetch(url, {
+function workspaceMutationHeaders(workspace) {
+  const launch = new URL(workspace.launchUrl);
+  const match = /^#icarus-action-session=([A-Za-z0-9_-]{43})$/.exec(launch.hash);
+  if (workspace.mode !== "mutation-capable" || match === null || launch.origin !== workspace.url) {
+    throw new Error("Workspace did not expose one canonical action-session launch fragment");
+  }
+  return {
+    origin: workspace.url,
+    authorization: `Bearer ${match[1]}`,
+    "content-type": "application/json",
+    "x-icarus-action": "workspace.mutate",
+  };
+}
+
+/**
+ * Node must not resolve the public .localhost name. Connect to the server's
+ * attested numeric bind address while exercising its exact public Host and
+ * Origin contract; the browser smoke separately proves real browser routing.
+ */
+async function workspaceRequest(workspace, url, init = {}) {
+  const target = new URL(url);
+  if (
+    workspace.host !== WORKSPACE_BIND_HOST ||
+    target.protocol !== "http:" ||
+    target.origin !== workspace.url
+  ) {
+    throw new Error("Workspace smoke request escaped its exact local public origin");
+  }
+  const headers = {
+    ...init.headers,
+    host: target.host,
+    origin: workspace.url,
+  };
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        agent: false,
+        hostname: workspace.host,
+        port: workspace.port,
+        method: init.method ?? "GET",
+        path: `${target.pathname}${target.search}`,
+        headers,
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.once("error", reject);
+        response.once("end", () => {
+          const responseHeaders = new Headers();
+          for (let index = 0; index < response.rawHeaders.length; index += 2) {
+            responseHeaders.append(
+              response.rawHeaders[index] ?? "",
+              response.rawHeaders[index + 1] ?? "",
+            );
+          }
+          resolve(
+            new Response(Buffer.concat(chunks), {
+              status: response.statusCode ?? 500,
+              statusText: response.statusMessage,
+              headers: responseHeaders,
+            }),
+          );
+        });
+      },
+    );
+    request.once("error", reject);
+    request.end(init.body);
+  });
+}
+
+async function post(workspace, url, value) {
+  const response = await workspaceRequest(workspace, url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: workspaceMutationHeaders(workspace),
     body: JSON.stringify(value),
   });
   const body = await response.json();
@@ -72,6 +147,8 @@ async function startProvider() {
               steps: ["Review the selected target", "Run the registered check only after approval"],
               risks: ["This workspace smoke stops before execution"],
               target: "src/app.txt",
+              targets: ["src/app.txt"],
+              iterationCeiling: 0,
               checkIds: ["verify"],
             }),
           },
@@ -97,13 +174,110 @@ async function startProvider() {
   };
 }
 
-const root = await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-smoke-"));
+async function captureWorkspaceStartup(stateRoot) {
+  const child = spawn(process.execPath, [path.resolve("packages/api/dist/main.js")], {
+    env: { ...process.env, ICARUS_HOME: stateRoot },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const closed = new Promise((resolve) => child.once("close", resolve));
+  let stdout = "";
+  let stderr = "";
+  const startup = await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error("Workspace startup record was not emitted within 10 seconds"));
+    }, 10_000);
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      const newline = stdout.indexOf("\n");
+      if (newline < 0) return;
+      clearTimeout(timeout);
+      try {
+        resolve(JSON.parse(stdout.slice(0, newline)));
+      } catch (error) {
+        reject(error);
+      } finally {
+        child.kill("SIGTERM");
+      }
+    });
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      if (stdout.indexOf("\n") < 0) {
+        clearTimeout(timeout);
+        reject(
+          new Error(
+            `Workspace exited before startup output (code=${String(code)}, signal=${String(
+              signal,
+            )}, stderr=${stderr})`,
+          ),
+        );
+      }
+    });
+  });
+  await closed;
+  return { startup, stdout, stderr };
+}
+
+const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "icarus-workspace-smoke-")));
 let runtime;
 let workspace;
 let provider;
 try {
   const repository = path.join(root, "repository");
   const stateRoot = path.join(root, "state");
+  const configuredZero = spawnSync(process.execPath, [path.resolve("packages/api/dist/main.js")], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ICARUS_HOME: path.join(root, "configured-zero-state"),
+      ICARUS_PORT: "0",
+    },
+  });
+  if (
+    configuredZero.status !== 1 ||
+    configuredZero.stdout !== "" ||
+    !configuredZero.stderr.includes('"code":"INVALID_PORT"')
+  ) {
+    throw new Error("An explicit ICARUS_PORT=0 did not fail closed");
+  }
+  const foreground = await captureWorkspaceStartup(path.join(root, "foreground-state"));
+  if (
+    typeof foreground.startup !== "object" ||
+    foreground.startup === null ||
+    Array.isArray(foreground.startup) ||
+    JSON.stringify(Object.keys(foreground.startup).sort()) !==
+      JSON.stringify(["binding", "stateRoot", "url"]) ||
+    foreground.startup.binding !== WORKSPACE_BIND_HOST ||
+    foreground.startup.stateRoot !== path.join(root, "foreground-state") ||
+    typeof foreground.startup.url !== "string" ||
+    foreground.stderr !== ""
+  ) {
+    throw new Error("Foreground startup output was not the closed launch-record shape");
+  }
+  const startupUrl = new URL(foreground.startup.url);
+  const startupToken =
+    /^#icarus-action-session=([A-Za-z0-9_-]{43})$/.exec(startupUrl.hash)?.[1] ?? null;
+  if (
+    startupToken === null ||
+    !isWorkspaceMutationHostname(startupUrl.hostname) ||
+    startupUrl.hostname === foreground.startup.binding ||
+    foreground.stdout.trim() !== JSON.stringify(foreground.startup) ||
+    JSON.stringify({
+      binding: foreground.startup.binding,
+      stateRoot: foreground.startup.stateRoot,
+    }).includes(startupToken) ||
+    foreground.stdout.split(startupToken).length !== 2
+  ) {
+    throw new Error("Foreground startup output disclosed or misplaced the action-session bearer");
+  }
   await mkdir(path.join(repository, "src"), { recursive: true });
   await writeFile(path.join(repository, "README.md"), "# Workspace smoke fixture\n");
   await writeFile(path.join(repository, "src", "app.txt"), "local state stays untouched\n");
@@ -128,7 +302,18 @@ try {
     },
     0,
   );
-  const project = await post(`${workspace.url}/api/projects`, {
+  const workspacePublicUrl = new URL(workspace.url);
+  if (
+    workspace.host !== WORKSPACE_BIND_HOST ||
+    workspacePublicUrl.protocol !== "http:" ||
+    !isWorkspaceMutationHostname(workspacePublicUrl.hostname) ||
+    workspacePublicUrl.port !== String(workspace.port)
+  ) {
+    throw new Error("Workspace did not separate its fixed bind from a random .localhost origin");
+  }
+  const firstLaunchUrl = workspace.launchUrl;
+  const firstPublicHostname = workspacePublicUrl.hostname;
+  const project = await post(workspace, `${workspace.url}/api/projects`, {
     repository: { name: "smoke-repository", path: repository },
     project: {
       name: "smoke-project",
@@ -137,10 +322,15 @@ try {
       checks: [{ id: "verify", name: "Verify", argv: ["node", "--test"] }],
     },
   });
-  const preview = await post(`${workspace.url}/api/projects/${project.id}/context-preview`, {
-    target: "src/app.txt",
-  });
+  const preview = await post(
+    workspace,
+    `${workspace.url}/api/projects/${project.id}/context-preview`,
+    {
+      target: "src/app.txt",
+    },
+  );
   const repeatedPreview = await post(
+    workspace,
     `${workspace.url}/api/projects/${project.id}/context-preview`,
     { target: "src/app.txt" },
   );
@@ -151,16 +341,17 @@ try {
   ) {
     throw new Error("Context preview was not deterministic metadata-only evidence");
   }
-  const draft = await post(`${workspace.url}/api/runs`, {
+  const draft = await post(workspace, `${workspace.url}/api/runs`, {
     projectId: project.id,
     task: "Inspect a bounded local change request.",
-    target: "src/app.txt",
+    targets: ["src/app.txt"],
     provider: { model: "smoke-contract", baseUrl: provider.baseUrl },
   });
   if (draft.state !== "preparing" || draft.phase !== "draft" || provider.requests() !== 0) {
     throw new Error("Draft was not persisted before provider work");
   }
-  const provenanceResponse = await fetch(
+  const provenanceResponse = await workspaceRequest(
+    workspace,
     `${workspace.url}/api/runs/${draft.id}/verification-attempts?snapshot=${String(draft.eventCursor)}`,
   );
   const provenance = await provenanceResponse.json();
@@ -185,7 +376,13 @@ try {
     { runtime, stateRoot, workspaceDist: path.resolve("packages/workspace/dist") },
     0,
   );
-  const draftResponse = await fetch(`${workspace.url}/api/runs/${draft.id}`);
+  if (
+    workspace.launchUrl === firstLaunchUrl ||
+    new URL(workspace.url).hostname === firstPublicHostname
+  ) {
+    throw new Error("Workspace action origin and bearer did not rotate after restart");
+  }
+  const draftResponse = await workspaceRequest(workspace, `${workspace.url}/api/runs/${draft.id}`);
   const persistedDraft = await draftResponse.json();
   if (
     !draftResponse.ok ||
@@ -195,7 +392,7 @@ try {
   ) {
     throw new Error("Draft was not recovered before planning after restart");
   }
-  const planned = await post(`${workspace.url}/api/runs/${draft.id}/plan`, {});
+  const planned = await post(workspace, `${workspace.url}/api/runs/${draft.id}/plan`, {});
   if (
     planned.state !== "awaiting_approval" ||
     planned.verification?.outcome !== "not_run" ||
@@ -203,7 +400,7 @@ try {
   ) {
     throw new Error("Plan did not stop truthfully at the approval gate");
   }
-  const roomIndexResponse = await fetch(`${workspace.url}/api/change-rooms`);
+  const roomIndexResponse = await workspaceRequest(workspace, `${workspace.url}/api/change-rooms`);
   const roomIndex = await roomIndexResponse.json();
   if (
     !roomIndexResponse.ok ||
@@ -215,7 +412,10 @@ try {
   ) {
     throw new Error("Change Room index did not summarize the planned run truthfully");
   }
-  const roomResponse = await fetch(`${workspace.url}/api/runs/${draft.id}/change-room`);
+  const roomResponse = await workspaceRequest(
+    workspace,
+    `${workspace.url}/api/runs/${draft.id}/change-room`,
+  );
   const room = await roomResponse.json();
   if (
     !roomResponse.ok ||
@@ -230,7 +430,8 @@ try {
   ) {
     throw new Error("Change Room projection was not the bounded evidence explanation");
   }
-  const contextResponse = await fetch(
+  const contextResponse = await workspaceRequest(
+    workspace,
     `${workspace.url}/api/runs/${draft.id}/change-context?question=why_blocked`,
   );
   const context = await contextResponse.json();
@@ -247,11 +448,13 @@ try {
   ) {
     throw new Error("Change-context packet did not answer with receipts");
   }
-  const roomMutation = await fetch(`${workspace.url}/api/runs/${draft.id}/change-room`, {
-    method: "POST",
-  });
-  if (roomMutation.status !== 404) {
-    throw new Error("Change Room route accepted a browser mutation verb");
+  const roomMutation = await workspaceRequest(
+    workspace,
+    `${workspace.url}/api/runs/${draft.id}/change-room`,
+    { method: "POST" },
+  );
+  if (roomMutation.status !== 401) {
+    throw new Error("Change Room route accepted a browser mutation verb without an action session");
   }
   await workspace.close();
   workspace = undefined;
@@ -263,17 +466,22 @@ try {
     { runtime, stateRoot, workspaceDist: path.resolve("packages/workspace/dist") },
     0,
   );
-  const persistedResponse = await fetch(`${workspace.url}/api/runs/${draft.id}`);
+  const persistedResponse = await workspaceRequest(
+    workspace,
+    `${workspace.url}/api/runs/${draft.id}`,
+  );
   const persisted = await persistedResponse.json();
   if (!persistedResponse.ok || persisted.state !== "awaiting_approval") {
     throw new Error("Persisted run was not recovered after restart");
   }
-  const indexResponse = await fetch(workspace.url);
+  const indexResponse = await workspaceRequest(workspace, workspace.url);
   const indexHtml = await indexResponse.text();
   if (
     !indexResponse.ok ||
     !indexHtml.includes("Icarus") ||
     indexResponse.headers.get("content-security-policy") === null ||
+    !indexResponse.headers.get("content-security-policy").includes("worker-src 'none'") ||
+    !indexResponse.headers.get("content-security-policy").includes("manifest-src 'none'") ||
     indexResponse.headers.has("access-control-allow-origin")
   ) {
     throw new Error("Production workspace entry was not served with the local security headers");
@@ -286,7 +494,7 @@ try {
     throw new Error("Production workspace entry did not reference its compiled module asset");
   }
   for (const assetPath of assetPaths) {
-    const assetResponse = await fetch(`${workspace.url}${assetPath}`);
+    const assetResponse = await workspaceRequest(workspace, `${workspace.url}${assetPath}`);
     const contentType = assetResponse.headers.get("content-type") ?? "";
     const expectedType = assetPath.endsWith(".js")
       ? "text/javascript"
@@ -312,6 +520,7 @@ try {
     `${JSON.stringify(
       {
         binding: workspace.host,
+        origin: workspace.url,
         projectId: project.id,
         contextDigest: preview.digest,
         runId: draft.id,

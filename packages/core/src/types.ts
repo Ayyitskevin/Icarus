@@ -1,6 +1,6 @@
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
-export const CONTEXT_AUDIT_POLICY_VERSION = "tracked-tree-secret-audit-v1";
+export const CONTEXT_AUDIT_POLICY_VERSION = "tracked-tree-secret-audit-v2";
 
 export type RunState =
   | "preparing"
@@ -18,7 +18,7 @@ export type RunState =
   | "rolled_back"
   | "restoring";
 
-export type ProviderKind = "ollama" | "openai";
+export type ProviderKind = "ollama" | "openai" | "anthropic";
 export type ProviderLocality = "loopback" | "remote";
 
 export interface SunCeiling {
@@ -28,7 +28,7 @@ export interface SunCeiling {
   readonly maxOutputTokensPerCall: number;
   readonly maxTotalTokens: number;
   readonly maxCostUsd: number;
-  readonly maxFilesChanged: 1;
+  readonly maxFilesChanged: number;
   readonly maxFileBytes: number;
   readonly maxDiffBytes: number;
   readonly maxCommandOutputBytes: number;
@@ -69,6 +69,19 @@ export interface ProjectRecord {
   readonly sandbox: SandboxProfile;
   readonly ceiling: SunCeiling;
   readonly createdAt: string;
+}
+
+export interface WorkspaceProjectEntry {
+  readonly project: ProjectRecord;
+  readonly repository: RepositoryRecord;
+}
+
+export interface WorkspaceProjectPage {
+  readonly before: number;
+  readonly snapshot: number;
+  readonly nextBefore: number;
+  readonly hasMore: boolean;
+  readonly projects: readonly WorkspaceProjectEntry[];
 }
 
 export type RepositoryAvailability = "available" | "missing" | "identity_changed" | "unavailable";
@@ -130,7 +143,8 @@ export interface ContextEntry {
 export interface ContextBundle {
   readonly auditPolicyVersion: typeof CONTEXT_AUDIT_POLICY_VERSION;
   readonly baseCommit: string;
-  readonly target: string;
+  /** The operator's candidate selection, sorted and deduplicated (ADR 0023). */
+  readonly targets: readonly string[];
   readonly repositoryMap: readonly string[];
   readonly entries: readonly ContextEntry[];
   readonly totalBytes: number;
@@ -146,7 +160,8 @@ export interface ContextManifestEntry {
 export interface ContextManifest {
   readonly auditPolicyVersion: typeof CONTEXT_AUDIT_POLICY_VERSION;
   readonly baseCommit: string;
-  readonly target: string;
+  /** The operator's candidate selection, sorted and deduplicated (ADR 0023). */
+  readonly targets: readonly string[];
   readonly repositoryMap: readonly string[];
   readonly entries: readonly ContextManifestEntry[];
   readonly totalBytes: number;
@@ -157,15 +172,142 @@ export interface PlanProposal {
   readonly steps: readonly string[];
   readonly risks: readonly string[];
   readonly target: string;
+  /**
+   * The exact set of repository-relative paths this run is authorized to
+   * change (ADR 0023). Sorted, deduplicated, and always containing `target`.
+   * Plan approval binds this set, so it is a maximum authority rather than a
+   * prediction: a patch set may change a non-empty subset and may never
+   * introduce a path outside it.
+   */
+  readonly targets: readonly string[];
+  /**
+   * Iterations this plan requests beyond its first attempt (ADR 0026, which
+   * supersedes the ADR 0024 repair grant). One budget, not two: approving the
+   * plan is the single operator decision that authorizes the loop, and the
+   * approval digest binds the number. Zero preserves single-attempt behavior.
+   */
+  readonly iterationCeiling: number;
   readonly checkIds: readonly string[];
+  /**
+   * Capabilities this plan requests (ADR 0026). Itemized, sorted, and covered
+   * by the plan approval digest, so approving the plan is the single operator
+   * decision that grants them. An empty list is a plan that requests no
+   * capability beyond the authority `targets` and `checkIds` already carry.
+   */
+  readonly grants: readonly CapabilityGrant[];
 }
 
+/**
+ * The capabilities a grant may name (ADR 0026). Deliberately closed: a
+ * capability that is not in this union cannot be requested, approved, or
+ * checked, so widening host authority requires editing this type and its ADR
+ * rather than passing a new string through from provider output.
+ */
+export type CapabilityKind = "read.manifest" | "read.checks" | "mutation.patchset" | "exec.check";
+
+/**
+ * One itemized capability request. `scope` is interpreted per kind — for
+ * `read.manifest` it is the requested read scope, resolved by the host into a
+ * `ReadableManifest` before approval. Limits are the grant's own ceilings and
+ * never widen a `SunCeiling`; the tighter of the two binds.
+ */
+export interface CapabilityGrant {
+  readonly kind: CapabilityKind;
+  readonly scope: readonly string[];
+  readonly maxCalls: number;
+}
+
+/**
+ * One file a `read.manifest` grant admits, pinned by the sha256 of its
+ * contents at the run's base commit. The operator approves these entries, so a
+ * read may only return bytes whose digest still matches.
+ */
+export interface ReadableManifestEntry {
+  readonly path: string;
+  readonly sha256: string;
+}
+
+/**
+ * The enumerated set of files a `read.manifest` grant admits, resolved against
+ * the pinned base commit. Approving the manifest digest is what keeps egress
+ * exact under a read tool: every byte a read can return was covered by a digest
+ * the operator approved, and the approval names the file it came from.
+ *
+ * Resolution is bounded rather than truncated — a scope admitting more than
+ * `MAX_READABLE_FILES` entries is refused, because a silently shortened
+ * manifest would make the model's view differ from the operator's with neither
+ * able to tell.
+ */
+export interface ReadableManifest {
+  readonly baseCommit: string;
+  readonly entries: readonly ReadableManifestEntry[];
+}
+
+/** Retained to decode runs persisted before ADR 0023 (schema v1). */
 export interface EditProposal {
   readonly path: string;
   readonly expectedPreimageSha256: string;
   readonly findText: string;
   readonly replaceText: string;
   readonly rationale: string;
+}
+
+export type FileEditOperation = "modify" | "create" | "delete";
+
+export interface FileReplacement {
+  readonly findText: string;
+  readonly replaceText: string;
+}
+
+/**
+ * One file-scoped operation inside a patch set (ADR 0023). A `modify` carries
+ * ordered replacements that must each match exactly once against the content
+ * produced by the preceding replacement; a `create` carries complete content;
+ * a `delete` carries only its preimage binding.
+ */
+export type FileEdit =
+  | {
+      readonly op: "modify";
+      readonly path: string;
+      readonly expectedPreimageSha256: string;
+      readonly replacements: readonly FileReplacement[];
+      readonly rationale: string;
+    }
+  | {
+      readonly op: "create";
+      readonly path: string;
+      readonly content: string;
+      readonly rationale: string;
+    }
+  | {
+      readonly op: "delete";
+      readonly path: string;
+      readonly expectedPreimageSha256: string;
+      readonly rationale: string;
+    };
+
+export interface PatchSet {
+  readonly summary: string;
+  readonly edits: readonly FileEdit[];
+}
+
+/**
+ * One path's baseline and approved bytes inside a tree checkpoint. `baseline`
+ * is absent for a created path and `approved` is absent for a deleted path;
+ * neither absence is ever inferred as an empty file.
+ */
+export interface CheckpointFile {
+  readonly path: string;
+  readonly op: FileEditOperation;
+  readonly baselineBase64: string | null;
+  readonly approvedBase64: string | null;
+}
+
+export interface TreeCheckpoint {
+  readonly runId: string;
+  readonly sha256: string;
+  readonly files: readonly CheckpointFile[];
+  readonly createdAt: string;
 }
 
 export interface ProviderUsage {
@@ -218,10 +360,16 @@ export interface RunRecord {
   readonly contextSha256: string;
   readonly plan: PlanProposal | null;
   readonly planSha256: string | null;
-  readonly edit: EditProposal | null;
+  /**
+   * The proposed change (ADR 0023). Runs persisted before that decision are
+   * presented as an equivalent single `modify` edit rather than being rewritten.
+   */
+  readonly patchSet: PatchSet | null;
   readonly cachePath: string | null;
   readonly worktreePath: string | null;
+  /** Legacy single-file checkpoint bytes; null for patch-set runs. */
   readonly baselineBase64: string | null;
+  /** Legacy single-file checkpoint bytes; null for patch-set runs. */
   readonly approvedBase64: string | null;
   readonly diff: string | null;
   readonly verification: VerificationEvidence | null;
@@ -419,7 +567,7 @@ export interface TaskScopeCardBody {
 export interface BaseContextCardBody {
   readonly baseCommit: string | null;
   readonly contextSha256: string | null;
-  readonly target: string | null;
+  readonly targets: readonly string[];
   readonly totalBytes: number | null;
   readonly auditPolicyVersion: string | null;
   readonly repositoryMap: readonly string[];
@@ -464,12 +612,20 @@ export type PatchsetActionStatus =
   | "cancelled"
   | "unknown";
 
+export interface PatchsetEditSummary {
+  readonly op: FileEditOperation;
+  readonly path: string;
+  readonly rationale: string;
+  readonly expectedPreimageSha256: string | null;
+  readonly replacementCount: number | null;
+}
+
 export interface PatchsetCardBody {
-  readonly action: {
-    readonly path: string;
-    readonly expectedPreimageSha256: string;
-    readonly rationale: string;
+  readonly patchSet: {
+    readonly summary: string;
+    readonly edits: readonly PatchsetEditSummary[];
   } | null;
+  readonly patchSetEditsTruncated: boolean;
   readonly actionStatus: PatchsetActionStatus;
   readonly diffSha256: string | null;
   readonly diffBytes: number | null;
@@ -670,6 +826,12 @@ export interface ChangeContextPacket {
   readonly generatedBy: "deterministic_host_projection";
 }
 
+export interface ApprovalCoverage {
+  readonly limit: 12;
+  readonly loaded: number;
+  readonly earlierApprovalsExcluded: boolean;
+}
+
 export interface RunHistory {
   readonly run: RunRecord;
   readonly approvals: readonly ApprovalRecord[];
@@ -679,6 +841,7 @@ export interface RunHistory {
 export interface RunPresentationSnapshot {
   readonly run: RunRecord;
   readonly approvals: readonly ApprovalRecord[];
+  readonly approvalCoverage: ApprovalCoverage;
   readonly events: readonly EventSummaryRecord[];
   readonly eventCursor: number;
   readonly eventCount: number;

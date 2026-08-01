@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
+import { TextDecoder } from "node:util";
 
 import {
   assertRegistrationStateSeparation,
@@ -9,11 +10,10 @@ import {
   DEFAULT_SANDBOX_LIMITS,
   IcarusError,
   type IcarusRuntime,
-  type ProjectRecord,
   parseProviderBaseUrl,
-  type RepositoryRecord,
 } from "@icarus/core";
 
+import { ActionCoordinator } from "./action-coordinator.js";
 import {
   changeContextQuery,
   contextPreviewRequest,
@@ -22,6 +22,7 @@ import {
   runEventHistoryQuery,
   runEventsQuery,
   runVerificationAttemptsQuery,
+  workspaceProjectPageQuery,
   workspaceRunPageQuery,
 } from "./contracts.js";
 import {
@@ -34,11 +35,26 @@ import {
   presentRunEventHistoryPage,
   presentRunEventPage,
   presentRunVerificationAttempts,
+  presentWorkspaceProjectPage,
   presentWorkspaceRunPage,
 } from "./present.js";
+import { parseStrictJson } from "./strict-json.js";
+import {
+  createBoundWorkspaceSession,
+  createWorkspaceMutationHostname,
+  isWorkspaceMutationHostname,
+  REVIEW_ONLY_WORKSPACE_HOST,
+  type WorkspaceReviewOnlyReason,
+  type WorkspaceServerMode,
+  type WorkspaceSession,
+} from "./workspace-session.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
+export const MAX_JSON_RESPONSE_BYTES = 8 * 1024 * 1024;
+const MAX_ERROR_MESSAGE_BYTES = 4 * 1024;
 const API_PREFIX = "/api/";
+const INTERNAL_ERROR_RESPONSE =
+  '{"error":{"code":"INTERNAL_ERROR","message":"The local workspace request failed."}}\n';
 
 export interface WorkspaceServerOptions {
   readonly runtime: IcarusRuntime;
@@ -48,10 +64,18 @@ export interface WorkspaceServerOptions {
 
 export interface StartedWorkspaceServer {
   readonly server: Server;
-  readonly host: "127.0.0.1";
+  readonly host: string;
   readonly port: number;
   readonly url: string;
+  readonly launchUrl: string;
+  readonly mode: WorkspaceServerMode;
+  readonly reviewOnlyReason: WorkspaceReviewOnlyReason | null;
   close(): Promise<void>;
+}
+
+export interface WorkspaceServerBindingHooks {
+  readonly createMutationHostname: () => string;
+  readonly listen: (server: Server, port: number, host: string) => Promise<void>;
 }
 
 function headers(contentType: string): Record<string, string> {
@@ -59,21 +83,42 @@ function headers(contentType: string): Record<string, string> {
     "cache-control": "no-store",
     "content-type": contentType,
     "content-security-policy":
-      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; worker-src 'none'; manifest-src 'none'",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
   };
 }
 
+export function serializeJsonResponse(value: unknown): string {
+  const body = `${JSON.stringify(value)}\n`;
+  if (Buffer.byteLength(body, "utf8") > MAX_JSON_RESPONSE_BYTES) {
+    throw new IcarusError(
+      "RESPONSE_TOO_LARGE",
+      "The local workspace response exceeds the 8 MiB JSON limit",
+    );
+  }
+  return body;
+}
+
 function json(response: ServerResponse, status: number, value: unknown): void {
+  const body = serializeJsonResponse(value);
   response.writeHead(status, headers("application/json; charset=utf-8"));
-  response.end(`${JSON.stringify(value)}\n`);
+  response.end(body);
+}
+
+function internalError(response: ServerResponse): void {
+  response.writeHead(500, headers("application/json; charset=utf-8"));
+  response.end(INTERNAL_ERROR_RESPONSE);
 }
 
 function errorStatus(error: IcarusError): number {
+  if (error.code === "ACTION_SESSION_REQUIRED") return 401;
+  if (error.code === "WORKSPACE_REVIEW_ONLY") return 403;
   if (error.code === "NOT_FOUND") return 404;
+  if (error.code === "SHUTTING_DOWN") return 503;
   if (error.code === "REQUEST_TOO_LARGE") return 413;
+  if (error.code === "RESPONSE_TOO_LARGE") return 500;
   if (error.code === "UNSUPPORTED_MEDIA_TYPE") return 415;
   if (
     error.code.includes("CONFLICT") ||
@@ -131,83 +176,24 @@ function safeError(error: unknown): { readonly status: number; readonly body: un
     /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(runId)
       ? runId
       : undefined;
+  const message =
+    Buffer.byteLength(trusted.message, "utf8") <= MAX_ERROR_MESSAGE_BYTES
+      ? trusted.message
+      : "The local workspace request failed with an oversized error message.";
   return {
     status: errorStatus(trusted),
     body: {
       error: {
         code: trusted.code,
-        message: trusted.message,
+        message,
         ...(safeRunId === undefined ? {} : { runId: safeRunId }),
       },
     },
   };
 }
 
-function requestHostname(request: IncomingMessage): string | null {
-  const host = request.headers.host;
-  if (host === undefined) return null;
-  try {
-    return new URL(`http://${host}`).hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-function requestAuthority(request: IncomingMessage): string | null {
-  const host = request.headers.host;
-  if (host === undefined) return null;
-  try {
-    const parsed = new URL(`http://${host}`);
-    if (
-      parsed.username.length > 0 ||
-      parsed.password.length > 0 ||
-      parsed.pathname !== "/" ||
-      parsed.search.length > 0 ||
-      parsed.hash.length > 0
-    ) {
-      return null;
-    }
-    return parsed.host.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-function assertLocalBrowserRequest(request: IncomingMessage): void {
-  const authority = requestAuthority(request);
-  const hostname = requestHostname(request);
-  if (
-    authority === null ||
-    (hostname !== "127.0.0.1" && hostname !== "localhost" && hostname !== "::1")
-  ) {
-    throw new IcarusError("INVALID_HOST", "The workspace accepts only loopback Host headers");
-  }
-  const origin = request.headers.origin;
-  if (origin === undefined) return;
-  let parsed: URL;
-  try {
-    parsed = new URL(origin);
-  } catch {
-    throw new IcarusError("INVALID_ORIGIN", "The request Origin is invalid");
-  }
-  const originHostname = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (
-    parsed.protocol !== "http:" ||
-    (originHostname !== "127.0.0.1" && originHostname !== "localhost" && originHostname !== "::1")
-  ) {
-    throw new IcarusError("INVALID_ORIGIN", "The workspace accepts only loopback Origins");
-  }
-  if (parsed.host.toLowerCase() !== authority) {
-    throw new IcarusError(
-      "INVALID_ORIGIN",
-      "The workspace accepts only a same-origin browser authority",
-    );
-  }
-}
-
 async function readJson(request: IncomingMessage): Promise<unknown> {
-  const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
-  if (contentType !== "application/json") {
+  if (request.headers["content-type"] !== "application/json") {
     throw new IcarusError("UNSUPPORTED_MEDIA_TYPE", "Mutation requests require application/json");
   }
   const contentLength = request.headers["content-length"];
@@ -229,11 +215,15 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
     }
     chunks.push(bytes);
   }
+  let source: string;
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      Buffer.concat(chunks),
+    );
   } catch {
-    throw new IcarusError("INVALID_JSON", "Request body must be valid JSON");
+    throw new IcarusError("INVALID_JSON", "Request body must be valid UTF-8 JSON");
   }
+  return parseStrictJson(source);
 }
 
 function decodedRouteId(value: string, name: string): string {
@@ -274,41 +264,37 @@ function disconnectSignal(
   };
 }
 
-function findProject(projects: readonly ProjectRecord[], projectId: string): ProjectRecord {
-  const project = projects.find((candidate) => candidate.id === projectId);
-  if (project === undefined) throw new IcarusError("NOT_FOUND", "Project was not found");
-  return project;
-}
-
-function findRepository(
-  repositories: readonly RepositoryRecord[],
-  repositoryId: string,
-): RepositoryRecord {
-  const repository = repositories.find((candidate) => candidate.id === repositoryId);
-  if (repository === undefined) throw new IcarusError("NOT_FOUND", "Repository was not found");
-  return repository;
-}
-
 function presentRunById(options: WorkspaceServerOptions, runId: string): Record<string, unknown> {
   const snapshot = options.runtime.service.presentationSnapshot(runId);
   const project = options.runtime.service.getProject(snapshot.run.projectId);
   return presentRun(project, snapshot);
 }
 
-function workspaceSnapshot(options: WorkspaceServerOptions): Record<string, unknown> {
-  const repositories = options.runtime.service.listRepositories();
-  const projects = options.runtime.service.listProjects();
+function workspaceSnapshot(
+  options: WorkspaceServerOptions,
+  session: WorkspaceSession,
+): Record<string, unknown> {
+  const mutationAvailable = session.mode === "mutation-capable";
+  const reviewOnlyReason =
+    "This stable-origin workspace is review-only. Relaunch without an explicit port to make bounded changes.";
   return {
     capabilities: {
       server: { status: "available", binding: "loopback" },
+      mutation: {
+        status: mutationAvailable ? "available" : "review_only",
+        reason: mutationAvailable
+          ? "This fresh-origin workspace has a session-scoped browser mutation transport."
+          : reviewOnlyReason,
+      },
       provider: {
         status: "unconfigured",
         reason: "Enter a loopback Ollama model and endpoint for each draft.",
       },
       planning: {
-        status: "available",
-        reason:
-          "Portable loopback planning is available; SQLite operation admission prevents concurrent provider work.",
+        status: mutationAvailable ? "available" : "review_only",
+        reason: mutationAvailable
+          ? "Portable loopback planning is available; SQLite operation admission prevents concurrent provider work."
+          : `Planning is disabled. ${reviewOnlyReason}`,
       },
       execution: {
         status: "unconfigured",
@@ -317,15 +303,14 @@ function workspaceSnapshot(options: WorkspaceServerOptions): Record<string, unkn
         inheritedRuntimePlatform: process.platform === "linux" ? "linux_supported" : "unsupported",
       },
     },
-    projects: projects.map((project) =>
-      presentProject(project, findRepository(repositories, project.repositoryId)),
-    ),
+    projectPage: presentWorkspaceProjectPage(options.runtime.service.openWorkspaceProjectPage()),
     runPage: presentWorkspaceRunPage(options.runtime.service.openWorkspaceRunPage()),
   };
 }
 
 async function routeApi(
   options: WorkspaceServerOptions,
+  session: WorkspaceSession,
   request: IncomingMessage,
   response: ServerResponse,
   pathname: string,
@@ -337,14 +322,21 @@ async function routeApi(
     return true;
   }
   if (method === "GET" && pathname === "/api/workspace") {
-    json(response, 200, workspaceSnapshot(options));
+    json(response, 200, workspaceSnapshot(options, session));
+    return true;
+  }
+  if (method === "GET" && pathname === "/api/projects") {
+    const query = workspaceProjectPageQuery(searchParams);
+    const page =
+      query.kind === "new"
+        ? options.runtime.service.openWorkspaceProjectPage()
+        : options.runtime.service.listWorkspaceProjectPage(query.before, query.snapshot);
+    json(response, 200, presentWorkspaceProjectPage(page));
     return true;
   }
   if (method === "POST" && pathname === "/api/projects") {
     const input = projectRequest(await readJson(request));
-    if (
-      options.runtime.service.listProjects().some((project) => project.name === input.project.name)
-    ) {
+    if (options.runtime.service.findProjectByName(input.project.name) !== null) {
       throw new IcarusError("PROJECT_NAME_CONFLICT", "The project name is already registered");
     }
     const projectDefinition = {
@@ -354,10 +346,8 @@ async function routeApi(
       sandbox: { image: input.project.sandboxImage, ...DEFAULT_SANDBOX_LIMITS },
       ceiling: DEFAULT_CEILING,
     };
-    const existingRepository = options.runtime.service
-      .listRepositories()
-      .find((repository) => repository.name === input.repository.name);
-    if (existingRepository === undefined) {
+    const existingRepository = options.runtime.service.findRepositoryByName(input.repository.name);
+    if (existingRepository === null) {
       await assertRegistrationStateSeparation(options.stateRoot, input.repository.path);
       const created = await options.runtime.service.registerRepositoryProject({
         repository: input.repository,
@@ -424,7 +414,6 @@ async function routeApi(
   }
   if (method === "POST" && pathname === "/api/runs") {
     const input = runDraftRequest(await readJson(request));
-    const project = findProject(options.runtime.service.listProjects(), input.projectId);
     const providerEndpoint = parseProviderBaseUrl(input.provider.baseUrl);
     if (providerEndpoint.locality !== "loopback") {
       throw new IcarusError(
@@ -438,9 +427,9 @@ async function routeApi(
       baseUrl: input.provider.baseUrl,
     });
     const run = options.runtime.service.createRunDraft({
-      projectName: project.name,
+      projectId: input.projectId,
       task: input.task,
-      target: input.target,
+      targets: input.targets,
       provider,
     });
     json(response, 201, presentRunById(options, run.id));
@@ -565,66 +554,228 @@ async function serveWorkspace(
   response.end(request.method === "HEAD" ? undefined : bytes);
 }
 
-export function createWorkspaceServer(options: WorkspaceServerOptions): Server {
-  return createServer(async (request, response) => {
-    try {
-      assertLocalBrowserRequest(request);
-      const url = new URL(request.url ?? "/", "http://127.0.0.1");
-      if (url.pathname.startsWith(API_PREFIX)) {
-        const handled = await routeApi(options, request, response, url.pathname, url.searchParams);
-        if (!handled) {
-          json(response, 404, { error: { code: "NOT_FOUND", message: "API route was not found" } });
-        }
-        return;
-      }
-      await serveWorkspace(options, request, response, url.pathname);
-    } catch (error) {
-      if (response.destroyed || response.headersSent) {
-        if (!response.destroyed) {
-          response.end();
-        }
-        return;
-      }
-      const safe = safeError(error);
-      json(response, safe.status, safe.body);
+async function handleWorkspaceRequest(
+  options: WorkspaceServerOptions,
+  session: WorkspaceSession,
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  try {
+    session.assertExactHost(request);
+    const url = new URL(request.url ?? "/", session.url);
+    if (request.method === "GET" || request.method === "HEAD") {
+      session.assertOptionalExactOrigin(request);
+    } else {
+      session.assertProtectedMutation(request);
     }
+    if (url.pathname.startsWith(API_PREFIX)) {
+      const handled = await routeApi(
+        options,
+        session,
+        request,
+        response,
+        url.pathname,
+        url.searchParams,
+      );
+      if (!handled) {
+        json(response, 404, { error: { code: "NOT_FOUND", message: "API route was not found" } });
+      }
+      return;
+    }
+    await serveWorkspace(options, request, response, url.pathname);
+  } catch (error) {
+    if (response.destroyed || response.headersSent) {
+      if (!response.destroyed) {
+        response.end();
+      }
+      return;
+    }
+    const safe = safeError(error);
+    try {
+      json(response, safe.status, safe.body);
+    } catch {
+      if (!response.headersSent) internalError(response);
+    }
+  }
+}
+
+function trackShutdownResponse(
+  response: ServerResponse,
+  shutdownResponses: Set<Promise<void>>,
+): void {
+  let responseSettlement: Promise<void>;
+  responseSettlement = new Promise<void>((resolve) => {
+    const settle = (): void => {
+      response.off("finish", settle);
+      response.off("close", settle);
+      resolve();
+    };
+    response.once("finish", settle);
+    response.once("close", settle);
+    if (response.writableFinished || response.destroyed) settle();
+  }).finally(() => {
+    shutdownResponses.delete(responseSettlement);
   });
+  shutdownResponses.add(responseSettlement);
+}
+
+function workspaceRequestListener(
+  options: WorkspaceServerOptions,
+  session: WorkspaceSession,
+  coordinator: ActionCoordinator,
+  shutdownResponses: Set<Promise<void>>,
+): (request: IncomingMessage, response: ServerResponse) => void {
+  return (request, response) => {
+    // Track transport settlement for every accepted socket before action
+    // admission. Handler completion alone does not prove that response bytes
+    // reached Node's finished/closed boundary.
+    trackShutdownResponse(response, shutdownResponses);
+    let work: Promise<void>;
+    try {
+      // `track` registers synchronously before the async handler reaches its
+      // first await. A request is therefore either in the fixed drain set or
+      // rejected before it can read a body or call the service.
+      work = coordinator.track(() => handleWorkspaceRequest(options, session, request, response));
+    } catch (error) {
+      const safe = safeError(error);
+      try {
+        json(response, safe.status, safe.body);
+      } catch {
+        if (!response.destroyed) response.destroy();
+      }
+      return;
+    }
+    // Node's request event does not observe returned promises. The coordinator
+    // retains the rejection for shutdown; this handler only prevents an
+    // unhandled rejection and closes a response whose fallback also failed.
+    void work.catch(() => {
+      if (!response.destroyed) response.destroy();
+    });
+  };
 }
 
 export async function startWorkspaceServer(
   options: WorkspaceServerOptions,
   port: number,
 ): Promise<StartedWorkspaceServer> {
+  return startWorkspaceServerWithBindingHooks(options, port, {
+    createMutationHostname: createWorkspaceMutationHostname,
+    listen: listenOnExactHost,
+  });
+}
+
+/** @internal Deterministic seam for exact bind and post-bind origin tests. */
+export async function startWorkspaceServerWithBindingHooks(
+  options: WorkspaceServerOptions,
+  port: number,
+  binding: WorkspaceServerBindingHooks,
+): Promise<StartedWorkspaceServer> {
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
     throw new IcarusError("INVALID_PORT", "Workspace port is invalid");
   }
-  const server = createWorkspaceServer(options);
+  const mode: WorkspaceServerMode = port === 0 ? "mutation-capable" : "review-only";
+  const reviewOnlyReason: WorkspaceReviewOnlyReason | null =
+    mode === "review-only" ? "explicit-port" : null;
+  const server = createServer();
+  const coordinator = new ActionCoordinator();
+  const shutdownResponses = new Set<Promise<void>>();
+  try {
+    await binding.listen(server, port, REVIEW_ONLY_WORKSPACE_HOST);
+  } catch (error) {
+    if (server.listening) await closeListeningServer(server);
+    throw error;
+  }
+  const address = server.address();
+  if (
+    address === null ||
+    typeof address === "string" ||
+    address.family !== "IPv4" ||
+    address.address !== REVIEW_ONLY_WORKSPACE_HOST
+  ) {
+    await closeListeningServer(server);
+    throw new IcarusError("UNSAFE_BINDING", "Workspace did not bind to the exact IPv4 loopback");
+  }
+  let session: WorkspaceSession;
+  try {
+    const originHostname =
+      mode === "mutation-capable" ? binding.createMutationHostname() : REVIEW_ONLY_WORKSPACE_HOST;
+    if (mode === "mutation-capable" && !isWorkspaceMutationHostname(originHostname)) {
+      throw new IcarusError("INVALID_ORIGIN", "Workspace mutation origin is invalid");
+    }
+    session = createBoundWorkspaceSession(mode, address.port, originHostname, reviewOnlyReason);
+    server.on(
+      "request",
+      workspaceRequestListener(options, session, coordinator, shutdownResponses),
+    );
+  } catch (error) {
+    await closeListeningServer(server);
+    throw error;
+  }
+  let closePromise: Promise<void> | undefined;
+  return {
+    server,
+    host: REVIEW_ONLY_WORKSPACE_HOST,
+    port: address.port,
+    url: session.url,
+    launchUrl: session.launchUrl,
+    mode: session.mode,
+    reviewOnlyReason: session.reviewOnlyReason,
+    close: () => {
+      if (closePromise !== undefined) return closePromise;
+
+      // Close admission before any asynchronous shutdown step. Existing
+      // handlers remain live and are never aborted by this first close.
+      const drainPromise = coordinator.drain();
+      const listenerClosePromise = new Promise<void>((resolve, reject) => {
+        server.close((error) => (error === undefined ? resolve() : reject(error)));
+      });
+      server.closeIdleConnections();
+
+      closePromise = (async () => {
+        const drain = await drainPromise;
+        const failures: unknown[] = drain.failures.map((failure) => failure.error);
+        while (shutdownResponses.size > 0) {
+          await Promise.all([...shutdownResponses]);
+        }
+        try {
+          // Every tracked handler has settled, so residual sockets can no
+          // longer own service or store work.
+          server.closeAllConnections();
+        } catch (error) {
+          failures.push(error);
+        }
+        try {
+          await listenerClosePromise;
+        } catch (error) {
+          failures.push(error);
+        }
+        if (failures.length > 0) {
+          throw new AggregateError(
+            failures,
+            "Workspace shutdown did not settle all active requests cleanly",
+          );
+        }
+      })();
+      return closePromise;
+    },
+  };
+}
+
+async function listenOnExactHost(server: Server, port: number, host: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error): void => reject(error);
     server.once("error", onError);
-    server.listen(port, "127.0.0.1", () => {
+    server.listen(port, host, () => {
       server.off("error", onError);
       resolve();
     });
   });
-  const address = server.address();
-  if (address === null || typeof address === "string" || address.address !== "127.0.0.1") {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    throw new IcarusError("UNSAFE_BINDING", "Workspace did not bind to IPv4 loopback");
-  }
-  let closed = false;
-  return {
-    server,
-    host: "127.0.0.1",
-    port: address.port,
-    url: `http://127.0.0.1:${address.port}`,
-    close: async () => {
-      if (closed) return;
-      closed = true;
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => (error === undefined ? resolve() : reject(error)));
-        server.closeAllConnections();
-      });
-    },
-  };
+}
+
+async function closeListeningServer(server: Server): Promise<void> {
+  if (!server.listening) return;
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error === undefined ? resolve() : reject(error)));
+    server.closeAllConnections();
+  });
 }
