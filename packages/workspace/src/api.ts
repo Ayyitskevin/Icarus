@@ -315,6 +315,368 @@ export interface RunPageView {
   readonly runs: readonly RunSummaryView[];
 }
 
+export type ChangeRoomVerificationOutcome = "passed" | "failed" | "unavailable" | "not_run";
+
+export type ChangeRoomProviderKind = "ollama" | "openai";
+
+export type ChangeRoomProviderLocality = "loopback" | "remote";
+
+export type ChangeRoomPrivacyClass = "local_process" | "remote_api";
+
+export interface ChangeRoomProviderView {
+  readonly kind: ChangeRoomProviderKind;
+  readonly model: string;
+  readonly locality: ChangeRoomProviderLocality;
+  readonly privacyClass: ChangeRoomPrivacyClass;
+}
+
+export interface ChangeRoomSummaryView {
+  readonly roomId: string;
+  readonly projectId: string;
+  readonly task: string;
+  readonly target: string;
+  readonly state: RunStateView;
+  readonly phase: RunPhase;
+  readonly verificationOutcome: ChangeRoomVerificationOutcome;
+  readonly provider: ChangeRoomProviderView;
+  readonly terminalReason: string | null;
+  readonly createdAt: string;
+  readonly lastActivity: string;
+}
+
+export interface ChangeRoomPageView {
+  readonly before: number;
+  readonly snapshot: number;
+  readonly nextBefore: number;
+  readonly hasMore: boolean;
+  readonly rooms: readonly ChangeRoomSummaryView[];
+}
+
+export type ChangeRoomCardKind =
+  | "task_scope"
+  | "base_context"
+  | "provider_plan"
+  | "plan_approval"
+  | "patchset"
+  | "registered_checks"
+  | "check_outcomes"
+  | "review_decision"
+  | "checkpoint"
+  | "rollback_restoration"
+  | "terminal_state";
+
+export type ChangeRoomAnnotationTarget = ChangeRoomCardKind | "room";
+
+export type ChangeRoomProvenanceClass =
+  | "operator_assertion"
+  | "provider_output"
+  | "host_fact"
+  | "approval_decision"
+  | "verification_evidence"
+  | "system_failure";
+
+export type ChangeRoomCardStatus = "available" | "pending" | "not_applicable" | "unavailable";
+
+export type ChangeRoomApprovalKind = "egress" | "plan" | "review" | "rollback" | "restore";
+
+export type ChangeRoomApprovalDecision = "approve" | "reject";
+
+export type ChangeRoomEvidenceRefView =
+  | { readonly kind: "event_sequence"; readonly sequence: number }
+  | {
+      readonly kind: "approval";
+      readonly approvalKind: ChangeRoomApprovalKind;
+      readonly digest: string;
+    }
+  | { readonly kind: "digest"; readonly label: string; readonly sha256: string }
+  | { readonly kind: "checkpoint"; readonly sha256: string };
+
+export interface ChangeRoomCardIndicatorsView {
+  readonly truncated: boolean;
+  readonly redacted: boolean;
+  readonly unavailableEvidence: boolean;
+}
+
+export interface ChangeRoomApprovalView {
+  readonly actor: string;
+  readonly decision: ChangeRoomApprovalDecision;
+  readonly digest: string;
+  readonly createdAt: string;
+}
+
+export interface TaskScopeCardBodyView {
+  readonly task: string;
+  readonly target: string;
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly baseRef: string;
+}
+
+export type ChangeRoomEgressState =
+  | "not_required_loopback"
+  | "awaiting_approval"
+  | "approved"
+  | "not_reached";
+
+export type ChangeRoomContextEntryReason =
+  | "repository_map"
+  | "root_rules"
+  | "target_rules"
+  | "seed"
+  | "target";
+
+export interface BaseContextCardBodyView {
+  readonly baseCommit: string | null;
+  readonly contextSha256: string | null;
+  readonly target: string | null;
+  readonly totalBytes: number | null;
+  readonly auditPolicyVersion: string | null;
+  readonly repositoryMap: readonly string[];
+  readonly entries: readonly {
+    readonly path: string;
+    readonly reason: ChangeRoomContextEntryReason;
+    readonly bytes: number;
+    readonly sha256: string;
+  }[];
+  readonly egress: {
+    readonly state: ChangeRoomEgressState;
+    readonly approval: {
+      readonly actor: string;
+      readonly digest: string;
+      readonly createdAt: string;
+    } | null;
+  };
+}
+
+export interface ProviderPlanCardBodyView {
+  readonly provider: ChangeRoomProviderView;
+  readonly trustLabel: "untrusted_proposal";
+  readonly plan: {
+    readonly summary: string;
+    readonly steps: readonly string[];
+    readonly risks: readonly string[];
+    readonly target: string;
+    readonly checkIds: readonly string[];
+  } | null;
+  readonly planSha256: string | null;
+}
+
+export interface PlanApprovalCardBodyView {
+  readonly approval: ChangeRoomApprovalView | null;
+}
+
+export type PatchsetActionStatusView =
+  | "not_recorded"
+  | "proposed"
+  | "materialized"
+  | "reverted"
+  | "completed"
+  | "cancelled"
+  | "unknown";
+
+export interface PatchsetCardBodyView {
+  readonly action: {
+    readonly path: string;
+    readonly expectedPreimageSha256: string;
+    readonly rationale: string;
+  } | null;
+  readonly actionStatus: PatchsetActionStatusView;
+  readonly diffSha256: string | null;
+  readonly diffBytes: number | null;
+  readonly diff: string | null;
+  readonly changedPaths: readonly string[];
+  readonly note: string;
+}
+
+export interface RegisteredChecksCardBodyView {
+  readonly checks: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly argv: readonly string[];
+  }[];
+  readonly sandbox: {
+    readonly image: string;
+    readonly cpus: number;
+    readonly memoryMb: number;
+    readonly pids: number;
+    readonly tmpfsMb: number;
+  };
+}
+
+export type CheckOutcomeStatusView = "passed" | "failed" | "unavailable" | "cancelled" | "not_run";
+
+export interface CheckOutcomeEntryView {
+  readonly id: string;
+  readonly name: string;
+  readonly argv: readonly string[];
+  readonly outcome: CheckOutcomeStatusView;
+  readonly exitCode: number | null;
+  readonly signal: string | null;
+  readonly durationMs: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly truncated: boolean;
+}
+
+export interface CheckOutcomesCardBodyView {
+  readonly outcome: ChangeRoomVerificationOutcome;
+  readonly checks: readonly CheckOutcomeEntryView[];
+  readonly diffSha256: string | null;
+  readonly checkpointSha256: string | null;
+}
+
+export interface ReviewDecisionCardBodyView {
+  readonly decision: ChangeRoomApprovalView | null;
+}
+
+export interface CheckpointCardBodyView {
+  readonly status: "saved" | "not_saved";
+  readonly sha256: string | null;
+  readonly createdAt: string | null;
+  readonly note: string;
+}
+
+export interface RollbackRestorationRecordView {
+  readonly kind: "rollback" | "restore";
+  readonly actor: string;
+  readonly decision: ChangeRoomApprovalDecision;
+  readonly digest: string;
+  readonly createdAt: string;
+  readonly completed: boolean;
+  readonly completedSequence: number | null;
+}
+
+export interface RollbackRestorationCardBodyView {
+  readonly records: readonly RollbackRestorationRecordView[];
+  readonly note: string;
+}
+
+export interface TerminalStateCardBodyView {
+  readonly state: RunStateView;
+  readonly resumeState: RunStateView | null;
+  readonly terminal: boolean;
+  readonly terminalReason: string | null;
+  readonly lastError: { readonly code: string; readonly message: string } | null;
+  readonly updatedAt: string;
+}
+
+interface ChangeRoomCardBaseView {
+  readonly id: string;
+  readonly title: string;
+  readonly provenanceClass: ChangeRoomProvenanceClass;
+  readonly status: ChangeRoomCardStatus;
+  readonly refs: readonly ChangeRoomEvidenceRefView[];
+  readonly indicators: ChangeRoomCardIndicatorsView;
+}
+
+export type ChangeRoomCardView =
+  | (ChangeRoomCardBaseView & { readonly kind: "task_scope"; readonly body: TaskScopeCardBodyView })
+  | (ChangeRoomCardBaseView & {
+      readonly kind: "base_context";
+      readonly body: BaseContextCardBodyView;
+    })
+  | (ChangeRoomCardBaseView & {
+      readonly kind: "provider_plan";
+      readonly body: ProviderPlanCardBodyView;
+    })
+  | (ChangeRoomCardBaseView & {
+      readonly kind: "plan_approval";
+      readonly body: PlanApprovalCardBodyView;
+    })
+  | (ChangeRoomCardBaseView & { readonly kind: "patchset"; readonly body: PatchsetCardBodyView })
+  | (ChangeRoomCardBaseView & {
+      readonly kind: "registered_checks";
+      readonly body: RegisteredChecksCardBodyView;
+    })
+  | (ChangeRoomCardBaseView & {
+      readonly kind: "check_outcomes";
+      readonly body: CheckOutcomesCardBodyView;
+    })
+  | (ChangeRoomCardBaseView & {
+      readonly kind: "review_decision";
+      readonly body: ReviewDecisionCardBodyView;
+    })
+  | (ChangeRoomCardBaseView & {
+      readonly kind: "checkpoint";
+      readonly body: CheckpointCardBodyView;
+    })
+  | (ChangeRoomCardBaseView & {
+      readonly kind: "rollback_restoration";
+      readonly body: RollbackRestorationCardBodyView;
+    })
+  | (ChangeRoomCardBaseView & {
+      readonly kind: "terminal_state";
+      readonly body: TerminalStateCardBodyView;
+    });
+
+export interface ChangeRoomAnnotationView {
+  readonly id: string;
+  readonly runId: string;
+  readonly card: ChangeRoomAnnotationTarget;
+  readonly actor: string;
+  readonly body: string;
+  readonly createdAt: string;
+}
+
+export interface ChangeRoomTimelineEntryView {
+  readonly sequence: number;
+  readonly type: string;
+  readonly label: string;
+  readonly evidenceSection: string;
+  readonly timestamp: string;
+  readonly createdAt: string;
+}
+
+export interface ChangeRoomIntegrityView {
+  readonly eventCursor: number;
+  readonly eventCount: number;
+  readonly timelineTruncated: boolean;
+  readonly digestSemantics: "byte_binding_only";
+  readonly note: string;
+}
+
+export interface ChangeRoomDetailView {
+  readonly schema: "icarus.change-room.v1";
+  readonly roomId: string;
+  readonly projectId: string;
+  readonly state: RunStateView;
+  readonly phase: RunPhase;
+  readonly cards: readonly ChangeRoomCardView[];
+  readonly annotations: readonly ChangeRoomAnnotationView[];
+  readonly timeline: readonly ChangeRoomTimelineEntryView[];
+  readonly integrity: ChangeRoomIntegrityView;
+  readonly generatedBy: "deterministic_host_projection";
+}
+
+export type ChangeContextQuestion =
+  | "why_blocked"
+  | "what_changed"
+  | "what_passed"
+  | "what_remains_before_review"
+  | "why_rolled_back";
+
+export interface ChangeContextReceiptView {
+  readonly cardId: string;
+  readonly eventSequences: readonly number[];
+  readonly digests: readonly string[];
+}
+
+export interface ChangeContextComponentView {
+  readonly statement: string;
+  readonly receipts: readonly ChangeContextReceiptView[];
+}
+
+export interface ChangeContextPacketView {
+  readonly schema: "icarus.change-context.v1";
+  readonly roomId: string;
+  readonly eventCursor: number;
+  readonly question: ChangeContextQuestion;
+  readonly components: readonly ChangeContextComponentView[];
+  readonly omissions: readonly string[];
+  readonly uncertainty: readonly string[];
+  readonly generatedBy: "deterministic_host_projection";
+}
+
 export interface RunFilesView {
   readonly involved: readonly string[];
   readonly changed: readonly string[];
@@ -562,6 +924,36 @@ export function getRunVerificationAttempts(
 ): Promise<unknown> {
   return requestJson<unknown>(
     `/api/runs/${encodeURIComponent(runId)}/verification-attempts?snapshot=${encodeURIComponent(String(snapshot))}`,
+    signal === undefined ? {} : { signal },
+  );
+}
+
+export function getChangeRoomPage(
+  cursor: RunPageCursor | null,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return requestJson<unknown>(
+    cursor === null
+      ? "/api/change-rooms"
+      : `/api/change-rooms?before=${encodeURIComponent(String(cursor.before))}&snapshot=${encodeURIComponent(String(cursor.snapshot))}`,
+    signal === undefined ? {} : { signal },
+  );
+}
+
+export function getChangeRoom(runId: string, signal?: AbortSignal): Promise<unknown> {
+  return requestJson<unknown>(
+    `/api/runs/${encodeURIComponent(runId)}/change-room`,
+    signal === undefined ? {} : { signal },
+  );
+}
+
+export function getChangeContext(
+  runId: string,
+  question: ChangeContextQuestion,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return requestJson<unknown>(
+    `/api/runs/${encodeURIComponent(runId)}/change-context?question=${encodeURIComponent(question)}`,
     signal === undefined ? {} : { signal },
   );
 }

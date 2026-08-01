@@ -10,6 +10,7 @@ import {
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
   IcarusError,
+  type ChangeRoomAnnotationTarget,
   type CheckProfile,
   type IcarusRuntime,
   type RunRecord,
@@ -218,6 +219,8 @@ function usage(): never {
       "icarus run rollback RUN --diff-sha SHA --actor ACTOR",
       "icarus run restore RUN --checkpoint-sha SHA --actor ACTOR",
       "icarus run resume RUN",
+      "icarus run annotate RUN --card CARD|room --text TEXT --actor ACTOR",
+      "icarus run annotations RUN",
       "icarus run cancel RUN --actor ACTOR",
     ].join("\n"),
   );
@@ -427,6 +430,23 @@ async function dispatch(
   if (action === "resume") {
     const options = parseOptions(rest, []);
     print(publicRun(await runtime.service.resume(oneRunId(options), signal)));
+    return;
+  }
+  if (action === "annotate") {
+    const options = parseOptions(rest, ["--card", "--text", "--actor"]);
+    print(
+      runtime.service.annotateRun(
+        oneRunId(options),
+        required(options, "--card") as ChangeRoomAnnotationTarget,
+        required(options, "--actor"),
+        required(options, "--text"),
+      ),
+    );
+    return;
+  }
+  if (action === "annotations") {
+    const options = parseOptions(rest, []);
+    print(runtime.service.listRunAnnotations(oneRunId(options)));
     return;
   }
   if (action === "cancel") {

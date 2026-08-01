@@ -35,6 +35,8 @@ const workspaceUiSources = await collectSources(
 const providerSource = await readFile("packages/core/src/providers.ts", "utf8");
 const runtimeSource = await readFile("packages/core/src/runtime.ts", "utf8");
 const storeSource = await readFile("packages/core/src/store.ts", "utf8");
+const changeRoomCoreSource = await readFile("packages/core/src/change-room.ts", "utf8");
+const changeContextCoreSource = await readFile("packages/core/src/change-context.ts", "utf8");
 const verificationProjectionSource = await readFile(
   "packages/core/src/verification-provenance.ts",
   "utf8",
@@ -299,6 +301,34 @@ const assertions = {
   workspaceNoRawHtml: workspaceUiSources.every(
     (source) => !source.includes("dangerouslySetInnerHTML") && !source.includes("innerHTML"),
   ),
+  changeRoomRoutesReadOnly:
+    workspaceServerSource.includes('if (method === "GET" && pathname === "/api/change-rooms")') &&
+    workspaceServerSource.includes('if (method === "GET" && runChangeRoom !== null)') &&
+    workspaceServerSource.includes('if (method === "GET" && runChangeContext !== null)') &&
+    !/"(?:POST|PUT|PATCH|DELETE)"\s*&&\s*(?:pathname === "\/api\/change-rooms"|runChangeRoom|runChangeContext)/.test(
+      workspaceServerSource,
+    ),
+  changeRoomAnnotationsAppendOnly:
+    storeSource.includes("CREATE TABLE IF NOT EXISTS run_annotations") &&
+    storeSource.includes("INSERT INTO run_annotations") &&
+    !/UPDATE\s+run_annotations/i.test(storeSource) &&
+    !/DELETE\s+FROM\s+run_annotations/i.test(storeSource),
+  changeRoomIndexProjectionPreflighted:
+    storeSource.includes("octet_length(provider_json) <= 16384") &&
+    storeSource.includes("octet_length(verification_json) <= 4194304") &&
+    storeSource.includes("json_valid(provider_json, 1) = 1") &&
+    storeSource.includes("json_valid(verification_json, 1) = 1") &&
+    storeSource.includes("verification_json IS NULL AS verification_absent"),
+  changeRoomSnapshotSafeColumns:
+    storeSource.includes(
+      "SELECT run_id, checkpoint_sha256, created_at FROM checkpoints WHERE run_id = ?",
+    ) &&
+    !/(?:baselineBase64|approvedBase64|baseline_base64|approved_base64)/.test(changeRoomCoreSource),
+  changeContextDeterministicLocal:
+    changeContextCoreSource.includes('generatedBy: "deterministic_host_projection"') &&
+    !/(?:fetch\(|node:http|node:https|ModelGateway|gatewayFactory|providerCall)/.test(
+      changeContextCoreSource,
+    ),
   noFocusedOrSkippedGateTests: testSources.every(
     (source) => !/\.(?:only|skip|todo)(?:\s*\(|\.)/.test(source),
   ),
