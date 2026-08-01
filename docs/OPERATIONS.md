@@ -219,6 +219,29 @@ This implementation adds one GET-only read and inline presentation. It does not
 alter the payload-free event APIs, schema, dependencies, source repository,
 browser action authority, guarded CLI, or ADR 0010 hold.
 
+## Change Room observation
+
+ADR 0019 adds three GET-only observation routes. `GET /api/change-rooms` opens a
+new newest-first index session when called without a query, or continues one
+with exactly `before` plus `snapshot`, returning twelve retained room summaries
+per page under an ephemeral pinned-rowid cursor. `GET /api/runs/:id/change-room`
+derives the run's eleven-card evidence projection in one SQLite read
+transaction. `GET /api/runs/:id/change-context?question=<question>` accepts
+exactly one of the five fixed questions and returns the deterministic,
+model-free answer packet whose statements carry receipts plus explicit omissions
+and uncertainty. A non-GET verb receives 404, an unknown run 404, and an invalid
+query contract 422 (`INVALID_REQUEST` or `INVALID_RUN_CURSOR`).
+
+Restarting the process and re-reading returns byte-identical projections, and
+GET reads perform no durable writes. Treat the room's integrity block literally:
+its digests prove byte binding and recorded-evidence integrity only, never fresh
+authorization or semantic correctness, and the checkpoint digest is a recorded
+byte binding rather than a fresh rehash. Operator annotations are read through
+the room but authored only through `run annotate`; they carry no authority over
+the run. Complete payload-bearing history remains CLI-only through
+`run history`; the browser stays review-only and gains no annotation-authoring,
+approval, mutation, execution, command, commit, push, or deployment route.
+
 ## Preflight
 
 Approval and execution require util-linux `flock` at `/usr/bin/flock` and a
@@ -300,6 +323,18 @@ preserve the state and require explicit operator recovery.
   performs the same bounded rollback. Review approval uses the same diff digest
   and is refused unless verification passed and the live source/worktree,
   changed-path set, diff, and checkpoint still match the reviewed evidence.
+- `run annotate <run-id> --card <card|room> --text <text> --actor <actor>`
+  appends one bounded operator annotation to a run's Change Room or to one of
+  its eleven evidence cards. The card enum is closed, the actor follows the
+  approval-actor rules, and the body must be non-blank, at most 1 KiB, and free
+  of NUL bytes. Recognizable credential material in actor or body is rejected
+  before write with `SECRET_INPUT_DETECTED`, and each run holds at most 32
+  annotations (`ANNOTATION_LIMIT_REACHED`). Annotations are append-only with no
+  update or delete path; they never append events, change run state, satisfy
+  gates, or feed digests, approvals, verification, or execution.
+- `run annotations <run-id>` lists a run's persisted annotations. The browser
+  shows the same annotations read-only inside the room projection; no browser
+  annotation route exists.
 
 Egress, plan, and review requests validate actor, digest, persisted gate, active
 run ownership, and any verification prerequisite under the run lease before
@@ -452,6 +487,15 @@ credentials, raw secret-bearing output, or private repository content.
 
 ## Upgrade policy
 
-Milestone 1 has schema version 1 and no automated migration against live state.
-Back up before upgrades. A schema change needs an ADR, migration tests, and
-explicit operator approval before existing state is opened by new code.
+Schema version 2 is additive and forward-only. Its only change is the
+`run_annotations` table, created by the store's existing idempotent
+`CREATE TABLE IF NOT EXISTS` block, so an existing version-1 database gains the
+table on first open with no change to any existing table or index and no
+backfill. The store reads `user_version` and raises it to 2 only when it is
+lower; a database from a newer version fails closed with
+`UNSUPPORTED_DATABASE_VERSION`. A version-1 binary can still open a version-2
+database — it ignores the unknown table — but resets the marker to 1; the next
+version-2 open raises it again. That marker drift is accepted and documented: it
+loses no data and blocks no recovery. Back up before upgrades. Any further
+schema change still needs an ADR, migration tests, and explicit operator
+approval before existing state is opened by new code.

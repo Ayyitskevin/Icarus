@@ -411,6 +411,76 @@ This implementation adds no schema, dependency, write, event append, Git/source
 read, raw evidence disclosure, browser mutation, or release authority. ADR 0010
 remains independently unresolved.
 
+## Sixth M3 change-room path
+
+ADR 0019 is implemented through the existing store, HTTP/API, CLI, and React
+boundaries. A Change Room is not a new entity: the room of a run is the run, and
+`roomId` is the run ID.
+
+1. Each `GET /api/runs/:id/change-room` read derives the
+   `icarus.change-room.v1` projection inside one SQLite read transaction from
+   the run row, approvals, the bounded 200-event metadata tail, the checkpoint
+   row's safe columns (run ID, digest, timestamp), project check/sandbox
+   configuration, and CLI annotations. There is no room table, event bus, or
+   parallel state machine. Exactly eleven evidence cards appear in fixed
+   lifecycle order, each with a host-controlled title, a provenance class
+   (`operator_assertion`, `provider_output`, `host_fact`, `approval_decision`,
+   `verification_evidence`, `system_failure`), an explicit status (`available`,
+   `pending`, `not_applicable`, `unavailable`), bounded references to the
+   authoritative records, a bounded body, and `truncated`, `redacted`, and
+   `unavailableEvidence` indicators. Card bodies reuse only the disclosure
+   classes the existing full-run presenter already crosses; checkpoint bytes,
+   private cache/worktree/artifact paths, event payloads, raw provider prompts,
+   and source blobs are never selected. The integrity block states that digests
+   prove byte binding and recorded-evidence integrity only; the provider plan is
+   labeled an untrusted proposal; the checkpoint card notes its digest is a
+   recorded byte binding, not a fresh rehash. A review rejection projects as a
+   rollback record carrying the rejecting decision, and completion sequences on
+   rollback/restore records mark observed completion events, not causal links.
+2. `GET /api/change-rooms` mirrors the ADR 0017 rowid-page discipline exactly:
+   one pinned `MAX(rowid)` snapshot, descending `LIMIT 13`, twelve retained
+   summaries, an ephemeral exclusive cursor, and fail-closed cursor validation.
+   Summaries add only the latest verification outcome, provider
+   kind/model/locality/privacy class, and a host-derived terminal reason.
+   Provider and verification JSON are projected in SQL only behind
+   `typeof`/`octet_length` preflight (16 KiB provider, 4 MiB verification) and
+   strict `json_valid(..., 1)`; an unprojectable or invalid value fails the page
+   closed as database corruption rather than guessing an unknown model or
+   outcome.
+3. `GET /api/runs/:id/change-context?question=...` answers exactly five fixed
+   questions with an `icarus.change-context.v1` packet built by a pure host
+   function over the room projection. No LLM, provider, network, or external
+   tool participates. Each of at most eight component statements is a
+   host-controlled template interpolating only bounded facts and carries
+   receipts — the evidence-card IDs, event sequences, and digests it stands on —
+   and packets carry explicit omission and uncertainty lists. A completed run's
+   `what_changed` states that nothing was committed, pushed, merged, or
+   deployed. The packet is shaped so a future optional local/BYOK assistant
+   could summarize it with citations; this slice does not build that assistant.
+4. `run annotate` validates before any write: run existence, a closed card enum
+   (the eleven card kinds or `room`), the approval-actor rules, a 1 KiB
+   non-blank body without NUL bytes, and fail-closed `SECRET_INPUT_DETECTED`
+   rejection of recognizable credential material in actor or body. A run holds
+   at most 32 annotations (`ANNOTATION_LIMIT_REACHED`). The `run_annotations`
+   table is append-only with no update or delete path anywhere; annotations
+   never append lifecycle events, advance event cursors, change run state,
+   satisfy gates, or feed digests, approvals, verification, or execution.
+   Schema version 2 adds only that table through the existing idempotent
+   `CREATE TABLE IF NOT EXISTS` block; the store raises `user_version` to 2 only
+   when it is lower and fails closed with `UNSUPPORTED_DATABASE_VERSION` on a
+   newer marker. A version-1 binary still opens a version-2 database, ignores
+   the table, and resets the marker to 1 — an accepted drift that loses no data.
+5. This path adds no schema beyond `run_annotations`, no dependency, no write
+   route, no stream, watcher, or daemon, and no browser authority. All three
+   routes are GET-only, non-GET verbs receive 404, and GET reads perform no
+   durable writes. Restart replay returns byte-identical projections. The React
+   workspace gains a Change Rooms section — a bounded newest-first index
+   (12-row replace-not-accumulate pages in a four-page window, explicit
+   load/refresh, no polling), room detail with the eleven cards and a pinned
+   event revision, read-only annotations, and an explain panel for the five
+   fixed questions. The guarded CLI lifecycle and the ADR 0010 hold are
+   unchanged.
+
 ## Provider contract
 
 The provider-neutral port accepts model identity, capability metadata, a typed

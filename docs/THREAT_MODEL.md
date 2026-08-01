@@ -130,6 +130,23 @@ ADR 0018's controls are implemented and locally evidenced while preserving the
 loopback/same-origin/CSP boundary and guarded CLI authority. Exact-head hosted CI
 is a merge gate; ADR 0010 remains an independent release hold.
 
+## Sixth M3 change-room threats
+
+| Threat | Required control | Required evidence and limits |
+| --- | --- | --- |
+| A room projection leaks private paths, checkpoint bytes, event payloads, raw provider prompts, or source blobs | derive cards in one read transaction from the run row, approvals, the bounded 200-event tail, safe checkpoint columns only (run ID, digest, timestamp), project configuration, and annotations; reuse only the disclosure classes the existing full-run presenter already crosses | presenter allowlist and serialization scans keep checkpoint bytes, private cache/worktree/artifact paths, event payloads, raw prompts, and source blobs out of room, index, and change-context responses |
+| Corrupt or unprojectable provider/verification JSON breaks or skews the room index | project those columns in SQL only behind `typeof`/`octet_length` preflight (16 KiB provider, 4 MiB verification) and strict `json_valid(..., 1)`; an invalid or unprojectable value fails the page closed as database corruption | the index never guesses an unknown model or outcome; the failure is an explicit closed page, not a partial or fabricated summary |
+| An annotation becomes authority or mutates the event stream | `run_annotations` is append-only with no update or delete path anywhere; annotations never append lifecycle events, advance event cursors, change run state, satisfy gates, or feed digests, approvals, verification, or execution; all three API routes are GET-only and perform no durable writes | by design contract the run row, event stream, and approvals are byte-identical after annotating; browser display is read-only inside the room projection and no browser annotation route exists |
+| Secret-shaped annotation content persists | validate before any write: run existence, a closed card enum, the approval-actor rules (bounded length, no CR/LF/NUL), a 1 KiB non-blank body without NUL, and fail-closed `SECRET_INPUT_DETECTED` rejection of recognizable credential material in actor or body | rejected input leaves no durable row; the 32-per-run cap (`ANNOTATION_LIMIT_REACHED`) keeps room responses bounded |
+| Room, index, or packet responses grow without bound | exactly eleven fixed cards with bounded bodies and references; at most 32 annotations of 1 KiB each; the 200-event metadata tail; twelve retained index rows per page; at most eight change-context components | response shapes are fixed-size by construction; no route enumerates unbounded history, payloads, or free-text search results |
+| A change-context answer invents facts or hides doubt | a pure host function builds the packet over the room projection: host-controlled templates interpolating only bounded facts, per-statement receipts (evidence-card IDs, event sequences, digests), explicit omission and uncertainty lists, and no LLM, provider, network, or external tool | every statement is traceable to recorded evidence; truncated timelines and absent free-text reasons are stated as uncertainty; a completed run's `what_changed` states nothing was committed, pushed, merged, or deployed |
+| Room digests are mistaken for fresh authorization or current integrity | the integrity block declares `digestSemantics: "byte_binding_only"`; the checkpoint card notes its digest is a recorded byte binding, not a fresh rehash; the provider plan is labeled an untrusted proposal | the projection never claims fresh authorization, semantic correctness, or rehashed bytes; rollback completion sequences mark observed completion events, not causal links |
+| The slice widens browser authority | all three routes are GET-only; non-GET verbs receive 404; unknown runs receive 404; invalid query contracts receive 422; no approval, mutation, annotation-authoring, execution, command, commit, push, or deployment route exists | route inventory assertions cover the new routes; the browser remains review-only |
+
+ADR 0019 adds no schema beyond `run_annotations`, dependency, write route,
+stream, watcher, daemon, or browser action route. ADR 0010 remains an
+independent release hold.
+
 ## Inherited repository automation hold
 
 `.github/workflows/opencode.yml` came from the pre-existing remote root and was
@@ -181,6 +198,9 @@ is held. ADR 0010 records the options without changing the workflow.
 - Effective Git config is checked before helper-capable commands, but a hostile
   same-user process can change config between the preflight and command. No OS
   no-exec boundary or hostile multi-user isolation is claimed.
+- Change Room annotations are operator-entered free text within fixed bounds.
+  They are validated and credential-screened before write, but the room presents
+  them as untrusted text, never as authority over the run.
 
 ## Security non-goals
 

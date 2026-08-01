@@ -37,7 +37,9 @@ evals, context budget allocation, and retrieval-quality fixtures.
 Status: the first four bounded slices are accepted with fresh local evidence and
 exact implementation-head hosted CI. The fifth bounded verification-provenance
 slice is implemented with fresh local evidence and uses exact-head hosted CI as
-its merge gate. Full M3 remains open.
+its merge gate. The sixth bounded Change Room slice is implemented on the
+candidate branch with fresh local evidence and uses exact-head hosted CI as its
+merge gate. Full M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
