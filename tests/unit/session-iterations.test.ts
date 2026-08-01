@@ -20,6 +20,11 @@ import type {
   VerificationEvidence,
 } from "../../packages/core/src/types.js";
 import {
+  approveChangeRoomPlan,
+  createChangeRoomFixture,
+  prepareChangeRoomRun,
+} from "../support/change-room-fixtures.js";
+import {
   createUnitStore,
   seedUnitProject,
   UNIT_BASE_COMMIT,
@@ -189,6 +194,10 @@ function chargeRepairIteration(store: ReturnType<typeof createUnitStore>["store"
   });
 }
 
+function beginPatchOperation(store: ReturnType<typeof createUnitStore>["store"]) {
+  return store.beginOperation(RUN_ID, "session.tool.mutation.patchset", 0, 0, 1_000, "running");
+}
+
 function expectCode(action: () => unknown, code: string): void {
   try {
     action();
@@ -341,6 +350,7 @@ describe("bounded repair transition", () => {
     seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying");
     seeded.store.beginSessionIteration(RUN_ID);
     chargeRepairIteration(seeded.store);
+    beginPatchOperation(seeded.store);
 
     const revised = "hello, repaired\n";
     const updated = seeded.store.recordPatchSetIntent(
@@ -366,6 +376,7 @@ describe("bounded repair transition", () => {
     seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying");
     seeded.store.beginSessionIteration(RUN_ID);
     chargeRepairIteration(seeded.store);
+    beginPatchOperation(seeded.store);
     seeded.store.recordPatchSetIntent(
       RUN_ID,
       patchSetFor("first\n"),
@@ -390,6 +401,7 @@ describe("bounded repair transition", () => {
     const failing = seeded.verificationFor("failed", APPROVED);
     seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying");
     seeded.store.beginSessionIteration(RUN_ID);
+    beginPatchOperation(seeded.store);
 
     expect(seeded.store.countSessionIterations(RUN_ID)).toBe(0);
     expectCode(
@@ -442,9 +454,52 @@ describe("durable agent-session disposition", () => {
     seeded: ReturnType<typeof seedVerifyingRun>,
   ): VerificationEvidence {
     const passing = seeded.verificationFor("passed", APPROVED);
-    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, passing, "running");
+    const operation = seeded.store.beginOperation(
+      RUN_ID,
+      "session.tool.exec.check",
+      0,
+      0,
+      1_000,
+      "running",
+    );
+    seeded.store.finishSessionVerificationOperation(
+      operation,
+      succeededFinish({ tool: "run_checks" }),
+      seeded.diff,
+      passing,
+    );
     return passing;
   }
+
+  it.each([
+    "session.tool.read.manifest",
+    "session.tool.read.checks",
+    "session.tool.exec.check",
+    "session.tool.mutation.patchset",
+    "session.reconcile",
+  ] as const)("refuses session-only operation %s outside an open repair epoch", (operationKind) => {
+    const fixture = createChangeRoomFixture();
+    roots.push(fixture.root);
+    prepareChangeRoomRun(fixture.store);
+    approveChangeRoomPlan(fixture.store);
+    fixture.store.recordWorkspace(fixture.runId, "/private/cache", "/private/worktree", null);
+    fixture.store.recordPatchSetIntent(
+      fixture.runId,
+      patchSetFor(APPROVED),
+      checkpointFilesFor(APPROVED),
+    );
+    expect(fixture.store.getRun(fixture.runId).state).toBe("running");
+
+    expectCode(
+      () => fixture.store.beginOperation(fixture.runId, operationKind, 0, 0, 1_000, "running"),
+      "INVALID_STATE",
+    );
+    expect(fixture.store.countOperationsByKind(fixture.runId, operationKind)).toBe(0);
+    expect(
+      fixture.store.listEvents(fixture.runId).filter((event) => event.type === "checkpoint.saved"),
+    ).toHaveLength(0);
+    fixture.store.close();
+  });
 
   it("records a settled iteration boundary as resumable evidence", () => {
     const seeded = seedVerifyingRun(1);
@@ -474,6 +529,36 @@ describe("durable agent-session disposition", () => {
       () => seeded.store.recordSessionIterationBoundary(RUN_ID, 2),
       "INVALID_SESSION_ITERATION",
     );
+  });
+
+  it("rejects active, failed, and interrupted provider revisions as iteration boundaries", () => {
+    for (const outcome of ["active", "failed", "interrupted"] as const) {
+      const seeded = seedVerifyingRun(1);
+      const failing = seeded.verificationFor("failed", APPROVED);
+      seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying");
+      seeded.store.beginSessionIteration(RUN_ID);
+      const operation = seeded.store.beginOperation(
+        RUN_ID,
+        SESSION_ITERATION_OPERATION_KIND,
+        0,
+        16,
+        1_000,
+      );
+      if (outcome === "failed") {
+        seeded.store.finishOperation(operation, {
+          ...succeededFinish(),
+          outcome: "failed",
+        });
+      } else if (outcome === "interrupted") {
+        seeded.store.markStartedOperationsInterrupted(RUN_ID);
+      }
+
+      expectCode(
+        () => seeded.store.recordSessionIterationBoundary(RUN_ID, 1),
+        "INVALID_SESSION_ITERATION",
+      );
+      if (outcome === "active") seeded.store.markStartedOperationsInterrupted(RUN_ID);
+    }
   });
 
   it("records the compatibility completion API but does not treat it as atomic report_done", () => {
@@ -612,10 +697,22 @@ describe("durable agent-session disposition", () => {
         ? passing
         : { ...passing, outcome, checks: [checkEvidence("unavailable")] };
     const operation = seeded.store.beginOperation(RUN_ID, operationKind, 0, 0, 1_000, "running");
+    if (operationKind === "session.tool.mutation.patchset") {
+      const current = seeded.store.getRun(RUN_ID);
+      if (current.patchSet === null) throw new Error("Expected a current patch set");
+      seeded.store.recordPatchSetIntent(
+        RUN_ID,
+        current.patchSet,
+        seeded.store.listCheckpointFiles(RUN_ID),
+      );
+      seeded.store.saveTreeCheckpoint(RUN_ID, verification.checkpointSha256);
+    }
 
     const updated = seeded.store.finishSessionVerificationOperation(
       operation,
-      succeededFinish({ tool: operationKind }),
+      succeededFinish({
+        tool: operationKind === "session.tool.mutation.patchset" ? "apply_patchset" : operationKind,
+      }),
       seeded.diff,
       verification,
     );
@@ -628,6 +725,197 @@ describe("durable agent-session disposition", () => {
         .slice(-2)
         .map((event) => event.type),
     ).toEqual(["operation.finished", "verification.completed"]);
+  });
+
+  it("binds patch intent to mutation and rejects succeeded or failed proposal relabeling", () => {
+    const seeded = seedVerifyingRun(1);
+    const failing = seeded.verificationFor("failed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying");
+    seeded.store.beginSessionIteration(RUN_ID);
+    chargeRepairIteration(seeded.store);
+
+    seeded.store.beginOperation(RUN_ID, "session.tool.read.manifest", 0, 0, 1_000);
+    const before = seeded.store.getRun(RUN_ID);
+    if (before.patchSet === null) throw new Error("Expected a current patch set");
+    const checkpointFiles = seeded.store.listCheckpointFiles(RUN_ID);
+    expectCode(
+      () => seeded.store.recordPatchSetIntent(RUN_ID, before.patchSet as PatchSet, checkpointFiles),
+      "RUN_BUSY",
+    );
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+
+    const mutation = seeded.store.beginOperation(
+      RUN_ID,
+      "session.tool.mutation.patchset",
+      0,
+      0,
+      1_000,
+    );
+    seeded.store.recordPatchSetIntent(RUN_ID, before.patchSet, checkpointFiles);
+    seeded.store.saveTreeCheckpoint(RUN_ID, failing.checkpointSha256);
+    expectCode(
+      () => seeded.store.finishOperation(mutation, succeededFinish({ tool: "propose_patch" })),
+      "INVALID_OPERATION_OUTCOME",
+    );
+    expectCode(
+      () =>
+        seeded.store.finishOperation(mutation, {
+          ...succeededFinish({ tool: "propose_patch" }),
+          outcome: "failed",
+        }),
+      "INVALID_OPERATION_OUTCOME",
+    );
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it("requires operation-bound repair intent and verification semantics", () => {
+    const outside = seedVerifyingRun(1);
+    const outsideFailure = outside.verificationFor("failed", APPROVED);
+    outside.store.recordVerificationAndAwaitReview(
+      RUN_ID,
+      outside.diff,
+      outsideFailure,
+      "verifying",
+    );
+    outside.store.beginSessionIteration(RUN_ID);
+    chargeRepairIteration(outside.store);
+    const outsideRun = outside.store.getRun(RUN_ID);
+    if (outsideRun.patchSet === null) throw new Error("Expected a current patch set");
+    expectCode(
+      () =>
+        outside.store.recordPatchSetIntent(
+          RUN_ID,
+          outsideRun.patchSet as PatchSet,
+          outside.store.listCheckpointFiles(RUN_ID),
+        ),
+      "RUN_BUSY",
+    );
+
+    const direct = seedVerifyingRun(1);
+    direct.verificationFor("failed", APPROVED);
+    enterRunningSession(direct.store);
+    expectCode(
+      () =>
+        direct.store.recordVerificationAndAwaitReview(
+          RUN_ID,
+          direct.diff,
+          direct.verificationFor("passed", APPROVED),
+          "running",
+        ),
+      "INVALID_OPERATION_OUTCOME",
+    );
+
+    const applied = seedVerifyingRun(1);
+    const appliedFailure = applied.verificationFor("failed", APPROVED);
+    applied.store.recordVerificationAndAwaitReview(
+      RUN_ID,
+      applied.diff,
+      appliedFailure,
+      "verifying",
+    );
+    applied.store.beginSessionIteration(RUN_ID);
+    chargeRepairIteration(applied.store);
+    const appliedRun = applied.store.getRun(RUN_ID);
+    if (appliedRun.patchSet === null) throw new Error("Expected a current patch set");
+    const apply = beginPatchOperation(applied.store);
+    applied.store.recordPatchSetIntent(
+      RUN_ID,
+      appliedRun.patchSet,
+      applied.store.listCheckpointFiles(RUN_ID),
+    );
+    const passingApply = applied.verificationFor("passed", APPROVED);
+    expectCode(
+      () =>
+        applied.store.finishSessionVerificationOperation(
+          apply,
+          succeededFinish({ tool: "apply_patchset" }),
+          applied.diff,
+          passingApply,
+        ),
+      "VERIFICATION_OUTCOME_MISMATCH",
+    );
+    applied.store.markStartedOperationsInterrupted(RUN_ID);
+
+    const reconciled = seedVerifyingRun(1);
+    reconciled.verificationFor("failed", APPROVED);
+    enterRunningSession(reconciled.store);
+    const reconcile = reconciled.store.beginOperation(
+      RUN_ID,
+      "session.reconcile",
+      0,
+      0,
+      1_000,
+      "running",
+    );
+    expectCode(
+      () =>
+        reconciled.store.finishSessionVerificationOperation(
+          reconcile,
+          succeededFinish(),
+          reconciled.diff,
+          reconciled.verificationFor("passed", APPROVED),
+        ),
+      "VERIFICATION_OUTCOME_MISMATCH",
+    );
+    reconciled.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it("requires failed patch settlement to carry its exact durable effects", () => {
+    const seeded = seedVerifyingRun(1);
+    seeded.verificationFor("failed", APPROVED);
+    enterRunningSession(seeded.store);
+    const operation = beginPatchOperation(seeded.store);
+    const current = seeded.store.getRun(RUN_ID);
+    if (current.verification === null) throw new Error("Expected failing verification");
+    const unavailable: VerificationEvidence = {
+      ...current.verification,
+      outcome: "unavailable",
+      checks: [checkEvidence("unavailable")],
+    };
+    expectCode(
+      () =>
+        seeded.store.finishFailedSessionPatchVerificationOperation(
+          operation,
+          {
+            ...succeededFinish({ tool: "apply_patchset" }),
+            outcome: "failed",
+          },
+          seeded.diff,
+          unavailable,
+        ),
+      "INVALID_OPERATION_OUTCOME",
+    );
+    seeded.store.markStartedOperationsInterrupted(RUN_ID);
+  });
+
+  it.each([
+    "session.tool.exec.check",
+    "session.tool.mutation.patchset",
+    "session.control.report_done",
+    "session.control.request_human_input",
+    "review.validate",
+    "checkpoint.rollback",
+    "checkpoint.restore",
+  ] as const)("requires atomic durable settlement for succeeded %s", (operationKind) => {
+    const seeded = seedVerifyingRun(1);
+    const failing = seeded.verificationFor("failed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying");
+    seeded.store.beginSessionIteration(RUN_ID);
+    chargeRepairIteration(seeded.store);
+    const operation = seeded.store.beginOperation(RUN_ID, operationKind, 0, 0, 1_000);
+
+    expectCode(
+      () => seeded.store.finishOperation(operation, succeededFinish()),
+      "INVALID_OPERATION_OUTCOME",
+    );
+    expect(
+      seeded.store.finishOperation(operation, {
+        ...succeededFinish(),
+        outcome: "failed",
+        detail:
+          operationKind === "session.tool.mutation.patchset" ? { tool: "apply_patchset" } : {},
+      }).state,
+    ).toBe("running");
   });
 
   it("rolls operation settlement back when current verification validation fails", () => {
@@ -917,16 +1205,19 @@ describe("durable agent-session disposition", () => {
     );
   });
 
-  it("requires terminal outcome counts to equal durable provider admission", () => {
+  it("allows zero-turn exhaustion while completed outcomes still require an iteration", () => {
     const seeded = seedVerifyingRun(1);
-    seeded.verificationFor("failed", APPROVED);
-    enterRunningSession(seeded.store);
+    const failing = seeded.verificationFor("failed", APPROVED);
+    seeded.store.recordVerificationAndAwaitReview(RUN_ID, seeded.diff, failing, "verifying");
+    seeded.store.beginSessionIteration(RUN_ID);
 
     expectCode(
-      () => seeded.store.recordSessionOutcome(RUN_ID, "exhausted", null, 0),
+      () => seeded.store.recordSessionOutcome(RUN_ID, "completed", "Not verified.", 0),
       "INVALID_SESSION_ITERATION",
     );
-    expect(seeded.store.getRun(RUN_ID).state).toBe("running");
+    expect(seeded.store.recordSessionOutcome(RUN_ID, "exhausted", null, 0).state).toBe(
+      "awaiting_review",
+    );
   });
 
   it("bounds session outcome text by UTF-8 bytes", () => {

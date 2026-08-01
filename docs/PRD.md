@@ -87,9 +87,12 @@ policy, and the number of changed files is bounded by the project ceiling.
     are explicit patch-set operations; rename is delete plus create.
 13. Persist patch/checkpoint intent before materialization, then apply every file
     through guarded private temporaries outside the Git worktree. In a session,
-    `propose_patch` is advisory preview/validation only and persists no authority;
+    `propose_patch` is advisory preview/validation only and persists no authority
+    or patch/checkpoint effects on success, failure, or cancellation;
     `apply_patchset` carries and independently revalidates its own exact bounded
-    PatchSet before persisting intent. A partially failed set compensates already
+    PatchSet before persisting intent. Repair replacement intent is accepted only
+    inside that active mutation operation; a new repair checkpoint is bound to
+    mutation or reconciliation. A partially failed set compensates already
     applied paths and fails closed.
 14. Run only exact project checks inside a digest-pinned, no-network, read-only
     Docker sandbox with no capabilities, no host secrets, a timeout,
@@ -114,7 +117,9 @@ policy, and the number of changed files is bounded by the project ceiling.
     Interrupted provider/tool operations stay charged; session resume reconciles
     the private checkpoint and reuses only completed-boundary evidence. An apply
     interrupted after intent persistence resumes from that persisted intent with
-    `unavailable`, non-approvable verification. Finish
+    `unavailable`, non-approvable verification. Every session verification is the
+    immediate successor of its producing operation; apply and reconciliation can
+    never claim passing checks, which only `run_checks` may establish. Finish
     `review.validate`, rollback, and restore operations in the same transaction
     as their corresponding state transition.
 19. Support one real local adapter (Ollama HTTP) and one real cloud adapter
@@ -385,7 +390,7 @@ authority.
 
 ## Sixth M3 change-room slice
 
-ADR 0019 is implemented by this bounded product slice. Its continuing contract
+ADR 0041 is implemented by this bounded product slice. Its continuing contract
 is to:
 
 1. Project each run as a strict read-only Change Room whose `roomId` is the run
@@ -455,6 +460,82 @@ is to:
    search, annotation edit/delete, LLM/BYOK summarizer, federation, forge,
    Git-hosting, or multi-agent surface, or any claim that a change landed
    outside the Icarus-private worktree. Preserve the unresolved ADR 0010 hold.
+
+## Offline Change Handoff Pack slice
+
+ADR 0042 defines a standalone, operator-exported evidence capsule for a future
+Athena Task Room without expanding Icarus authority. Its product contract is to:
+
+1. Build `icarus.change-handoff.v1` directly from validated authoritative
+   records through a closed safe-facts projection. Never reuse or serialize
+   `icarus.change-room.v1`: the local room may expose bounded task, plan, path,
+   diff, command-output, event, and annotation evidence that the external
+   artifact must omit.
+2. Allow only schema/version; deterministic handoff and opaque run/project IDs;
+   a correlation ID and optional opaque external task reference; state and
+   host-derived phase; provider kind/model/locality/privacy class; safe egress,
+   plan-approval, verification, review, rollback/restoration, and terminal
+   statuses; fixed host summaries; bounded counts; schema/version/type/digest-only
+   artifact references; one disclosure class; the fixed integrity statement;
+   omissions; and bounded uncertainty. The correlation ID is 1–128 ASCII bytes
+   matching `[A-Za-z0-9][A-Za-z0-9._:-]{0,127}`; the optional task reference
+   uses the same alphabet for 1–256 bytes; provider model crosses only when it
+   passes the same 1–128-byte safe-token syntax.
+3. Never include task text, plan content or grants, repository/context/source/
+   changed-path values, PatchSet/checkpoint/diff bytes, check command/argv/output/
+   sandbox configuration, annotations/actors, event payloads, local paths, URLs,
+   destinations, credentials, headers, research/code artifacts, or any command,
+   approval, retry, delivery, tool-call, or execution instruction. Unsafe or
+   unrepresentable source evidence fails closed; it is never truncated into an
+   apparently safe payload.
+4. Make `run handoff-preview` a pure read: no network or credential access and
+   no database, temporary snapshot, source, cache, worktree, or artifact write.
+   Fingerprint the owned SQLite family, refuse a non-empty WAL rather than omit
+   it or open source state with SQLite, query a stable private in-memory image,
+   and re-fingerprint around the read. Emit the exact strict canonical JSON line
+   that export would write, its complete payload SHA-256, a separate
+   request/preview SHA-256 binding every safe source input, and the fixed
+   complete omission list.
+5. Make `run handoff-export` require that exact preview digest, reread and
+   revalidate all bound evidence, and refuse drift before publication. Write
+   only `icarus-change-handoff.json` and
+   `icarus-change-handoff-result.json` below a current-user-owned,
+   non-group/other-writable parent, using owner-only, descriptor-relative,
+   no-follow exclusive creation, no overwrite, payload-then-result ordering,
+   file/output-directory/parent-entry `fsync`, and descriptor-live
+   identity-checked cleanup of only
+   this attempt's partial files. Fail before creating output when the host lacks
+   the required descriptor-root/no-follow primitives. The result has exactly
+   `exportStatus`, `previewSha256`, `outputSchema`, and newline-inclusive
+   `payloadSha256`.
+6. Keep secure preview, export, verification, and inspection Linux-only and fail
+   platform/capability checks before protected file access or output-directory
+   creation, without a weaker path-only fallback. Make `handoff verify` and
+   `handoff inspect` file-only. They run before
+   state-root/runtime setup, reject hostile files, duplicate/unknown members,
+   malformed/oversized/deep/noncanonical JSON and invalid hashes, and never open
+   SQLite, a repository, credential store, provider, browser server, Git
+   controller, or network. Inspection prints only the payload allowlist and
+   fixed caveats.
+7. Keep the meanings separate: payload and artifact digests bind bytes and
+   recorded local evidence only. They do not prove authenticity, fresh
+   authorization, semantic correctness, evidence truth, disclosure permission,
+   or permission to execute or land code. Operator export is a disclosure act,
+   not approval of any Icarus or receiver action.
+8. Reserve only a conceptual one-way Athena seam. A later accepted integration
+   may map handoff schema, complete handoff digest, Icarus run ID, correlation
+   ID, safe lifecycle outcome, and disclosure class into an imported
+   `constellation.event.v1` timeline record. No other field maps. This slice
+   implements no shared event type, client, receiver, identity/authentication,
+   credential, delivery, callback, retry, outbox, Task Room creation, Minerva
+   trigger, API/browser/provider/Git/landing/deployment path, or workflow state.
+9. Preserve Change Room fixed-card replay, GET-only routes, redaction,
+   deterministic model-free answers, append-only annotation non-authority, and
+   the truth that no commit, push, merge, or deployment is represented. Prove
+   preview purity, default-deny canaries, stale refusal, canonical bytes, hostile
+   files, no overwrite/partial cleanup, result hashing, and database-independent
+   verification before claiming the slice complete.
+
 
 ## Sun ceiling
 

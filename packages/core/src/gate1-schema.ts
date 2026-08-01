@@ -560,15 +560,30 @@ function expectedSchemaObjects(schema: string, names: readonly string[]): Schema
   }
 }
 
-const EXPECTED_BROWSER_ACTION_OBJECTS = expectedSchemaObjects(
-  BROWSER_ACTION_LEDGER_SCHEMA,
-  BROWSER_ACTION_OBJECTS,
-);
-const EXPECTED_LANDING_OBJECTS = expectedSchemaObjects(LANDING_LEDGER_SCHEMA, LANDING_OBJECTS);
-const EXPECTED_PRE_GATE1_OBJECTS = expectedSchemaObjects(
-  ICARUS_PRE_GATE1_SCHEMA,
-  ICARUS_PRE_GATE1_OBJECTS,
-);
+let expectedBrowserActionObjectsCache: readonly SchemaObject[] | undefined;
+let expectedLandingObjectsCache: readonly SchemaObject[] | undefined;
+let expectedPreGate1ObjectsCache: readonly SchemaObject[] | undefined;
+
+function expectedBrowserActionObjects(): readonly SchemaObject[] {
+  expectedBrowserActionObjectsCache ??= expectedSchemaObjects(
+    BROWSER_ACTION_LEDGER_SCHEMA,
+    BROWSER_ACTION_OBJECTS,
+  );
+  return expectedBrowserActionObjectsCache;
+}
+
+function expectedLandingObjects(): readonly SchemaObject[] {
+  expectedLandingObjectsCache ??= expectedSchemaObjects(LANDING_LEDGER_SCHEMA, LANDING_OBJECTS);
+  return expectedLandingObjectsCache;
+}
+
+function expectedPreGate1Objects(): readonly SchemaObject[] {
+  expectedPreGate1ObjectsCache ??= expectedSchemaObjects(
+    ICARUS_PRE_GATE1_SCHEMA,
+    ICARUS_PRE_GATE1_OBJECTS,
+  );
+  return expectedPreGate1ObjectsCache;
+}
 const KNOWN_SCHEMA_OBJECTS: ReadonlySet<string> = new Set([
   ...ICARUS_PRE_GATE1_OBJECTS,
   ...BROWSER_ACTION_OBJECTS,
@@ -601,7 +616,7 @@ function assertExactPreGate1ObjectGroup(
   label: string,
 ): "missing" | "valid" {
   const expectedNames = new Set(names);
-  const expected = EXPECTED_PRE_GATE1_OBJECTS.filter((entry) => expectedNames.has(entry.name));
+  const expected = expectedPreGate1Objects().filter((entry) => expectedNames.has(entry.name));
   const actual = schemaObjects(database, names);
   if (actual.length === 0) return "missing";
   invariant(actual.length === expected.length, "DATABASE_ERROR", `${label} schema is incomplete`);
@@ -731,10 +746,10 @@ function inspectOpenDatabase(
   const browserActions = assertExactFamily(
     database,
     BROWSER_ACTION_OBJECTS,
-    EXPECTED_BROWSER_ACTION_OBJECTS,
+    expectedBrowserActionObjects(),
     "browser action",
   );
-  const landing = assertExactFamily(database, LANDING_OBJECTS, EXPECTED_LANDING_OBJECTS, "landing");
+  const landing = assertExactFamily(database, LANDING_OBJECTS, expectedLandingObjects(), "landing");
   assertClosedSchemaObjectSet(database);
   const core = assertExactPreGate1Schema(database, requireCompleteCore);
   if (core === "not_applicable") {

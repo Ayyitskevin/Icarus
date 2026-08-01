@@ -5,19 +5,32 @@ import path from "node:path";
 
 import {
   assertRegistrationStateSeparation,
+  assertExpectedChangeHandoffPreview,
   BROWSER_ACTION_LEDGER_MIGRATION,
+  buildChangeHandoffPreview,
+  CHANGE_HANDOFF_FILENAME,
+  CHANGE_HANDOFF_MAX_BYTES,
+  CHANGE_HANDOFF_RESULT_FILENAME,
+  CHANGE_HANDOFF_RESULT_MAX_BYTES,
   type CheckProfile,
+  createChangeHandoffExportResult,
   createIcarusRuntime,
   createProviderConfig,
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
+  encodeChangeHandoffExportResult,
   type Gate1MigrationToken,
   IcarusError,
   type ChangeRoomAnnotationTarget,
   type IcarusRuntime,
+  inspectChangeHandoffDocuments,
   LANDING_LEDGER_MIGRATION,
   migrateGate1Schema,
+  readChangeHandoffSource,
+  readSecureHandoffFile,
   type RunRecord,
+  verifyChangeHandoffDocuments,
+  writeChangeHandoffFiles,
 } from "@icarus/core";
 
 interface ParsedOptions {
@@ -255,6 +268,86 @@ function publicRun(run: RunRecord): Record<string, unknown> {
 function print(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
+function handoffInputPair(input: string): {
+  readonly payload: Buffer;
+  readonly result: Buffer;
+} {
+  const absoluteInput = path.resolve(input);
+  if (path.basename(absoluteInput) !== CHANGE_HANDOFF_FILENAME) {
+    fail("INVALID_HANDOFF_FILE", "Handoff input must use the fixed payload filename");
+  }
+  const payload = readSecureHandoffFile(absoluteInput, CHANGE_HANDOFF_MAX_BYTES).bytes;
+  const result = readSecureHandoffFile(
+    path.join(path.dirname(absoluteInput), CHANGE_HANDOFF_RESULT_FILENAME),
+    CHANGE_HANDOFF_RESULT_MAX_BYTES,
+  ).bytes;
+  return { payload, result };
+}
+
+function dispatchFileOnlyHandoff(args: readonly string[]): boolean {
+  const [group, action, ...rest] = args;
+  if (group !== "handoff") return false;
+  if (action !== "verify" && action !== "inspect") usage();
+  const options = parseOptions(rest, ["--input"]);
+  noPositionals(options);
+  const files = handoffInputPair(required(options, "--input"));
+  print(
+    action === "verify"
+      ? verifyChangeHandoffDocuments(files.payload, files.result)
+      : inspectChangeHandoffDocuments(files.payload, files.result),
+  );
+  return true;
+}
+
+function handoffRequest(options: ParsedOptions): {
+  readonly correlationId: string;
+  readonly externalTaskRef: string | null;
+} {
+  return {
+    correlationId: required(options, "--correlation-id"),
+    externalTaskRef: optional(options, "--external-task-ref") ?? null,
+  };
+}
+
+function dispatchReadOnlyRunHandoff(args: readonly string[], root: string): boolean {
+  const [group, action, ...rest] = args;
+  if (group !== "run" || action === undefined || !action.startsWith("handoff-")) return false;
+  if (action === "handoff-preview") {
+    const options = parseOptions(rest, ["--correlation-id", "--external-task-ref"]);
+    const runId = oneRunId(options);
+    const source = readChangeHandoffSource(path.join(root, "icarus.sqlite3"), runId);
+    const preview = buildChangeHandoffPreview(source, handoffRequest(options));
+    process.stdout.write(preview.payloadBytes);
+    process.stderr.write(
+      `${JSON.stringify({
+        payloadSha256: preview.payloadSha256,
+        previewSha256: preview.previewSha256,
+      })}\n`,
+    );
+    return true;
+  }
+  if (action === "handoff-export") {
+    const options = parseOptions(rest, [
+      "--correlation-id",
+      "--external-task-ref",
+      "--expected-preview-sha256",
+      "--output-dir",
+    ]);
+    const runId = oneRunId(options);
+    const source = readChangeHandoffSource(path.join(root, "icarus.sqlite3"), runId);
+    const preview = buildChangeHandoffPreview(source, handoffRequest(options));
+    assertExpectedChangeHandoffPreview(preview, required(options, "--expected-preview-sha256"));
+    const result = createChangeHandoffExportResult(preview);
+    writeChangeHandoffFiles(
+      required(options, "--output-dir"),
+      preview.payloadBytes,
+      encodeChangeHandoffExportResult(result),
+    );
+    print(result);
+    return true;
+  }
+  usage();
+}
 
 function usage(): never {
   fail(
@@ -271,6 +364,10 @@ function usage(): never {
       "icarus run status RUN",
       "icarus run list [--project NAME]",
       "icarus run history RUN",
+      "icarus run handoff-preview RUN --correlation-id ID [--external-task-ref REF]",
+      "icarus run handoff-export RUN --correlation-id ID [--external-task-ref REF] --expected-preview-sha256 SHA --output-dir DIR",
+      "icarus handoff verify --input FILE",
+      "icarus handoff inspect --input FILE",
       "icarus run review RUN --decision approve|reject --diff-sha SHA --actor ACTOR",
       "icarus run rollback RUN --diff-sha SHA --actor ACTOR",
       "icarus run restore RUN --checkpoint-sha SHA --actor ACTOR",
@@ -524,7 +621,9 @@ async function main(): Promise<void> {
   let runtime: IcarusRuntime | undefined;
   try {
     const args = process.argv.slice(2);
+    if (dispatchFileOnlyHandoff(args)) return;
     const root = stateRoot();
+    if (dispatchReadOnlyRunHandoff(args, root)) return;
     const registrationPath = registrationPathForPreflight(args);
     if (registrationPath !== undefined) {
       await assertRegistrationStateSeparation(root, registrationPath);

@@ -403,7 +403,7 @@ their current/pressed state without changing browser authority.
 
 ## Change Room observation
 
-ADR 0019 adds three GET-only observation routes. `GET /api/change-rooms` opens a
+ADR 0041 adds three GET-only observation routes. `GET /api/change-rooms` opens a
 new newest-first index session when called without a query, or continues one
 with exactly `before` plus `snapshot`, returning twelve retained room summaries
 per page under an ephemeral pinned-rowid cursor. `GET /api/runs/:id/change-room`
@@ -423,6 +423,120 @@ the room but authored only through `run annotate`; they carry no authority over
 the run. Complete payload-bearing history remains CLI-only through
 `run history`; the browser stays review-only and gains no annotation-authoring,
 approval, mutation, execution, command, commit, push, or deployment route.
+
+## Offline Change Handoff Pack runbook
+
+A Handoff Pack is an operator-published local evidence file, not a Change Room
+export and not a delivery action. Use an owner-controlled local filesystem.
+Do not choose a shared, network, synchronized, repository, cache, worktree, or
+publicly served directory.
+
+First preview the exact artifact without writing state or output files:
+
+```text
+icarus run handoff-preview RUN_ID \
+  --correlation-id CORRELATION_ID \
+  --external-task-ref OPAQUE_REFERENCE
+```
+
+`--external-task-ref` is optional. Correlation IDs must be 1–128 ASCII bytes
+matching `[A-Za-z0-9][A-Za-z0-9._:-]{0,127}`. The external reference uses the
+same alphabet and is 1–256 bytes. The persisted model is publishable only when
+it matches the same 1–128-byte safe-token grammar. These values are opaque:
+they are not URLs, paths, actors, credentials, routing destinations, or
+approval subjects.
+
+Preview uses a read-only, non-migrating state path. It must make no network or
+provider call, read no credential, and write neither SQLite nor the state root,
+source checkout, cache, worktree, temporary snapshot, or output directory. The
+reader securely captures a stable main-database image in memory and never opens
+the source path with SQLite. A non-empty `icarus.sqlite3-wal` is refused as
+`RUN_BUSY`; stop the normal writer and retry after its clean close/checkpoint.
+Never delete, truncate, or move WAL/SHM companions to make preview proceed. It
+prints:
+
+- the exact newline-terminated canonical `icarus.change-handoff.v1` payload;
+- `payloadSha256`, which binds those complete payload bytes;
+- a separate `previewSha256`, which binds the request and safe source snapshot;
+  and
+- the complete fixed omission list.
+
+Read the payload and omissions. In particular, verify that it contains no task,
+path, plan, diff, command/output, annotation, event payload, credential, URL,
+or executable instruction. The preview digest is the value passed to export;
+the payload digest is not interchangeable with it.
+
+Create or choose the private output directory, then export explicitly. Its parent
+must be owned by the current user and must not be group- or other-writable; an
+existing output directory must have mode `0700`:
+
+```text
+icarus run handoff-export RUN_ID \
+  --correlation-id CORRELATION_ID \
+  --external-task-ref OPAQUE_REFERENCE \
+  --expected-preview-sha256 PREVIEW_DIGEST \
+  --output-dir ./icarus-handoff
+```
+
+Export rereads and revalidates the run. If any digest-bound input changed,
+repeat preview and review the new bytes; never bypass the stale-preview
+refusal. Successful export creates exactly:
+
+```text
+icarus-change-handoff.json
+icarus-change-handoff-result.json
+```
+
+Both files are owner-only, no-follow, exclusively created regular files. Export
+never overwrites either name. It writes and syncs the payload first, then the
+result, then syncs the output directory and its parent directory entry. If a
+caught failure occurs, it removes only
+a partial file whose still-open descriptor and current path match the inode
+created by this invocation; a pre-existing file is never changed. A newly
+created empty directory may remain on failure rather than risk deleting a
+path-raced replacement. Inspect unexpected partial files after a process kill
+or power loss manually—there is no background cleanup, retry, or recovery
+daemon.
+
+Secure Handoff Pack preview, descriptor-relative export, verification, and
+inspection are Linux-only in v1. Platform and capability checks fail closed
+before source or handoff-file access and, for export, before creating the output
+directory. There is no weaker path-only fallback on macOS or Windows.
+
+The result is strict canonical JSON with exactly `exportStatus`,
+`previewSha256`, `outputSchema`, and `payloadSha256`. `payloadSha256` hashes the
+complete handoff file including its final newline. It contains no path,
+destination, evidence body, receiver, delivery, timestamp, or retry state.
+
+Verify or safely inspect a handoff file without opening Icarus state:
+
+```text
+icarus handoff verify --input ./icarus-handoff/icarus-change-handoff.json
+icarus handoff inspect --input ./icarus-handoff/icarus-change-handoff.json
+```
+
+These commands dispatch before `ICARUS_HOME`, migration, database, runtime,
+service, provider, Git, or credential setup. They reject symlinks, hardlinks,
+special or over-permissive files, ownership/identity/size races, invalid UTF-8,
+BOM/NUL, duplicate/unknown members, excessive bytes/depth, malformed or
+noncanonical JSON, and invalid hash semantics. `inspect` prints only allowlisted
+fields and fixed caveats; it cannot recover an omitted category.
+
+A successful result means the file is internally consistent. It does not prove
+who made or supplied it, whether local evidence was true, whether the change is
+correct, whether disclosure was authorized, or whether anyone may approve,
+execute, land, merge, or deploy code. Every payload states:
+
+> Digests prove byte binding and recorded local evidence integrity only. They
+> do not establish fresh authorization, semantic correctness, evidence truth,
+> disclosure permission, or permission to execute/land code.
+
+No command in this runbook contacts Athena or Minerva, creates a Task Room,
+sends a webhook, reads a callback, records delivery, retries, or changes a run.
+Moving the finished file elsewhere is outside Icarus and remains an explicit
+operator responsibility. A future one-way Athena importer needs its own accepted
+ADR, authentication and replay model, operational runbook, and evidence.
+
 
 ## Preflight
 
@@ -540,24 +654,37 @@ written by this session, including a created file. `list_tree` and `search`
 enumerate only the approved base manifest.
 
 `propose_patch` only previews and validates the bounded PatchSet supplied to
-that call. It persists no authority, and a later apply never depends on an
-in-memory proposal. `apply_patchset` carries its own exact PatchSet,
+that call. It persists no authority or patch/checkpoint effects on any terminal
+outcome, and a later apply never depends on an in-memory proposal.
+`apply_patchset` carries its own exact PatchSet,
 independently repeats grant, path, preimage, secret, and ceiling validation,
 restores the private baseline, persists the exact new patch/checkpoint intent,
 and only then materializes through the guarded file-write path. If apply is
 interrupted after intent persistence, resume reconciles from that persisted
 intent and records `unavailable`, non-approvable verification rather than
 claiming that checks completed.
-`run_checks` must name the complete approved check list in order and records the
-current formal verification. `report_done` rechecks live bytes, changed paths,
+The Store accepts a repair replacement intent only while its mutation operation
+is active; a missing repair checkpoint may be created only by that operation or
+`session.reconcile`. Apply, failed/cancelled apply, and reconciliation may record
+only `unavailable`. Every session `running` verification must immediately follow
+the operation that produced it, and only `run_checks` may establish passed or
+failed current check evidence. `run_checks` must name the complete approved check
+list in order. `report_done` rechecks live bytes, changed paths,
 diff, checkpoint, and passing evidence. A bounded secret-scanned human question
 or iteration exhaustion lands `awaiting_review` with a blocker, so ordinary
 review approval refuses it.
 
-Tool-operation finish and any verification/session-terminal event it produces
-commit in one SQLite transaction. `review.validate`, rollback, and restore
-operation finishes commit with their corresponding state transition. A crash
-cannot leave a successful operation detached from its evidence or state.
+Effectful `apply_patchset`/`run_checks` and session-control operation finishes
+commit with their verification/session-terminal evidence in one SQLite
+transaction; advisory/read tools settle only their operation. The patch
+operation's own intent/checkpoint events distinguish apply from proposal and
+must agree with its redundant tool discriminator. Every proposal terminal is
+zero-effect; failed/cancelled effectful apply may retain only its bounded partial
+apply shape, and a complete effect shape requires an immediate unavailable
+snapshot. `review.validate`, rollback,
+and restore finishes commit with their corresponding state transition. A crash
+cannot leave an effectful successful operation detached from its evidence or
+state.
 
 On resume, unfinished operations are conservatively charged, the private
 checkpoint is reconciled, and only completed session boundaries are rehydrated.

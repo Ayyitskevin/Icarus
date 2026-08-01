@@ -80,7 +80,10 @@ export function createUnitStore(): {
   };
 }
 
-export function seedUnitProject(store: IcarusStore): {
+export function seedUnitProject(
+  store: IcarusStore,
+  ceiling: SunCeiling = UNIT_CEILING,
+): {
   readonly repositoryId: string;
   readonly projectId: string;
 } {
@@ -96,7 +99,7 @@ export function seedUnitProject(store: IcarusStore): {
     baseRef: "main",
     checks: [{ id: "unit", name: "Unit check", argv: ["node", "--test"] }],
     sandbox: UNIT_SANDBOX,
-    ceiling: UNIT_CEILING,
+    ceiling,
   });
   return { repositoryId: repository.id, projectId: project.id };
 }
@@ -115,7 +118,7 @@ export function unitContextManifest(): ContextManifest {
         sha256: "d".repeat(64),
       },
     ],
-    totalBytes: 6,
+    totalBytes: 22,
   };
 }
 

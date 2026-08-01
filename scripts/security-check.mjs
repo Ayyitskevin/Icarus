@@ -59,6 +59,13 @@ const workspaceUiSources = await collectSources(
   "packages/workspace/src",
   (name) => name.endsWith(".ts") || name.endsWith(".tsx"),
 );
+const workspaceApiRuntimeSources = await collectSources("packages/api/src", (name) =>
+  name.endsWith(".ts"),
+);
+const packageRuntimeSources = await collectSources(
+  "packages",
+  (name) => name.endsWith(".ts") || name.endsWith(".tsx"),
+);
 const providerSource = await readFile("packages/core/src/providers.ts", "utf8");
 const policySource = await readFile("packages/core/src/policy.ts", "utf8");
 const serviceSource = await readFile("packages/core/src/service.ts", "utf8");
@@ -66,6 +73,19 @@ const runtimeSource = await readFile("packages/core/src/runtime.ts", "utf8");
 const storeSource = await readFile("packages/core/src/store.ts", "utf8");
 const changeRoomCoreSource = await readFile("packages/core/src/change-room.ts", "utf8");
 const changeContextCoreSource = await readFile("packages/core/src/change-context.ts", "utf8");
+const canonicalJsonSource = await readFile("packages/core/src/canonical-json.ts", "utf8");
+const changeHandoffSource = await readFile("packages/core/src/change-handoff.ts", "utf8");
+const changeHandoffReaderSource = await readFile(
+  "packages/core/src/change-handoff-reader.ts",
+  "utf8",
+);
+const changeHandoffFilesSource = await readFile(
+  "packages/core/src/change-handoff-files.ts",
+  "utf8",
+);
+const changeHandoffUnitSource = await readFile("tests/unit/change-handoff.test.ts", "utf8");
+const sessionIterationsUnitSource = await readFile("tests/unit/session-iterations.test.ts", "utf8");
+const storeUnitSource = await readFile("tests/unit/store.test.ts", "utf8");
 const typesSource = await readFile("packages/core/src/types.ts", "utf8");
 const readManifestSource = await readFile("packages/core/src/read-manifest.ts", "utf8");
 const toolsSource = await readFile("packages/core/src/tools.ts", "utf8");
@@ -300,6 +320,102 @@ const shutdownDrainIndex = workspaceServerSource.indexOf(
 const shutdownCloseConnectionsIndex = workspaceServerSource.indexOf("server.closeAllConnections()");
 const shutdownServerCloseIndex = workspaceMainSource.indexOf("await server?.close()");
 const shutdownRuntimeCloseIndex = workspaceMainSource.indexOf("runtime?.close()");
+const handoffInputPairStart = cliSource.indexOf("function handoffInputPair(");
+const handoffRequestStart = cliSource.indexOf("function handoffRequest(");
+const handoffReadOnlyDispatchStart = cliSource.indexOf("function dispatchReadOnlyRunHandoff(");
+const handoffUsageStart = cliSource.indexOf("\nfunction usage()", handoffReadOnlyDispatchStart);
+const fileOnlyHandoffCliSource =
+  handoffInputPairStart >= 0 && handoffRequestStart > handoffInputPairStart
+    ? cliSource.slice(handoffInputPairStart, handoffRequestStart)
+    : "";
+const readOnlyHandoffCliSource =
+  handoffReadOnlyDispatchStart >= 0 && handoffUsageStart > handoffReadOnlyDispatchStart
+    ? cliSource.slice(handoffReadOnlyDispatchStart, handoffUsageStart)
+    : "";
+const cliMainStart = cliSource.indexOf("async function main(): Promise<void>");
+const cliMainSource = cliMainStart >= 0 ? cliSource.slice(cliMainStart) : "";
+const handoffSerializerStart = changeHandoffSource.indexOf(
+  "export function buildChangeHandoffPreview(",
+);
+const handoffSerializerEnd = changeHandoffSource.indexOf(
+  "\nfunction enumValue",
+  handoffSerializerStart,
+);
+const handoffSerializerSource =
+  handoffSerializerStart >= 0 && handoffSerializerEnd > handoffSerializerStart
+    ? changeHandoffSource.slice(handoffSerializerStart, handoffSerializerEnd)
+    : "";
+const handoffOmissionsStart = changeHandoffSource.indexOf(
+  "export const CHANGE_HANDOFF_OMISSIONS = [",
+);
+const handoffOmissionsEnd = changeHandoffSource.indexOf("\n] as const;", handoffOmissionsStart);
+const handoffOmissionsSource =
+  handoffOmissionsStart >= 0 && handoffOmissionsEnd > handoffOmissionsStart
+    ? changeHandoffSource.slice(handoffOmissionsStart, handoffOmissionsEnd)
+    : "";
+const changeRoomCardOrderStart = changeRoomCoreSource.indexOf(
+  "export const CHANGE_ROOM_CARD_ORDER",
+);
+const changeRoomCardOrderEnd = changeRoomCoreSource.indexOf("\n];", changeRoomCardOrderStart);
+const changeRoomCardOrderSource =
+  changeRoomCardOrderStart >= 0 && changeRoomCardOrderEnd > changeRoomCardOrderStart
+    ? changeRoomCoreSource.slice(changeRoomCardOrderStart, changeRoomCardOrderEnd)
+    : "";
+const changeContextQuestionsStart = changeContextCoreSource.indexOf(
+  "export const CHANGE_CONTEXT_QUESTIONS",
+);
+const changeContextQuestionsEnd = changeContextCoreSource.indexOf(
+  "\n];",
+  changeContextQuestionsStart,
+);
+const changeContextQuestionsSource =
+  changeContextQuestionsStart >= 0 && changeContextQuestionsEnd > changeContextQuestionsStart
+    ? changeContextCoreSource.slice(changeContextQuestionsStart, changeContextQuestionsEnd)
+    : "";
+const handoffCoreSources = [
+  canonicalJsonSource,
+  changeHandoffSource,
+  changeHandoffReaderSource,
+  changeHandoffFilesSource,
+];
+const handoffProtectedRuntimeSources = [
+  processSource,
+  gitSource,
+  coreSchemaSource,
+  gate1SchemaSource,
+  browserActionStateSource,
+  landingGitSource,
+  landingRecordsSource,
+  landingStateSource,
+  sandboxSource,
+  ...workspaceApiRuntimeSources,
+  ...workspaceUiSources,
+  providerSource,
+  policySource,
+  serviceSource,
+  runtimeSource,
+  storeSource,
+  changeRoomCoreSource,
+  changeContextCoreSource,
+  typesSource,
+  readManifestSource,
+  toolsSource,
+  sessionLoopSource,
+];
+const handoffRuntimeMarker =
+  /(?:\b(?:ChangeHandoff\w*|Handoff(?:Pack|Payload|Result|Preview|Export)\w*)\b|change[-_]handoff|handoff-(?:preview|export)|\/api\/[^"'\s]*handoff)/i;
+const expectedHandoffOmissions = [
+  "raw_task_prompts_and_research",
+  "plan_text_steps_risks_rationale_and_grants",
+  "source_paths_repository_maps_context_contents_patch_diff_and_checkpoint_bytes",
+  "check_commands_argv_sandbox_stdout_stderr_and_output_fragments",
+  "annotations_actors_and_event_payloads",
+  "local_cache_worktree_and_artifact_paths",
+  "urls_destinations_credentials_tokens_keys_bearers_and_headers",
+  "commands_tool_calls_approval_retry_and_execution_instructions",
+];
+const expectedHandoffIntegrityStatement =
+  "Digests prove byte binding and recorded local evidence integrity only. They do not establish fresh authorization, semantic correctness, evidence truth, disclosure permission, or permission to execute/land code.";
 
 const assertions = {
   controllerNeverUsesShell:
@@ -970,11 +1086,12 @@ const assertions = {
     storeSource.includes("FROM operations") &&
     storeSource.includes("WHERE run_id = ? AND kind = '") &&
     !storeSource.includes("repair_iterations_used") &&
-    // A recorded patch set may only be replaced by an iteration that was
-    // already charged, and by exactly one replacement per charged iteration.
+    // A recorded patch set may only be replaced in the open repair epoch by a
+    // succeeded revision that has not already authorized another replacement.
     storeSource.includes("this.#supersessionIsAuthorized(current)") &&
     storeSource.includes("if (charged < 1 || charged > granted) return false") &&
-    storeSource.includes('this.#countEvents(run.id, "patch_set.superseded") < charged'),
+    storeSource.includes("this.#repairSessionIsOpen(run.id)") &&
+    storeSource.includes("successfulRevisions > replacementIntents"),
   sessionLoopCannotWidenAuthority:
     // Every revision is parsed against the approved mutation grant and the
     // immutable baseline, then rechecked against the resulting path set.
@@ -1233,6 +1350,510 @@ const assertions = {
   workspaceNoRawHtml: workspaceUiSources.every(
     (source) => !source.includes("dangerouslySetInnerHTML") && !source.includes("innerHTML"),
   ),
+  changeHandoffCliRoutesBeforeMutableRuntime:
+    cliMainSource.indexOf("if (dispatchFileOnlyHandoff(args)) return;") >= 0 &&
+    cliMainSource.indexOf("const root = stateRoot();") >= 0 &&
+    cliMainSource.indexOf("if (dispatchReadOnlyRunHandoff(args, root)) return;") >= 0 &&
+    cliMainSource.indexOf("const registrationPath = registrationPathForPreflight(args)") >= 0 &&
+    cliMainSource.indexOf("const migrationApproval = schemaMigrationApproval()") >= 0 &&
+    cliMainSource.indexOf("runtime = await createIcarusRuntime(root") >= 0 &&
+    cliMainSource.indexOf("if (dispatchFileOnlyHandoff(args)) return;") <
+      cliMainSource.indexOf("const root = stateRoot();") &&
+    cliMainSource.indexOf("const root = stateRoot();") <
+      cliMainSource.indexOf("if (dispatchReadOnlyRunHandoff(args, root)) return;") &&
+    cliMainSource.indexOf("if (dispatchReadOnlyRunHandoff(args, root)) return;") <
+      cliMainSource.indexOf("const registrationPath = registrationPathForPreflight(args)") &&
+    cliMainSource.indexOf("if (dispatchReadOnlyRunHandoff(args, root)) return;") <
+      cliMainSource.indexOf("const migrationApproval = schemaMigrationApproval()") &&
+    cliMainSource.indexOf("if (dispatchReadOnlyRunHandoff(args, root)) return;") <
+      cliMainSource.indexOf("runtime = await createIcarusRuntime(root"),
+  changeHandoffFileOnlyCommandsAreStateIndependent:
+    fileOnlyHandoffCliSource.includes("path.basename(absoluteInput) !== CHANGE_HANDOFF_FILENAME") &&
+    fileOnlyHandoffCliSource.includes(
+      "path.join(path.dirname(absoluteInput), CHANGE_HANDOFF_RESULT_FILENAME)",
+    ) &&
+    fileOnlyHandoffCliSource.includes("readSecureHandoffFile(") &&
+    fileOnlyHandoffCliSource.includes(
+      "verifyChangeHandoffDocuments(files.payload, files.result)",
+    ) &&
+    fileOnlyHandoffCliSource.includes(
+      "inspectChangeHandoffDocuments(files.payload, files.result)",
+    ) &&
+    fileOnlyHandoffCliSource.includes('action !== "verify" && action !== "inspect"') &&
+    fileOnlyHandoffCliSource.includes('parseOptions(rest, ["--input"])') &&
+    fileOnlyHandoffCliSource.includes("noPositionals(options)") &&
+    !/(?:stateRoot|ICARUS_HOME|readChangeHandoffSource|createIcarusRuntime|migrateGate1Schema|Database|service\.|runtime\.|fetch\(|process\.env)/.test(
+      fileOnlyHandoffCliSource,
+    ) &&
+    gate1SchemaSource.includes("function expectedBrowserActionObjects()") &&
+    gate1SchemaSource.includes("function expectedLandingObjects()") &&
+    gate1SchemaSource.includes("function expectedPreGate1Objects()") &&
+    !/const\s+EXPECTED_(?:BROWSER_ACTION|LANDING|PRE_GATE1)_OBJECTS\s*=\s*expectedSchemaObjects/.test(
+      gate1SchemaSource,
+    ),
+  changeHandoffRunProjectionIsReadOnlyAndFailClosed:
+    readOnlyHandoffCliSource.includes(
+      'if (group !== "run" || action === undefined || !action.startsWith("handoff-"))',
+    ) &&
+    readOnlyHandoffCliSource.includes(
+      'readChangeHandoffSource(path.join(root, "icarus.sqlite3"), runId)',
+    ) &&
+    readOnlyHandoffCliSource.includes("assertExpectedChangeHandoffPreview(") &&
+    !/(?:createIcarusRuntime|migrateGate1Schema|service\.|runtime\.|fetch\(|providerCall|GitController)/.test(
+      readOnlyHandoffCliSource,
+    ) &&
+    changeHandoffReaderSource.includes("noFollowFlag();") &&
+    changeHandoffReaderSource.includes("sourcePath = assertDatabasePath(databasePath)") &&
+    changeHandoffReaderSource.indexOf("noFollowFlag();") <
+      changeHandoffReaderSource.indexOf("sourcePath = assertDatabasePath(databasePath)") &&
+    changeHandoffReaderSource.includes("source = fingerprintFamily(sourcePath)") &&
+    changeHandoffReaderSource.includes(
+      "const databaseImage = readDatabaseImage(sourcePath, source)",
+    ) &&
+    changeHandoffReaderSource.includes("const read = readStableFamilyFile(databasePath, true)") &&
+    changeHandoffReaderSource.includes("walEntry !== undefined && BigInt(walEntry.size) !== 0n") &&
+    changeHandoffReaderSource.includes("image[18] = 1") &&
+    changeHandoffReaderSource.includes("image[19] = 1") &&
+    changeHandoffReaderSource.includes(
+      "database = new Database(databaseImage, { readonly: true })",
+    ) &&
+    changeHandoffReaderSource.includes('database.pragma("query_only = ON")') &&
+    changeHandoffReaderSource.includes("if (!sameFamily(source, fingerprintFamily(sourcePath)))") &&
+    changeHandoffReaderSource.includes("activeOperations !== 0") &&
+    changeHandoffReaderSource.includes(
+      'throw new IcarusError("RUN_BUSY", "Run has an active operation and cannot be handed off")',
+    ) &&
+    !/(?:mkdtempSync|copyFileSync|writeFileSync|chmodSync|rmSync)/.test(
+      changeHandoffReaderSource,
+    ) &&
+    !changeHandoffReaderSource.includes("new Database(databasePath") &&
+    !changeHandoffReaderSource.includes("new Database(sourcePath") &&
+    !/\b(?:INSERT\s+INTO|UPDATE\s+\w|DELETE\s+FROM|CREATE\s+TABLE|DROP\s+TABLE|ALTER\s+TABLE|REPLACE\s+INTO|VACUUM|ATTACH\s+DATABASE)\b/i.test(
+      changeHandoffReaderSource,
+    ) &&
+    !/SELECT\s+\*/i.test(changeHandoffReaderSource),
+  changeHandoffVerificationEventsAreBoundedAndRelational:
+    changeHandoffReaderSource.includes(
+      "const MAX_VERIFICATION_EVENT_JSON_BYTES = 32 * 1024 * 1024",
+    ) &&
+    changeHandoffReaderSource.includes("typeof(payload_json) AS storage_type") &&
+    changeHandoffReaderSource.includes("octet_length(payload_json) AS payload_bytes") &&
+    changeHandoffReaderSource.includes('preflight.storage_type !== "text"') &&
+    changeHandoffReaderSource.includes("payloadBytes > MAX_VERIFICATION_EVENT_JSON_BYTES") &&
+    changeHandoffReaderSource.indexOf("payloadBytes > MAX_VERIFICATION_EVENT_JSON_BYTES") <
+      changeHandoffReaderSource.indexOf(
+        "SELECT json_valid(payload_json,1) AS valid FROM run_events",
+      ) &&
+    changeHandoffReaderSource.includes("COUNT(*) FROM json_each(payload_json)") &&
+    changeHandoffReaderSource.includes("nested_changed_paths_count") &&
+    changeHandoffReaderSource.includes('projected.nested_checks_type !== "array"') &&
+    changeHandoffReaderSource.includes('projected.nested_changed_paths_type !== "array"') &&
+    changeHandoffReaderSource.includes("checkpointSha256: string") &&
+    changeHandoffReaderSource.includes("latestVerificationEvent.checkpointSha256 !==") &&
+    changeHandoffReaderSource.includes("persistedVerificationSummary.checkpointSha256") &&
+    changeHandoffReaderSource.includes("sha256(diffBody) !== diffSha256") &&
+    changeHandoffReaderSource.includes("latestVerificationEvent.verificationEvidenceSha256 !==") &&
+    changeHandoffReaderSource.includes("persistedVerificationEvidenceSha256") &&
+    changeHandoffReaderSource.includes("eventRead.restoreCompletionSequences.at(-1) ?? 0") &&
+    changeHandoffReaderSource.includes("transition.sequence > previousRollbackCompletion") &&
+    changeHandoffReaderSource.includes("transition.sequence < authorization.sequence") &&
+    changeHandoffReaderSource.includes(
+      "eventRead.planCreatedReadableFiles !== (readable?.entries.length ?? 0)",
+    ) &&
+    changeHandoffReaderSource.includes('if (type === "patch_set.intent_recorded")') &&
+    changeHandoffReaderSource.includes('if (type === "edit.intent_recorded")') &&
+    changeHandoffReaderSource.includes(
+      "const replayTransition = (from: RunState, to: RunState): void =>",
+    ) &&
+    changeHandoffReaderSource.includes("if (replayedState !== from) sourceInvalid()") &&
+    changeHandoffReaderSource.includes("eventRead.replayedState !== state") &&
+    changeHandoffReaderSource.includes("!intentMatches") &&
+    changeHandoffReaderSource.includes("candidate.sequence > previousResumeSequence") &&
+    changeHandoffReaderSource.includes("candidate.sequence < transition.sequence") &&
+    changeHandoffReaderSource.includes('cancellationRequest.from !== "failed"') &&
+    changeHandoffReaderSource.includes("currentReviewTransitions.length > 1") &&
+    changeHandoffReaderSource.includes(
+      'transition.kind === "review" && transition.sequence > verificationSequence',
+    ) &&
+    changeHandoffReaderSource.includes('type === "execution.completed"') &&
+    changeHandoffReaderSource.includes('type === "session.verification_requested"') &&
+    changeHandoffReaderSource.includes('if (type === "operation.started")') &&
+    changeHandoffReaderSource.includes("remaining !== grantedIterations - sessionIterationCount") &&
+    changeHandoffReaderSource.includes("iterations !== sessionIterationCount") &&
+    changeHandoffReaderSource.includes("assertAtomicSessionControlEvidence(") &&
+    changeHandoffReaderSource.includes("disposition.revisionSequence !== activeIntentSequence") &&
+    changeHandoffReaderSource.includes(
+      "disposition.diffSha256 !== activeVerification.diffSha256",
+    ) &&
+    changeHandoffReaderSource.includes(
+      "disposition.checkpointSha256 !== activeVerification.checkpointSha256",
+    ) &&
+    changeHandoffReaderSource.includes("eventRead.verificationRequestSequence ?? 0") &&
+    changeHandoffUnitSource.includes("eventCanaryUpdate.changes !== 1") &&
+    changeHandoffUnitSource.includes("type = 'workspace.created'") &&
+    changeHandoffUnitSource.includes(
+      'Buffer.from(PRIVATE_CANARIES.patchBaseline).toString("base64")',
+    ) &&
+    changeHandoffUnitSource.includes(
+      'Buffer.from(PRIVATE_CANARIES.patchApproved).toString("base64")',
+    ),
+  changeHandoffLifecycleLedgersAreRelational:
+    changeHandoffReaderSource.includes(
+      'const CANCELLATION_RECOVERY_OPERATION_KIND = "cancellation.recovery"',
+    ) &&
+    changeHandoffReaderSource.includes("const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000") &&
+    changeHandoffReaderSource.includes("const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2") &&
+    changeHandoffReaderSource.includes(
+      'const SESSION_ITERATION_OPERATION_KIND = "provider.revise"',
+    ) &&
+    changeHandoffReaderSource.includes("const REPAIR_SESSION_OPERATION_KINDS") &&
+    changeHandoffReaderSource.includes("SESSION_READ_MANIFEST_OPERATION_KIND,") &&
+    changeHandoffReaderSource.includes("SESSION_READ_CHECKS_OPERATION_KIND,") &&
+    changeHandoffReaderSource.includes("REPAIR_SESSION_OPERATION_KINDS.has(kind)") &&
+    changeHandoffReaderSource.includes("const ATOMIC_OPERATION_SUCCESSORS") &&
+    changeHandoffReaderSource.includes('if (type === "operation.finished")') &&
+    changeHandoffReaderSource.includes('if (type === "operation.interrupted")') &&
+    changeHandoffReaderSource.includes("activeOperation !== null") &&
+    changeHandoffReaderSource.includes("terminal.operationId !== activeOperation.operationId") &&
+    changeHandoffReaderSource.includes("terminal.kind !== activeOperation.kind") &&
+    changeHandoffReaderSource.includes("terminalOperationIds.has(operationId)") &&
+    changeHandoffReaderSource.includes("repairSessionOpen = true") &&
+    changeHandoffReaderSource.includes("!repairSessionOpen || replayedState !==") &&
+    changeHandoffReaderSource.includes('iterationTerminal.status !== "succeeded"') &&
+    changeHandoffReaderSource.includes("activeCheckpointSha256 = digest(") &&
+    changeHandoffReaderSource.includes("eventRead.activeCheckpointSha256 !== checkpointSha256") &&
+    changeHandoffReaderSource.includes("const startsById = new Map(") &&
+    changeHandoffReaderSource.includes("const terminalsById = new Map(") &&
+    changeHandoffReaderSource.includes("started.reservedCostUsd !== reservedCostUsd") &&
+    changeHandoffReaderSource.includes("terminal?.status === status") &&
+    changeHandoffReaderSource.includes("activeOperationPatchIntents += 1") &&
+    changeHandoffReaderSource.includes(
+      'activeOperation.kind !== "session.tool.mutation.patchset"',
+    ) &&
+    changeHandoffReaderSource.includes('terminal.detailTool === "propose_patch"') &&
+    changeHandoffReaderSource.includes('terminal.detailTool === "apply_patchset"') &&
+    changeHandoffReaderSource.includes("terminal.patchIntentCount === 1") &&
+    changeHandoffReaderSource.includes("terminal.checkpointCount === 1") &&
+    changeHandoffReaderSource.includes("function hasNoPatchEffects(") &&
+    changeHandoffReaderSource.includes("const failedProposal =") &&
+    changeHandoffReaderSource.includes("const partialFailedApply =") &&
+    changeHandoffReaderSource.includes("terminalCanProduceVerification(") &&
+    changeHandoffReaderSource.includes("predecessor.sequence !== sequence - 1") &&
+    changeHandoffReaderSource.includes("activeOperation?.kind !== SESSION_PATCH_OPERATION_KIND") &&
+    changeHandoffReaderSource.includes('type === "session.completed" && operationId === null') &&
+    changeHandoffReaderSource.includes(
+      'expectedSuccessor = appliedPatch ? "verification.completed" : undefined',
+    ) &&
+    changeHandoffReaderSource.includes("safeInteger(projected.detail_tool_count) === 1") &&
+    changeHandoffReaderSource.includes("safeInteger(operation.mutation_result_tool_count) === 1") &&
+    changeHandoffReaderSource.includes("terminal?.detailTool === mutationResultTool") &&
+    changeHandoffReaderSource.includes("runUsage.toolCalls !== operationRows.length") &&
+    changeHandoffReaderSource.includes("totalTokens > ceiling.maxTotalTokens") &&
+    changeHandoffReaderSource.includes(
+      "Math.abs(runUsage.reservedCostUsd - activeReservedCostUsd) > Number.EPSILON",
+    ) &&
+    !changeHandoffReaderSource.includes("transition.createdAt !== approval.createdAt") &&
+    storeSource.includes("function assertOperationKind(kind: string): void") &&
+    storeSource.includes('Buffer.byteLength(kind, "utf8") <= 128') &&
+    storeSource.includes("const REPAIR_SESSION_OPERATION_KINDS") &&
+    storeSource.includes("SESSION_READ_MANIFEST_OPERATION_KIND,") &&
+    storeSource.includes("SESSION_READ_CHECKS_OPERATION_KIND,") &&
+    storeSource.includes("SESSION_CHECK_OPERATION_KIND,") &&
+    storeSource.includes("SESSION_PATCH_OPERATION_KIND,") &&
+    storeSource.includes("SESSION_RECONCILE_OPERATION_KIND,") &&
+    storeSource.includes("const ATOMIC_SUCCESS_OPERATION_KINDS") &&
+    storeSource.includes("!ATOMIC_SUCCESS_OPERATION_KINDS.has(token.kind)") &&
+    storeSource.includes("#sessionPatchOperationEffects(token: OperationToken)") &&
+    storeSource.includes("effects.patchIntentCount === 1") &&
+    storeSource.includes("effects.checkpointCount === 1") &&
+    storeSource.includes("Patch operation settlement does not match its durable effects") &&
+    storeSource.includes("const partialFailedApply =") &&
+    storeSource.includes("Patch intent cannot cross a non-mutation operation") &&
+    storeSource.includes("A repair replacement intent requires an active mutation operation") &&
+    storeSource.includes(
+      "A repair checkpoint requires an active mutation or reconciliation operation",
+    ) &&
+    storeSource.includes(
+      "Running session verification must settle atomically with its operation",
+    ) &&
+    storeSource.includes(
+      "Patch application and reconciliation can only persist unavailable verification",
+    ) &&
+    storeSource.includes("Failed patch settlement does not match its durable effects") &&
+    storeSource.includes("Patch operation settlement requires its closed tool discriminator") &&
+    storeSource.includes("Session iteration boundary requires a succeeded provider revision") &&
+    storeSource.includes("Session completion does not authorize the current change revision") &&
+    changeHandoffUnitSource.includes(
+      "preserves same-revision completion authority across rollback, restore, and fresh verification",
+    ) &&
+    changeHandoffUnitSource.includes(
+      "accepts distinct approval row and event timestamps from a stepping clock",
+    ) &&
+    changeHandoffUnitSource.includes(
+      "reconciles operation starts, terminals, atomic successors, and rows by operation identity",
+    ) &&
+    changeHandoffUnitSource.includes(
+      "rejects a session-only operation admitted outside an open repair epoch",
+    ) &&
+    changeHandoffUnitSource.includes(
+      "distinguishes advisory propose_patch from atomically verified apply_patchset",
+    ) &&
+    changeHandoffUnitSource.includes(
+      "accepts an effectful %s patch only with its immediate unavailable verification",
+    ) &&
+    changeHandoffUnitSource.includes(
+      "rejects running verification whose immediate operation did not succeed",
+    ) &&
+    changeHandoffUnitSource.includes(
+      "accepts current and legacy interrupted operations and preserves repair epochs across resume",
+    ) &&
+    changeHandoffUnitSource.includes(
+      "validates emergency cancellation ordinals, reservations, and interruption evidence",
+    ) &&
+    changeHandoffUnitSource.includes(
+      "rejects operation-count, reservation, and aggregate usage drift",
+    ) &&
+    sessionIterationsUnitSource.includes(
+      "rejects active, failed, and interrupted provider revisions as iteration boundaries",
+    ) &&
+    sessionIterationsUnitSource.includes(
+      "binds patch intent to mutation and rejects succeeded or failed proposal relabeling",
+    ) &&
+    sessionIterationsUnitSource.includes(
+      "refuses session-only operation %s outside an open repair epoch",
+    ) &&
+    sessionIterationsUnitSource.includes(
+      "requires operation-bound repair intent and verification semantics",
+    ) &&
+    sessionIterationsUnitSource.includes(
+      "requires failed patch settlement to carry its exact durable effects",
+    ) &&
+    sessionIterationsUnitSource.includes(
+      "allows zero-turn exhaustion while completed outcomes still require an iteration",
+    ) &&
+    sessionIterationsUnitSource.includes("requires atomic durable settlement for succeeded %s") &&
+    storeUnitSource.includes(
+      "rejects invalid operation kinds by UTF-8 byte length at admission and counting",
+    ),
+  changeHandoffPayloadSerializerIsExplicitDefaultDeny:
+    handoffSerializerSource.includes("const payload: ChangeHandoffPayloadV1 = {") &&
+    [
+      "schema: CHANGE_HANDOFF_SCHEMA",
+      "version: CHANGE_HANDOFF_VERSION",
+      "identifiers: {",
+      "run: {",
+      "provider: {",
+      "lifecycle,",
+      "counts: {",
+      "artifactReferences: artifactReferences(source)",
+      "disclosureClass: CHANGE_HANDOFF_DISCLOSURE_CLASS",
+      "summary: buildSummary(source.state, lifecycle)",
+      "integrity: {",
+      "omissions: CHANGE_HANDOFF_OMISSIONS",
+      "uncertainty: CHANGE_HANDOFF_UNCERTAINTIES",
+      "const payloadBytes = canonicalJsonLine(payload)",
+    ].every((field) => handoffSerializerSource.includes(field)) &&
+    !handoffSerializerSource.includes("...") &&
+    !/(?:\bChangeRoom\b|change-room|change-context|source\.(?:task|target|diff|events)|baselineBase64|approvedBase64|cachePath|worktreePath|argv|stdout|stderr|annotation|actor|url|header)/i.test(
+      handoffSerializerSource,
+    ) &&
+    changeHandoffSource.includes("const object = exactRecord(value, [") &&
+    changeHandoffSource.includes(
+      "const object = exactRecord(strictCanonicalDocument(bytes, 2 * 1024), [",
+    ) &&
+    !/SELECT\s+\*/i.test(changeHandoffSource),
+  changeHandoffHasNoEffectfulRuntimeIntegration: handoffCoreSources.every(
+    (source) =>
+      !/from\s+["'](?:@icarus\/(?:api|workspace)|\.\/(?:change-room|change-context|providers|git|landing-[^"']+|runtime|service|store|tools|session-loop|sandbox|process|artifact-store)\.js)["']/.test(
+        source,
+      ) &&
+      !/(?:\bfetch\s*\(|node:(?:http|https|net|tls)|\bModelGateway\b|\bgatewayFactory\b|\bproviderCall\b|\bexecFile(?:Sync)?\s*\(|\bspawn(?:Sync)?\s*\(|\bcreateIcarusRuntime\b|\bGitController\b|\bArtifactStore\b|process\.env)/.test(
+        source,
+      ) &&
+      !/(?:\bChangeRoom\b|change-room|change-context)/.test(source),
+  ),
+  changeHandoffAddsNoApiBrowserOrControlPlaneSurface:
+    handoffProtectedRuntimeSources.every((source) => !handoffRuntimeMarker.test(source)) &&
+    workspaceApiRuntimeSources.every((source) => !handoffRuntimeMarker.test(source)) &&
+    workspaceUiSources.every((source) => !handoffRuntimeMarker.test(source)) &&
+    packageRuntimeSources.every(
+      (source) => !/(?:\bAthena\b|\bMinerva\b|constellation\.event\.v1)/i.test(source),
+    ) &&
+    handoffCoreSources.every(
+      (source) => !/\b(?:outbox|delivery|webhook|callback|queue|worker|receiver)\b/i.test(source),
+    ) &&
+    packageRuntimeSources.every(
+      (source) =>
+        !/(?:CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+["']?\w*(?:handoff|outbox|delivery)/i.test(
+          source,
+        ),
+    ) &&
+    packageRuntimeSources.every((source) => !/["'](?:outbox|delivery)[._-]/i.test(source)),
+  changeHandoffFileReadsAreBoundedAndHostileSafe:
+    changeHandoffFilesSource.includes('process.platform !== "linux"') &&
+    changeHandoffFilesSource.includes('"HANDOFF_FILE_UNSUPPORTED"') &&
+    changeHandoffFilesSource.includes("assertNoSymlinkComponents(absolutePath, true)") &&
+    changeHandoffFilesSource.includes("const before = lstatSync(absolutePath, { bigint: true })") &&
+    changeHandoffFilesSource.includes("assertOwnedPrivateRegular(before, maxBytes)") &&
+    changeHandoffFilesSource.includes("realpathSync(absolutePath) !== absolutePath") &&
+    changeHandoffFilesSource.includes(
+      'const noFollow = noFollowFlag("HANDOFF_FILE_UNSUPPORTED")',
+    ) &&
+    changeHandoffFilesSource.indexOf('const noFollow = noFollowFlag("HANDOFF_FILE_UNSUPPORTED")') <
+      changeHandoffFilesSource.indexOf("assertNoSymlinkComponents(absolutePath, true)") &&
+    changeHandoffFilesSource.includes("const opened = fstatSync(descriptor, { bigint: true })") &&
+    changeHandoffFilesSource.includes("opened.dev !== before.dev || opened.ino !== before.ino") &&
+    changeHandoffFilesSource.includes("while (total <= maxBytes)") &&
+    changeHandoffFilesSource.includes("if (total > maxBytes)") &&
+    changeHandoffFilesSource.includes("!sameIdentity(opened, finished)") &&
+    changeHandoffFilesSource.includes("finished.dev !== current.dev") &&
+    changeHandoffFilesSource.includes("finished.ino !== current.ino") &&
+    changeHandoffFilesSource.includes("stat.nlink !== 1n") &&
+    changeHandoffFilesSource.includes("(stat.mode & 0o177n) !== 0n") &&
+    changeHandoffFilesSource.includes("closeSync(descriptor)") &&
+    !changeHandoffFilesSource.includes('process.platform === "win32"') &&
+    !changeHandoffFilesSource.includes("fsConstants.O_NOFOLLOW ?? 0"),
+  changeHandoffExportIsFixedExclusiveAndCrashDurable:
+    changeHandoffFilesSource.includes(
+      'export const CHANGE_HANDOFF_FILENAME = "icarus-change-handoff.json"',
+    ) &&
+    changeHandoffFilesSource.includes(
+      'export const CHANGE_HANDOFF_RESULT_FILENAME = "icarus-change-handoff-result.json"',
+    ) &&
+    changeHandoffFilesSource.includes('process.platform !== "linux"') &&
+    changeHandoffFilesSource.includes("const parentBefore = lstatSync(parentDirectory") &&
+    changeHandoffFilesSource.includes(
+      "parentDescriptor = openSync(parentDirectory, fsConstants.O_RDONLY | directoryOnly | noFollow)",
+    ) &&
+    changeHandoffFilesSource.includes("const openedParent = fstatSync(parentDescriptor") &&
+    changeHandoffFilesSource.includes("assertPrivateParentDirectory(parentBefore)") &&
+    changeHandoffFilesSource.includes("assertPrivateParentDirectory(openedParent)") &&
+    changeHandoffFilesSource.includes("assertPrivateParentDirectory(current)") &&
+    changeHandoffFilesSource.includes("(stat.mode & 0o022n) !== 0n") &&
+    changeHandoffFilesSource.includes("currentUid === undefined") &&
+    changeHandoffFilesSource.includes("const parentRoot = descriptorRoot(parentDescriptor)") &&
+    changeHandoffFilesSource.includes(
+      "mkdirSync(path.join(parentRoot, outputName), { mode: 0o700 })",
+    ) &&
+    changeHandoffFilesSource.indexOf("const parentRoot = descriptorRoot(parentDescriptor)") <
+      changeHandoffFilesSource.indexOf(
+        "mkdirSync(path.join(parentRoot, outputName), { mode: 0o700 })",
+      ) &&
+    (changeHandoffFilesSource.match(/fsyncSync\(parentDescriptor\)/g) ?? []).length >= 2 &&
+    changeHandoffFilesSource.indexOf(
+      "mkdirSync(path.join(parentRoot, outputName), { mode: 0o700 })",
+    ) < changeHandoffFilesSource.indexOf("fsyncSync(parentDescriptor)") &&
+    changeHandoffFilesSource.lastIndexOf("fsyncSync(parentDescriptor)") <
+      changeHandoffFilesSource.indexOf("succeeded = true") &&
+    changeHandoffFilesSource.includes("(stat.mode & 0o777n) !== 0o700n") &&
+    changeHandoffFilesSource.includes("fsConstants.O_WRONLY") &&
+    changeHandoffFilesSource.includes("fsConstants.O_CREAT") &&
+    changeHandoffFilesSource.includes("fsConstants.O_EXCL") &&
+    changeHandoffFilesSource.includes('noFollowFlag("HANDOFF_EXPORT_UNSUPPORTED")') &&
+    changeHandoffFilesSource.includes("0o600") &&
+    changeHandoffFilesSource.includes("directoryRoot = descriptorRoot(directoryDescriptor)") &&
+    changeHandoffFilesSource.includes(
+      "openExclusiveAt(directoryRoot, CHANGE_HANDOFF_FILENAME, register)",
+    ) &&
+    changeHandoffFilesSource.includes(
+      "openExclusiveAt(directoryRoot, CHANGE_HANDOFF_RESULT_FILENAME, register)",
+    ) &&
+    changeHandoffFilesSource.includes("writeAll(payloadFile.descriptor, payloadBytes)") &&
+    changeHandoffFilesSource.includes("writeAll(resultFile.descriptor, resultBytes)") &&
+    changeHandoffFilesSource.indexOf("writeAll(payloadFile.descriptor, payloadBytes)") <
+      changeHandoffFilesSource.indexOf("writeAll(resultFile.descriptor, resultBytes)") &&
+    changeHandoffFilesSource.includes("fsyncSync(payloadFile.descriptor)") &&
+    changeHandoffFilesSource.includes("fsyncSync(resultFile.descriptor)") &&
+    changeHandoffFilesSource.includes("fsyncSync(directoryDescriptor)") &&
+    changeHandoffFilesSource.indexOf("fsyncSync(directoryDescriptor)") <
+      changeHandoffFilesSource.indexOf("succeeded = true") &&
+    (
+      changeHandoffFilesSource.match(
+        /assertDirectoryPathStable\(absoluteDirectory, openedDirectory\)/g,
+      ) ?? []
+    ).length >= 3 &&
+    changeHandoffFilesSource.lastIndexOf(
+      "assertDirectoryPathStable(absoluteDirectory, openedDirectory)",
+    ) > changeHandoffFilesSource.lastIndexOf("fsyncSync(parentDescriptor)") &&
+    changeHandoffFilesSource.includes(
+      "const descriptorStat = fstatSync(created.descriptor, { bigint: true })",
+    ) &&
+    changeHandoffFilesSource.includes("current.dev === descriptorStat.dev") &&
+    changeHandoffFilesSource.includes("current.ino === descriptorStat.ino") &&
+    changeHandoffFilesSource.includes("unlinkSync(child)") &&
+    changeHandoffFilesSource.indexOf(
+      "for (const file of [...created].reverse()) cleanupCreatedFile(directoryRoot, file)",
+    ) < changeHandoffFilesSource.lastIndexOf("for (const file of created)") &&
+    !changeHandoffFilesSource.includes("rmdirSync(") &&
+    !changeHandoffFilesSource.includes("rmSync(") &&
+    !changeHandoffFilesSource.includes("recursive: true"),
+  changeHandoffParserRequiresStrictCanonicalBytes:
+    canonicalJsonSource.includes("if (keys.has(key))") &&
+    canonicalJsonSource.includes(
+      'invalidJson("Request body must not contain duplicate JSON object members")',
+    ) &&
+    canonicalJsonSource.includes("if (depth >= this.#maxDepth)") &&
+    canonicalJsonSource.includes("new StrictJsonScanner(source, maxDepth).parseDocument()") &&
+    canonicalJsonSource.includes("Number.isSafeInteger(value)") &&
+    canonicalJsonSource.includes("isWellFormedUnicode(value)") &&
+    canonicalJsonSource.includes("return stableJson(value)") &&
+    canonicalJsonSource.includes("Buffer.from(`$" + '{canonicalJson(value)}\\n`, "utf8")') &&
+    changeHandoffSource.includes("buffer.length > maxBytes") &&
+    changeHandoffSource.includes("buffer[buffer.length - 1] !== 0x0a") &&
+    changeHandoffSource.includes("buffer[buffer.length - 2] === 0x0a") &&
+    changeHandoffSource.includes("buffer.includes(0)") &&
+    changeHandoffSource.includes(
+      "buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf",
+    ) &&
+    changeHandoffSource.includes('new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })') &&
+    changeHandoffSource.includes("return parseStrictJson(decoded, 8)") &&
+    changeHandoffSource.includes("!Buffer.from(bytes).equals(canonicalJsonLine(payload))") &&
+    changeHandoffSource.includes("!Buffer.from(bytes).equals(canonicalJsonLine(result))"),
+  changeHandoffOmissionsAndIntegrityAreFixed:
+    expectedHandoffOmissions.every((entry) =>
+      handoffOmissionsSource.includes(JSON.stringify(entry)),
+    ) &&
+    (handoffOmissionsSource.match(/^\s+"[^"]+",?$/gm) ?? []).length ===
+      expectedHandoffOmissions.length &&
+    changeHandoffSource.includes(JSON.stringify(expectedHandoffIntegrityStatement)) &&
+    changeHandoffSource.includes('semantics: "byte_binding_and_recorded_local_evidence_only"') &&
+    changeHandoffSource.includes(
+      "literal(integrity.statement, CHANGE_HANDOFF_INTEGRITY_STATEMENT)",
+    ) &&
+    changeHandoffSource.includes("omissions.length !== CHANGE_HANDOFF_OMISSIONS.length") &&
+    changeHandoffSource.includes(
+      "!CHANGE_HANDOFF_OMISSIONS.every((entry, index) => entry === omissions[index])",
+    ) &&
+    changeHandoffSource.includes('authenticity: "not_established"') &&
+    changeHandoffSource.includes('authorization: "not_established"') &&
+    changeHandoffSource.includes('semanticTruth: "not_established"') &&
+    changeHandoffSource.includes('disclosurePermission: "not_established"') &&
+    changeHandoffSource.includes('executionAuthority: "none"'),
+  changeHandoffPreservesChangeRoomContract:
+    [
+      "task_scope",
+      "base_context",
+      "provider_plan",
+      "plan_approval",
+      "patchset",
+      "registered_checks",
+      "check_outcomes",
+      "review_decision",
+      "checkpoint",
+      "rollback_restoration",
+      "terminal_state",
+    ].every((entry) => changeRoomCardOrderSource.includes(JSON.stringify(entry))) &&
+    (changeRoomCardOrderSource.match(/^\s+"[^"]+",?$/gm) ?? []).length === 11 &&
+    [
+      "why_blocked",
+      "what_changed",
+      "what_passed",
+      "what_remains_before_review",
+      "why_rolled_back",
+    ].every((entry) => changeContextQuestionsSource.includes(JSON.stringify(entry))) &&
+    (changeContextQuestionsSource.match(/^\s+"[^"]+",?$/gm) ?? []).length === 5 &&
+    !handoffRuntimeMarker.test(changeRoomCoreSource) &&
+    !handoffRuntimeMarker.test(changeContextCoreSource),
   changeRoomRoutesReadOnly:
     workspaceServerSource.includes('if (method === "GET" && pathname === "/api/change-rooms")') &&
     workspaceServerSource.includes('if (method === "GET" && runChangeRoom !== null)') &&

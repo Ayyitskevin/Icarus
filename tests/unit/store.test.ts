@@ -266,6 +266,82 @@ describe("SQLite run persistence", () => {
     }
   });
 
+  it("rejects invalid operation kinds by UTF-8 byte length at admission and counting", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+    const invalidKinds = [
+      "",
+      "a".repeat(129),
+      "é".repeat(65),
+      "line\nbreak",
+      "line\rbreak",
+      "nul\0kind",
+    ];
+
+    for (const kind of invalidKinds) {
+      expectIcarusCode(
+        () => fixture.store.beginOperation(UNIT_RUN_ID, kind, 0, 0, 500),
+        "INVALID_OPERATION_KIND",
+      );
+      expectIcarusCode(
+        () => fixture.store.countOperationsByKind(UNIT_RUN_ID, kind),
+        "INVALID_OPERATION_KIND",
+      );
+    }
+    expect(fixture.store.getRun(UNIT_RUN_ID).usage.toolCalls).toBe(0);
+    fixture.store.close();
+  });
+
+  it("admits session operations only inside an open repair session", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+    approvePreparedRun(fixture.store);
+
+    for (const kind of [
+      "provider.revise",
+      "session.control.report_done",
+      "session.control.request_human_input",
+    ]) {
+      expectIcarusCode(
+        () => fixture.store.beginOperation(UNIT_RUN_ID, kind, 0, 0, 500, "running"),
+        "INVALID_STATE",
+      );
+    }
+    expect(fixture.store.getRun(UNIT_RUN_ID).usage.toolCalls).toBe(0);
+    fixture.store.close();
+  });
+
+  it("rejects operation detail whose wrapped persisted event exceeds 32 MiB", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+    const operation = fixture.store.beginOperation(UNIT_RUN_ID, "bounded.result", 0, 0, 500);
+
+    expectIcarusCode(
+      () =>
+        fixture.store.finishOperation(operation, {
+          outcome: "failed",
+          activeRuntimeMs: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          estimatedCostUsd: 0,
+          detail: { output: "x".repeat(32 * 1024 * 1024) },
+        }),
+      "OPERATION_RESULT_TOO_LARGE",
+    );
+    expect(fixture.store.getRun(UNIT_RUN_ID).usage).toMatchObject({
+      toolCalls: 1,
+      estimatedCostUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      activeRuntimeMs: 0,
+    });
+    fixture.store.markStartedOperationsInterrupted(UNIT_RUN_ID);
+    fixture.store.close();
+  });
+
   it("maps SQLite writer contention to RUN_BUSY", () => {
     const fixture = createUnitStore();
     cleanupRoots.push(fixture.root);
@@ -802,6 +878,34 @@ describe("SQLite run persistence", () => {
     });
     expect(reopened.resumeFailed(UNIT_RUN_ID).state).toBe("running");
     reopened.close();
+  });
+
+  it("requires active operations to be interrupted before a failed run resumes", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    prepareRun(fixture.store);
+    approvePreparedRun(fixture.store);
+    fixture.store.beginOperation(UNIT_RUN_ID, "synthetic.stale_operation", 0, 0, 1_000, "running");
+    expectIcarusCode(
+      () =>
+        fixture.store.transition(UNIT_RUN_ID, "cancelling", "cancellation.requested", {
+          actor: "unit-operator",
+        }),
+      "RUN_BUSY",
+    );
+    expect(fixture.store.getRun(UNIT_RUN_ID).state).toBe("running");
+    fixture.store.failRun(
+      UNIT_RUN_ID,
+      "running",
+      new IcarusError("INTERRUPTED", "Synthetic control interruption"),
+    );
+
+    expectIcarusCode(() => fixture.store.resumeFailed(UNIT_RUN_ID), "RUN_BUSY");
+    expect(fixture.store.getRun(UNIT_RUN_ID).state).toBe("failed");
+
+    fixture.store.markStartedOperationsInterrupted(UNIT_RUN_ID);
+    expect(fixture.store.resumeFailed(UNIT_RUN_ID).state).toBe("running");
+    fixture.store.close();
   });
 
   it("uses legacy checkpoint columns only for a legacy edit row", () => {

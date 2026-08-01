@@ -1,11 +1,16 @@
 import { sha256 } from "../../packages/core/src/digest.js";
 import { planApprovalDigest, treeCheckpointDigest } from "../../packages/core/src/policy.js";
 import type { IcarusStore } from "../../packages/core/src/store.js";
-import type { CheckpointFile, VerificationEvidence } from "../../packages/core/src/types.js";
+import type {
+  CheckpointFile,
+  SunCeiling,
+  VerificationEvidence,
+} from "../../packages/core/src/types.js";
 import {
   createUnitStore,
   seedUnitProject,
   UNIT_BASE_COMMIT,
+  UNIT_CEILING,
   UNIT_PLAN,
   UNIT_PROVIDER,
   UNIT_RUN_ID,
@@ -21,9 +26,9 @@ export interface ChangeRoomFixture {
   readonly runId: string;
 }
 
-export function createChangeRoomFixture(): ChangeRoomFixture {
+export function createChangeRoomFixture(ceiling: SunCeiling = UNIT_CEILING): ChangeRoomFixture {
   const fixture = createUnitStore();
-  const { projectId } = seedUnitProject(fixture.store);
+  const { projectId } = seedUnitProject(fixture.store, ceiling);
   fixture.store.createRun({
     id: UNIT_RUN_ID,
     projectId,
@@ -82,6 +87,7 @@ export function driveToAwaitingReview(
 export function finishToAwaitingReview(
   store: IcarusStore,
   outcome: VerificationEvidence["outcome"] = "passed",
+  nextState: "awaiting_review" | "verifying" | "running" = "awaiting_review",
 ): VerifiedRunEvidence {
   const baselineBase64 = Buffer.from("hello\n").toString("base64");
   const approvedBase64 = Buffer.from("goodbye\n").toString("base64");
@@ -118,25 +124,30 @@ export function finishToAwaitingReview(
   store.saveTreeCheckpoint(UNIT_RUN_ID, checkpointSha256);
   store.transition(UNIT_RUN_ID, "verifying", "edit.materialized");
   const diff = "diff --git a/src/greeting.txt b/src/greeting.txt\n-hello\n+goodbye\n";
-  store.recordVerificationAndAwaitReview(UNIT_RUN_ID, diff, {
-    outcome,
-    checks: [
-      {
-        checkId: "unit",
-        argv: ["node", "--test"],
-        exitCode: outcome === "passed" ? 0 : 1,
-        signal: null,
-        durationMs: 10,
-        stdout: outcome === "passed" ? "ok\n" : "",
-        stderr: outcome === "passed" ? "" : "assertion failed\n",
-        truncated: false,
-        outcome: outcome === "passed" ? "passed" : "failed",
-      },
-    ],
-    changedPaths: [UNIT_PLAN.target],
-    diffSha256: sha256(diff),
-    checkpointSha256,
-  });
+  store.recordVerificationAndAwaitReview(
+    UNIT_RUN_ID,
+    diff,
+    {
+      outcome,
+      checks: [
+        {
+          checkId: "unit",
+          argv: ["node", "--test"],
+          exitCode: outcome === "passed" ? 0 : 1,
+          signal: null,
+          durationMs: 10,
+          stdout: outcome === "passed" ? "ok\n" : "",
+          stderr: outcome === "passed" ? "" : "assertion failed\n",
+          truncated: false,
+          outcome: outcome === "passed" ? "passed" : "failed",
+        },
+      ],
+      changedPaths: [UNIT_PLAN.target],
+      diffSha256: sha256(diff),
+      checkpointSha256,
+    },
+    nextState,
+  );
   return { diff, diffSha256: sha256(diff), checkpointSha256 };
 }
 

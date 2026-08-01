@@ -161,7 +161,8 @@ surfaces, reversible Git landing, governed preview environments, and Supabase
 change packs. Icarus will own the authority/evidence kernel and integrate editor,
 environment, and backend primitives rather than rebuild them.
 
-The candidate Change Rooms slice (ADR 0041) adds a per-run Change Room: a strict
+The merged Change Rooms implementation (ADR 0041, still Proposed pending an
+independent review record) adds a per-run Change Room: a strict
 read-only projection derived in one SQLite read transaction from the run row,
 approvals, the bounded 200-event metadata tail, safe checkpoint columns,
 project check/sandbox configuration, and CLI annotations — the room is the run,
@@ -180,6 +181,42 @@ run state, events, gates, or digests. Existing state requires a verified backup
 and one explicitly approved `run-annotations-v1` migration; see
 `docs/OPERATIONS.md`. The three new routes are GET-only reads and add no
 browser authority beyond the existing observation boundary.
+
+The Change Handoff Pack v1 candidate
+([ADR 0042](docs/adr/0042-change-handoff-packs.md)) is deliberately separate.
+`icarus.change-handoff.v1` is a strict default-deny, lifecycle-metadata-only
+artifact built directly from validated Icarus records; the Change Room is never
+serialized or filtered into it. It can carry opaque IDs, state/phase, bounded
+provider metadata, safe approval/verification/recovery outcomes, fixed host
+summaries, counts, digest-only artifact references, a disclosure class, and
+explicit omissions/uncertainty. It cannot carry task, plan, code, path, diff,
+command/output, annotation, event-payload, credential, URL, or executable-action
+content.
+
+The operator must preview exact canonical bytes and their separate payload and
+request/preview SHA-256 values, then export with that exact preview digest.
+Preview reads a stable WAL-clean database image entirely in memory and returns
+`RUN_BUSY` rather than opening or changing source SQLite state when a non-empty
+WAL exists. Export requires a current-user-owned parent that is not group/other-writable,
+then writes only `icarus-change-handoff.json` and
+`icarus-change-handoff-result.json` as owner-only, no-follow, exclusive local
+files and never overwrites. Secure Handoff Pack preview, export, verification,
+and inspection are Linux-only in this candidate. Export preflights Linux
+descriptor-root/no-follow support and syncs the new directory entry before
+success; every handoff command fails closed on other platforms. File-only
+`handoff verify` and `handoff inspect` do not open Icarus state or use the
+network. All surfaces repeat the governing limit: digests bind bytes and
+recorded local evidence; they do not prove authenticity, authorization, truth,
+disclosure permission, or authority to execute or land code. Digest references
+are integrity identifiers rather than confidentiality controls and may confirm
+a correctly guessed low-entropy value.
+
+A later Athena design may map only the handoff schema and digest, Icarus run ID,
+correlation ID, safe lifecycle outcome, and disclosure class into an imported
+`constellation.event.v1` timeline record. This milestone implements no Athena
+client, shared protocol/runtime, receiver identity, delivery, callback, retry,
+outbox, message bus, Task Room creation, Minerva trigger, API route, browser
+action, Git action, landing, or deployment.
 
 Not yet included: browser approval or execution, arbitrary/provider-native
 tools, model-written shell commands, semantic search, commits or pushes,
@@ -327,6 +364,34 @@ node packages/cli/dist/main.js run plan \
   --input-usd-per-million <current-rate> \
   --output-usd-per-million <current-rate>
 ```
+
+Preview and explicitly export a redacted offline Handoff Pack:
+
+```text
+node packages/cli/dist/main.js run handoff-preview <run-id> \
+  --correlation-id project.change-42 \
+  --external-task-ref ATHENA-42
+node packages/cli/dist/main.js run handoff-export <run-id> \
+  --correlation-id project.change-42 \
+  --external-task-ref ATHENA-42 \
+  --expected-preview-sha256 <displayed-preview-digest> \
+  --output-dir ./icarus-handoff
+node packages/cli/dist/main.js handoff verify \
+  --input ./icarus-handoff/icarus-change-handoff.json
+node packages/cli/dist/main.js handoff inspect \
+  --input ./icarus-handoff/icarus-change-handoff.json
+```
+
+The expected preview value is the separate request/preview digest, not the
+payload digest. Preview makes no writes; it refuses a non-empty SQLite WAL as
+`RUN_BUSY`, so stop the ordinary writer and retry after a clean close rather
+than manipulating journal files. Export rereads and revalidates state and
+refuses stale evidence or either pre-existing fixed output filename.
+Secure Handoff Pack commands are Linux-only in this candidate. Export fails
+before output-directory creation when descriptor-root/no-follow support is
+unavailable; `verify` and `inspect` remain file-only and do not require or open
+`ICARUS_HOME`. They establish internal consistency only, never authenticity or
+authority.
 
 Icarus does not embed model pricing because pricing changes. A remote run with a
 cost ceiling requires explicit rates so that the ceiling is enforceable. The

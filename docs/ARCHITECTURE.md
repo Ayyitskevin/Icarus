@@ -145,12 +145,23 @@ ordinary-operation slot and `commandTimeoutMs` of active runtime for
 from persisted evidence; a started operation is charged conservatively before
 that reserved recovery runs.
 
-Settlement preserves that single source of truth. A tool operation's finish and
-the verification or session-terminal event it produces commit in one SQLite
-transaction. `review.validate`, rollback, and restore operation finishes commit
-with their corresponding state transition. A crash therefore cannot leave a
-settled operation without its boundary or a boundary whose operation still
-appears started.
+Settlement preserves that single source of truth. Effectful
+`apply_patchset`/`run_checks` and session-control operation finishes commit
+with their verification or session-terminal event in one SQLite transaction;
+advisory/read tools settle only their operation. Patch settlement is classified
+from both its closed tool discriminator and the intent/checkpoint events emitted
+inside that exact active operation, so an applied patch cannot be relabeled as a
+proposal. Every `propose_patch` terminal is zero-effect, including failed and
+cancelled proposals; only `apply_patchset` may retain bounded partial effects on
+failure. A repair replacement intent must originate inside that mutation
+operation, and a newly created repair checkpoint must originate there or in
+`session.reconcile`. Within a session, every `running` verification is the
+immediate successor of its effectful operation: apply, failed/cancelled apply,
+and reconciliation may record only `unavailable`; only `run_checks` may
+establish passed or failed current check evidence. `review.validate`, rollback,
+and restore operation finishes commit with their corresponding state
+transition. A crash therefore cannot leave an effectful settled operation
+without its boundary or a boundary whose operation still appears started.
 
 The run row retains the latest verification for efficient status reads. Every
 completed verification also appends its complete bounded evidence and diff to
@@ -282,7 +293,8 @@ review approval must refuse.
    advisory preview/validation only. `apply_patchset` carries and independently
    revalidates its own bounded PatchSet, then records exact intent before writes.
    Interrupted materialization resumes from persisted intent with `unavailable`,
-   non-approvable verification. `run_checks` records a current full-plan
+   non-approvable verification. Apply and reconciliation cannot claim passing
+   checks; `run_checks` records the current full-plan
    verification. `report_done` must revalidate the live checkpoint/diff and
    passing evidence. Human input or exhaustion records a non-approvable review
    blocker.
@@ -581,7 +593,7 @@ failure. Static assets retain their existing file-serving path.
 
 ## Sixth M3 change-room path
 
-ADR 0019 is implemented through the existing store, HTTP/API, CLI, and React
+ADR 0041 is implemented through the existing store, HTTP/API, CLI, and React
 boundaries. A Change Room is not a new entity: the room of a run is the run, and
 `roomId` is the run ID.
 
@@ -652,6 +664,116 @@ boundaries. A Change Room is not a new entity: the room of a run is the run, and
    event revision, read-only annotations, and an explain panel for the five
    fixed questions. The guarded CLI lifecycle and the ADR 0010 hold are
    unchanged.
+
+## Offline Change Handoff Pack path
+
+ADR 0042 adds a CLI/filesystem projection beside, not on top of, the Change
+Room. The dependency and data flow is:
+
+```text
+WAL-clean SQLite family -> stable main-file bytes -> private in-memory SQLite
+                                                -> default-deny safe facts
+                                                -> canonical payload + digests
+
+export request + expected preview digest -> recapture/revalidate safe snapshot
+                                         -> regenerate/compare exact bytes
+                                         -> exclusive local payload/result files
+
+arbitrary handoff file -> hostile-file reader -> strict canonical decoder
+                                               -> verify or safe inspection
+```
+
+The first two paths are run-scoped but do not construct the ordinary writable
+runtime. The reader fingerprints the owned database family, refuses a non-empty
+WAL with `RUN_BUSY`, captures stable main-database bytes, normalizes only the
+private buffer's journal header, and opens that buffer in query-only SQLite.
+It re-fingerprints the source around the read and never SQLite-opens the source
+path or creates a temporary snapshot. Refusing uncheckpointed WAL truth is the
+deliberate price of preview purity; the operator must let the normal writer
+close/checkpoint and retry, never remove SQLite companions manually. The reader
+then projects a dedicated internal source snapshot. It may inspect bounded local
+records to validate relationships, but the safe-facts object contains only
+opaque IDs, state/phase, the four safe provider scalars, lifecycle statuses,
+counts, and typed digests. Annotation rows, event payloads, repository records
+and paths, task/target text, plan/PatchSet/check content, diff/checkpoint bytes,
+cache/worktree paths, actors, URLs, credentials, and landing/browser ledgers do
+not cross that boundary. The builder enumerates every payload member; no object
+spread or Change Room/full-run conversion exists.
+
+The correlation ID is 1–128 ASCII bytes under
+`[A-Za-z0-9][A-Za-z0-9._:-]{0,127}`. The optional external reference uses the
+same alphabet for 1–256 bytes. A provider model is copied only if it also passes
+the 1–128-byte safe-token grammar. Every remaining string is a fixed enum,
+canonical UUID/digest, or host template. Unsafe permitted-looking data refuses
+the whole projection, so late redaction never becomes the disclosure boundary.
+
+Canonical encoding sorts/places exact schema members deterministically, rejects
+unknown prototypes, unsafe numbers and malformed Unicode, and emits compact JSON
+plus exactly one LF. The payload SHA-256 covers those complete bytes. A separate
+domain-separated preview SHA-256 binds the versioned operator request, safe
+source binding/revision, schema, and payload SHA-256. The source binding contains
+only safe facts and evidence digests, never omitted task or secret-bearing bytes;
+it is not an offline oracle over private content. Handoff ID, payload bytes, and
+both digests are reproducible without time or randomness.
+
+Preview returns those exact bytes and digests without a write. Export is a new
+read/validate operation, not continuation of an open snapshot: it recomputes
+everything and compares the expected preview digest before opening a destination.
+It requires the selected parent directory to be current-user-owned and not
+group- or other-writable, and any existing output directory to be mode `0700`.
+It then creates only `icarus-change-handoff.json` followed by
+`icarus-change-handoff-result.json`. Both are owner-only, single-link regular
+files opened descriptor-relative with no-follow/exclusive semantics. Each file,
+the output directory, and its parent directory entry are `fsync`ed before
+successful publication is reported; no overwrite is possible. Caught-error
+cleanup may remove only a partial file created by that
+invocation whose open descriptor and path still identify the same inode; an
+empty newly created directory may remain rather than risk a path-racy removal.
+The secure source reader, descriptor-root export implementation, and file-only
+verification/inspection reader are Linux-only. Platform and capability
+preflight fails with `HANDOFF_EXPORT_UNSUPPORTED` before output-directory
+creation and before source or handoff-file access; there is no weaker path-only
+fallback on macOS or Windows. The result's closed
+four fields are `exportStatus`, `previewSha256`, `outputSchema`, and
+`payloadSha256`; the last binds the newline-terminated payload.
+
+File-only verify/inspect dispatch before state-root resolution, migration,
+runtime, service, or environment credential setup. Their bounded hostile-file
+reader rejects symlinked ancestors/finals, hardlinks, special files, unsafe
+ownership/modes, growth or identity races, invalid UTF-8/BOM/NUL, excessive
+bytes/depth, duplicate or unknown members, and noncanonical framing. It
+re-encodes and compares exact bytes before reporting consistency. Inspection
+uses a separate allowlisted presenter, so an unexpected input never becomes a
+way to echo omitted material.
+
+This path adds no SQLite object, lifecycle event, operation, API route, browser
+component, provider/network dependency, Git/landing action, delivery state,
+worker, or retry loop. The output files are operator-owned copies, not a new
+Icarus source of truth. Their integrity statement distinguishes byte binding and
+recorded local evidence from authenticity, authorization, truth, disclosure
+permission, and execution/landing authority.
+
+The future Athena seam is documentation only. A later importer may use six
+meanings — handoff schema, complete payload digest, Icarus run ID, correlation
+ID, safe lifecycle outcome, and disclosure class — in an evidence-only
+`constellation.event.v1` timeline record. No other payload field maps, and no
+Athena response becomes Icarus input. There is no shared runtime type, client,
+receiver, authentication, credential, outbox, callback, retry, automatic Task
+Room creation, or Minerva trigger in this architecture.
+
+The four invariants remain:
+
+- **State:** SQLite remains run truth. Preview is ephemeral; exported files are
+  operator-owned evidence copies and never re-enter the lifecycle.
+- **Feedback:** CLI preview/export/verify/inspect output and the fixed result file
+  report local consistency. There is no receiver or delivery status to observe.
+- **Deletion coupling:** ordinary Icarus cleanup remains unchanged. Export never
+  deletes pre-existing output; failure may clean only its identity-matched
+  partial files, while later artifact retention is the operator's responsibility.
+- **Timing:** preview reads one coherent snapshot; export always rereads and
+  compares before publication; file verification is independent of live Icarus
+  state. No asynchronous delivery, retry, or callback ordering exists.
+
 
 ## Provider contract
 

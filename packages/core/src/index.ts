@@ -1,4 +1,48 @@
 export {
+  canonicalJson,
+  canonicalJsonLine,
+  DEFAULT_MAX_JSON_DEPTH,
+  parseStrictJson,
+} from "./canonical-json.js";
+export {
+  assertExpectedChangeHandoffPreview,
+  buildChangeHandoffPreview,
+  CHANGE_HANDOFF_DISCLOSURE_CLASS,
+  CHANGE_HANDOFF_INTEGRITY_STATEMENT,
+  CHANGE_HANDOFF_OMISSIONS,
+  CHANGE_HANDOFF_SCHEMA,
+  CHANGE_HANDOFF_UNCERTAINTIES,
+  CHANGE_HANDOFF_VERSION,
+  changeHandoffPhase,
+  createChangeHandoffExportResult,
+  decodeChangeHandoffExportResultBytes,
+  decodeChangeHandoffPayloadBytes,
+  encodeChangeHandoffExportResult,
+  inspectChangeHandoffDocuments,
+  type ChangeHandoffArtifactReference,
+  type ChangeHandoffArtifactType,
+  type ChangeHandoffExportResult,
+  type ChangeHandoffInspection,
+  type ChangeHandoffPayloadV1,
+  type ChangeHandoffPhase,
+  type ChangeHandoffPreview,
+  type ChangeHandoffRequest,
+  type ChangeHandoffSourceSnapshot,
+  type ChangeHandoffVerification,
+  validateChangeHandoffRequest,
+  verifyChangeHandoffDocuments,
+} from "./change-handoff.js";
+export {
+  CHANGE_HANDOFF_FILENAME,
+  CHANGE_HANDOFF_MAX_BYTES,
+  CHANGE_HANDOFF_RESULT_FILENAME,
+  CHANGE_HANDOFF_RESULT_MAX_BYTES,
+  readSecureHandoffFile,
+  type SecureFileRead,
+  writeChangeHandoffFiles,
+} from "./change-handoff-files.js";
+export { readChangeHandoffSource } from "./change-handoff-reader.js";
+export {
   assertBrowserActionCancellationParent,
   assertBrowserActionDescriptorFields,
   assertBrowserActionIdentity,

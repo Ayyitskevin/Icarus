@@ -101,9 +101,22 @@ Windows host acceptance remained pending, the approval-index rollout against
 existing state remained operator-gated, and ADR 0025's residual work
 independently blocked release. Exact-head native acceptance is now recorded in
 run 30602949132. The browser authority and execution outcome remains governed by
-ADR 0036 Gate 1. The candidate Change Rooms slice (ADR 0041) is implemented on
-the candidate branch with fresh local evidence and uses exact-head hosted CI as
-its merge gate. Full M3 remains open.
+ADR 0036 Gate 1. The Change Rooms implementation merged through
+[PR #21](https://github.com/Ayyitskevin/Icarus/pull/21) as
+`683c123d37645d0e161e55b2368ef66cff79ef75`; local acceptance, published
+implementation-head CI, PR-head CI, and resulting-main CI passed. PR #21 records
+no independent review or review decision, however, so ADR 0041 remains Proposed
+under the repository's local, independent-review, merge, and exact-head evidence
+policy. Full M3 remains open.
+
+ADR 0042's unpublished candidate implements the next bounded offline artifact:
+a default-deny `icarus.change-handoff.v1` projection with pure preview,
+stale-preview-guarded export, and file-only verify/inspect. The complete local
+gate and two independent exact-snapshot reviews are green with no remaining
+blocker, high, or medium finding. Merge and exact published-head hosted CI
+remain open, so the ADR stays Proposed. It exports fixed local files for an
+operator to review and move deliberately. It does not send to Athena, add a
+receiver, synchronize lifecycle state, or grant landing or execution authority.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
@@ -256,6 +269,13 @@ worker scheduling, Highwind capability routing, heartbeats, retries,
 cancellation, idempotency, and resource/cost policies. Treat every host as a
 separate node and retain Zenbook as an operator client rather than a worker.
 
+ADR 0042 reserves only a future conceptual Athena seam: handoff schema, complete
+payload digest, Icarus run ID, correlation ID, safe lifecycle outcome, and
+disclosure class may map one way into a future Athena contract. No other handoff
+field maps, and the seam currently has no delivery, callback, retry, shared
+database, command, landing, or execution path. Any runtime integration requires
+a separate ADR and authority review under Gate 6.
+
 ## M7 — Dogfood and hardening
 
 Status: historical planning record — its measurable continuation is distributed
@@ -283,9 +303,21 @@ portable mutation-session/client bootstrap is the first local candidate; the
 guarded action ledger and routes remain unimplemented. ADR 0027 Git landing is
 accepted, but no landing runtime or migration exists. After the versioned
 benchmark closes, implementation continues through the bounded
-browser-to-draft-PR path. Every future release candidate still requires fresh
-local evidence, independent review, and exact published-head hosted CI;
-platform claims require the matching exact-commit native evidence.
+browser-to-draft-PR path.
+
+The merged Change Rooms implementation is available as a read-only observation
+surface, but ADR 0041 remains Proposed until an independent review is recorded.
+The current adjacent candidate is ADR 0042's standalone Change Handoff Pack v1.
+It preserves the existing Change Room behavior and has satisfied fresh focused
+unit, integration, CLI, adversarial, full repository, smoke, security,
+workflow-audit, dependency-audit, and independent-review gates on the local
+candidate. A successful local artifact does not accept ADR 0042, authorize
+Athena integration, or establish disclosure permission; merge and exact
+published-head hosted CI remain required.
+
+Every future release candidate still requires fresh local evidence, independent
+review, merge, and exact published-head hosted CI; platform claims require the
+matching exact-commit native evidence.
 
 Older approval pagination, current file/status views, multi-file or raw payload
 browser diff/history, complete browser checkpoint inspection, browser approval,

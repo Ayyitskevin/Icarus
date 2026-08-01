@@ -102,6 +102,8 @@ export const CANCELLATION_RECOVERY_OPERATION_KIND = "cancellation.recovery";
 export const SESSION_ITERATION_OPERATION_KIND = "provider.revise";
 export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
+const SESSION_READ_MANIFEST_OPERATION_KIND = "session.tool.read.manifest";
+const SESSION_READ_CHECKS_OPERATION_KIND = "session.tool.read.checks";
 const SESSION_CHECK_OPERATION_KIND = "session.tool.exec.check";
 const SESSION_PATCH_OPERATION_KIND = "session.tool.mutation.patchset";
 const SESSION_RECONCILE_OPERATION_KIND = "session.reconcile";
@@ -110,6 +112,42 @@ const SESSION_REQUEST_HUMAN_OPERATION_KIND = "session.control.request_human_inpu
 const REVIEW_VALIDATION_OPERATION_KIND = "review.validate";
 const CHECKPOINT_ROLLBACK_OPERATION_KIND = "checkpoint.rollback";
 const CHECKPOINT_RESTORE_OPERATION_KIND = "checkpoint.restore";
+const MAX_OPERATION_JSON_BYTES = 32 * 1024 * 1024;
+const REPAIR_SESSION_OPERATION_KINDS: ReadonlySet<string> = new Set([
+  SESSION_ITERATION_OPERATION_KIND,
+  SESSION_READ_MANIFEST_OPERATION_KIND,
+  SESSION_READ_CHECKS_OPERATION_KIND,
+  SESSION_CHECK_OPERATION_KIND,
+  SESSION_PATCH_OPERATION_KIND,
+  SESSION_RECONCILE_OPERATION_KIND,
+  SESSION_REPORT_DONE_OPERATION_KIND,
+  SESSION_REQUEST_HUMAN_OPERATION_KIND,
+]);
+const ATOMIC_SUCCESS_OPERATION_KINDS: ReadonlySet<string> = new Set([
+  SESSION_CHECK_OPERATION_KIND,
+  SESSION_REPORT_DONE_OPERATION_KIND,
+  SESSION_REQUEST_HUMAN_OPERATION_KIND,
+  REVIEW_VALIDATION_OPERATION_KIND,
+  CHECKPOINT_ROLLBACK_OPERATION_KIND,
+  CHECKPOINT_RESTORE_OPERATION_KIND,
+]);
+const ACTIVE_OPERATION_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "base.pinned",
+  "browser.action.admitted",
+  "checkpoint.saved",
+  "context.assembled",
+  "edit.intent_recorded",
+  "egress.requested",
+  "operation.started",
+  "operation.finished",
+  "operation.interrupted",
+  "patch_set.intent_recorded",
+  "patch_set.superseded",
+  "plan.created",
+  "run.failed",
+  "resume.requested",
+  "workspace.created",
+]);
 export const RUN_EVENT_PAGE_LIMIT = 64;
 export const RUN_PRESENTATION_EVENT_LIMIT = 200;
 export const RUN_PRESENTATION_APPROVAL_LIMIT = 12;
@@ -173,6 +211,14 @@ const SAFE_WORKSPACE_SNAPSHOT_MAX = Number.MAX_SAFE_INTEGER - 1;
 const PROJECT_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
 const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 const EVENT_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+
+function assertOperationKind(kind: string): void {
+  invariant(
+    kind.length > 0 && Buffer.byteLength(kind, "utf8") <= 128 && !/[\r\n\0]/.test(kind),
+    "INVALID_OPERATION_KIND",
+    "Operation kind is invalid",
+  );
+}
 const RUN_STATES: ReadonlySet<string> = new Set<RunState>([
   "preparing",
   "planned",
@@ -2508,6 +2554,18 @@ export class IcarusStore {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
       invariant(current.state === "running", "INVALID_STATE", "Run is not executing");
+      const activeOperation = this.#database
+        .prepare("SELECT kind FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
+        .get(runId);
+      const activeOperationKind =
+        activeOperation === undefined
+          ? null
+          : text(row(activeOperation, "active patch operation").kind, "operations.kind");
+      invariant(
+        activeOperationKind === null || activeOperationKind === SESSION_PATCH_OPERATION_KIND,
+        "RUN_BUSY",
+        "Patch intent cannot cross a non-mutation operation",
+      );
       invariant(
         current.plan !== null,
         "MISSING_PLAN",
@@ -2541,11 +2599,17 @@ export class IcarusStore {
       const existing = this.#database
         .prepare("SELECT patch_set_json FROM patch_sets WHERE run_id = ?")
         .get(runId);
+      const replacing = current.patchSet !== null;
       const supersedes = existing === undefined ? null : current.patchSet;
       invariant(
-        existing === undefined || this.#supersessionIsAuthorized(current),
+        !replacing || this.#supersessionIsAuthorized(current),
         "IMMUTABLE_ARTIFACT_CONFLICT",
-        "A patch set is already recorded for this run",
+        "A replacement intent requires a successful revision in the current repair session",
+      );
+      invariant(
+        !replacing || activeOperationKind === SESSION_PATCH_OPERATION_KIND,
+        "RUN_BUSY",
+        "A repair replacement intent requires an active mutation operation",
       );
       const now = this.#now();
       if (supersedes !== null) {
@@ -2553,6 +2617,8 @@ export class IcarusStore {
           digest: digestJson(asJsonValue(supersedes)),
           paths: supersedes.edits.map((edit) => edit.path).sort(),
         });
+      }
+      if (replacing) {
         this.#database.prepare("DELETE FROM patch_sets WHERE run_id = ?").run(runId);
         this.#database.prepare("DELETE FROM checkpoint_files WHERE run_id = ?").run(runId);
         this.#database.prepare("DELETE FROM checkpoints WHERE run_id = ?").run(runId);
@@ -2569,12 +2635,23 @@ export class IcarusStore {
       }
       const result = this.#database
         .prepare(
-          `UPDATE runs SET diff = CASE WHEN ? THEN NULL ELSE diff END,
+          `UPDATE runs SET edit_json = CASE WHEN ? THEN NULL ELSE edit_json END,
+           baseline_base64 = CASE WHEN ? THEN NULL ELSE baseline_base64 END,
+           approved_base64 = CASE WHEN ? THEN NULL ELSE approved_base64 END,
+           diff = CASE WHEN ? THEN NULL ELSE diff END,
            verification_json = CASE WHEN ? THEN NULL ELSE verification_json END,
            version = version + 1, updated_at = ?
            WHERE id = ? AND state = 'running'`,
         )
-        .run(supersedes === null ? 0 : 1, supersedes === null ? 0 : 1, now, runId);
+        .run(
+          replacing ? 1 : 0,
+          replacing ? 1 : 0,
+          replacing ? 1 : 0,
+          replacing ? 1 : 0,
+          replacing ? 1 : 0,
+          now,
+          runId,
+        );
       invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
       this.#appendEvent(runId, "patch_set.intent_recorded", {
         paths: editPaths,
@@ -2662,7 +2739,70 @@ export class IcarusStore {
     const granted = Math.min(run.plan.iterationCeiling, MAX_SESSION_ITERATIONS);
     const charged = this.countSessionIterations(run.id);
     if (charged < 1 || charged > granted) return false;
-    return this.#countEvents(run.id, "patch_set.superseded") < charged;
+    if (!this.#repairSessionIsOpen(run.id)) return false;
+    const repair = this.#database
+      .prepare(
+        "SELECT sequence FROM run_events WHERE run_id = ? AND type = 'repair.requested' ORDER BY sequence DESC LIMIT 1",
+      )
+      .get(run.id);
+    if (repair === undefined) return false;
+    const repairSequence = numberValue(
+      row(repair, "repair session boundary").sequence,
+      "run_events.sequence",
+    );
+    const successfulRevisions = numberValue(
+      row(
+        this.#database
+          .prepare(
+            `SELECT COUNT(*) AS total
+             FROM run_events AS event
+             JOIN operations AS operation
+               ON operation.run_id = event.run_id
+              AND operation.id = json_extract(event.payload_json, '$.operationId')
+             WHERE event.run_id = ? AND event.sequence > ?
+               AND event.type = 'operation.started'
+               AND json_extract(event.payload_json, '$.kind') = ?
+               AND operation.status = 'succeeded'`,
+          )
+          .get(run.id, repairSequence, SESSION_ITERATION_OPERATION_KIND),
+        "repair revision count",
+      ).total,
+      "repair revisions.total",
+    );
+    const replacementIntents = numberValue(
+      row(
+        this.#database
+          .prepare(
+            `SELECT COUNT(*) AS total FROM run_events
+             WHERE run_id = ? AND sequence > ? AND type = 'patch_set.intent_recorded'`,
+          )
+          .get(run.id, repairSequence),
+        "repair replacement count",
+      ).total,
+      "repair replacements.total",
+    );
+    return successfulRevisions > replacementIntents;
+  }
+
+  #repairSessionIsOpen(runId: string): boolean {
+    const latest = this.#database
+      .prepare(
+        `SELECT type FROM run_events
+         WHERE run_id = ? AND type IN (
+           'repair.requested', 'edit.materialized', 'execution.completed',
+           'session.verification_requested', 'egress.approved', 'plan.approved',
+           'review.accepted', 'review.rejected', 'rollback.approved', 'restore.approved',
+           'rollback.completed', 'restore.completed', 'cancellation.requested',
+           'cancellation.completed', 'session.completed', 'session.awaiting_human',
+           'session.exhausted'
+         )
+         ORDER BY sequence DESC LIMIT 1`,
+      )
+      .get(runId);
+    return (
+      latest !== undefined &&
+      text(row(latest, "repair session state").type, "run_events.type") === "repair.requested"
+    );
   }
 
   #countEvents(runId: string, type: string): number {
@@ -2681,11 +2821,7 @@ export class IcarusStore {
    * process crash cannot resurrect capability budget.
    */
   countOperationsByKind(runId: string, kind: string): number {
-    invariant(
-      kind.length > 0 && kind.length <= 128 && !/[\r\n\0]/.test(kind),
-      "INVALID_OPERATION_KIND",
-      "Operation kind is invalid",
-    );
+    assertOperationKind(kind);
     this.getRun(runId);
     const value = row(
       this.#database
@@ -2718,6 +2854,29 @@ export class IcarusStore {
         iterations === this.countSessionIterations(runId),
         "INVALID_SESSION_ITERATION",
         "Session iteration boundary does not match durable provider admission",
+      );
+      const iterationOperation = this.#database
+        .prepare(
+          `SELECT status FROM operations
+           WHERE run_id = ? AND kind = ?
+           ORDER BY rowid DESC LIMIT 1`,
+        )
+        .get(runId, SESSION_ITERATION_OPERATION_KIND);
+      invariant(
+        iterationOperation !== undefined &&
+          text(
+            row(iterationOperation, "session iteration operation").status,
+            "operations.status",
+          ) === "succeeded",
+        "INVALID_SESSION_ITERATION",
+        "Session iteration boundary requires a succeeded provider revision",
+      );
+      invariant(
+        this.#database
+          .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
+          .get(runId) === undefined,
+        "RUN_BUSY",
+        "Session iteration boundary cannot cross an active operation",
       );
       const latest = this.#latestSessionIterationBoundary(runId);
       invariant(
@@ -2791,7 +2950,9 @@ export class IcarusStore {
     iterations: number,
   ): void {
     invariant(
-      Number.isSafeInteger(iterations) && iterations >= 0,
+      Number.isSafeInteger(iterations) &&
+        iterations >= 0 &&
+        (kind === "exhausted" || iterations > 0),
       "INVALID_SESSION_ITERATION",
       "Session outcome iteration count is invalid",
     );
@@ -2965,6 +3126,48 @@ export class IcarusStore {
       "SESSION_NOT_COMPLETED",
       "Session completion was not atomically paired after report_done settlement",
     );
+    const latestIntent = row(
+      this.#database
+        .prepare(
+          `SELECT COALESCE(MAX(sequence), 0) AS sequence FROM run_events
+           WHERE run_id = ? AND type IN ('edit.intent_recorded', 'patch_set.intent_recorded')`,
+        )
+        .get(runId),
+      "latest change intent",
+    );
+    const completedVerification = this.#database
+      .prepare(
+        `SELECT payload_json FROM run_events
+         WHERE run_id = ? AND type = 'verification.completed' AND sequence < ?
+         ORDER BY sequence DESC LIMIT 1`,
+      )
+      .get(runId, sequence);
+    const current = this.getRun(runId);
+    const completedVerificationPayload =
+      completedVerification === undefined
+        ? null
+        : parseJson<unknown>(
+            row(completedVerification, "session completion verification").payload_json,
+            "run_events.payload_json",
+          );
+    const completedVerificationRecord =
+      completedVerificationPayload === null
+        ? null
+        : row(completedVerificationPayload, "session completion verification payload");
+    const completedVerificationEvidence =
+      completedVerificationRecord === null
+        ? null
+        : row(completedVerificationRecord.verification, "session completion verification evidence");
+    invariant(
+      numberValue(latestIntent.sequence, "latest change intent.sequence") < sequence &&
+        completedVerificationRecord !== null &&
+        completedVerificationEvidence !== null &&
+        current.verification !== null &&
+        completedVerificationRecord.diffSha256 === current.verification.diffSha256 &&
+        completedVerificationEvidence.checkpointSha256 === current.verification.checkpointSha256,
+      "SESSION_NOT_COMPLETED",
+      "Session completion does not authorize the current change revision",
+    );
   }
 
   /**
@@ -3090,6 +3293,11 @@ export class IcarusStore {
     verification: VerificationEvidence,
     nextState: "awaiting_review" | "verifying" | "running" = "awaiting_review",
   ): RunRecord {
+    invariant(
+      nextState !== "running",
+      "INVALID_OPERATION_OUTCOME",
+      "Running session verification must settle atomically with its operation",
+    );
     const transaction = this.#database.transaction(() => {
       this.#recordVerificationInTransaction(runId, diff, verification, nextState);
     });
@@ -3235,6 +3443,21 @@ export class IcarusStore {
     }
     const createdAt = this.#now();
     const transaction = this.#database.transaction(() => {
+      if (this.#repairSessionIsOpen(runId)) {
+        const activeOperation = this.#database
+          .prepare("SELECT kind FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
+          .get(runId);
+        const activeOperationKind =
+          activeOperation === undefined
+            ? null
+            : text(row(activeOperation, "active checkpoint operation").kind, "operations.kind");
+        invariant(
+          activeOperationKind === SESSION_PATCH_OPERATION_KIND ||
+            activeOperationKind === SESSION_RECONCILE_OPERATION_KIND,
+          "RUN_BUSY",
+          "A repair checkpoint requires an active mutation or reconciliation operation",
+        );
+      }
       this.#database
         .prepare(
           `INSERT INTO checkpoints (run_id, baseline_base64, approved_base64, checkpoint_sha256, created_at)
@@ -3353,6 +3576,13 @@ export class IcarusStore {
         "INVALID_RESUME_STATE",
         "Failed run has no safe resume state",
       );
+      invariant(
+        this.#database
+          .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
+          .get(runId) === undefined,
+        "RUN_BUSY",
+        "Failed run cannot resume while an operation is still active",
+      );
       this.#assertNoOtherActiveRun(current.projectId, runId);
       if (current.resumeState === "running" || current.resumeState === "verifying") {
         invariant(
@@ -3469,6 +3699,7 @@ export class IcarusStore {
     budgetClass: "ordinary" | "emergency",
     expectedState?: RunState,
   ): OperationToken {
+    assertOperationKind(kind);
     invariant(
       Number.isFinite(reservedCostUsd) && reservedCostUsd >= 0,
       "INVALID_RESERVATION",
@@ -3532,6 +3763,20 @@ export class IcarusStore {
           "INVALID_EMERGENCY_OPERATION",
           "Cancellation recovery kind is reserved for its emergency operation",
         );
+        if (REPAIR_SESSION_OPERATION_KINDS.has(kind)) {
+          invariant(
+            run.state === "running" && this.#repairSessionIsOpen(runId),
+            "INVALID_STATE",
+            "Session operations require an open repair session",
+          );
+        }
+        if (kind === SESSION_ITERATION_OPERATION_KIND) {
+          invariant(
+            this.#iterationBudgetRemaining(run) > 0,
+            "ITERATION_BUDGET_EXHAUSTED",
+            "The approved iteration budget is exhausted",
+          );
+        }
         invariant(
           run.usage.toolCalls + 1 <= project.ceiling.maxToolCalls,
           "TOOL_BUDGET_EXCEEDED",
@@ -3603,6 +3848,32 @@ export class IcarusStore {
   }
 
   finishOperation(token: OperationToken, finish: OperationFinish): RunRecord {
+    const detailTool =
+      typeof finish.detail === "object" &&
+      finish.detail !== null &&
+      !Array.isArray(finish.detail) &&
+      typeof finish.detail.tool === "string"
+        ? finish.detail.tool
+        : null;
+    if (token.kind === SESSION_PATCH_OPERATION_KIND) {
+      invariant(
+        detailTool === "propose_patch" || detailTool === "apply_patchset",
+        "INVALID_OPERATION_OUTCOME",
+        "Patch operation settlement requires its closed tool discriminator",
+      );
+    }
+    if (finish.outcome === "succeeded" && token.kind === SESSION_PATCH_OPERATION_KIND) {
+      invariant(
+        detailTool === "propose_patch",
+        "INVALID_OPERATION_OUTCOME",
+        "Only propose_patch can settle this operation without verification evidence",
+      );
+    }
+    invariant(
+      finish.outcome !== "succeeded" || !ATOMIC_SUCCESS_OPERATION_KINDS.has(token.kind),
+      "INVALID_OPERATION_OUTCOME",
+      "This operation kind must settle atomically with its durable successor",
+    );
     return this.#finishOperation(token, finish, false);
   }
 
@@ -3622,6 +3893,26 @@ export class IcarusStore {
       SESSION_PATCH_OPERATION_KIND,
       SESSION_RECONCILE_OPERATION_KIND,
     ]);
+    if (token.kind === SESSION_PATCH_OPERATION_KIND) {
+      invariant(
+        typeof finish.detail === "object" &&
+          finish.detail !== null &&
+          !Array.isArray(finish.detail) &&
+          finish.detail.tool === "apply_patchset",
+        "OPERATION_TOKEN_MISMATCH",
+        "Patch verification settlement requires apply_patchset evidence",
+      );
+    }
+    if (
+      token.kind === SESSION_PATCH_OPERATION_KIND ||
+      token.kind === SESSION_RECONCILE_OPERATION_KIND
+    ) {
+      invariant(
+        verification.outcome === "unavailable",
+        "VERIFICATION_OUTCOME_MISMATCH",
+        "Patch application and reconciliation can only persist unavailable verification",
+      );
+    }
     const transaction = this.#database.transaction(() => {
       invariant(
         this.getRun(token.runId).state === "running",
@@ -3661,12 +3952,28 @@ export class IcarusStore {
       "VERIFICATION_OUTCOME_MISMATCH",
       "Failed patch settlement can only persist unavailable verification",
     );
+    invariant(
+      typeof finish.detail === "object" &&
+        finish.detail !== null &&
+        !Array.isArray(finish.detail) &&
+        finish.detail.tool === "apply_patchset",
+      "OPERATION_TOKEN_MISMATCH",
+      "Failed patch settlement requires apply_patchset evidence",
+    );
     this.#assertOperationFinishInput(finish);
     const transaction = this.#database.transaction(() => {
       invariant(
         this.getRun(token.runId).state === "running",
         "INVALID_STATE",
         "Failed session patch can only settle while the session is running",
+      );
+      const effects = this.#sessionPatchOperationEffects(token);
+      invariant(
+        effects.editIntentCount === 0 &&
+          effects.patchIntentCount === 1 &&
+          effects.checkpointCount === 1,
+        "INVALID_OPERATION_OUTCOME",
+        "Failed patch settlement does not match its durable effects",
       );
       this.#finishOperationInTransaction(token, finish, false);
       this.#recordVerificationInTransaction(token.runId, diff, verification, "running");
@@ -3815,6 +4122,46 @@ export class IcarusStore {
     );
   }
 
+  #sessionPatchOperationEffects(token: OperationToken): {
+    readonly editIntentCount: number;
+    readonly patchIntentCount: number;
+    readonly checkpointCount: number;
+  } {
+    const started = this.#database
+      .prepare(
+        `SELECT sequence FROM run_events
+         WHERE run_id = ? AND type = 'operation.started'
+           AND json_extract(payload_json, '$.operationId') = ?`,
+      )
+      .get(token.runId, token.id);
+    invariant(
+      started !== undefined,
+      "OPERATION_TOKEN_MISMATCH",
+      "Patch operation has no durable start event",
+    );
+    const startedSequence = numberValue(
+      row(started, "patch operation start").sequence,
+      "run_events.sequence",
+    );
+    const effects = row(
+      this.#database
+        .prepare(
+          `SELECT
+             COUNT(CASE WHEN type = 'edit.intent_recorded' THEN 1 END) AS edit_intents,
+             COUNT(CASE WHEN type = 'patch_set.intent_recorded' THEN 1 END) AS patch_intents,
+             COUNT(CASE WHEN type = 'checkpoint.saved' THEN 1 END) AS checkpoints
+           FROM run_events WHERE run_id = ? AND sequence > ?`,
+        )
+        .get(token.runId, startedSequence),
+      "patch operation effects",
+    );
+    return {
+      editIntentCount: numberValue(effects.edit_intents, "patch effects.edit_intents"),
+      patchIntentCount: numberValue(effects.patch_intents, "patch effects.patch_intents"),
+      checkpointCount: numberValue(effects.checkpoints, "patch effects.checkpoints"),
+    };
+  }
+
   #finishOperationInTransaction(
     token: OperationToken,
     finish: OperationFinish,
@@ -3848,6 +4195,37 @@ export class IcarusStore {
       "OPERATION_ALREADY_FINISHED",
       "Operation is not active",
     );
+    if (persistedKind === SESSION_PATCH_OPERATION_KIND) {
+      const detailTool =
+        typeof finish.detail === "object" &&
+        finish.detail !== null &&
+        !Array.isArray(finish.detail) &&
+        typeof finish.detail.tool === "string"
+          ? finish.detail.tool
+          : null;
+      const effects = this.#sessionPatchOperationEffects(token);
+      const advisoryProposal =
+        detailTool === "propose_patch" &&
+        effects.editIntentCount === 0 &&
+        effects.patchIntentCount === 0 &&
+        effects.checkpointCount === 0;
+      const appliedPatch =
+        detailTool === "apply_patchset" &&
+        effects.editIntentCount === 0 &&
+        effects.patchIntentCount === 1 &&
+        effects.checkpointCount === 1;
+      const partialFailedApply =
+        detailTool === "apply_patchset" &&
+        (finish.outcome === "failed" || finish.outcome === "cancelled") &&
+        effects.editIntentCount === 0 &&
+        effects.patchIntentCount <= 1 &&
+        effects.checkpointCount <= effects.patchIntentCount;
+      invariant(
+        advisoryProposal || (finish.outcome === "succeeded" ? appliedPatch : partialFailedApply),
+        "INVALID_OPERATION_OUTCOME",
+        "Patch operation settlement does not match its durable effects",
+      );
+    }
     const actualCost = finish.estimatedCostUsd ?? token.reservedCostUsd;
     invariant(
       actualCost <= token.reservedCostUsd + Number.EPSILON,
@@ -3883,10 +4261,23 @@ export class IcarusStore {
         "Operation exceeded the active-runtime ceiling",
       );
     }
+    const resultJson = json(finish.detail);
+    const finishedEventPayload = asJsonValue({
+      operationId: token.id,
+      kind: token.kind,
+      outcome: finish.outcome,
+      detail: finish.detail,
+    });
+    invariant(
+      Buffer.byteLength(resultJson, "utf8") <= MAX_OPERATION_JSON_BYTES &&
+        Buffer.byteLength(json(finishedEventPayload), "utf8") <= MAX_OPERATION_JSON_BYTES,
+      "OPERATION_RESULT_TOO_LARGE",
+      "Operation result exceeds its persisted JSON byte limit",
+    );
     const now = this.#now();
     this.#database
       .prepare("UPDATE operations SET status = ?, result_json = ?, finished_at = ? WHERE id = ?")
-      .run(finish.outcome, json(finish.detail), now, token.id);
+      .run(finish.outcome, resultJson, now, token.id);
     this.#database
       .prepare(
         `UPDATE runs SET reserved_cost_usd = MAX(0, reserved_cost_usd - ?),
@@ -3905,12 +4296,7 @@ export class IcarusStore {
         now,
         token.runId,
       );
-    this.#appendEvent(token.runId, "operation.finished", {
-      operationId: token.id,
-      kind: token.kind,
-      outcome: finish.outcome,
-      detail: finish.detail,
-    });
+    this.#appendEvent(token.runId, "operation.finished", finishedEventPayload);
   }
 
   markStartedOperationsInterrupted(runId: string): RunRecord {
@@ -5150,6 +5536,14 @@ export class IcarusStore {
   }
 
   #appendEvent(runId: string, type: string, payload: unknown): number {
+    const activeOperation = this.#database
+      .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
+      .get(runId);
+    invariant(
+      activeOperation === undefined || ACTIVE_OPERATION_EVENT_TYPES.has(type),
+      "RUN_BUSY",
+      "Authoritative run events cannot cross an active operation",
+    );
     const sequenceRow = row(
       this.#database
         .prepare(

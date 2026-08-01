@@ -1,12 +1,189 @@
 # Implementation plans
 
-## Candidate plan: Change Rooms slice (ADR 0041)
+## Candidate plan: Change Handoff Pack v1 (ADR 0042)
 
-Status values are evidence claims. ADR 0041 and its implementation are complete
-on the candidate branch `agent/change-rooms-v1`, now merged forward onto the
-Gate 1 baseline. Fresh local acceptance is recorded below; exact published-head
-hosted CI remains the PR merge gate and is recorded on the PR. This accepts only
-the Change Rooms slice once that gate passes, not full M3 or Gate 1.
+Status values are evidence claims. ADR 0042 remains Proposed. The candidate
+implementation, local evidence, and independent review below are complete on
+the unpublished local tree; merge and exact published-head hosted CI remain
+acceptance gates. This accepts only the offline Handoff Pack slice, not Athena
+integration, M3, Gate 1, Git landing, or deployment.
+
+### Separate default-deny payload
+
+- [x] Build `icarus.change-handoff.v1` directly from validated authoritative
+      Icarus records through a closed safe-facts projection; do not serialize,
+      spread, filter, or import `icarus.change-room.v1`, a full run, event,
+      annotation, plan, PatchSet, verification record, or provider response
+- [x] Emit only schema/version; deterministic handoff, run, project, correlation,
+      and optional external-task identifiers; run state/host phase; bounded safe
+      provider metadata; fixed lifecycle status; fixed summaries; counts; typed
+      digest-only artifact references; disclosure class; the fixed integrity
+      statement; omissions; and bounded uncertainty
+- [x] Validate correlation IDs with
+      `[A-Za-z0-9][A-Za-z0-9._:-]{0,127}`; validate an optional 1–256-byte
+      external task reference with the same alphabet; expose a persisted model
+      only when it matches the same 1–128-byte safe-token syntax; reject
+      recognizable credential material and fail closed rather than truncate
+- [x] Seed unique canaries through task, targets, repository/context/source paths,
+      plan summary/steps/risks/rationale/grants, PatchSet paths and bytes, diff,
+      check command/argv/stdout/stderr/sandbox, annotations/actors, event payloads,
+      cache/worktree/artifact paths, URLs, credentials, headers, research, and
+      code, then prove none can enter payload, errors, summaries, or inspection
+
+### Pure preview and digest binding
+
+- [x] Add `run handoff-preview` as a read-only, non-migrating command that performs
+      zero network or credential access and zero database, source, cache, worktree,
+      or artifact writes; emit the exact canonical payload, its newline-inclusive
+      SHA-256, a distinct request/preview SHA-256, and every omitted category
+- [x] Use strict canonical JSON with fixed member order, exact keys, safe values,
+      no duplicates, and exactly one trailing newline; derive handoff ID and
+      preview digest deterministically without clocks, random values, paths, or
+      omitted raw text
+- [x] Bind the preview digest to the versioned request, validated operator inputs,
+      safe source snapshot, payload schema, and complete payload digest so export
+      refuses every digest-bound change before publication
+- [x] Refuse missing, corrupt, contradictory, unsafe, or unrepresentable run
+      evidence instead of guessing an outcome or repairing state
+
+### Explicit local export
+
+- [x] Add `run handoff-export` with the exact expected preview SHA-256; reopen and
+      revalidate evidence, regenerate bytes, and refuse stale or corrupt input
+      before creating either output
+- [x] Create only `icarus-change-handoff.json` and
+      `icarus-change-handoff-result.json` as owner-only regular files using
+      descriptor-relative no-follow exclusive creation, no overwrite, payload
+      then result ordering, file/output-directory/parent-entry `fsync`, and
+      identity-checked cleanup of only partial files created by the failed attempt
+- [x] Keep the result shape exact: `exportStatus`, `previewSha256`,
+      `outputSchema`, and `payloadSha256`, where `payloadSha256`
+      binds the complete newline-terminated payload; persist no path, delivery,
+      receiver, retry, callback, outbox, or workflow state
+- [x] Keep secure preview, export, verification, and inspection Linux-only;
+      fail platform/capability checks before protected file access or output
+      directory creation, with no weaker path-only fallback
+
+### File-only verification and inspection
+
+- [x] Dispatch `handoff verify` and `handoff inspect` before state-root resolution,
+      migration checks, runtime creation, database access, or environment
+      credential reads; prove both work while `ICARUS_HOME` is absent/inaccessible
+- [x] Reject symlinked components/finals, hardlinks, special files, non-owner or
+      over-permissive files, identity/size races, invalid UTF-8, BOM/NUL, duplicate
+      or unknown fields, excessive bytes/depth, malformed and noncanonical JSON,
+      and incorrect SHA-256 relationships
+- [x] Make `verify` report internal consistency only and make `inspect` print only
+      allowlisted fields plus fixed caveats; neither may reveal omitted evidence
+      or imply authenticity, authorization, truth, disclosure permission, or
+      execution/landing authority
+
+### Authority preservation and future seam
+
+- [x] Add no API route, browser action, schema/table, lifecycle event, provider or
+      network call, Git action, landing/deployment flow, delivery ledger, outbox,
+      queue, retry, worker, callback, webhook, message bus, chat, or secondary
+      workflow state
+- [x] Document only the conceptual one-way Athena mapping: handoff schema, complete
+      handoff digest, Icarus run ID, correlation ID, safe lifecycle outcome, and
+      disclosure class may later become an imported `constellation.event.v1`
+      timeline record; implement no shared protocol/runtime, client, receiver,
+      credentials, remote identity, delivery, or automatic Task Room creation
+- [x] Prove a receiver cannot use a pack to create a run; approve egress, plan,
+      review, rollback, restoration, landing, or deployment; inspect local
+      evidence; infer task/code/path/check output; or trigger Minerva/another system
+- [x] Preserve all Change Room guarantees: fixed eleven-card projection, GET-only
+      routes, deterministic replay, redaction, model-free five-question packets,
+      append-only annotation non-authority, and no represented commit/push/merge/
+      deployment
+
+### Required acceptance evidence
+
+- [x] Focused unit/integration coverage for deterministic preview/export identity,
+      preview purity, strict inputs, default-deny canaries, stale previews, corrupt
+      records, exact canonical bytes, hostile files, no overwrite, partial cleanup,
+      result hash verification, and database-independent file commands
+- [x] Existing Change Room unit, integration, real-workspace, and static security
+      assertions remain green without weakening or replacing them
+- [x] `pnpm workflow:setup`
+- [x] `pnpm format:check`
+- [x] `pnpm lint`
+- [x] `pnpm typecheck`
+- [x] `pnpm test`
+- [x] `pnpm test:integration`
+- [x] `pnpm security`
+- [x] `pnpm build`
+- [x] `pnpm check`
+- [x] `pnpm smoke:workspace`
+- [x] `ICARUS_CHROMIUM_EXECUTABLE=/absolute/path/to/chromium pnpm smoke:workspace:browser`
+- [x] `pnpm audit --audit-level high`
+- [x] `pnpm audit --prod --audit-level high`
+- [x] `git diff --check`
+- [x] Independent review has no remaining blocker, high, or medium finding
+- [ ] Hosted `ci` succeeds at the exact published implementation head; the
+      Linux-only native filesystem claims carry matching exact-commit Linux
+      evidence
+
+Fresh local candidate evidence on 2026-08-01:
+
+- `pnpm exec vitest run tests/unit/session-iterations.test.ts
+  tests/unit/change-handoff.test.ts --reporter=dot` passed 119/119 focused
+  Store/reader provenance and handoff tests.
+- `pnpm check` exited 0: workflow lint and formatting passed across 153 files;
+  lint reported no errors and only inherited diagnostics; typecheck passed; 652
+  unit/provider tests across 48 files and 93 integration tests across 12 files
+  passed; the evaluator reported 7 passed, 0 failed, and 3 explicitly
+  unsupported; 134 security tests and all 129 static assertions passed; and the
+  production build completed.
+- `pnpm smoke:workspace` exited 0 on exact IPv4 loopback with one provider
+  request, two served assets, `awaiting_approval` state, `not_run`
+  verification, and unchanged source. The real-browser smoke passed under
+  Brave `Chrome/151.0.7922.71` with zero browser errors, zero external
+  requests, every existing Change Room/verification/history/session assertion,
+  and unchanged source.
+- Both high-severity dependency audits reported no known vulnerabilities;
+  `pnpm format:check` checked 153 files without changes and `git diff --check`
+  exited 0.
+- Two independent exact-snapshot reviews returned PASS with no blocker, high,
+  or medium finding. Their focused evidence passed 119/119 repository tests, a
+  separate 5/5 adversarial provenance/recovery matrix, and a 6/6 parity
+  regression. A provisional HOLD found against stale Store/reader hashes was
+  re-run against the current snapshot and closed: a session-only check outside
+  an open repair epoch now fails before recording either an operation or a
+  checkpoint, and the reader rejects forged equivalent history.
+- The reviewed implementation snapshot is bound by SHA-256 to Store
+  `02427927d002b0d53a7d765fb958934867e568786f71bf910f739ae9437f1193`,
+  reader `bf7fc5ed173efc34043d2764f2bd21c4290dc5e1340f273aed46efeb6e202709`,
+  session tests
+  `b497aadec81a241d3847f66e94287573e03bf8d0df6f1922e69bce3862639885`,
+  handoff tests
+  `7d7fd90e908c80bf9e70d82dc175879fdace248592378aef23c4820dc442e9c3`,
+  and the static security gate
+  `dc1cfb41604b533439ffac65815b3be36457ad065f30e3f65b98ea8d999f1f66`.
+
+This is full coherence for the bounded local candidate. ADR 0042 remains
+Proposed because the branch is unmerged and unpublished, so no exact published
+implementation-head hosted CI exists. No push, PR, merge, migration,
+deployment, provider/network call, or external handoff occurred.
+
+### Explicitly deferred
+
+Athena or Minerva integration; `constellation.event.v1` runtime types; HTTP,
+receiver authentication, signing, delivery, callback, webhook, retry, outbox,
+message bus, chat, automatic Task Room creation, and every remote or executable
+action. A future authenticated/imported protocol requires a separate ADR and
+does not silently widen this offline artifact.
+
+
+## Merged implementation record: Change Rooms slice (ADR 0041 remains Proposed)
+
+Status values are evidence claims. The Change Rooms implementation merged
+through [PR #21](https://github.com/Ayyitskevin/Icarus/pull/21) as exact `main`
+`683c123d37645d0e161e55b2368ef66cff79ef75`. Local acceptance below, exact
+published PR-head CI, and resulting-main CI passed. The PR carries no independent
+review record, so ADR 0041 honestly remains Proposed under the repository's
+local, independent-review, merge, and exact-head evidence policy. This preserves
+the completed implementation evidence without accepting full M3 or Gate 1.
 
 ### Read-only Change Room projection
 
@@ -137,6 +314,14 @@ Fresh local candidate evidence on 2026-08-01, recorded on the merged tree
   [30684614501](https://github.com/Ayyitskevin/Icarus/actions/runs/30684614501)
   passed its real `quality` job in 1 minute 52 seconds at exact published
   implementation head `05f1519b85b1baaef6d5800fd2dc8186b2fbd5c5`.
+- PR-head `ci` run
+  [30684698766](https://github.com/Ayyitskevin/Icarus/actions/runs/30684698766)
+  passed at documentation head `eacaeb12affcf7307f41e850ef05f4a3e22aeeac`.
+- Resulting-main `ci` run
+  [30698803412](https://github.com/Ayyitskevin/Icarus/actions/runs/30698803412)
+  passed at merge commit `683c123d37645d0e161e55b2368ef66cff79ef75`.
+- PR #21 records no independent review or review decision; those successful
+  publication gates therefore do not change ADR 0041 from Proposed to Accepted.
 
 ### Explicitly deferred
 
