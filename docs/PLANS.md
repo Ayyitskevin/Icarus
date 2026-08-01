@@ -95,7 +95,7 @@ the Change Rooms slice once that gate passes, not full M3 or Gate 1.
 - [x] `pnpm audit --audit-level high`
 - [x] `pnpm audit --prod --audit-level high`
 - [x] `git diff --check`
-- [ ] Hosted `ci` succeeds at the exact published implementation head
+- [x] Hosted `ci` succeeds at the exact published implementation head
 
 Fresh local candidate evidence on 2026-08-01, recorded on the merged tree
 (Gate 1 baseline plus the Change Rooms slice):
@@ -133,6 +133,10 @@ Fresh local candidate evidence on 2026-08-01, recorded on the merged tree
   reported no errors.
 - The earlier pre-merge evidence at base `8f0cf49` (211/42 tests, 5/0/5
   evaluation, both smokes) was superseded by this merged-tree record.
+- Hosted `ci` run
+  [30684614501](https://github.com/Ayyitskevin/Icarus/actions/runs/30684614501)
+  passed its real `quality` job in 1 minute 52 seconds at exact published
+  implementation head `05f1519b85b1baaef6d5800fd2dc8186b2fbd5c5`.
 
 ### Explicitly deferred
 
