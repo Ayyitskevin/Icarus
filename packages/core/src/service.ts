@@ -4,6 +4,8 @@ import path from "node:path";
 import { TextDecoder } from "node:util";
 
 import type { ArtifactStore } from "./artifacts.js";
+import { buildChangeRoom } from "./change-room.js";
+import { buildChangeContext } from "./change-context.js";
 import { assembleContext, containsSecretShapedContent, renderContextPrompt } from "./context.js";
 import { createContextPreview, type ProjectContextPreview } from "./context-preview.js";
 import { digestJson, sha256 } from "./digest.js";
@@ -52,6 +54,11 @@ import {
 } from "./tools.js";
 import type {
   CapabilityKind,
+  ChangeContextPacket,
+  ChangeContextQuestion,
+  ChangeRoomAnnotationTarget,
+  ChangeRoomIndexPage,
+  ChangeRoomProjection,
   CheckEvidence,
   CheckProfile,
   CheckpointFile,
@@ -65,6 +72,7 @@ import type {
   ProjectRepositoryStatus,
   ProviderConfig,
   RepositoryRecord,
+  RunAnnotationRecord,
   RunEventHistoryPage,
   RunEventPage,
   RunHistory,
@@ -851,6 +859,37 @@ export class IcarusService {
 
   getRunVerificationAttempts(runId: string, snapshot: number): RunVerificationAttemptsSnapshot {
     return this.#store.getRunVerificationAttempts(runId, snapshot);
+  }
+
+  getChangeRoom(runId: string): ChangeRoomProjection {
+    const snapshot = this.#store.getChangeRoomSnapshot(runId);
+    const project = this.#store.getProject(snapshot.run.projectId);
+    return buildChangeRoom(snapshot, project);
+  }
+
+  openChangeRoomPage(): ChangeRoomIndexPage {
+    return this.#store.openChangeRoomPage();
+  }
+
+  listChangeRoomPage(before: number, snapshot: number): ChangeRoomIndexPage {
+    return this.#store.listChangeRoomPage(before, snapshot);
+  }
+
+  getChangeContext(runId: string, question: ChangeContextQuestion): ChangeContextPacket {
+    return buildChangeContext(this.getChangeRoom(runId), question);
+  }
+
+  annotateRun(
+    runId: string,
+    card: ChangeRoomAnnotationTarget,
+    actor: string,
+    body: string,
+  ): RunAnnotationRecord {
+    return this.#store.addRunAnnotation(runId, card, actor, body);
+  }
+
+  listRunAnnotations(runId: string): RunAnnotationRecord[] {
+    return this.#store.listRunAnnotations(runId);
   }
 
   createRunDraft(input: PlanRunInput): RunRecord {

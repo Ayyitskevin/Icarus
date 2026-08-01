@@ -400,6 +400,62 @@ try {
   ) {
     throw new Error("Plan did not stop truthfully at the approval gate");
   }
+  const roomIndexResponse = await workspaceRequest(workspace, `${workspace.url}/api/change-rooms`);
+  const roomIndex = await roomIndexResponse.json();
+  if (
+    !roomIndexResponse.ok ||
+    roomIndex.rooms?.length !== 1 ||
+    roomIndex.rooms[0]?.roomId !== draft.id ||
+    roomIndex.rooms[0]?.verificationOutcome !== "not_run" ||
+    roomIndex.rooms[0]?.terminalReason !== null ||
+    roomIndex.rooms[0]?.provider?.model !== "smoke-contract"
+  ) {
+    throw new Error("Change Room index did not summarize the planned run truthfully");
+  }
+  const roomResponse = await workspaceRequest(
+    workspace,
+    `${workspace.url}/api/runs/${draft.id}/change-room`,
+  );
+  const room = await roomResponse.json();
+  if (
+    !roomResponse.ok ||
+    room.schema !== "icarus.change-room.v1" ||
+    room.roomId !== draft.id ||
+    room.cards?.length !== 11 ||
+    room.cards[0]?.kind !== "task_scope" ||
+    room.cards[2]?.body?.trustLabel !== "untrusted_proposal" ||
+    room.cards[3]?.status !== "pending" ||
+    room.integrity?.digestSemantics !== "byte_binding_only" ||
+    room.generatedBy !== "deterministic_host_projection"
+  ) {
+    throw new Error("Change Room projection was not the bounded evidence explanation");
+  }
+  const contextResponse = await workspaceRequest(
+    workspace,
+    `${workspace.url}/api/runs/${draft.id}/change-context?question=why_blocked`,
+  );
+  const context = await contextResponse.json();
+  if (
+    !contextResponse.ok ||
+    context.schema !== "icarus.change-context.v1" ||
+    context.question !== "why_blocked" ||
+    !Array.isArray(context.components) ||
+    context.components.length === 0 ||
+    !context.components.every(
+      (entry) => Array.isArray(entry.receipts) && entry.receipts.length > 0,
+    ) ||
+    !context.components.some((entry) => entry.statement.includes("plan approval"))
+  ) {
+    throw new Error("Change-context packet did not answer with receipts");
+  }
+  const roomMutation = await workspaceRequest(
+    workspace,
+    `${workspace.url}/api/runs/${draft.id}/change-room`,
+    { method: "POST" },
+  );
+  if (roomMutation.status !== 401) {
+    throw new Error("Change Room route accepted a browser mutation verb without an action session");
+  }
   await workspace.close();
   workspace = undefined;
   runtime.close();

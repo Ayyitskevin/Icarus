@@ -161,11 +161,33 @@ surfaces, reversible Git landing, governed preview environments, and Supabase
 change packs. Icarus will own the authority/evidence kernel and integrate editor,
 environment, and backend primitives rather than rebuild them.
 
+The candidate Change Rooms slice (ADR 0041) adds a per-run Change Room: a strict
+read-only projection derived in one SQLite read transaction from the run row,
+approvals, the bounded 200-event metadata tail, safe checkpoint columns,
+project check/sandbox configuration, and CLI annotations — the room is the run,
+with no room table or parallel state machine. Exactly eleven evidence cards in
+fixed lifecycle order carry host-controlled titles, provenance classes, explicit
+statuses, bounded references, and truncation/redaction/unavailable-evidence
+indicators; the integrity block states that digests prove byte binding and
+recorded-evidence integrity only, never fresh authorization or semantic
+correctness. A bounded index pages twelve newest-first room summaries under the
+same pinned-rowid cursor discipline as the workspace run page, and five fixed
+change-context questions return deterministic, model-free answers whose
+statements carry evidence receipts plus explicit omissions and uncertainty.
+Annotations are CLI-only and append-only — at most 32 per run with 1 KiB bodies,
+with recognizable credential material rejected before write — and never advance
+run state, events, gates, or digests. Existing state requires a verified backup
+and one explicitly approved `run-annotations-v1` migration; see
+`docs/OPERATIONS.md`. The three new routes are GET-only reads and add no
+browser authority beyond the existing observation boundary.
+
 Not yet included: browser approval or execution, arbitrary/provider-native
 tools, model-written shell commands, semantic search, commits or pushes,
 application previews, current file/status or multi-file and payload-bearing
 browser diff/history navigation, deployment, backend platform primitives,
-multi-agent orchestration, and distributed workers.
+multi-agent orchestration, distributed workers, browser annotation authoring,
+live room polling, change-context packet summarization by a future assistant,
+free-text questions, and room search.
 
 ## Requirements
 
@@ -328,6 +350,9 @@ node packages/cli/dist/main.js run rollback <run-id> \
   --diff-sha <displayed-diff-digest> --actor kevin
 node packages/cli/dist/main.js run restore <run-id> \
   --checkpoint-sha <displayed-checkpoint-digest> --actor kevin
+node packages/cli/dist/main.js run annotate <run-id> \
+  --card check_outcomes --text "..." --actor kevin
+node packages/cli/dist/main.js run annotations <run-id>
 ```
 
 Use `run list [--project <name>]` to rediscover persisted run IDs and `run

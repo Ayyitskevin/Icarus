@@ -13,6 +13,7 @@ import {
   DEFAULT_SANDBOX_LIMITS,
   type Gate1MigrationToken,
   IcarusError,
+  type ChangeRoomAnnotationTarget,
   type IcarusRuntime,
   LANDING_LEDGER_MIGRATION,
   migrateGate1Schema,
@@ -172,12 +173,14 @@ function schemaMigrationApproval(): {
   readonly approvalIndex: boolean;
   readonly patchSet: boolean;
   readonly readableManifest: boolean;
+  readonly annotation: boolean;
   readonly gate1: Gate1MigrationToken | null;
 } {
   const none = {
     approvalIndex: false,
     patchSet: false,
     readableManifest: false,
+    annotation: false,
     gate1: null,
   };
   const approval = process.env.ICARUS_APPROVE_SCHEMA_MIGRATION;
@@ -187,6 +190,7 @@ function schemaMigrationApproval(): {
   if (approval === "approval-index-v1") return { ...none, approvalIndex: true };
   if (approval === "patch-set-v2") return { ...none, patchSet: true };
   if (approval === "readable-manifest-v3") return { ...none, readableManifest: true };
+  if (approval === "run-annotations-v1") return { ...none, annotation: true };
   if (approval === BROWSER_ACTION_LEDGER_MIGRATION) {
     return { ...none, gate1: BROWSER_ACTION_LEDGER_MIGRATION };
   }
@@ -271,6 +275,8 @@ function usage(): never {
       "icarus run rollback RUN --diff-sha SHA --actor ACTOR",
       "icarus run restore RUN --checkpoint-sha SHA --actor ACTOR",
       "icarus run resume RUN",
+      "icarus run annotate RUN --card CARD|room --text TEXT --actor ACTOR",
+      "icarus run annotations RUN",
       "icarus run cancel RUN --actor ACTOR",
     ].join("\n"),
   );
@@ -485,6 +491,23 @@ async function dispatch(
     print(publicRun(await runtime.service.resume(oneRunId(options), signal)));
     return;
   }
+  if (action === "annotate") {
+    const options = parseOptions(rest, ["--card", "--text", "--actor"]);
+    print(
+      runtime.service.annotateRun(
+        oneRunId(options),
+        required(options, "--card") as ChangeRoomAnnotationTarget,
+        required(options, "--actor"),
+        required(options, "--text"),
+      ),
+    );
+    return;
+  }
+  if (action === "annotations") {
+    const options = parseOptions(rest, []);
+    print(runtime.service.listRunAnnotations(oneRunId(options)));
+    return;
+  }
   if (action === "cancel") {
     const options = parseOptions(rest, ["--actor"]);
     print(publicRun(await runtime.service.cancel(oneRunId(options), required(options, "--actor"))));
@@ -516,6 +539,7 @@ async function main(): Promise<void> {
       allowApprovalIndexMigration: migrationApproval.approvalIndex,
       allowPatchSetMigration: migrationApproval.patchSet,
       allowReadableManifestMigration: migrationApproval.readableManifest,
+      allowAnnotationMigration: migrationApproval.annotation,
     });
     await dispatch(runtime, args, controller.signal);
   } catch (error) {

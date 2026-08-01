@@ -401,6 +401,29 @@ The first keyboard focus in the workspace is a skip link. Press Enter to move
 focus to the main workspace landmark; selected project and run controls expose
 their current/pressed state without changing browser authority.
 
+## Change Room observation
+
+ADR 0019 adds three GET-only observation routes. `GET /api/change-rooms` opens a
+new newest-first index session when called without a query, or continues one
+with exactly `before` plus `snapshot`, returning twelve retained room summaries
+per page under an ephemeral pinned-rowid cursor. `GET /api/runs/:id/change-room`
+derives the run's eleven-card evidence projection in one SQLite read
+transaction. `GET /api/runs/:id/change-context?question=<question>` accepts
+exactly one of the five fixed questions and returns the deterministic,
+model-free answer packet whose statements carry receipts plus explicit omissions
+and uncertainty. A non-GET verb is refused by the action-session boundary (401 without it, 404 behind it), an unknown run 404, and an invalid
+query contract 422 (`INVALID_REQUEST` or `INVALID_RUN_CURSOR`).
+
+Restarting the process and re-reading returns byte-identical projections, and
+GET reads perform no durable writes. Treat the room's integrity block literally:
+its digests prove byte binding and recorded-evidence integrity only, never fresh
+authorization or semantic correctness, and the checkpoint digest is a recorded
+byte binding rather than a fresh rehash. Operator annotations are read through
+the room but authored only through `run annotate`; they carry no authority over
+the run. Complete payload-bearing history remains CLI-only through
+`run history`; the browser stays review-only and gains no annotation-authoring,
+approval, mutation, execution, command, commit, push, or deployment route.
+
 ## Preflight
 
 Approval and execution require util-linux `flock` at `/usr/bin/flock` and a
@@ -487,6 +510,18 @@ preserve the state and require explicit operator recovery.
   performs the same bounded rollback. Review approval uses the same diff digest
   and is refused unless verification passed and the live source/worktree,
   changed-path set, diff, and checkpoint still match the reviewed evidence.
+- `run annotate <run-id> --card <card|room> --text <text> --actor <actor>`
+  appends one bounded operator annotation to a run's Change Room or to one of
+  its eleven evidence cards. The card enum is closed, the actor follows the
+  approval-actor rules, and the body must be non-blank, at most 1 KiB, and free
+  of NUL bytes. Recognizable credential material in actor or body is rejected
+  before write with `SECRET_INPUT_DETECTED`, and each run holds at most 32
+  annotations (`ANNOTATION_LIMIT_REACHED`). Annotations are append-only with no
+  update or delete path; they never append events, change run state, satisfy
+  gates, or feed digests, approvals, verification, or execution.
+- `run annotations <run-id>` lists a run's persisted annotations. The browser
+  shows the same annotations read-only inside the room projection; no browser
+  annotation route exists.
 
 The approved first execution remains a single strict patch-set proposal and
 formal verification. Only a failure enters the ADR 0026 session, and only when
@@ -708,6 +743,15 @@ credentials, raw secret-bearing output, or private repository content.
 
 ## Upgrade policy
 
-Milestone 1 has schema version 1 and no automated migration against live state.
-Back up before upgrades. A schema change needs an ADR, migration tests, and
-explicit operator approval before existing state is opened by new code.
+The `run_annotations` table (ADR 0041) is additive and forward-only. Fresh
+databases always contain it. A database that already has `runs` but lacks the
+table follows the same operator-gated migration contract as the earlier
+additive ledgers: back up `icarus.sqlite3` and its WAL/SHM companions, then
+open state once with exactly
+`ICARUS_APPROVE_SCHEMA_MIGRATION=run-annotations-v1`. One token approves
+exactly one migration; without it the store refuses to open with
+`DATABASE_MIGRATION_REQUIRED` before writing anything, and a table whose shape
+does not match fails closed as `DATABASE_ERROR`. There is no backfill and no
+change to any existing table or index. Back up before upgrades. Any further
+schema change still needs an ADR, migration tests, and explicit operator
+approval before existing state is opened by new code.

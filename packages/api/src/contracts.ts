@@ -1,4 +1,4 @@
-import { IcarusError } from "@icarus/core";
+import { CHANGE_CONTEXT_QUESTIONS, type ChangeContextQuestion, IcarusError } from "@icarus/core";
 
 const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
 const DIGEST_IMAGE_PATTERN = /^[a-z0-9][a-z0-9._/-]*(?::[a-zA-Z0-9._-]+)?@sha256:[a-f0-9]{64}$/;
@@ -299,4 +299,21 @@ export function runEventHistoryQuery(searchParams: URLSearchParams): {
     invalid("before and snapshot must be canonical positive safe integers");
   }
   return { before, snapshot };
+}
+
+export function changeContextQuery(searchParams: URLSearchParams): {
+  readonly question: ChangeContextQuestion;
+} {
+  const keys = Array.from(searchParams.keys());
+  const values = searchParams.getAll("question");
+  if (keys.length !== 1 || keys[0] !== "question" || values.length !== 1) {
+    invalid("Change-context requests require exactly one question query parameter");
+  }
+  const question = values[0] ?? "";
+  if (!CHANGE_CONTEXT_QUESTIONS.includes(question as ChangeContextQuestion)) {
+    invalid(
+      "question must be one of why_blocked, what_changed, what_passed, what_remains_before_review, why_rolled_back",
+    );
+  }
+  return { question: question as ChangeContextQuestion };
 }

@@ -1,5 +1,152 @@
 # Implementation plans
 
+## Candidate plan: Change Rooms slice (ADR 0041)
+
+Status values are evidence claims. ADR 0041 and its implementation are complete
+on the candidate branch `agent/change-rooms-v1`, now merged forward onto the
+Gate 1 baseline. Fresh local acceptance is recorded below; exact published-head
+hosted CI remains the PR merge gate and is recorded on the PR. This accepts only
+the Change Rooms slice once that gate passes, not full M3 or Gate 1.
+
+### Read-only Change Room projection
+
+- [x] Derive `icarus.change-room.v1` per run in one SQLite read transaction
+      from the run row, approvals, the bounded 200-event metadata tail, safe
+      checkpoint columns, project check/sandbox configuration, and CLI
+      annotations; `roomId` is the run ID with no room table, event bus, or
+      parallel state machine
+- [x] Project exactly eleven evidence cards in fixed lifecycle order with
+      host-controlled titles, six provenance classes, explicit
+      `available`/`pending`/`not_applicable`/`unavailable` statuses, bounded
+      event/digest/approval references, and
+      `truncated`/`redacted`/`unavailableEvidence` indicators
+- [x] Reuse only the disclosure classes the existing full-run presenter
+      already crosses; never select checkpoint bytes, private runtime paths,
+      event payloads, raw provider prompts, or source blobs
+- [x] State digest semantics explicitly: byte binding and recorded-evidence
+      integrity only, never fresh authorization or semantic correctness; the
+      checkpoint digest is a recorded byte binding, not a fresh rehash; the
+      provider plan is an untrusted proposal until host checks and approvals
+      land
+- [x] Project a review rejection as a rollback record carrying the rejecting
+      decision, with completion sequences marked as observed events rather
+      than causal links
+
+### Bounded index and deterministic answers
+
+- [x] Serve `GET /api/change-rooms` under the ADR 0017 rowid discipline with
+      provider/verification JSON extracted in SQL only behind
+      `typeof`/`octet_length` preflight and strict JSON validity; fail closed
+      as database corruption otherwise
+- [x] Answer exactly five fixed questions through `GET
+      /api/runs/:id/change-context` with an `icarus.change-context.v1` packet
+      of at most eight host-templated statements, each carrying evidence-card,
+      event-sequence, and digest receipts, plus explicit omissions and
+      uncertainty; no LLM, provider, network, or external tool participates
+
+### CLI-only append-only annotations
+
+- [x] Add `run annotate` / `run annotations` with run-existence, closed-card,
+      approval-actor, and 1 KiB non-blank body validation, fail-closed
+      credential rejection, and a 32-per-run cap
+- [x] Prove annotations are append-only and non-authoritative: no update or
+      delete path, no event append, no event-cursor advance, no run-state,
+      gate, digest, approval, verification, or execution input
+- [x] Advance the schema to version 2 additively and forward-only (the
+      `run_annotations` table only), raise `user_version` only when lower, and
+      fail closed on newer databases; cover the version-1 migration and the
+      newer-version refusal with tests
+
+### Browser boundary
+
+- [x] Keep all three routes GET-only with 404 for non-GET verbs and unknown
+      runs and 422 for invalid query contracts; zero durable writes on reads;
+      byte-identical restart replay
+- [x] Add the review-only React Change Rooms section: explicit-load bounded
+      index in a four-page replace-not-accumulate window, room detail with
+      pinned event revision, read-only annotations, and the five-question
+      explain panel; exact-key bounded client validation; single-flight
+      generation-guarded requests; React text only
+
+### Acceptance coverage and commands
+
+- [x] Unit coverage: projection across draft/planned/review/completed/failed/
+      rolled-back/restored states, determinism, bounded-tail truthfulness,
+      corrupt-checkpoint fail-closed, checkpoint-byte exclusion; every
+      question across representative states with receipt validation;
+      annotation validation, cap, ordering, migration, and non-authority;
+      index page boundaries, provider/verification extraction, terminal
+      reasons, and corruption fail-closed; client validators and page session
+- [x] Integration coverage: a completed Docker-verified CLI run presented as a
+      room with annotation visibility, restart replay, redaction scans, query
+      and method negatives, and zero durable writes; a browser-planned draft
+      room with honest pending evidence
+- [x] `pnpm workflow:setup` (pinned `actionlint` v1.7.12)
+- [x] `pnpm format:check`
+- [x] `pnpm lint`
+- [x] `pnpm typecheck`
+- [x] `pnpm test`
+- [x] `pnpm test:integration`
+- [x] `pnpm security`
+- [x] `pnpm build`
+- [x] `pnpm check`
+- [x] `pnpm smoke:workspace`
+- [x] `ICARUS_CHROMIUM_EXECUTABLE=$(which brave-browser) pnpm smoke:workspace:browser`
+- [x] `pnpm audit --audit-level high`
+- [x] `pnpm audit --prod --audit-level high`
+- [x] `git diff --check`
+- [x] Hosted `ci` succeeds at the exact published implementation head
+
+Fresh local candidate evidence on 2026-08-01, recorded on the merged tree
+(Gate 1 baseline plus the Change Rooms slice):
+
+- `pnpm check` exited 0: formatting 147 files; lint reported no errors with
+  inherited informational diagnostics only; typecheck passed; 572
+  unit/provider tests across 47 files passed; 89 integration tests across 11
+  files passed; evaluation reported 7 passed, 0 failed, and 3 explicitly
+  unsupported; 134 security tests and 116 static assertions passed; the
+  26-module Vite build completed.
+- Unit coverage on the merged store proves: projection across
+  draft/planned/review/completed/failed/rolled-back/restored states against
+  ADR 0023 patch sets and tree checkpoints; determinism; bounded-tail
+  truthfulness; corrupt-checkpoint fail-closed; every change-context question
+  with receipt validation; annotation validation, cap, ordering, and
+  non-authority; the operator-gated annotation migration
+  (`DATABASE_MIGRATION_REQUIRED` without the token, shape-validated
+  `run-annotations-v1` approval, invalid-shape refusal); and the index
+  page's provider/verification extraction, terminal reasons, and corruption
+  fail-closed.
+- Integration coverage proves a completed Docker-verified CLI run presented
+  as a room with annotation visibility, restart replay, redaction scans,
+  action-session refusal (401) of mutation verbs and 404 behind it, zero
+  durable writes across every table, and the one-shot
+  `ICARUS_APPROVE_SCHEMA_MIGRATION=run-annotations-v1` CLI flow including
+  unrelated-token refusal.
+- `pnpm smoke:workspace` passed with the Change Room index, projection,
+  receipt packet, and 401 action-session refusal assertions.
+- The real Brave smoke (Brave Browser 151.1.93.129) passed with zero browser
+  errors and zero blocked external requests, including the Change Room
+  scenario (toggle, bounded index, eleven-card room, pinned revision,
+  `why_blocked` packet with receipts, GET-only reads) and the restored
+  workspace view.
+- Both dependency audits reported no known vulnerabilities; `git diff --check`
+  reported no errors.
+- The earlier pre-merge evidence at base `8f0cf49` (211/42 tests, 5/0/5
+  evaluation, both smokes) was superseded by this merged-tree record.
+- Hosted `ci` run
+  [30684614501](https://github.com/Ayyitskevin/Icarus/actions/runs/30684614501)
+  passed its real `quality` job in 1 minute 52 seconds at exact published
+  implementation head `05f1519b85b1baaef6d5800fd2dc8186b2fbd5c5`.
+
+### Explicitly deferred
+
+Browser annotation authoring; live room polling or streaming; LLM/BYOK
+summarization of the change-context packet; free-text questions; room search;
+annotation editing or deletion; per-card deep links into raw payloads;
+provider-usage rollups inside room cards (the existing full-run usage view
+and operation timeline events remain the usage surface); anything
+Nostr/relay/federation/forge/Git-hosting/chat-like; and any claim that a
+change landed outside the Icarus-private worktree.
 ## Current product execution program
 
 The dependency-ordered plan for making Icarus a trustworthy Cursor rival with

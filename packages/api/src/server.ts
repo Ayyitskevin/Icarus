@@ -15,6 +15,7 @@ import {
 
 import { ActionCoordinator } from "./action-coordinator.js";
 import {
+  changeContextQuery,
   contextPreviewRequest,
   projectRequest,
   runDraftRequest,
@@ -25,6 +26,9 @@ import {
   workspaceRunPageQuery,
 } from "./contracts.js";
 import {
+  presentChangeContext,
+  presentChangeRoom,
+  presentChangeRoomPage,
   presentProject,
   presentRepositoryStatus,
   presentRun,
@@ -399,6 +403,15 @@ async function routeApi(
     json(response, 200, presentWorkspaceRunPage(page));
     return true;
   }
+  if (method === "GET" && pathname === "/api/change-rooms") {
+    const query = workspaceRunPageQuery(searchParams);
+    const page =
+      query.kind === "new"
+        ? options.runtime.service.openChangeRoomPage()
+        : options.runtime.service.listChangeRoomPage(query.before, query.snapshot);
+    json(response, 200, presentChangeRoomPage(page));
+    return true;
+  }
   if (method === "POST" && pathname === "/api/runs") {
     const input = runDraftRequest(await readJson(request));
     const providerEndpoint = parseProviderBaseUrl(input.provider.baseUrl);
@@ -438,6 +451,8 @@ async function routeApi(
     return true;
   }
   const runVerificationAttempts = /^\/api\/runs\/([^/]+)\/verification-attempts$/.exec(pathname);
+  const runChangeContext = /^\/api\/runs\/([^/]+)\/change-context$/.exec(pathname);
+  const runChangeRoom = /^\/api\/runs\/([^/]+)\/change-room$/.exec(pathname);
   const runEventHistory = /^\/api\/runs\/([^/]+)\/events\/history$/.exec(pathname);
   const runEvents = /^\/api\/runs\/([^/]+)\/events$/.exec(pathname);
   const runDetail = /^\/api\/runs\/([^/]+)$/.exec(pathname);
@@ -451,6 +466,21 @@ async function routeApi(
         options.runtime.service.getRunVerificationAttempts(runId, snapshot),
       ),
     );
+    return true;
+  }
+  if (method === "GET" && runChangeContext !== null) {
+    const runId = decodedRouteId(runChangeContext[1] ?? "", "run id");
+    const { question } = changeContextQuery(searchParams);
+    json(
+      response,
+      200,
+      presentChangeContext(options.runtime.service.getChangeContext(runId, question)),
+    );
+    return true;
+  }
+  if (method === "GET" && runChangeRoom !== null) {
+    const runId = decodedRouteId(runChangeRoom[1] ?? "", "run id");
+    json(response, 200, presentChangeRoom(options.runtime.service.getChangeRoom(runId)));
     return true;
   }
   if (method === "GET" && runEventHistory !== null) {

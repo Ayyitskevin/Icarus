@@ -503,6 +503,329 @@ export interface ApprovalRecord {
   readonly createdAt: string;
 }
 
+export const CHANGE_ROOM_SCHEMA = "icarus.change-room.v1";
+export const CHANGE_CONTEXT_SCHEMA = "icarus.change-context.v1";
+
+export type ChangeRoomCardKind =
+  | "task_scope"
+  | "base_context"
+  | "provider_plan"
+  | "plan_approval"
+  | "patchset"
+  | "registered_checks"
+  | "check_outcomes"
+  | "review_decision"
+  | "checkpoint"
+  | "rollback_restoration"
+  | "terminal_state";
+
+export type ChangeRoomAnnotationTarget = ChangeRoomCardKind | "room";
+
+export type ChangeRoomProvenanceClass =
+  | "operator_assertion"
+  | "provider_output"
+  | "host_fact"
+  | "approval_decision"
+  | "verification_evidence"
+  | "system_failure";
+
+export type ChangeRoomCardStatus = "available" | "pending" | "not_applicable" | "unavailable";
+
+export type ChangeRoomEvidenceRef =
+  | { readonly kind: "event_sequence"; readonly sequence: number }
+  | {
+      readonly kind: "approval";
+      readonly approvalKind: ApprovalRecord["kind"];
+      readonly digest: string;
+    }
+  | { readonly kind: "digest"; readonly label: string; readonly sha256: string }
+  | { readonly kind: "checkpoint"; readonly sha256: string };
+
+export interface ChangeRoomCardIndicators {
+  readonly truncated: boolean;
+  readonly redacted: boolean;
+  readonly unavailableEvidence: boolean;
+}
+
+interface ChangeRoomCardBase {
+  readonly id: string;
+  readonly title: string;
+  readonly provenanceClass: ChangeRoomProvenanceClass;
+  readonly status: ChangeRoomCardStatus;
+  readonly refs: readonly ChangeRoomEvidenceRef[];
+  readonly indicators: ChangeRoomCardIndicators;
+}
+
+export interface TaskScopeCardBody {
+  readonly task: string;
+  readonly target: string;
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly baseRef: string;
+}
+
+export interface BaseContextCardBody {
+  readonly baseCommit: string | null;
+  readonly contextSha256: string | null;
+  readonly targets: readonly string[];
+  readonly totalBytes: number | null;
+  readonly auditPolicyVersion: string | null;
+  readonly repositoryMap: readonly string[];
+  readonly entries: readonly ContextManifestEntry[];
+  readonly egress: {
+    readonly state: "not_required_loopback" | "awaiting_approval" | "approved" | "not_reached";
+    readonly approval: {
+      readonly actor: string;
+      readonly digest: string;
+      readonly createdAt: string;
+    } | null;
+  };
+}
+
+export interface ProviderPlanCardBody {
+  readonly provider: {
+    readonly kind: ProviderKind;
+    readonly model: string;
+    readonly locality: ProviderLocality;
+    readonly privacyClass: ModelCapabilities["privacyClass"];
+  };
+  readonly trustLabel: "untrusted_proposal";
+  readonly plan: PlanProposal | null;
+  readonly planSha256: string | null;
+}
+
+export interface PlanApprovalCardBody {
+  readonly approval: {
+    readonly actor: string;
+    readonly decision: ApprovalRecord["decision"];
+    readonly digest: string;
+    readonly createdAt: string;
+  } | null;
+}
+
+export type PatchsetActionStatus =
+  | "not_recorded"
+  | "proposed"
+  | "materialized"
+  | "reverted"
+  | "completed"
+  | "cancelled"
+  | "unknown";
+
+export interface PatchsetEditSummary {
+  readonly op: FileEditOperation;
+  readonly path: string;
+  readonly rationale: string;
+  readonly expectedPreimageSha256: string | null;
+  readonly replacementCount: number | null;
+}
+
+export interface PatchsetCardBody {
+  readonly patchSet: {
+    readonly summary: string;
+    readonly edits: readonly PatchsetEditSummary[];
+  } | null;
+  readonly patchSetEditsTruncated: boolean;
+  readonly actionStatus: PatchsetActionStatus;
+  readonly diffSha256: string | null;
+  readonly diffBytes: number | null;
+  readonly diff: string | null;
+  readonly changedPaths: readonly string[];
+  readonly note: string;
+}
+
+export interface RegisteredChecksCardBody {
+  readonly checks: readonly CheckProfile[];
+  readonly sandbox: SandboxProfile;
+}
+
+export interface CheckOutcomeEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly argv: readonly string[];
+  readonly outcome: CheckEvidence["outcome"] | "not_run";
+  readonly exitCode: number | null;
+  readonly signal: string | null;
+  readonly durationMs: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly truncated: boolean;
+}
+
+export interface CheckOutcomesCardBody {
+  readonly outcome: VerificationEvidence["outcome"] | "not_run";
+  readonly checks: readonly CheckOutcomeEntry[];
+  readonly diffSha256: string | null;
+  readonly checkpointSha256: string | null;
+}
+
+export interface ReviewDecisionCardBody {
+  readonly decision: {
+    readonly actor: string;
+    readonly decision: ApprovalRecord["decision"];
+    readonly digest: string;
+    readonly createdAt: string;
+  } | null;
+}
+
+export interface CheckpointCardBody {
+  readonly status: "saved" | "not_saved";
+  readonly sha256: string | null;
+  readonly createdAt: string | null;
+  readonly note: string;
+}
+
+export interface RollbackRestorationRecord {
+  readonly kind: "rollback" | "restore";
+  readonly actor: string;
+  readonly decision: ApprovalRecord["decision"];
+  readonly digest: string;
+  readonly createdAt: string;
+  readonly completed: boolean;
+  readonly completedSequence: number | null;
+}
+
+export interface RollbackRestorationCardBody {
+  readonly records: readonly RollbackRestorationRecord[];
+  readonly note: string;
+}
+
+export interface TerminalStateCardBody {
+  readonly state: RunState;
+  readonly resumeState: RunState | null;
+  readonly terminal: boolean;
+  readonly terminalReason: string | null;
+  readonly lastError: { readonly code: string; readonly message: string } | null;
+  readonly updatedAt: string;
+}
+
+export type ChangeRoomCard =
+  | (ChangeRoomCardBase & { readonly kind: "task_scope"; readonly body: TaskScopeCardBody })
+  | (ChangeRoomCardBase & { readonly kind: "base_context"; readonly body: BaseContextCardBody })
+  | (ChangeRoomCardBase & {
+      readonly kind: "provider_plan";
+      readonly body: ProviderPlanCardBody;
+    })
+  | (ChangeRoomCardBase & { readonly kind: "plan_approval"; readonly body: PlanApprovalCardBody })
+  | (ChangeRoomCardBase & { readonly kind: "patchset"; readonly body: PatchsetCardBody })
+  | (ChangeRoomCardBase & {
+      readonly kind: "registered_checks";
+      readonly body: RegisteredChecksCardBody;
+    })
+  | (ChangeRoomCardBase & { readonly kind: "check_outcomes"; readonly body: CheckOutcomesCardBody })
+  | (ChangeRoomCardBase & {
+      readonly kind: "review_decision";
+      readonly body: ReviewDecisionCardBody;
+    })
+  | (ChangeRoomCardBase & { readonly kind: "checkpoint"; readonly body: CheckpointCardBody })
+  | (ChangeRoomCardBase & {
+      readonly kind: "rollback_restoration";
+      readonly body: RollbackRestorationCardBody;
+    })
+  | (ChangeRoomCardBase & {
+      readonly kind: "terminal_state";
+      readonly body: TerminalStateCardBody;
+    });
+
+export interface RunAnnotationRecord {
+  readonly id: string;
+  readonly runId: string;
+  readonly card: ChangeRoomAnnotationTarget;
+  readonly actor: string;
+  readonly body: string;
+  readonly createdAt: string;
+}
+
+export interface ChangeRoomCheckpointSummary {
+  readonly sha256: string;
+  readonly createdAt: string;
+}
+
+export interface ChangeRoomSnapshot {
+  readonly run: RunRecord;
+  readonly approvals: readonly ApprovalRecord[];
+  readonly events: readonly EventSummaryRecord[];
+  readonly eventCursor: number;
+  readonly eventCount: number;
+  readonly checkpoint: ChangeRoomCheckpointSummary | null;
+  readonly annotations: readonly RunAnnotationRecord[];
+}
+
+export interface ChangeRoomProjection {
+  readonly schema: typeof CHANGE_ROOM_SCHEMA;
+  readonly roomId: string;
+  readonly projectId: string;
+  readonly state: RunState;
+  readonly cards: readonly ChangeRoomCard[];
+  readonly annotations: readonly RunAnnotationRecord[];
+  readonly timeline: readonly EventSummaryRecord[];
+  readonly integrity: {
+    readonly eventCursor: number;
+    readonly eventCount: number;
+    readonly timelineTruncated: boolean;
+    readonly digestSemantics: "byte_binding_only";
+    readonly note: string;
+  };
+  readonly generatedBy: "deterministic_host_projection";
+}
+
+export type ChangeRoomVerificationOutcome = VerificationEvidence["outcome"] | "not_run";
+
+export interface ChangeRoomIndexSummary {
+  readonly roomId: string;
+  readonly projectId: string;
+  readonly task: string;
+  readonly target: string;
+  readonly state: RunState;
+  readonly verificationOutcome: ChangeRoomVerificationOutcome;
+  readonly provider: {
+    readonly kind: ProviderKind;
+    readonly model: string;
+    readonly locality: ProviderLocality;
+    readonly privacyClass: ModelCapabilities["privacyClass"];
+  };
+  readonly terminalReason: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ChangeRoomIndexPage {
+  readonly before: number;
+  readonly snapshot: number;
+  readonly nextBefore: number;
+  readonly hasMore: boolean;
+  readonly rooms: readonly ChangeRoomIndexSummary[];
+}
+
+export type ChangeContextQuestion =
+  | "why_blocked"
+  | "what_changed"
+  | "what_passed"
+  | "what_remains_before_review"
+  | "why_rolled_back";
+
+export interface ChangeContextReceipt {
+  readonly cardId: string;
+  readonly eventSequences: readonly number[];
+  readonly digests: readonly string[];
+}
+
+export interface ChangeContextComponent {
+  readonly statement: string;
+  readonly receipts: readonly ChangeContextReceipt[];
+}
+
+export interface ChangeContextPacket {
+  readonly schema: typeof CHANGE_CONTEXT_SCHEMA;
+  readonly roomId: string;
+  readonly eventCursor: number;
+  readonly question: ChangeContextQuestion;
+  readonly components: readonly ChangeContextComponent[];
+  readonly omissions: readonly string[];
+  readonly uncertainty: readonly string[];
+  readonly generatedBy: "deterministic_host_projection";
+}
+
 export interface ApprovalCoverage {
   readonly limit: 12;
   readonly loaded: number;

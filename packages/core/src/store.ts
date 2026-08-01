@@ -18,7 +18,10 @@ import {
   isBrowserActionOutcome,
   isBrowserActionStatus,
 } from "./browser-action-state.js";
+import { CHANGE_ROOM_ANNOTATION_TARGETS, changeRoomTerminalReason } from "./change-room.js";
+import { containsSecretShapedContent } from "./context.js";
 import {
+  ICARUS_ANNOTATION_SCHEMA,
   ICARUS_APPROVAL_INDEX_SCHEMA,
   ICARUS_CORE_SCHEMA,
   ICARUS_PATCH_SET_SCHEMA,
@@ -44,6 +47,11 @@ import { assertTransition } from "./state-machine.js";
 import type {
   ApprovalRecord,
   CapabilityGrant,
+  ChangeRoomAnnotationTarget,
+  ChangeRoomIndexPage,
+  ChangeRoomIndexSummary,
+  ChangeRoomSnapshot,
+  ChangeRoomVerificationOutcome,
   CheckProfile,
   CheckpointFile,
   ContextManifest,
@@ -57,9 +65,12 @@ import type {
   PlanProposal,
   ProjectRecord,
   ProviderConfig,
+  ProviderKind,
+  ProviderLocality,
   ReadableManifest,
   ReadableManifestEntry,
   RepositoryRecord,
+  RunAnnotationRecord,
   RunEventHistoryPage,
   RunEventPage,
   RunHistory,
@@ -106,6 +117,9 @@ export const WORKSPACE_RUN_PAGE_LIMIT = 12;
 export const WORKSPACE_PROJECT_PAGE_LIMIT = 12;
 export const WORKSPACE_PROJECT_CHECKS_MAX_BYTES = 1024 * 1024;
 export const WORKSPACE_PROJECT_PROFILE_MAX_BYTES = 16 * 1024;
+export const CHANGE_ROOM_PAGE_LIMIT = 12;
+export const RUN_ANNOTATION_LIMIT = 32;
+export const RUN_ANNOTATION_BODY_MAX_BYTES = 1_024;
 const APPROVAL_RUN_ID_MAX_BYTES = 64;
 const APPROVAL_KIND_MAX_BYTES = 16;
 const APPROVAL_DIGEST_MAX_BYTES = 64;
@@ -491,6 +505,47 @@ function inspectApprovalIndex(databasePath: string): ApprovalIndexStatus {
 }
 
 type PatchSetSchemaStatus = "not_applicable" | "missing" | "valid";
+
+type AnnotationSchemaStatus = "not_applicable" | "missing" | "valid";
+
+/**
+ * Read-only shape inspection performed before the writable handle is opened, so
+ * a refusal cannot have mutated the database. A database that predates the
+ * `runs` table is not a migration candidate; a database that has `runs` but
+ * lacks the ADR 0041 annotation table requires explicit operator approval.
+ */
+function inspectAnnotationSchema(databasePath: string): AnnotationSchemaStatus {
+  if (!existsSync(databasePath)) return "not_applicable";
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const runsTableExists =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runs'")
+        .get() !== undefined;
+    if (!runsTableExists) return "not_applicable";
+
+    const present =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run_annotations'")
+        .get() !== undefined;
+    if (!present) return "missing";
+
+    const expectedColumns = ["id", "run_id", "card", "actor", "body", "created_at"];
+    const columns = (
+      database.prepare("PRAGMA table_info('run_annotations')").all() as unknown[]
+    ).map((entry) => text(row(entry, "run annotation column").name, "run annotation column.name"));
+    invariant(
+      columns.length === expectedColumns.length &&
+        expectedColumns.every((column, index) => columns[index] === column),
+      "DATABASE_ERROR",
+      "Run annotation table has an invalid shape",
+    );
+    return "valid";
+  } finally {
+    database.close();
+  }
+}
 
 /**
  * Read-only shape inspection performed before the writable handle is opened, so
@@ -1250,6 +1305,7 @@ export class IcarusStore {
       allowApprovalIndexMigration?: boolean;
       allowPatchSetMigration?: boolean;
       allowReadableManifestMigration?: boolean;
+      allowAnnotationMigration?: boolean;
     } = {},
   ) {
     const parent = path.dirname(databasePath);
@@ -1287,6 +1343,13 @@ export class IcarusStore {
         "Readable manifest migration requires a state backup and explicit operator approval",
       );
     }
+    const annotationStatus = inspectAnnotationSchema(databasePath);
+    if (annotationStatus === "missing" && options.allowAnnotationMigration !== true) {
+      throw new IcarusError(
+        "DATABASE_MIGRATION_REQUIRED",
+        "Run annotation migration requires a state backup and explicit operator approval",
+      );
+    }
     this.#database = new Database(databasePath);
     chmodSync(databasePath, 0o600);
     this.#database.pragma(`busy_timeout = ${busyTimeoutMs}`);
@@ -1297,6 +1360,7 @@ export class IcarusStore {
     this.#database.exec(ICARUS_APPROVAL_INDEX_SCHEMA);
     this.#database.exec(ICARUS_PATCH_SET_SCHEMA);
     this.#database.exec(ICARUS_READABLE_MANIFEST_SCHEMA);
+    this.#database.exec(ICARUS_ANNOTATION_SCHEMA);
     if (
       gate1Schemas.browserActions === "not_applicable" &&
       gate1Schemas.landing === "not_applicable"
@@ -4105,6 +4169,413 @@ export class IcarusStore {
 
   getRunVerificationAttempts(runId: string, snapshot: number): RunVerificationAttemptsSnapshot {
     return readRunVerificationAttempts(this.#database, runId, snapshot);
+  }
+
+  #annotationRow(entry: unknown): RunAnnotationRecord {
+    const value = row(entry, "run annotation");
+    const record: RunAnnotationRecord = {
+      id: text(value.id, "annotation.id"),
+      runId: text(value.run_id, "annotation.run_id"),
+      card: text(value.card, "annotation.card") as ChangeRoomAnnotationTarget,
+      actor: text(value.actor, "annotation.actor"),
+      body: text(value.body, "annotation.body"),
+      createdAt: text(value.created_at, "annotation.created_at"),
+    };
+    invariant(
+      RUN_ID_PATTERN.test(record.id) && RUN_ID_PATTERN.test(record.runId),
+      "DATABASE_ERROR",
+      "Run annotation identity is invalid",
+    );
+    invariant(
+      CHANGE_ROOM_ANNOTATION_TARGETS.includes(record.card),
+      "DATABASE_ERROR",
+      "Run annotation card is invalid",
+    );
+    invariant(
+      record.actor.trim().length > 0 &&
+        record.actor.length <= 200 &&
+        !/[\r\n\0]/.test(record.actor),
+      "DATABASE_ERROR",
+      "Run annotation actor is invalid",
+    );
+    invariant(
+      record.body.trim().length > 0 &&
+        !record.body.includes("\0") &&
+        Buffer.byteLength(record.body, "utf8") <= RUN_ANNOTATION_BODY_MAX_BYTES,
+      "DATABASE_ERROR",
+      "Run annotation body is invalid",
+    );
+    invariant(
+      isCanonicalTimestamp(record.createdAt),
+      "DATABASE_ERROR",
+      "Run annotation timestamp is invalid",
+    );
+    return record;
+  }
+
+  addRunAnnotation(
+    runId: string,
+    card: ChangeRoomAnnotationTarget,
+    actor: string,
+    body: string,
+  ): RunAnnotationRecord {
+    invariant(
+      CHANGE_ROOM_ANNOTATION_TARGETS.includes(card),
+      "INVALID_ANNOTATION",
+      "Annotation card is invalid",
+    );
+    invariant(
+      actor.trim().length > 0 && actor.length <= 200 && !/[\r\n\0]/.test(actor),
+      "INVALID_ANNOTATION",
+      "Annotation actor is invalid",
+    );
+    invariant(
+      !containsSecretShapedContent(Buffer.from(actor, "utf8")),
+      "SECRET_INPUT_DETECTED",
+      "Annotation actor contains recognizable credential material",
+    );
+    invariant(
+      body.trim().length > 0 &&
+        !body.includes("\0") &&
+        Buffer.byteLength(body, "utf8") <= RUN_ANNOTATION_BODY_MAX_BYTES,
+      "INVALID_ANNOTATION",
+      "Annotation body is invalid",
+    );
+    invariant(
+      !containsSecretShapedContent(Buffer.from(body, "utf8")),
+      "SECRET_INPUT_DETECTED",
+      "Annotation body contains recognizable credential material",
+    );
+    const transaction = this.#database.transaction((): RunAnnotationRecord => {
+      const exists = this.#database.prepare("SELECT 1 FROM runs WHERE id = ?").get(runId);
+      invariant(exists !== undefined, "NOT_FOUND", "Run was not found");
+      const count = numberValue(
+        row(
+          this.#database
+            .prepare("SELECT COUNT(*) AS count FROM run_annotations WHERE run_id = ?")
+            .get(runId),
+          "annotation count",
+        ).count,
+        "annotation.count",
+      );
+      invariant(
+        Number.isSafeInteger(count) && count < RUN_ANNOTATION_LIMIT,
+        "ANNOTATION_LIMIT_REACHED",
+        "Run annotation limit is reached",
+      );
+      const record: RunAnnotationRecord = {
+        id: this.#id(),
+        runId,
+        card,
+        actor,
+        body,
+        createdAt: this.#now(),
+      };
+      this.#database
+        .prepare(
+          "INSERT INTO run_annotations (id, run_id, card, actor, body, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(record.id, record.runId, record.card, record.actor, record.body, record.createdAt);
+      return record;
+    });
+    return transaction();
+  }
+
+  listRunAnnotations(runId: string): RunAnnotationRecord[] {
+    const transaction = this.#database.transaction((): RunAnnotationRecord[] => {
+      const exists = this.#database.prepare("SELECT 1 FROM runs WHERE id = ?").get(runId);
+      invariant(exists !== undefined, "NOT_FOUND", "Run was not found");
+      return this.#listRunAnnotations(runId);
+    });
+    return transaction();
+  }
+
+  #listRunAnnotations(runId: string): RunAnnotationRecord[] {
+    const rows = this.#database
+      .prepare(
+        "SELECT id, run_id, card, actor, body, created_at FROM run_annotations WHERE run_id = ? ORDER BY rowid LIMIT ?",
+      )
+      .all(runId, RUN_ANNOTATION_LIMIT + 1) as unknown[];
+    invariant(
+      rows.length <= RUN_ANNOTATION_LIMIT,
+      "DATABASE_ERROR",
+      "Run annotation history exceeds its bound",
+    );
+    return rows.map((entry) => this.#annotationRow(entry));
+  }
+
+  getChangeRoomSnapshot(runId: string): ChangeRoomSnapshot {
+    const transaction = this.#database.transaction((): ChangeRoomSnapshot => {
+      const run = this.getRun(runId);
+      const approvals = this.listApprovals(runId);
+      const aggregate = row(
+        this.#database
+          .prepare(
+            "SELECT COALESCE(MAX(sequence), 0) AS event_cursor FROM run_events WHERE run_id = ?",
+          )
+          .get(runId),
+        "event aggregate",
+      );
+      const eventCursor = numberValue(aggregate.event_cursor, "event.event_cursor");
+      invariant(
+        Number.isSafeInteger(eventCursor) && eventCursor >= 0,
+        "DATABASE_ERROR",
+        "Event aggregate is invalid",
+      );
+      const eventCount = eventCursor;
+      const events = (
+        this.#database
+          .prepare(
+            `SELECT sequence, run_id, type, created_at
+             FROM run_events WHERE run_id = ?
+             ORDER BY sequence DESC LIMIT ?`,
+          )
+          .all(runId, RUN_PRESENTATION_EVENT_LIMIT) as unknown[]
+      )
+        .map((entry) => eventSummaryRow(entry, "change room event", runId))
+        .reverse();
+      const firstExpectedSequence = eventCursor - events.length + 1;
+      invariant(
+        events.every((event, index) => event.sequence === firstExpectedSequence + index),
+        "DATABASE_ERROR",
+        "Change Room event sequence is not contiguous",
+      );
+      const checkpointRow = this.#database
+        .prepare("SELECT run_id, checkpoint_sha256, created_at FROM checkpoints WHERE run_id = ?")
+        .get(runId);
+      let checkpoint: ChangeRoomSnapshot["checkpoint"] = null;
+      if (checkpointRow !== undefined) {
+        const value = row(checkpointRow, "checkpoint");
+        const checkpointRunId = text(value.run_id, "checkpoint.run_id");
+        const sha256 = text(value.checkpoint_sha256, "checkpoint.checkpoint_sha256");
+        const createdAt = text(value.created_at, "checkpoint.created_at");
+        invariant(
+          checkpointRunId === runId && /^[a-f0-9]{64}$/.test(sha256),
+          "DATABASE_ERROR",
+          "Checkpoint identity is invalid",
+        );
+        invariant(
+          isCanonicalTimestamp(createdAt),
+          "DATABASE_ERROR",
+          "Checkpoint timestamp is invalid",
+        );
+        checkpoint = { sha256, createdAt };
+      }
+      const annotations = this.#listRunAnnotations(runId);
+      return { run, approvals, events, eventCursor, eventCount, checkpoint, annotations };
+    });
+    return transaction();
+  }
+
+  openChangeRoomPage(): ChangeRoomIndexPage {
+    return this.#changeRoomPage(null);
+  }
+
+  listChangeRoomPage(before: number, snapshot: number): ChangeRoomIndexPage {
+    invariant(
+      Number.isSafeInteger(before) && before > 0,
+      "INVALID_RUN_CURSOR",
+      "Change Room cursor must be a positive safe integer",
+    );
+    invariant(
+      Number.isSafeInteger(snapshot) && snapshot >= 0 && snapshot <= SAFE_WORKSPACE_SNAPSHOT_MAX,
+      "INVALID_RUN_CURSOR",
+      "Change Room snapshot must be a nonnegative safe integer",
+    );
+    return this.#changeRoomPage({ before, snapshot });
+  }
+
+  #changeRoomPage(
+    requested: { readonly before: number; readonly snapshot: number } | null,
+  ): ChangeRoomIndexPage {
+    const transaction = this.#database.transaction((): ChangeRoomIndexPage => {
+      const maximum = sqliteMaximumRowid(
+        row(
+          this.#database
+            .prepare("SELECT CAST(COALESCE(MAX(rowid), 0) AS TEXT) AS snapshot FROM runs")
+            .get(),
+          "run snapshot",
+        ).snapshot,
+        "run snapshot",
+      );
+      let before: number;
+      let snapshot: number;
+      if (requested === null) {
+        invariant(
+          maximum <= BigInt(SAFE_WORKSPACE_SNAPSHOT_MAX),
+          "DATABASE_ERROR",
+          "Change Room snapshot is unsafe",
+        );
+        snapshot = Number(maximum);
+        before = snapshot + 1;
+      } else {
+        before = requested.before;
+        snapshot = requested.snapshot;
+        invariant(
+          BigInt(snapshot) <= maximum,
+          "INVALID_RUN_CURSOR",
+          "Change Room snapshot is ahead of persisted history",
+        );
+        if (snapshot > 0) {
+          invariant(
+            this.#database.prepare("SELECT 1 FROM runs WHERE rowid = ?").get(snapshot) !==
+              undefined,
+            "INVALID_RUN_CURSOR",
+            "Change Room snapshot anchor is missing",
+          );
+        }
+        const pageOneBefore = snapshot + 1;
+        if (before !== pageOneBefore) {
+          invariant(
+            before <= snapshot &&
+              this.#database.prepare("SELECT 1 FROM runs WHERE rowid = ?").get(before) !==
+                undefined,
+            "INVALID_RUN_CURSOR",
+            "Change Room cursor anchor is missing",
+          );
+        }
+      }
+      const rows = this.#database
+        .prepare(
+          `SELECT CAST(rowid AS TEXT) AS cursor,
+                  id, project_id, task, target, state, error_code, created_at, updated_at,
+                  typeof(provider_json) AS provider_storage,
+                  octet_length(provider_json) AS provider_bytes,
+                  CASE WHEN typeof(provider_json) = 'text' AND octet_length(provider_json) <= 16384
+                            AND json_valid(provider_json, 1) = 1
+                       THEN json_extract(provider_json, '$.kind') END AS provider_kind,
+                  CASE WHEN typeof(provider_json) = 'text' AND octet_length(provider_json) <= 16384
+                            AND json_valid(provider_json, 1) = 1
+                       THEN json_extract(provider_json, '$.model') END AS provider_model,
+                  CASE WHEN typeof(provider_json) = 'text' AND octet_length(provider_json) <= 16384
+                            AND json_valid(provider_json, 1) = 1
+                       THEN json_extract(provider_json, '$.capabilities.locality') END AS provider_locality,
+                  CASE WHEN typeof(provider_json) = 'text' AND octet_length(provider_json) <= 16384
+                            AND json_valid(provider_json, 1) = 1
+                       THEN json_extract(provider_json, '$.capabilities.privacyClass') END AS provider_privacy_class,
+                  verification_json IS NULL AS verification_absent,
+                  typeof(verification_json) AS verification_storage,
+                  octet_length(verification_json) AS verification_bytes,
+                  CASE WHEN verification_json IS NULL THEN NULL
+                       WHEN typeof(verification_json) = 'text' AND octet_length(verification_json) <= 4194304
+                            AND json_valid(verification_json, 1) = 1
+                       THEN json_extract(verification_json, '$.outcome')
+                       ELSE '' END AS verification_outcome
+           FROM runs
+           WHERE rowid < ? AND rowid <= ?
+           ORDER BY rowid DESC
+           LIMIT 13`,
+        )
+        .all(before, snapshot) as unknown[];
+      const summaries = rows.map((entry) => this.#changeRoomSummaryRow(entry, before, snapshot));
+      const hasMore = summaries.length > CHANGE_ROOM_PAGE_LIMIT;
+      const retained = summaries.slice(0, CHANGE_ROOM_PAGE_LIMIT);
+      return {
+        before,
+        snapshot,
+        nextBefore: retained.at(-1)?.cursor ?? before,
+        hasMore,
+        rooms: retained.map((entry) => entry.summary),
+      };
+    });
+    return transaction();
+  }
+
+  #changeRoomSummaryRow(
+    entry: unknown,
+    before: number,
+    snapshot: number,
+  ): { readonly cursor: number; readonly summary: ChangeRoomIndexSummary } {
+    const value = row(entry, "change room summary");
+    const base = workspaceRunSummaryRow(value, before, snapshot);
+    const errorCode = nullableText(value.error_code, "run.error_code");
+    invariant(
+      errorCode === null || /^[A-Z][A-Z0-9_]{1,127}$/.test(errorCode),
+      "DATABASE_ERROR",
+      "Run error code is invalid",
+    );
+    invariant(
+      value.provider_storage === "text" &&
+        typeof value.provider_bytes === "number" &&
+        Number.isSafeInteger(value.provider_bytes) &&
+        value.provider_bytes >= 0 &&
+        value.provider_bytes <= 16_384,
+      "DATABASE_ERROR",
+      "Run provider projection is invalid",
+    );
+    const providerKind = text(value.provider_kind, "run.provider.kind");
+    const providerModel = text(value.provider_model, "run.provider.model");
+    const providerLocality = text(value.provider_locality, "run.provider.locality");
+    const providerPrivacyClass = text(value.provider_privacy_class, "run.provider.privacy_class");
+    invariant(
+      providerKind === "ollama" || providerKind === "openai",
+      "DATABASE_ERROR",
+      "Run provider kind is invalid",
+    );
+    invariant(
+      providerModel.trim().length > 0 &&
+        !providerModel.includes("\0") &&
+        Buffer.byteLength(providerModel, "utf8") <= 256,
+      "DATABASE_ERROR",
+      "Run provider model is invalid",
+    );
+    invariant(
+      providerLocality === "loopback" || providerLocality === "remote",
+      "DATABASE_ERROR",
+      "Run provider locality is invalid",
+    );
+    invariant(
+      providerPrivacyClass === "local_process" || providerPrivacyClass === "remote_api",
+      "DATABASE_ERROR",
+      "Run provider privacy class is invalid",
+    );
+    let verificationOutcome: ChangeRoomVerificationOutcome;
+    if (value.verification_absent === 1) {
+      invariant(
+        value.verification_outcome === null,
+        "DATABASE_ERROR",
+        "Run verification outcome is invalid",
+      );
+      verificationOutcome = "not_run";
+    } else {
+      invariant(
+        value.verification_absent === 0 &&
+          value.verification_storage === "text" &&
+          typeof value.verification_bytes === "number" &&
+          Number.isSafeInteger(value.verification_bytes) &&
+          value.verification_bytes >= 0 &&
+          value.verification_bytes <= 4_194_304,
+        "DATABASE_ERROR",
+        "Run verification projection is invalid",
+      );
+      const outcome = text(value.verification_outcome, "run.verification.outcome");
+      invariant(
+        outcome === "passed" || outcome === "failed" || outcome === "unavailable",
+        "DATABASE_ERROR",
+        "Run verification outcome is invalid",
+      );
+      verificationOutcome = outcome;
+    }
+    return {
+      cursor: base.cursor,
+      summary: {
+        roomId: base.summary.id,
+        projectId: base.summary.projectId,
+        task: base.summary.task,
+        target: base.summary.target,
+        state: base.summary.state,
+        verificationOutcome,
+        provider: {
+          kind: providerKind as ProviderKind,
+          model: providerModel,
+          locality: providerLocality as ProviderLocality,
+          privacyClass: providerPrivacyClass as ChangeRoomIndexSummary["provider"]["privacyClass"],
+        },
+        terminalReason: changeRoomTerminalReason(base.summary.state, errorCode),
+        createdAt: base.summary.createdAt,
+        updatedAt: base.summary.updatedAt,
+      },
+    };
   }
 
   listEventHistoryPage(runId: string, before: number, snapshot: number): RunEventHistoryPage {

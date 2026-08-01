@@ -71,6 +71,7 @@ import {
 } from "./run-page-nav.js";
 import type { VerificationAttemptsPanelHandle } from "./VerificationAttemptsPanel.js";
 import { VerificationAttemptsPanel } from "./VerificationAttemptsPanel.js";
+import { ChangeRoomView } from "./ChangeRoomView.js";
 
 /** Splits the candidate-target textarea into unique, non-empty paths (ADR 0023). */
 function selectedTargets(value: string): string[] {
@@ -2461,6 +2462,7 @@ export function App() {
     () => false,
   );
   const [workspace, setWorkspace] = useState<WorkspaceView | null>(null);
+  const [primaryView, setPrimaryView] = useState<"workspace" | "changeRooms">("workspace");
   const [projectPageSession, setProjectPageSession] = useState<ProjectPageSession | null>(null);
   const [projectPageBusy, setProjectPageBusy] = useState(false);
   const [projectPageError, setProjectPageError] = useState<string | null>(null);
@@ -2944,14 +2946,34 @@ export function App() {
           <h1>Icarus local workspace</h1>
           <p>Idea → persisted project → strict context → guarded plan → inspectable evidence.</p>
         </div>
-        <button
-          type="button"
-          className="button--secondary"
-          disabled={refreshing}
-          onClick={() => void refreshWorkspace()}
-        >
-          {refreshing ? "Refreshing…" : "Refresh workspace"}
-        </button>
+        <div className="app-header__actions">
+          <div className="view-toggle">
+            <button
+              type="button"
+              className={primaryView === "workspace" ? undefined : "button--secondary"}
+              aria-pressed={primaryView === "workspace"}
+              onClick={() => setPrimaryView("workspace")}
+            >
+              Workspace
+            </button>
+            <button
+              type="button"
+              className={primaryView === "changeRooms" ? undefined : "button--secondary"}
+              aria-pressed={primaryView === "changeRooms"}
+              onClick={() => setPrimaryView("changeRooms")}
+            >
+              Change Rooms
+            </button>
+          </div>
+          <button
+            type="button"
+            className="button--secondary"
+            disabled={refreshing}
+            onClick={() => void refreshWorkspace()}
+          >
+            {refreshing ? "Refreshing…" : "Refresh workspace"}
+          </button>
+        </div>
       </header>
 
       {workspaceError === null ? null : (
@@ -2976,6 +2998,16 @@ export function App() {
         <main id="workspace-main" className="loading-state" tabIndex={-1}>
           <h2>Workspace unavailable</h2>
           <p>Start the local workspace and open its exact printed launch URL, then retry.</p>
+        </main>
+      ) : primaryView === "changeRooms" ? (
+        <main
+          id="workspace-main"
+          className="workspace-layout workspace-layout--single"
+          tabIndex={-1}
+        >
+          <div className="content">
+            <ChangeRoomView projects={workspace.projectPage.projects} />
+          </div>
         </main>
       ) : (
         <main id="workspace-main" className="workspace-layout" tabIndex={-1}>

@@ -383,6 +383,79 @@ These merged read-only observation slices do not complete M3, close ADR 0025's
 residual release work, establish native acceptance, or add browser action
 authority.
 
+## Sixth M3 change-room slice
+
+ADR 0019 is implemented by this bounded product slice. Its continuing contract
+is to:
+
+1. Project each run as a strict read-only Change Room whose `roomId` is the run
+   ID, derived in one SQLite read transaction from the run row, approvals, the
+   200-event metadata tail, safe checkpoint columns, project check/sandbox
+   configuration, and CLI annotations. Add no room table, event bus, or parallel
+   state machine, and return a byte-identical projection on restart replay.
+2. Present exactly eleven evidence cards in fixed lifecycle order, from task
+   scope through terminal state. Each card carries a host-controlled title, one
+   of six provenance classes, an explicit
+   `available`/`pending`/`not_applicable`/`unavailable` status, bounded
+   references (event sequences, approval digests, plan/context/diff/checkpoint
+   digests), a bounded body, and `truncated`/`redacted`/`unavailableEvidence`
+   indicators. Card bodies reuse only the disclosure classes the existing
+   full-run presenter already crosses; baseline/approved checkpoint bytes,
+   private cache/worktree/artifact paths, event payloads, raw provider prompts,
+   and source blobs are never selected. State in the integrity block that
+   digests prove byte binding and recorded-evidence integrity only — never fresh
+   authorization or semantic correctness; label the provider plan an untrusted
+   proposal; note that the checkpoint digest is a recorded byte binding, not a
+   fresh rehash.
+3. Serve a bounded change-room index under the ADR 0017 rowid discipline: one
+   pinned `MAX(rowid)` snapshot, descending `LIMIT 13`, twelve retained
+   summaries, an ephemeral exclusive cursor, and fail-closed cursor validation.
+   Summaries expose only IDs, bounded task/target text, exact state,
+   host-derived phase, latest verification outcome, provider
+   kind/model/locality/privacy class, host-derived terminal reason, and
+   timestamps. Project provider/verification JSON in SQL only behind
+   typeof/octet-length preflight and strict JSON validity; fail the page closed
+   as database corruption otherwise.
+4. Answer exactly five fixed change-context questions (`why_blocked`,
+   `what_changed`, `what_passed`, `what_remains_before_review`,
+   `why_rolled_back`) and reject any other question shape. Return a deterministic
+   host projection of at most eight component statements, each a host-controlled
+   template over bounded facts carrying receipts (evidence-card IDs, event
+   sequences, digests), plus explicit omission and uncertainty lists. Involve no
+   LLM, provider, network, or external tool. State in a completed run's
+   `what_changed` that nothing was committed, pushed, merged, or deployed.
+5. Accept annotations only through the CLI (`run annotate` / `run annotations`).
+   Validate before any write: run existence, a closed card enum (the eleven card
+   kinds or `room`), the approval-actor rules, and a non-blank body of at most
+   1 KiB without NUL bytes; reject recognizable credential material in actor or
+   body before write; cap annotations at 32 per run. Keep them append-only with
+   no update or delete path and no authority: they never append lifecycle
+   events, advance event cursors, change run state, satisfy gates, or feed
+   digests, approvals, verification, or execution. Show them in the browser only
+   as read-only text inside the room projection; provide no browser annotation
+   route.
+6. Keep the browser review-only. All three new routes are GET-only; non-GET
+   verbs are refused by the ADR 0029 action-session boundary (401 without it, 404 behind it), unknown runs receive 404, invalid query contracts receive
+   422, and GET reads perform no durable writes. The React Change Rooms section
+   pages its index explicitly (12-row replace-not-accumulate pages, at most a
+   four-page window, no polling), pins the room's event revision, and offers the
+   five fixed explain questions.
+7. Keep the annotation schema additive and operator-gated: the only change is
+   the `run_annotations` table in `ICARUS_ANNOTATION_SCHEMA`, applied
+   idempotently on every open so fresh databases always have it. A database
+   with `runs` but no table is refused with `DATABASE_MIGRATION_REQUIRED`
+   until the operator backs up and reruns with exactly
+   `ICARUS_APPROVE_SCHEMA_MIGRATION=run-annotations-v1`; one token approves
+   exactly one migration, an unrelated token changes nothing, and an invalid
+   table shape fails closed as `DATABASE_ERROR`. There is no backfill and no
+   existing table or index change.
+8. Add no schema beyond `run_annotations`, dependency, browser approval,
+   mutation, annotation-authoring, execution, command, commit, push, or
+   deployment route, live room polling or streaming, free-text questions, room
+   search, annotation edit/delete, LLM/BYOK summarizer, federation, forge,
+   Git-hosting, or multi-agent surface, or any claim that a change landed
+   outside the Icarus-private worktree. Preserve the unresolved ADR 0010 hold.
+
 ## Sun ceiling
 
 Every run records maximum active runtime, provider output tokens, total tokens,

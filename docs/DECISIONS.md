@@ -35,6 +35,7 @@ Decision records for the current milestone:
 | [0036](adr/0036-proof-carrying-software-factory-product-direction.md) | Proof-carrying software factory product direction and gated competitive roadmap | Accepted product direction — Gate 0 released at exact `main` `802b91e6`; Gate 1 active |
 | [0039](adr/0039-portable-numeric-loopback-origins.md) | Portable CSPRNG-selected numeric-loopback mutation origins | Rejected — native run `30613980911` passed Windows and failed macOS |
 | [0040](adr/0040-chromium-resolved-localhost-origins.md) | Chromium-resolved 128-bit `.localhost` mutation origins over exact `127.0.0.1` | Accepted — exact-head evidence complete at `eb01b6406c12126c60add7ac83800f8eba8ffdc9` (native run `30618043377`); interim operator browser/resolver/proxy risk accepted 2026-07-31; not a Gate 1 release |
+| [0041](adr/0041-change-rooms-evidence-projections.md) | Change Rooms are evidence projections, not a chat system, workflow engine, or execution authority | Proposed |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.

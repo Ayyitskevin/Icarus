@@ -22,6 +22,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 import {
+  ICARUS_ANNOTATION_OBJECTS,
   ICARUS_APPROVAL_INDEX_OBJECTS,
   ICARUS_BASE_SCHEMA_OBJECTS,
   ICARUS_PATCH_SET_OBJECTS,
@@ -572,6 +573,7 @@ const KNOWN_SCHEMA_OBJECTS: ReadonlySet<string> = new Set([
   ...ICARUS_PRE_GATE1_OBJECTS,
   ...BROWSER_ACTION_OBJECTS,
   ...LANDING_OBJECTS,
+  ...ICARUS_ANNOTATION_OBJECTS,
 ]);
 
 function assertClosedSchemaObjectSet(database: Database.Database): void {

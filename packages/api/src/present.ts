@@ -2,12 +2,18 @@ import { createHash } from "node:crypto";
 
 import {
   type ApprovalRecord,
+  type ChangeContextPacket,
+  type ChangeRoomCard,
+  type ChangeRoomEvidenceRef,
+  type ChangeRoomIndexPage,
+  type ChangeRoomProjection,
   type EventRecord,
   type EventSummaryRecord,
   IcarusError,
   type ProjectRecord,
   type ProjectRepositoryStatus,
   type RepositoryRecord,
+  type RunAnnotationRecord,
   type RunEventHistoryPage,
   type RunEventPage,
   type RunPresentationSnapshot,
@@ -309,6 +315,267 @@ export function presentWorkspaceRunPage(page: WorkspaceRunPage): Record<string, 
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
     })),
+  };
+}
+
+export function presentChangeRoomPage(page: ChangeRoomIndexPage): Record<string, unknown> {
+  return {
+    before: page.before,
+    snapshot: page.snapshot,
+    nextBefore: page.nextBefore,
+    hasMore: page.hasMore,
+    rooms: page.rooms.map((room) => ({
+      roomId: room.roomId,
+      projectId: room.projectId,
+      task: room.task,
+      target: room.target,
+      state: room.state,
+      phase: workspaceRunPhase(room.state),
+      verificationOutcome: room.verificationOutcome,
+      provider: {
+        kind: room.provider.kind,
+        model: room.provider.model,
+        locality: room.provider.locality,
+        privacyClass: room.provider.privacyClass,
+      },
+      terminalReason: room.terminalReason,
+      createdAt: room.createdAt,
+      lastActivity: room.updatedAt,
+    })),
+  };
+}
+
+function presentChangeRoomRef(ref: ChangeRoomEvidenceRef): Record<string, unknown> {
+  switch (ref.kind) {
+    case "event_sequence":
+      return { kind: "event_sequence", sequence: ref.sequence };
+    case "approval":
+      return { kind: "approval", approvalKind: ref.approvalKind, digest: ref.digest };
+    case "digest":
+      return { kind: "digest", label: ref.label, sha256: ref.sha256 };
+    case "checkpoint":
+      return { kind: "checkpoint", sha256: ref.sha256 };
+  }
+}
+
+function presentChangeRoomCardBody(card: ChangeRoomCard): Record<string, unknown> {
+  switch (card.kind) {
+    case "task_scope":
+      return {
+        task: card.body.task,
+        target: card.body.target,
+        projectId: card.body.projectId,
+        projectName: card.body.projectName,
+        baseRef: card.body.baseRef,
+      };
+    case "base_context":
+      return {
+        baseCommit: card.body.baseCommit,
+        contextSha256: card.body.contextSha256,
+        targets: card.body.targets,
+        totalBytes: card.body.totalBytes,
+        auditPolicyVersion: card.body.auditPolicyVersion,
+        repositoryMap: card.body.repositoryMap,
+        entries: card.body.entries.map((entry) => ({
+          path: entry.path,
+          reason: entry.reason,
+          bytes: entry.bytes,
+          sha256: entry.sha256,
+        })),
+        egress: {
+          state: card.body.egress.state,
+          approval:
+            card.body.egress.approval === null
+              ? null
+              : {
+                  actor: card.body.egress.approval.actor,
+                  digest: card.body.egress.approval.digest,
+                  createdAt: card.body.egress.approval.createdAt,
+                },
+        },
+      };
+    case "provider_plan":
+      return {
+        provider: {
+          kind: card.body.provider.kind,
+          model: card.body.provider.model,
+          locality: card.body.provider.locality,
+          privacyClass: card.body.provider.privacyClass,
+        },
+        trustLabel: card.body.trustLabel,
+        plan:
+          card.body.plan === null
+            ? null
+            : {
+                summary: card.body.plan.summary,
+                steps: card.body.plan.steps,
+                risks: card.body.plan.risks,
+                target: card.body.plan.target,
+                targets: card.body.plan.targets,
+                iterationCeiling: card.body.plan.iterationCeiling,
+                checkIds: card.body.plan.checkIds,
+                grants: card.body.plan.grants,
+              },
+        planSha256: card.body.planSha256,
+      };
+    case "plan_approval":
+      return { approval: card.body.approval };
+    case "patchset":
+      return {
+        patchSet:
+          card.body.patchSet === null
+            ? null
+            : {
+                summary: card.body.patchSet.summary,
+                edits: card.body.patchSet.edits.map((edit) => ({
+                  op: edit.op,
+                  path: edit.path,
+                  rationale: edit.rationale,
+                  expectedPreimageSha256: edit.expectedPreimageSha256,
+                  replacementCount: edit.replacementCount,
+                })),
+              },
+        patchSetEditsTruncated: card.body.patchSetEditsTruncated,
+        actionStatus: card.body.actionStatus,
+        diffSha256: card.body.diffSha256,
+        diffBytes: card.body.diffBytes,
+        diff: card.body.diff,
+        changedPaths: card.body.changedPaths,
+        note: card.body.note,
+      };
+    case "registered_checks":
+      return {
+        checks: card.body.checks.map((check) => ({
+          id: check.id,
+          name: check.name,
+          argv: check.argv,
+        })),
+        sandbox: {
+          image: card.body.sandbox.image,
+          cpus: card.body.sandbox.cpus,
+          memoryMb: card.body.sandbox.memoryMb,
+          pids: card.body.sandbox.pids,
+          tmpfsMb: card.body.sandbox.tmpfsMb,
+        },
+      };
+    case "check_outcomes":
+      return {
+        outcome: card.body.outcome,
+        checks: card.body.checks.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          argv: entry.argv,
+          outcome: entry.outcome,
+          exitCode: entry.exitCode,
+          signal: entry.signal,
+          durationMs: entry.durationMs,
+          stdout: entry.stdout,
+          stderr: entry.stderr,
+          truncated: entry.truncated,
+        })),
+        diffSha256: card.body.diffSha256,
+        checkpointSha256: card.body.checkpointSha256,
+      };
+    case "review_decision":
+      return { decision: card.body.decision };
+    case "checkpoint":
+      return {
+        status: card.body.status,
+        sha256: card.body.sha256,
+        createdAt: card.body.createdAt,
+        note: card.body.note,
+      };
+    case "rollback_restoration":
+      return {
+        records: card.body.records.map((record) => ({
+          kind: record.kind,
+          actor: record.actor,
+          decision: record.decision,
+          digest: record.digest,
+          createdAt: record.createdAt,
+          completed: record.completed,
+          completedSequence: record.completedSequence,
+        })),
+        note: card.body.note,
+      };
+    case "terminal_state":
+      return {
+        state: card.body.state,
+        resumeState: card.body.resumeState,
+        terminal: card.body.terminal,
+        terminalReason: card.body.terminalReason,
+        lastError: card.body.lastError,
+        updatedAt: card.body.updatedAt,
+      };
+  }
+}
+
+function presentChangeRoomCard(card: ChangeRoomCard): Record<string, unknown> {
+  return {
+    id: card.id,
+    kind: card.kind,
+    title: card.title,
+    provenanceClass: card.provenanceClass,
+    status: card.status,
+    refs: card.refs.map(presentChangeRoomRef),
+    indicators: {
+      truncated: card.indicators.truncated,
+      redacted: card.indicators.redacted,
+      unavailableEvidence: card.indicators.unavailableEvidence,
+    },
+    body: presentChangeRoomCardBody(card),
+  };
+}
+
+function presentRunAnnotation(annotation: RunAnnotationRecord): Record<string, unknown> {
+  return {
+    id: annotation.id,
+    runId: annotation.runId,
+    card: annotation.card,
+    actor: annotation.actor,
+    body: annotation.body,
+    createdAt: annotation.createdAt,
+  };
+}
+
+export function presentChangeRoom(room: ChangeRoomProjection): Record<string, unknown> {
+  return {
+    schema: room.schema,
+    roomId: room.roomId,
+    projectId: room.projectId,
+    state: room.state,
+    phase: workspaceRunPhase(room.state),
+    cards: room.cards.map(presentChangeRoomCard),
+    annotations: room.annotations.map(presentRunAnnotation),
+    timeline: timeline(room.timeline),
+    integrity: {
+      eventCursor: room.integrity.eventCursor,
+      eventCount: room.integrity.eventCount,
+      timelineTruncated: room.integrity.timelineTruncated,
+      digestSemantics: room.integrity.digestSemantics,
+      note: room.integrity.note,
+    },
+    generatedBy: room.generatedBy,
+  };
+}
+
+export function presentChangeContext(packet: ChangeContextPacket): Record<string, unknown> {
+  return {
+    schema: packet.schema,
+    roomId: packet.roomId,
+    eventCursor: packet.eventCursor,
+    question: packet.question,
+    components: packet.components.map((entry) => ({
+      statement: entry.statement,
+      receipts: entry.receipts.map((receipt) => ({
+        cardId: receipt.cardId,
+        eventSequences: receipt.eventSequences,
+        digests: receipt.digests,
+      })),
+    })),
+    omissions: packet.omissions,
+    uncertainty: packet.uncertainty,
+    generatedBy: packet.generatedBy,
   };
 }
 

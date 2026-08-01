@@ -139,6 +139,19 @@ CREATE TABLE IF NOT EXISTS readable_manifests (
 );
 `;
 
+/** ADR 0041's append-only operator review annotations. */
+export const ICARUS_ANNOTATION_SCHEMA = `
+CREATE TABLE IF NOT EXISTS run_annotations (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  card TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS run_annotations_by_run ON run_annotations(run_id);
+`;
+
 export const ICARUS_PRE_GATE1_SCHEMA = [
   ICARUS_CORE_SCHEMA,
   ICARUS_APPROVAL_INDEX_SCHEMA,
@@ -163,6 +176,8 @@ export const ICARUS_APPROVAL_INDEX_OBJECTS = ["approvals_by_run"] as const;
 export const ICARUS_PATCH_SET_OBJECTS = ["patch_sets", "checkpoint_files"] as const;
 
 export const ICARUS_READABLE_MANIFEST_OBJECTS = ["readable_manifests"] as const;
+
+export const ICARUS_ANNOTATION_OBJECTS = ["run_annotations", "run_annotations_by_run"] as const;
 
 export const ICARUS_PRE_GATE1_OBJECTS = [
   ...ICARUS_BASE_SCHEMA_OBJECTS,

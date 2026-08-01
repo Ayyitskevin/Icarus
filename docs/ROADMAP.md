@@ -101,7 +101,9 @@ Windows host acceptance remained pending, the approval-index rollout against
 existing state remained operator-gated, and ADR 0025's residual work
 independently blocked release. Exact-head native acceptance is now recorded in
 run 30602949132. The browser authority and execution outcome remains governed by
-ADR 0036 Gate 1.
+ADR 0036 Gate 1. The candidate Change Rooms slice (ADR 0041) is implemented on
+the candidate branch with fresh local evidence and uses exact-head hosted CI as
+its merge gate. Full M3 remains open.
 
 The first slice adds a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context

@@ -228,6 +228,7 @@ export async function createIcarusRuntime(
     readonly allowApprovalIndexMigration?: boolean;
     readonly allowPatchSetMigration?: boolean;
     readonly allowReadableManifestMigration?: boolean;
+    readonly allowAnnotationMigration?: boolean;
   } = {},
 ): Promise<IcarusRuntime> {
   const root = await prepareStateRoot(stateRoot, process.platform);
@@ -240,6 +241,7 @@ export async function createIcarusRuntime(
     allowApprovalIndexMigration: options.allowApprovalIndexMigration === true,
     allowPatchSetMigration: options.allowPatchSetMigration === true,
     allowReadableManifestMigration: options.allowReadableManifestMigration === true,
+    allowAnnotationMigration: options.allowAnnotationMigration === true,
   });
   const artifacts = new ArtifactStore(root);
   const git = new GitController(controllerHome, runsRoot);

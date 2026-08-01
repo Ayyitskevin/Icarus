@@ -64,6 +64,8 @@ const policySource = await readFile("packages/core/src/policy.ts", "utf8");
 const serviceSource = await readFile("packages/core/src/service.ts", "utf8");
 const runtimeSource = await readFile("packages/core/src/runtime.ts", "utf8");
 const storeSource = await readFile("packages/core/src/store.ts", "utf8");
+const changeRoomCoreSource = await readFile("packages/core/src/change-room.ts", "utf8");
+const changeContextCoreSource = await readFile("packages/core/src/change-context.ts", "utf8");
 const typesSource = await readFile("packages/core/src/types.ts", "utf8");
 const readManifestSource = await readFile("packages/core/src/read-manifest.ts", "utf8");
 const toolsSource = await readFile("packages/core/src/tools.ts", "utf8");
@@ -927,8 +929,17 @@ const assertions = {
     cliSource.includes('approval === "readable-manifest-v3"') &&
     // One token approves one migration; the tokens are not combinable.
     cliSource.includes(
-      "approvalIndex: false,\n    patchSet: false,\n    readableManifest: false,\n    gate1: null,",
+      "approvalIndex: false,\n    patchSet: false,\n    readableManifest: false,\n    annotation: false,\n    gate1: null,",
     ),
+  annotationMigrationHumanGated:
+    coreSchemaSource.includes("export const ICARUS_ANNOTATION_SCHEMA") &&
+    storeSource.includes("function inspectAnnotationSchema(") &&
+    storeSource.includes(
+      'annotationStatus === "missing" && options.allowAnnotationMigration !== true',
+    ) &&
+    storeSource.includes('"DATABASE_MIGRATION_REQUIRED"') &&
+    cliSource.includes('approval === "run-annotations-v1"') &&
+    cliSource.includes("allowAnnotationMigration: migrationApproval.annotation"),
   persistedReadableManifestIsDigestVerified:
     storeSource.includes("readableManifest(runId: string): ReadableManifest | null") &&
     storeSource.includes("readableManifestDigest(manifest) ===") &&
@@ -1222,6 +1233,38 @@ const assertions = {
   workspaceNoRawHtml: workspaceUiSources.every(
     (source) => !source.includes("dangerouslySetInnerHTML") && !source.includes("innerHTML"),
   ),
+  changeRoomRoutesReadOnly:
+    workspaceServerSource.includes('if (method === "GET" && pathname === "/api/change-rooms")') &&
+    workspaceServerSource.includes('if (method === "GET" && runChangeRoom !== null)') &&
+    workspaceServerSource.includes('if (method === "GET" && runChangeContext !== null)') &&
+    !/"(?:POST|PUT|PATCH|DELETE)"\s*&&\s*(?:pathname === "\/api\/change-rooms"|runChangeRoom|runChangeContext)/.test(
+      workspaceServerSource,
+    ),
+  changeRoomAnnotationsAppendOnly:
+    coreSchemaSource.includes("CREATE TABLE IF NOT EXISTS run_annotations") &&
+    storeSource.includes("INSERT INTO run_annotations") &&
+    storeSource.includes("ICARUS_ANNOTATION_SCHEMA") &&
+    storeSource.includes("inspectAnnotationSchema") &&
+    !/UPDATE\s+run_annotations/i.test(storeSource) &&
+    !/DELETE\s+FROM\s+run_annotations/i.test(storeSource) &&
+    !/UPDATE\s+run_annotations/i.test(coreSchemaSource) &&
+    !/DELETE\s+FROM\s+run_annotations/i.test(coreSchemaSource),
+  changeRoomIndexProjectionPreflighted:
+    storeSource.includes("octet_length(provider_json) <= 16384") &&
+    storeSource.includes("octet_length(verification_json) <= 4194304") &&
+    storeSource.includes("json_valid(provider_json, 1) = 1") &&
+    storeSource.includes("json_valid(verification_json, 1) = 1") &&
+    storeSource.includes("verification_json IS NULL AS verification_absent"),
+  changeRoomSnapshotSafeColumns:
+    storeSource.includes(
+      "SELECT run_id, checkpoint_sha256, created_at FROM checkpoints WHERE run_id = ?",
+    ) &&
+    !/(?:baselineBase64|approvedBase64|baseline_base64|approved_base64)/.test(changeRoomCoreSource),
+  changeContextDeterministicLocal:
+    changeContextCoreSource.includes('generatedBy: "deterministic_host_projection"') &&
+    !/(?:fetch\(|node:http|node:https|ModelGateway|gatewayFactory|providerCall)/.test(
+      changeContextCoreSource,
+    ),
   noFocusedOrSkippedGateTests: testSources.every(
     (source) => !/\.(?:only|skip|todo)(?:\s*\(|\.)/.test(source),
   ),
