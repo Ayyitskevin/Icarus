@@ -259,6 +259,7 @@ describe("release security regressions", () => {
         (browserRefusal?.exitCode === 2 &&
           browserRefusal.stderr.includes("INVALID_DATABASE_CONFIGURATION")) ||
           (browserRefusal?.exitCode === 1 && browserRefusal.stderr.includes("RUN_BUSY")),
+        browserRefusal?.stderr ?? "Missing browser migration refusal",
       ).toBe(true);
       expect(JSON.parse(browserSuccesses[0]?.stdout ?? "")).toEqual({
         migration: "browser-action-ledger-v1",

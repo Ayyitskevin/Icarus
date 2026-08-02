@@ -183,6 +183,28 @@ describe("Gate 1 schema maintenance", () => {
     reopened.close();
   });
 
+  test("maps SQLite migration contention to RUN_BUSY without changing the schema", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    fixture.store.close();
+    removeGate1Schemas(fixture.databasePath);
+    writeStateMarker(fixture.databasePath);
+    const before = sha256(readFileSync(fixture.databasePath));
+    const locker = new Database(fixture.databasePath);
+
+    try {
+      locker.exec("BEGIN IMMEDIATE");
+      expectIcarusCode(
+        () => migrateGate1Schema(fixture.databasePath, BROWSER_ACTION_LEDGER_MIGRATION),
+        "RUN_BUSY",
+      );
+      expect(sha256(readFileSync(fixture.databasePath))).toBe(before);
+    } finally {
+      locker.exec("ROLLBACK");
+      locker.close();
+    }
+  });
+
   test("inspects committed uncheckpointed WAL state without changing the source family", () => {
     const fixture = createUnitStore();
     cleanupRoots.push(fixture.root);
@@ -210,11 +232,29 @@ process.exit(0);`,
     expect(databaseFamilyBytes(fixture.databasePath)).toEqual(before);
   });
 
+  test("classifies a canonical SQLite rollback journal as RUN_BUSY without changing it", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    fixture.store.close();
+    removeGate1Schemas(fixture.databasePath);
+    writeStateMarker(fixture.databasePath);
+    writeFileSync(`${fixture.databasePath}-journal`, "unexpected", { mode: 0o600 });
+    const before = databaseFamilyBytes(fixture.databasePath);
+
+    expectIcarusCode(() => inspectGate1Schemas(fixture.databasePath), "RUN_BUSY");
+    expectIcarusCode(
+      () => migrateGate1Schema(fixture.databasePath, BROWSER_ACTION_LEDGER_MIGRATION),
+      "RUN_BUSY",
+    );
+
+    expect(databaseFamilyBytes(fixture.databasePath)).toEqual(before);
+  });
+
   test("refuses unexpected SQLite-family siblings without changing them", () => {
     const fixture = createUnitStore();
     cleanupRoots.push(fixture.root);
     fixture.store.close();
-    writeFileSync(`${fixture.databasePath}-journal`, "unexpected", { mode: 0o600 });
+    writeFileSync(`${fixture.databasePath}-unexpected`, "unexpected", { mode: 0o600 });
     const before = databaseFamilyBytes(fixture.databasePath);
 
     expectIcarusCode(() => inspectGate1Schemas(fixture.databasePath), "DATABASE_ERROR");

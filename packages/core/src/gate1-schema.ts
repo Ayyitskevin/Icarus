@@ -853,14 +853,30 @@ function fingerprintSqliteFamilyFile(filePath: string, name: string): SqliteFami
   };
 }
 
+function isSqliteBusy(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { readonly code?: unknown }).code === "string" &&
+    (error as { readonly code: string }).code.startsWith("SQLITE_BUSY")
+  );
+}
+
 function fingerprintSqliteFamily(databasePath: string): SqliteFamilyFingerprint {
   const parent = path.dirname(databasePath);
   const basename = path.basename(databasePath);
+  const rollbackJournal = `${basename}-journal`;
   const allowed = new Set([basename, `${basename}-wal`, `${basename}-shm`]);
   const names = readdirSync(parent)
     .filter((name) => name === basename || name.startsWith(`${basename}-`))
     .sort();
   invariant(names.includes(basename), "DATABASE_ERROR", "SQLite database disappeared");
+  invariant(
+    !names.includes(rollbackJournal),
+    "RUN_BUSY",
+    "SQLite schema inspection found an active rollback journal",
+  );
   invariant(
     names.every((name) => allowed.has(name)),
     "DATABASE_ERROR",
@@ -1173,6 +1189,11 @@ export function migrateGate1Schema(databasePath: string, token: Gate1MigrationTo
       );
     });
     apply.immediate();
+  } catch (error) {
+    if (isSqliteBusy(error)) {
+      throw new IcarusError("RUN_BUSY", "Another process is migrating the Gate 1 schema");
+    }
+    throw error;
   } finally {
     database.close();
   }
