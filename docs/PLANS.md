@@ -1,12 +1,11 @@
 # Implementation plans
 
-## Candidate plan: Change Handoff Pack v1 (ADR 0042)
+## Accepted implementation record: Change Handoff Pack v1 (ADR 0042)
 
-Status values are evidence claims. ADR 0042 remains Proposed. The candidate
-implementation, local evidence, and independent review below are complete on
-the unpublished local tree; merge and exact published-head hosted CI remain
-acceptance gates. This accepts only the offline Handoff Pack slice, not Athena
-integration, M3, Gate 1, Git landing, or deployment.
+Status values are evidence claims. ADR 0042 is Accepted. The implementation,
+local evidence, independent review, direct-main integration, and exact
+published-head hosted CI are complete. This accepts only the offline Handoff
+Pack slice, not Athena integration, M3, Gate 1, Git landing, or deployment.
 
 ### Separate default-deny payload
 
@@ -120,11 +119,11 @@ integration, M3, Gate 1, Git landing, or deployment.
 - [x] `pnpm audit --prod --audit-level high`
 - [x] `git diff --check`
 - [x] Independent review has no remaining blocker, high, or medium finding
-- [ ] Hosted `ci` succeeds at the exact published implementation head; the
+- [x] Hosted `ci` succeeds at the exact published implementation head; the
       Linux-only native filesystem claims carry matching exact-commit Linux
       evidence
 
-Fresh local candidate evidence on 2026-08-01:
+Fresh acceptance evidence on 2026-08-01:
 
 - `pnpm exec vitest run tests/unit/session-iterations.test.ts
   tests/unit/change-handoff.test.ts --reporter=dot` passed 119/119 focused
@@ -161,10 +160,26 @@ Fresh local candidate evidence on 2026-08-01:
   and the static security gate
   `dc1cfb41604b533439ffac65815b3be36457ad065f30e3f65b98ea8d999f1f66`.
 
-This is full coherence for the bounded local candidate. ADR 0042 remains
-Proposed because the branch is unmerged and unpublished, so no exact published
-implementation-head hosted CI exists. No push, PR, merge, migration,
-deployment, provider/network call, or external handoff occurred.
+- Initial exact-head `ci` run
+  [30724930551](https://github.com/Ayyitskevin/Icarus/actions/runs/30724930551)
+  safely failed the concurrent Gate 1 migration regression because one losing
+  process surfaced an unclassified SQLite contention error.
+- Repair commit
+  [133aa38d](https://github.com/Ayyitskevin/Icarus/commit/133aa38d9b631d794ca724f64d97987662541ff3)
+  maps `SQLITE_BUSY*` and the canonical rollback journal to `RUN_BUSY` while
+  retaining `DATABASE_ERROR` for arbitrary siblings. The deterministic writer
+  lock test proved red before green, five concurrent stress runs passed, and
+  final `pnpm check` passed 654 unit/provider, 93 integration, 7/0/3 evaluator,
+  134 security, static-security, typecheck, workflow, lint, and build gates.
+- Exact published implementation-head `ci` run
+  [30725709403](https://github.com/Ayyitskevin/Icarus/actions/runs/30725709403)
+  passed the deterministic release gate, production dependency audit, and
+  whitespace check in 1 minute 46 seconds.
+
+This is full coherence for the bounded offline implementation. ADR 0042 is
+Accepted on direct-main commit `133aa38d` with independent review and exact-head
+hosted evidence. No PR, migration, deployment, provider call, or Change Handoff
+artifact delivery occurred.
 
 ### Explicitly deferred
 

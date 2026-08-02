@@ -182,7 +182,7 @@ and one explicitly approved `run-annotations-v1` migration; see
 `docs/OPERATIONS.md`. The three new routes are GET-only reads and add no
 browser authority beyond the existing observation boundary.
 
-The Change Handoff Pack v1 candidate
+The accepted Change Handoff Pack v1 implementation
 ([ADR 0042](docs/adr/0042-change-handoff-packs.md)) is deliberately separate.
 `icarus.change-handoff.v1` is a strict default-deny, lifecycle-metadata-only
 artifact built directly from validated Icarus records; the Change Room is never
@@ -201,7 +201,7 @@ WAL exists. Export requires a current-user-owned parent that is not group/other-
 then writes only `icarus-change-handoff.json` and
 `icarus-change-handoff-result.json` as owner-only, no-follow, exclusive local
 files and never overwrites. Secure Handoff Pack preview, export, verification,
-and inspection are Linux-only in this candidate. Export preflights Linux
+and inspection are Linux-only in v1. Export preflights Linux
 descriptor-root/no-follow support and syncs the new directory entry before
 success; every handoff command fails closed on other platforms. File-only
 `handoff verify` and `handoff inspect` do not open Icarus state or use the
@@ -387,7 +387,7 @@ payload digest. Preview makes no writes; it refuses a non-empty SQLite WAL as
 `RUN_BUSY`, so stop the ordinary writer and retry after a clean close rather
 than manipulating journal files. Export rereads and revalidates state and
 refuses stale evidence or either pre-existing fixed output filename.
-Secure Handoff Pack commands are Linux-only in this candidate. Export fails
+Secure Handoff Pack commands are Linux-only in v1. Export fails
 before output-directory creation when descriptor-root/no-follow support is
 unavailable; `verify` and `inspect` remain file-only and do not require or open
 `ICARUS_HOME`. They establish internal consistency only, never authenticity or

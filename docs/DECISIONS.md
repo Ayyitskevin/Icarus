@@ -36,7 +36,7 @@ Decision records for the current milestone:
 | [0039](adr/0039-portable-numeric-loopback-origins.md) | Portable CSPRNG-selected numeric-loopback mutation origins | Rejected — native run `30613980911` passed Windows and failed macOS |
 | [0040](adr/0040-chromium-resolved-localhost-origins.md) | Chromium-resolved 128-bit `.localhost` mutation origins over exact `127.0.0.1` | Accepted — exact-head evidence complete at `eb01b6406c12126c60add7ac83800f8eba8ffdc9` (native run `30618043377`); interim operator browser/resolver/proxy risk accepted 2026-07-31; not a Gate 1 release |
 | [0041](adr/0041-change-rooms-evidence-projections.md) | Change Rooms are evidence projections, not a chat system, workflow engine, or execution authority | Proposed |
-| [0042](adr/0042-change-handoff-packs.md) | Change Handoff Packs are operator-exported redacted evidence capsules, not Change Room replicas or cross-system authority | Proposed |
+| [0042](adr/0042-change-handoff-packs.md) | Change Handoff Packs are operator-exported redacted evidence capsules, not Change Room replicas or cross-system authority | Accepted — exact published-main CI passed at `133aa38d` in run `30725709403` |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.

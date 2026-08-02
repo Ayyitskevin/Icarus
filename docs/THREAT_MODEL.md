@@ -196,7 +196,7 @@ ADR 0041 adds no schema beyond `run_annotations`, dependency, write route,
 stream, watcher, daemon, or browser action route. ADR 0025's residual
 third-party-review and secret-rotation holds remain independent.
 
-## Change Handoff Pack threats (proposed ADR 0042)
+## Change Handoff Pack threats (accepted ADR 0042)
 
 | Threat | Required control | Required evidence and limits |
 | --- | --- | --- |

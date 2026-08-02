@@ -1,7 +1,10 @@
 # ADR 0042: Change Handoff Packs are redacted evidence capsules, not Change Room replicas or cross-system authority
 
-- Status: Proposed
+- Status: Accepted — exact published-main CI passed at `133aa38d` under
+  [run 30725709403](https://github.com/Ayyitskevin/Icarus/actions/runs/30725709403).
 - Date: 2026-08-01
+- Accepted: 2026-08-01 after direct-main integration, independent review, and
+  exact-head hosted evidence.
 - Extends: [ADR 0041](0041-change-rooms-evidence-projections.md)
 - Related: [ADR 0002](0002-sqlite-event-history.md),
   [ADR 0005](0005-deterministic-untrusted-context.md),
@@ -190,7 +193,7 @@ The secure source reader, export writer, and file-only reader are Linux-only in
 v1. Platform and descriptor-root/no-follow capability checks fail closed before
 source or handoff file access and, for export, before output-directory creation.
 macOS and Windows support would require a separate ACL-aware implementation and
-matching native evidence; none is claimed by this candidate.
+matching native evidence; none is claimed by v1.
 
 The result file has exactly `exportStatus`, `previewSha256`, `outputSchema`,
 and `payloadSha256`. The last member is the SHA-256 of the
@@ -326,6 +329,9 @@ with immediate unavailable evidence, and interrupted apply reconciliation
 followed by real checks. Static proof must show that no
 API/browser/provider/Git/landing/workflow state was added. The existing Change
 Room fixed-card, replay, GET-only, annotation non-authority, and redaction suites
-must remain green. Status remains Proposed until fresh local gates, independent
-review, merge, and exact published-head hosted CI are recorded; this decision
-does not accept ADR 0041 or complete M3 or Gate 1.
+must remain green. Fresh local gates, independent review, direct-main
+integration, and exact published-head CI are recorded at commit
+[133aa38d](https://github.com/Ayyitskevin/Icarus/commit/133aa38d9b631d794ca724f64d97987662541ff3)
+under [run 30725709403](https://github.com/Ayyitskevin/Icarus/actions/runs/30725709403).
+Status is Accepted for the bounded offline Handoff Pack slice;
+this decision does not accept ADR 0041 or complete M3 or Gate 1.

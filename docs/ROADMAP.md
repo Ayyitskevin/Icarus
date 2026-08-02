@@ -109,12 +109,12 @@ no independent review or review decision, however, so ADR 0041 remains Proposed
 under the repository's local, independent-review, merge, and exact-head evidence
 policy. Full M3 remains open.
 
-ADR 0042's unpublished candidate implements the next bounded offline artifact:
+Accepted ADR 0042 implements the next bounded offline artifact:
 a default-deny `icarus.change-handoff.v1` projection with pure preview,
-stale-preview-guarded export, and file-only verify/inspect. The complete local
-gate and two independent exact-snapshot reviews are green with no remaining
-blocker, high, or medium finding. Merge and exact published-head hosted CI
-remain open, so the ADR stays Proposed. It exports fixed local files for an
+stale-preview-guarded export, and file-only verify/inspect. The implementation
+landed directly on `main` at `133aa38d`; the complete local gate and independent
+reviews are green with no remaining blocker, high, or medium finding, and exact
+published-head `ci` run `30725709403` passed. It exports fixed local files for an
 operator to review and move deliberately. It does not send to Athena, add a
 receiver, synchronize lifecycle state, or grant landing or execution authority.
 
@@ -307,13 +307,12 @@ browser-to-draft-PR path.
 
 The merged Change Rooms implementation is available as a read-only observation
 surface, but ADR 0041 remains Proposed until an independent review is recorded.
-The current adjacent candidate is ADR 0042's standalone Change Handoff Pack v1.
+The accepted adjacent slice is ADR 0042's standalone Change Handoff Pack v1.
 It preserves the existing Change Room behavior and has satisfied fresh focused
 unit, integration, CLI, adversarial, full repository, smoke, security,
-workflow-audit, dependency-audit, and independent-review gates on the local
-candidate. A successful local artifact does not accept ADR 0042, authorize
-Athena integration, or establish disclosure permission; merge and exact
-published-head hosted CI remain required.
+workflow-audit, dependency-audit, independent-review, direct-main, and exact
+published-head gates. Its acceptance does not authorize Athena integration,
+establish disclosure permission, or widen any landing or execution authority.
 
 Every future release candidate still requires fresh local evidence, independent
 review, merge, and exact published-head hosted CI; platform claims require the
