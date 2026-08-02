@@ -4028,15 +4028,17 @@ try {
     [],
     "the stale-evidence state after a failed event poll",
   );
-  const failedPollRequestCount = networkRequests.filter(
-    (request) => request.method === "GET" && request.url?.includes("/events?after="),
-  ).length;
-  await delay(EVENT_POLL_INTERVAL_MS + 500);
+  const steadyStateRecoveryBoundary = failedEventResponse.observedAt + EVENT_POLL_INTERVAL_MS + 500;
+  await delay(Math.max(0, steadyStateRecoveryBoundary - Date.now()));
   assert.equal(
-    networkRequests.filter(
-      (request) => request.method === "GET" && request.url?.includes("/events?after="),
-    ).length,
-    failedPollRequestCount,
+    networkRequests.some(
+      (request) =>
+        request.method === "GET" &&
+        request.url?.includes("/events?after=") &&
+        request.observedAt > failedEventResponse.observedAt &&
+        request.observedAt <= steadyStateRecoveryBoundary,
+    ),
+    false,
     "the first failed poll must delay recovery beyond the steady-state interval",
   );
   await waitForObserved(
