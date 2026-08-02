@@ -49,6 +49,7 @@ const ACTION_AUTHORITY_HTML_SENTINEL =
   '<img data-browser-action-authority-injection="true">browser-contract-model';
 const ACTION_SESSION_STORAGE_KEY = "icarus.action-session";
 const WORKSPACE_BIND_HOST = "127.0.0.1";
+const GUARDED_BROWSER_ACTIONS_SUPPORTED = process.platform === "linux";
 
 // These process-wide relaxations exist only inside the disposable compiled-browser
 // smoke profile. Product launches must never inherit this test-only flag set.
@@ -2181,7 +2182,10 @@ try {
     "initial browser requests must retain the exact random .localhost origin",
   );
   assert.equal(await page.capability("Provider"), "unconfigured");
-  assert.equal(await page.capability("Execution"), "available");
+  assert.equal(
+    await page.capability("Execution"),
+    GUARDED_BROWSER_ACTIONS_SUPPORTED ? "available" : "unsupported",
+  );
 
   const initialActionSessionEvidence = await page.call((storageKey) => {
     const evidence = window.__icarusActionSessionSmoke;
@@ -4950,276 +4954,301 @@ try {
   );
 
   const actionPostUrl = `${workspace.url}/api/runs/${encodeURIComponent(browserRunId)}/actions`;
-  const openBrowserAction = async (label) => {
-    const opened = await page.call((actionLabel) => {
-      const normalize = (value) => value.replaceAll(/\s+/g, " ").trim();
-      const item = Array.from(document.querySelectorAll(".browser-action-list li")).find(
-        (candidate) => candidate.querySelector("strong")?.textContent?.trim() === actionLabel,
-      );
-      const trigger = Array.from(item?.querySelectorAll("button") ?? []).find(
-        (candidate) => normalize(candidate.textContent ?? "") === "Review this action",
-      );
-      if (!(trigger instanceof HTMLButtonElement) || trigger.disabled) return false;
-      trigger.click();
-      return true;
-    }, label);
-    assert.equal(opened, true, `Could not open guarded action ${label}`);
-    await page.waitFor(
-      (actionLabel) =>
-        document
-          .querySelector('[role="dialog"] #browser-action-confirmation-heading')
-          ?.textContent?.trim() === actionLabel,
-      [label],
-      `the immutable confirmation for ${label}`,
-    );
-  };
-  const dialogFact = (label) =>
-    page.call((factLabel) => {
-      const dialog = document.querySelector('[role="dialog"]');
-      const term = Array.from(dialog?.querySelectorAll("dt") ?? []).find(
-        (candidate) => candidate.textContent?.trim() === factLabel,
-      );
-      return term?.parentElement?.querySelector("dd")?.textContent?.trim() ?? null;
-    }, label);
-  const receiptFacts = (actionId) =>
-    page.call((expectedActionId) => {
-      const receipts = Array.from(document.querySelectorAll(".browser-action-receipt"));
-      const receipt = receipts.find((candidate) => {
-        const actionTerm = Array.from(candidate.querySelectorAll("dt")).find(
-          (term) => term.textContent?.trim() === "Action ID",
+  let browserActionEvidence = null;
+  if (GUARDED_BROWSER_ACTIONS_SUPPORTED) {
+    const openBrowserAction = async (label) => {
+      const opened = await page.call((actionLabel) => {
+        const normalize = (value) => value.replaceAll(/\s+/g, " ").trim();
+        const item = Array.from(document.querySelectorAll(".browser-action-list li")).find(
+          (candidate) => candidate.querySelector("strong")?.textContent?.trim() === actionLabel,
         );
-        return (
-          actionTerm?.parentElement?.querySelector("dd")?.textContent?.trim() === expectedActionId
+        const trigger = Array.from(item?.querySelectorAll("button") ?? []).find(
+          (candidate) => normalize(candidate.textContent ?? "") === "Review this action",
         );
-      });
-      return Object.fromEntries(
-        Array.from(receipt?.querySelectorAll("dt") ?? []).map((term) => [
-          term.textContent?.trim() ?? "",
-          term.parentElement?.querySelector("dd")?.textContent?.replaceAll(/\s+/g, " ").trim() ??
-            "",
-        ]),
+        if (!(trigger instanceof HTMLButtonElement) || trigger.disabled) return false;
+        trigger.click();
+        return true;
+      }, label);
+      assert.equal(opened, true, `Could not open guarded action ${label}`);
+      await page.waitFor(
+        (actionLabel) =>
+          document
+            .querySelector('[role="dialog"] #browser-action-confirmation-heading')
+            ?.textContent?.trim() === actionLabel,
+        [label],
+        `the immutable confirmation for ${label}`,
       );
-    }, actionId);
-
-  await openBrowserAction("Approve bounded plan and execute");
-  await page.waitFor(
-    () =>
-      document.activeElement instanceof HTMLButtonElement &&
-      document.activeElement.textContent?.trim() === "Close without submitting",
-    [],
-    "initial focus on the non-submitting dialog control",
-  );
-  const planDialogEvidence = await page.call(
-    (target, sandboxImage, providerEndpoint, hostileModel) => {
-      const dialog = document.querySelector('[role="dialog"]');
-      const text = dialog?.textContent?.replaceAll(/\s+/g, " ").trim() ?? "";
-      return {
-        modal: dialog?.getAttribute("aria-modal") === "true",
-        immutable: text.includes("Immutable confirmation"),
-        authority: text.includes("What plan approval permits"),
-        actorFixed: text.includes(
-          "The actor is fixed by the host at startup. This browser request contains no actor.",
-        ),
-        target: text.includes(target),
-        checkArgv: text.includes('["node","--test"]'),
-        sandbox: text.includes(sandboxImage),
-        provider: text.includes(providerEndpoint),
-        consequence: text.includes("This does not commit, push, merge, or deploy."),
-        hostileModelText: text.includes(hostileModel),
-        hostileModelElement:
-          dialog?.querySelector('[data-browser-action-authority-injection="true"]') !== null,
-      };
-    },
-    TARGET,
-    SANDBOX_IMAGE,
-    provider.baseUrl,
-    ACTION_AUTHORITY_HTML_SENTINEL,
-  );
-  assert.deepEqual(planDialogEvidence, {
-    modal: true,
-    immutable: true,
-    authority: true,
-    actorFixed: true,
-    target: true,
-    checkArgv: true,
-    sandbox: true,
-    provider: true,
-    consequence: true,
-    hostileModelText: true,
-    hostileModelElement: false,
-  });
-  await page.pressKey("Tab", "Tab", 9);
-  assert.equal(
-    await page.call(() => document.activeElement?.textContent?.replaceAll(/\s+/g, " ").trim()),
-    "Approve bounded plan and execute",
-  );
-  await page.pressKey("Tab", "Tab", 9);
-  assert.equal(
-    await page.call(() => document.activeElement?.textContent?.replaceAll(/\s+/g, " ").trim()),
-    "Close without submitting",
-    "Tab from the last enabled dialog control must wrap to the first",
-  );
-  await page.pressKey("Escape", "Escape", 27);
-  await page.waitFor(
-    (actionLabel) => {
-      if (document.querySelector('[role="dialog"]') !== null) return false;
-      const active = document.activeElement;
-      return (
-        active instanceof HTMLButtonElement &&
-        active.closest("li")?.querySelector("strong")?.textContent?.trim() === actionLabel
-      );
-    },
-    ["Approve bounded plan and execute"],
-    "Escape to close the dialog and restore its exact trigger focus",
-  );
-
-  await openBrowserAction("Approve bounded plan and execute");
-  const staleActionId = await dialogFact("Action ID");
-  assert.match(
-    staleActionId,
-    /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
-  );
-  const heldActionEventPoll = browserPage.holdNextEventPoll();
-  finishHeldBrowserEventPoll = heldActionEventPoll.finish;
-  await waitForObserved(
-    () => heldActionEventPoll.observation() !== null,
-    "the held event poll that pins the stale confirmation",
-  );
-  insertResumeRequestedFixture(stateRoot, browserRunId);
-  const actionPostBaseline = networkRequests.filter(
-    (request) => request.method === "POST" && request.url === actionPostUrl,
-  ).length;
-  await page.clickButton("Approve bounded plan and execute");
-  await page.waitFor(
-    (actionId) => {
-      const receipts = Array.from(document.querySelectorAll(".browser-action-receipt"));
-      return receipts.some((receipt) => {
-        const facts = new Map(
-          Array.from(receipt.querySelectorAll("dt")).map((term) => [
-            term.textContent?.trim(),
-            term.parentElement?.querySelector("dd")?.textContent?.replaceAll(/\s+/g, " ").trim(),
+    };
+    const dialogFact = (label) =>
+      page.call((factLabel) => {
+        const dialog = document.querySelector('[role="dialog"]');
+        const term = Array.from(dialog?.querySelectorAll("dt") ?? []).find(
+          (candidate) => candidate.textContent?.trim() === factLabel,
+        );
+        return term?.parentElement?.querySelector("dd")?.textContent?.trim() ?? null;
+      }, label);
+    const receiptFacts = (actionId) =>
+      page.call((expectedActionId) => {
+        const receipts = Array.from(document.querySelectorAll(".browser-action-receipt"));
+        const receipt = receipts.find((candidate) => {
+          const actionTerm = Array.from(candidate.querySelectorAll("dt")).find(
+            (term) => term.textContent?.trim() === "Action ID",
+          );
+          return (
+            actionTerm?.parentElement?.querySelector("dd")?.textContent?.trim() === expectedActionId
+          );
+        });
+        return Object.fromEntries(
+          Array.from(receipt?.querySelectorAll("dt") ?? []).map((term) => [
+            term.textContent?.trim() ?? "",
+            term.parentElement?.querySelector("dd")?.textContent?.replaceAll(/\s+/g, " ").trim() ??
+              "",
           ]),
         );
-        return (
-          facts.get("Action ID") === actionId &&
-          facts.get("Status") === "settled" &&
-          facts.get("Outcome") === "refused" &&
-          facts.get("Safe error code") === "STALE_ACTION"
-        );
-      });
-    },
-    [staleActionId],
-    "the bounded stale-action refusal receipt",
-  );
-  await waitForObserved(
-    () =>
-      networkResponses.some(
-        (response) =>
-          response.url === actionPostUrl &&
-          response.status === 409 &&
-          response.observedAt >= (heldActionEventPoll.observation()?.observedAt ?? 0),
-      ),
-    "the stale action's bounded HTTP 409 envelope",
-  );
-  assert.equal(
-    networkRequests.filter((request) => request.method === "POST" && request.url === actionPostUrl)
-      .length,
-    actionPostBaseline + 1,
-    "a stale confirmation must submit its immutable action ID exactly once",
-  );
-  assert.deepEqual(await receiptFacts(staleActionId), {
-    "Action ID": staleActionId,
-    Kind: "plan.approve",
-    Status: "settled",
-    Outcome: "refused",
-    "Safe error code": "STALE_ACTION",
-    Updated: (await receiptFacts(staleActionId)).Updated,
-  });
-  assert.equal(provider.requests.length, 1, "stale plan approval must cause no provider effect");
-  await page.waitFor(
-    () =>
-      document.activeElement?.id === "run-browser-actions" &&
-      document.querySelector('[role="dialog"]') === null,
-    [],
-    "stale confirmation teardown to focus the surviving action panel",
-  );
-  const heldActionEventRelease = await heldActionEventPoll.finish();
-  finishHeldBrowserEventPoll = undefined;
+      }, actionId);
 
-  await page.waitFor(
-    () =>
-      Array.from(document.querySelectorAll(".browser-action-list strong")).some(
-        (candidate) => candidate.textContent?.trim() === "Cancel run",
-      ),
-    [],
-    "the fresh cancellation descriptor after stale refusal",
-  );
-  await openBrowserAction("Cancel run");
-  const cancelActionId = await dialogFact("Action ID");
-  assert.match(
-    cancelActionId,
-    /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
-  );
-  await page.clickButton("Cancel run");
-  await page.waitFor(
-    (actionId) => {
-      const facts = Array.from(document.querySelectorAll(".browser-action-receipt")).map(
-        (receipt) =>
-          new Map(
+    await openBrowserAction("Approve bounded plan and execute");
+    await page.waitFor(
+      () =>
+        document.activeElement instanceof HTMLButtonElement &&
+        document.activeElement.textContent?.trim() === "Close without submitting",
+      [],
+      "initial focus on the non-submitting dialog control",
+    );
+    const planDialogEvidence = await page.call(
+      (target, sandboxImage, providerEndpoint, hostileModel) => {
+        const dialog = document.querySelector('[role="dialog"]');
+        const text = dialog?.textContent?.replaceAll(/\s+/g, " ").trim() ?? "";
+        return {
+          modal: dialog?.getAttribute("aria-modal") === "true",
+          immutable: text.includes("Immutable confirmation"),
+          authority: text.includes("What plan approval permits"),
+          actorFixed: text.includes(
+            "The actor is fixed by the host at startup. This browser request contains no actor.",
+          ),
+          target: text.includes(target),
+          checkArgv: text.includes('["node","--test"]'),
+          sandbox: text.includes(sandboxImage),
+          provider: text.includes(providerEndpoint),
+          consequence: text.includes("This does not commit, push, merge, or deploy."),
+          hostileModelText: text.includes(hostileModel),
+          hostileModelElement:
+            dialog?.querySelector('[data-browser-action-authority-injection="true"]') !== null,
+        };
+      },
+      TARGET,
+      SANDBOX_IMAGE,
+      provider.baseUrl,
+      ACTION_AUTHORITY_HTML_SENTINEL,
+    );
+    assert.deepEqual(planDialogEvidence, {
+      modal: true,
+      immutable: true,
+      authority: true,
+      actorFixed: true,
+      target: true,
+      checkArgv: true,
+      sandbox: true,
+      provider: true,
+      consequence: true,
+      hostileModelText: true,
+      hostileModelElement: false,
+    });
+    await page.pressKey("Tab", "Tab", 9);
+    assert.equal(
+      await page.call(() => document.activeElement?.textContent?.replaceAll(/\s+/g, " ").trim()),
+      "Approve bounded plan and execute",
+    );
+    await page.pressKey("Tab", "Tab", 9);
+    assert.equal(
+      await page.call(() => document.activeElement?.textContent?.replaceAll(/\s+/g, " ").trim()),
+      "Close without submitting",
+      "Tab from the last enabled dialog control must wrap to the first",
+    );
+    await page.pressKey("Escape", "Escape", 27);
+    await page.waitFor(
+      (actionLabel) => {
+        if (document.querySelector('[role="dialog"]') !== null) return false;
+        const active = document.activeElement;
+        return (
+          active instanceof HTMLButtonElement &&
+          active.closest("li")?.querySelector("strong")?.textContent?.trim() === actionLabel
+        );
+      },
+      ["Approve bounded plan and execute"],
+      "Escape to close the dialog and restore its exact trigger focus",
+    );
+
+    await openBrowserAction("Approve bounded plan and execute");
+    const staleActionId = await dialogFact("Action ID");
+    assert.match(
+      staleActionId,
+      /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+    );
+    const heldActionEventPoll = browserPage.holdNextEventPoll();
+    finishHeldBrowserEventPoll = heldActionEventPoll.finish;
+    await waitForObserved(
+      () => heldActionEventPoll.observation() !== null,
+      "the held event poll that pins the stale confirmation",
+    );
+    insertResumeRequestedFixture(stateRoot, browserRunId);
+    const actionPostBaseline = networkRequests.filter(
+      (request) => request.method === "POST" && request.url === actionPostUrl,
+    ).length;
+    await page.clickButton("Approve bounded plan and execute");
+    await page.waitFor(
+      (actionId) => {
+        const receipts = Array.from(document.querySelectorAll(".browser-action-receipt"));
+        return receipts.some((receipt) => {
+          const facts = new Map(
             Array.from(receipt.querySelectorAll("dt")).map((term) => [
               term.textContent?.trim(),
               term.parentElement?.querySelector("dd")?.textContent?.replaceAll(/\s+/g, " ").trim(),
             ]),
-          ),
-      );
-      return (
-        facts.some(
+          );
+          return (
+            facts.get("Action ID") === actionId &&
+            facts.get("Status") === "settled" &&
+            facts.get("Outcome") === "refused" &&
+            facts.get("Safe error code") === "STALE_ACTION"
+          );
+        });
+      },
+      [staleActionId],
+      "the bounded stale-action refusal receipt",
+    );
+    await waitForObserved(
+      () =>
+        networkResponses.some(
+          (response) =>
+            response.url === actionPostUrl &&
+            response.status === 409 &&
+            response.observedAt >= (heldActionEventPoll.observation()?.observedAt ?? 0),
+        ),
+      "the stale action's bounded HTTP 409 envelope",
+    );
+    assert.equal(
+      networkRequests.filter(
+        (request) => request.method === "POST" && request.url === actionPostUrl,
+      ).length,
+      actionPostBaseline + 1,
+      "a stale confirmation must submit its immutable action ID exactly once",
+    );
+    assert.deepEqual(await receiptFacts(staleActionId), {
+      "Action ID": staleActionId,
+      Kind: "plan.approve",
+      Status: "settled",
+      Outcome: "refused",
+      "Safe error code": "STALE_ACTION",
+      Updated: (await receiptFacts(staleActionId)).Updated,
+    });
+    assert.equal(provider.requests.length, 1, "stale plan approval must cause no provider effect");
+    await page.waitFor(
+      () =>
+        document.activeElement?.id === "run-browser-actions" &&
+        document.querySelector('[role="dialog"]') === null,
+      [],
+      "stale confirmation teardown to focus the surviving action panel",
+    );
+    const heldActionEventRelease = await heldActionEventPoll.finish();
+    finishHeldBrowserEventPoll = undefined;
+
+    await page.waitFor(
+      () =>
+        Array.from(document.querySelectorAll(".browser-action-list strong")).some(
+          (candidate) => candidate.textContent?.trim() === "Cancel run",
+        ),
+      [],
+      "the fresh cancellation descriptor after stale refusal",
+    );
+    await openBrowserAction("Cancel run");
+    const cancelActionId = await dialogFact("Action ID");
+    assert.match(
+      cancelActionId,
+      /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+    );
+    await page.clickButton("Cancel run");
+    await page.waitFor(
+      (actionId) => {
+        const facts = Array.from(document.querySelectorAll(".browser-action-receipt")).map(
           (receipt) =>
-            receipt.get("Action ID") === actionId &&
-            receipt.get("Kind") === "run.cancel" &&
-            receipt.get("Status") === "settled" &&
-            receipt.get("Outcome") === "succeeded" &&
-            receipt.get("Safe error code") === "None",
-        ) &&
-        Array.from(document.querySelectorAll(".run-evidence dt")).some(
-          (term) =>
-            term.textContent?.trim() === "Exact persisted state" &&
-            term.parentElement?.querySelector("dd")?.textContent?.trim() === "cancelled",
-        )
-      );
-    },
-    [cancelActionId],
-    "the successful bounded cancellation receipt and terminal run state",
-  );
-  assert.equal(provider.requests.length, 1, "cancellation must not start another provider request");
-  const actionPosts = networkRequests.filter(
-    (request) => request.method === "POST" && request.url === actionPostUrl,
-  );
-  assert.equal(actionPosts.length, actionPostBaseline + 2);
-  const guardedActionSecurity = localRequestSecurity.filter(
-    (request) => request.method === "POST" && request.url === actionPostUrl,
-  );
-  assert.deepEqual(
-    guardedActionSecurity.map((request) => request.action),
-    ["plan.approve", "run.cancel"],
-  );
-  const browserActionEvidence = {
-    immutableConfirmation: true,
-    completePlanAuthority: true,
-    hostileAuthorityTextInert: true,
-    keyboardFocusTrap: true,
-    escapeRestoredTrigger: true,
-    staleActionId,
-    staleStatus: 409,
-    staleReceipt: "refused/STALE_ACTION",
-    staleProviderEffects: 0,
-    staleFocusFallback: "action-panel",
-    heldEventRelease: heldActionEventRelease,
-    cancelActionId,
-    cancelReceipt: "succeeded",
-    finalState: "cancelled",
-    actionPosts: actionPosts.length - actionPostBaseline,
-  };
+            new Map(
+              Array.from(receipt.querySelectorAll("dt")).map((term) => [
+                term.textContent?.trim(),
+                term.parentElement
+                  ?.querySelector("dd")
+                  ?.textContent?.replaceAll(/\s+/g, " ")
+                  .trim(),
+              ]),
+            ),
+        );
+        return (
+          facts.some(
+            (receipt) =>
+              receipt.get("Action ID") === actionId &&
+              receipt.get("Kind") === "run.cancel" &&
+              receipt.get("Status") === "settled" &&
+              receipt.get("Outcome") === "succeeded" &&
+              receipt.get("Safe error code") === "None",
+          ) &&
+          Array.from(document.querySelectorAll(".run-evidence dt")).some(
+            (term) =>
+              term.textContent?.trim() === "Exact persisted state" &&
+              term.parentElement?.querySelector("dd")?.textContent?.trim() === "cancelled",
+          )
+        );
+      },
+      [cancelActionId],
+      "the successful bounded cancellation receipt and terminal run state",
+    );
+    assert.equal(
+      provider.requests.length,
+      1,
+      "cancellation must not start another provider request",
+    );
+    const actionPosts = networkRequests.filter(
+      (request) => request.method === "POST" && request.url === actionPostUrl,
+    );
+    assert.equal(actionPosts.length, actionPostBaseline + 2);
+    const guardedActionSecurity = localRequestSecurity.filter(
+      (request) => request.method === "POST" && request.url === actionPostUrl,
+    );
+    assert.deepEqual(
+      guardedActionSecurity.map((request) => request.action),
+      ["plan.approve", "run.cancel"],
+    );
+    browserActionEvidence = {
+      immutableConfirmation: true,
+      completePlanAuthority: true,
+      hostileAuthorityTextInert: true,
+      keyboardFocusTrap: true,
+      escapeRestoredTrigger: true,
+      staleActionId,
+      staleStatus: 409,
+      staleReceipt: "refused/STALE_ACTION",
+      staleProviderEffects: 0,
+      staleFocusFallback: "action-panel",
+      heldEventRelease: heldActionEventRelease,
+      cancelActionId,
+      cancelReceipt: "succeeded",
+      finalState: "cancelled",
+      actionPosts: actionPosts.length - actionPostBaseline,
+    };
+  } else {
+    assert.equal(await page.capability("Execution"), "unsupported");
+    assert.equal(
+      await page.call(() => document.querySelector(".browser-action-list") === null),
+      true,
+      "portable hosts must publish no Linux-only guarded action controls",
+    );
+    assert.equal(
+      networkRequests.filter(
+        (request) => request.method === "POST" && request.url === actionPostUrl,
+      ).length,
+      0,
+      "portable hosts must issue no Linux-only guarded action requests",
+    );
+  }
 
   assert.deepEqual(blockedExternalRequests, []);
   assert.deepEqual(browserErrors, []);
@@ -5477,7 +5506,7 @@ try {
   assert.equal(projects.length, PROJECT_PAGE_FIXTURE_COUNT + 2);
   assert.notEqual(browserProject, undefined);
   assert.equal(run.id, browserRunId);
-  assert.equal(run.state, "cancelled");
+  assert.equal(run.state, GUARDED_BROWSER_ACTIONS_SUPPORTED ? "cancelled" : "awaiting_approval");
   const after = await fingerprint(repository);
   assert.deepEqual(after, before);
 
@@ -5493,7 +5522,7 @@ try {
           userAgent: chromiumVersion.userAgent,
         },
         initialProvider: "unconfigured",
-        initialExecution: "available",
+        initialExecution: GUARDED_BROWSER_ACTIONS_SUPPORTED ? "available" : "unsupported",
         validationErrors: ["invalid_check_argv", "missing_context_target", "invalid_provider_url"],
         projectId: browserProject?.id,
         contextDigest: firstDigest,
