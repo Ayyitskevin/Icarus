@@ -785,6 +785,85 @@ A check is failed if it timed out or was cancelled, even if it traps termination
 and eventually exits zero. The historical event evidence and the latest run
 snapshot should agree on the current attempt while preserving earlier attempts.
 
+## Gate 1 benchmark contract runbook
+
+The committed, populated offline input is
+`fixtures/evals/gate1/manifest.v1.json`. Run its focused strict validator and
+evaluator with:
+
+```text
+pnpm benchmark:gate1
+```
+
+The ordinary `pnpm eval` gate includes the same focused contract. Both paths use
+the production Ollama adapter only through deterministic loopback HTTP and run
+registered checks inside the production no-network sandboxes. They may create
+one deterministic local candidate and one absent-only private `icarus/` ref per
+case in temporary Icarus-owned state. They resolve no GitHub credential, contact
+no external network, mutate no remote ref or pull request, run no live state
+migration, and perform no force-push, merge, or deployment.
+
+Treat every repository fixture as untrusted plain-tree input. A fixture root
+must not contain any `.git` path, and its exact inventory must contain neither a
+`.git` component nor a `.gitattributes` file. The copy step independently
+excludes root `.git` and rechecks that it is absent before initializing Git.
+Fixture Git runs only as fixed `/usr/bin/git` with `/usr/bin:/bin`, an isolated
+home/configuration, system/global configuration and attributes disabled, hooks
+and credential helpers disabled, prompts and SSH suppressed, and network
+protocols denied. The focused fixture-boundary suite injects `.git` as a
+directory, file, and symlink plus a malicious local clean filter, then proves
+the benchmark refuses before the filter can execute.
+
+The generated result path is `.local/gate1-benchmark-report.json`. It is ignored;
+the runner removes any stale result before starting Gate 1 work, and it must not
+be committed as a replacement for the manifest. Report schema v1 is a closed
+success/failure union. A success report binds the validated committed-input
+digest and records all three completed cases with their observed task, source,
+provider-instruction, registered-check, and candidate identities. Each completed
+case marks draft-PR and receipt effects `not_executed_contract_only`; their
+closed future requirements live in the input manifest. The manifest's
+derivative-effect declaration is `contract-only-unassessed`; do not treat it as
+an operator assessment of automation configured on a real repository.
+
+A handled failure after report-output preflight records only the ordered prefix
+of fully completed cases. `counts.contractPassed` and the aggregate effect
+counters cover that prefix only, and `effects.status` is
+`partial_completed_cases_only`; never infer the active failed case's incomplete
+effects from those counters. The failure record includes its stage, the next case
+ID only for case execution, a bounded safe error code or `null`, and a SHA-256 of
+the error message rather than the message. `manifestSha256` is the digest of the
+raw manifest bytes when available and is `null` only when those bytes could not
+be read. The failure report adds an explicit incomplete-effects limitation. Both
+variants reject missing or extra fields, are strict-parsed and validated before
+and after atomic persistence, and say Gate 1 remains incomplete. If report
+construction, validation, or persistence fails and the failure variant cannot
+itself be validated and persisted, the command raises a combined failure and no
+report should be trusted.
+
+The offline recovery exercise closes and reopens the production runtime, reads a
+benchmark-harness candidate journal, and re-instantiates the local landing
+controller before creating the absent-only ref. It rejects a duplicate replay,
+but it does not execute a browser reload or foreground-server process restart
+and does not prove durable landing coordination. Browser reload and server
+restart remain separate acceptance cases: same-tab reload retains its
+`sessionStorage` bearer, while a foreground-server restart rotates origin and
+bearer and requires the newly emitted launch URL. Never preserve, copy, or report
+the old bearer as restart evidence.
+
+The offline command is not the Gate 1 release benchmark. Completion still needs
+a separate versioned, human-approved, credential-gated Linux live-evidence
+profile bound to the offline manifest digest. It must reuse the exact immutable
+case/task/check/source/expected-change/candidate pins while separately pinning
+the real provider/model and adapter version, captured pricing and budgets, and
+an operator assessment of each real repository's automation with its disposition
+and raw assessment digest. The profile must name and separately approve every
+allowed Git object upload, absent-only remote-ref creation, draft-PR creation,
+and receipt effect; nothing else becomes authorized. Its result must record exact
+candidate and live branch/commit/draft-PR/receipt identities and prove 3/3
+success. Mock, synthetic, loopback, or contract-only results cannot substitute.
+No credential value belongs in either manifest or result, and this offline
+runbook does not authorize the live profile.
+
 ## Repository automation and release hold
 
 The inherited `.github/workflows/opencode.yml` is outside the local runtime but

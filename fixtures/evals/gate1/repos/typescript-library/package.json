@@ -1,0 +1,8 @@
+{
+  "name": "gate1-typescript-library-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/clamp.test.ts"
+  }
+}

@@ -16,7 +16,7 @@ The current sequence is:
 | Gate | Product outcome | Exit evidence |
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
-| 1 | Verified Change Gate | browser digest approvals plus deterministic candidate commit, absent-only `icarus/<run-id>` reference, bounded GitHub REST object upload, draft PR, and reconciliation receipt on three repositories; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint; derivative repository automation is disclosed and digest-bound |
+| 1 | Verified Change Gate | populated closed three-stack offline input contract present; a separate human-approved, credential-gated live-evidence profile must bind its digest and immutable case pins, real provider/model and budgets, operator-assessed repository automation, named remote effects, browser digest approvals, deterministic candidate commit, absent-only `icarus/<run-id>` reference, bounded GitHub REST object upload, draft PR, and reconciliation receipt, then succeed 3/3; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
 | 2 | Context and agent quality | measured explanation/security/refactor evals, retrieval recall ≥0.90 and precision ≥0.60, first-pass plan acceptance ≥80% |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
@@ -305,9 +305,39 @@ Current forward work is Gate 1. PR #20 (`79e6dc7`, implementation head
 ledger and shutdown settlement plus ADR 0027's landing schema, records,
 deterministic candidate construction, and absent-only local reference. Guarded
 action routes, admitted-row terminal reconciliation and recovery presentation,
-durable landing coordination, the GitHub gateway, and the versioned benchmark
-remain incomplete. No live state migration, Git landing effect, deployment, or
-public release was authorized or performed by that foundation work.
+durable landing coordination, and the GitHub gateway and receipt runtime remain
+incomplete.
+
+Slice 1 adds the populated closed input contract at
+`fixtures/evals/gate1/manifest.v1.json`, the focused `pnpm benchmark:gate1`
+command integrated under `pnpm eval`, and the ignored schema-v1
+`.local/gate1-benchmark-report.json`. That report is a closed success/failure
+union: success binds the validated manifest digest and all three case
+observations, while failure retains only the ordered completed-case prefix,
+labels its aggregate counters `partial_completed_cases_only`, and binds the
+failure stage, applicable next case, safe code or `null`, and message digest. A
+failure report's manifest digest is `null` only when the raw manifest bytes were
+unavailable. The local path uses deterministic loopback production-Ollama
+transport, no-network sandboxes, and the real local candidate plus absent-only-
+ref foundation; each completed-case record's draft-PR and receipt values are
+explicitly `not_executed_contract_only`. The manifest's derivative-effect
+declaration is `contract-only-unassessed`. For each completed case, the offline
+runner reopens the production runtime and replays a harness-only candidate
+journal into a new local controller; it does not execute browser reload,
+foreground-server restart, or durable landing coordination.
+
+Gate 1 still requires a separate versioned, human-approved, credential-gated
+live-evidence profile bound to the offline manifest digest and exact immutable
+case/task/check/source/expected-change/candidate pins. It must pin a real
+provider/model and adapter version, captured pricing and budgets, and an
+operator-produced repository-automation assessment with disposition and raw
+assessment digest. It may authorize only named, separately approved Git object
+upload, absent-only remote-ref creation, draft-PR creation, and receipt effects,
+and must succeed 3/3 against approved real repositories with exact candidate and
+live identities. Mock or synthetic model, GitHub, automation, or receipt results
+cannot satisfy that gate. No credential, paid model, external network, remote
+mutation, live state migration, force-push, merge, deployment, or public release
+is authorized or performed by the offline contract runner.
 
 The merged Change Rooms implementation is available as a read-only observation
 surface, but ADR 0041 remains Proposed until an independent review is recorded.

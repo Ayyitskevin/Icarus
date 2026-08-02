@@ -1,10 +1,12 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { parseStrictJson } from "../packages/core/dist/canonical-json.js";
 import {
   validateCiWorkflowSupplyChain,
   validateWorkflowAttributes,
 } from "./ci-workflow-policy.mjs";
+import { validateGate1BenchmarkManifest } from "./gate1-benchmark-contract.mjs";
 
 async function collectSources(directory, include) {
   const sources = [];
@@ -98,9 +100,27 @@ const compactVerificationProjectionSource = verificationProjectionSource.replace
 const actionlintToolSource = await readFile("scripts/actionlint-tool.mjs", "utf8");
 const actionlintSetupSource = await readFile("scripts/setup-actionlint.mjs", "utf8");
 const workflowLintSource = await readFile("scripts/workflow-lint.mjs", "utf8");
+const gate1BenchmarkSource = await readFile("scripts/gate1-benchmark.mjs", "utf8");
+const gate1BenchmarkContractSource = await readFile("scripts/gate1-benchmark-contract.mjs", "utf8");
+const gate1BenchmarkResultContractSource = await readFile(
+  "scripts/gate1-benchmark-result-contract.mjs",
+  "utf8",
+);
+const gate1BenchmarkManifestSource = await readFile(
+  "fixtures/evals/gate1/manifest.v1.json",
+  "utf8",
+);
 const inheritedWorkflowSource = await readFile(".github/workflows/opencode.yml", "utf8");
 const packageSource = await readFile("package.json", "utf8");
 const packageJson = JSON.parse(packageSource);
+const gate1BenchmarkManifest = parseStrictJson(gate1BenchmarkManifestSource);
+let gate1BenchmarkManifestValid = false;
+try {
+  validateGate1BenchmarkManifest(gate1BenchmarkManifest);
+  gate1BenchmarkManifestValid = true;
+} catch {
+  // The named assertion below reports benchmark authority drift.
+}
 const ciWorkflowSource = await readFile(".github/workflows/ci.yml", "utf8");
 const gitAttributesSource = await readFile(".gitattributes", "utf8");
 let ciWorkflowSupplyChainPinned = false;
@@ -1885,6 +1905,76 @@ const assertions = {
     changeContextCoreSource.includes('generatedBy: "deterministic_host_projection"') &&
     !/(?:fetch\(|node:http|node:https|ModelGateway|gatewayFactory|providerCall)/.test(
       changeContextCoreSource,
+    ),
+  gate1BenchmarkCommandIntegrated:
+    packageJson.scripts["benchmark:gate1"] ===
+      "pnpm build:node && node scripts/gate1-benchmark.mjs" &&
+    packageJson.scripts.eval ===
+      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs",
+  gate1BenchmarkManifestClosedAndNonAuthoritative:
+    gate1BenchmarkManifestValid &&
+    gate1BenchmarkManifest.executionBoundary?.credentialReads === 0 &&
+    gate1BenchmarkManifest.executionBoundary?.externalNetworkRequests === 0 &&
+    gate1BenchmarkManifest.executionBoundary?.remoteMutations === 0 &&
+    gate1BenchmarkManifest.executionBoundary?.mockedEvidenceCompletesGate === false &&
+    gate1BenchmarkManifest.releaseGate?.credentialGatedRealGitHubEvidenceRequired === true &&
+    gate1BenchmarkManifest.cases?.every(
+      (entry) =>
+        entry.modelAdapter?.paid === false &&
+        entry.modelAdapter?.credentials === false &&
+        entry.budgets?.maxRemoteMutations === 0 &&
+        entry.repository?.derivativeEffects?.evidenceMode === "contract-only-unassessed" &&
+        entry.repository?.derivativeEffects?.liveAssessmentRequired === true &&
+        entry.repository?.derivativeEffects?.assessmentSha256 === null &&
+        entry.draftPullRequestEvidence?.remoteMutationAllowed === false &&
+        entry.receiptEvidence?.runtimeRequiredForGate === true &&
+        entry.receiptEvidence?.syntheticReceiptCompletesGate === false,
+    ),
+  gate1BenchmarkRunnerUsesOnlyLocalProductionFoundations:
+    gate1BenchmarkSource.includes('server.listen(0, "127.0.0.1"') &&
+    gate1BenchmarkSource.includes("new DockerSandboxRunner(") &&
+    gate1BenchmarkSource.includes("await createIcarusRuntime(stateRoot, { gatewayFactory })") &&
+    gate1BenchmarkSource.includes("return new OllamaGateway(config)") &&
+    gate1BenchmarkSource.includes('target.hostname !== "127.0.0.1"') &&
+    gate1BenchmarkSource.includes("effects.externalNetworkRequests += 1") &&
+    gate1BenchmarkSource.includes('await assertPathAbsent(path.join(source, ".git")') &&
+    gate1BenchmarkSource.includes("sourcePath !== fixtureGitPath") &&
+    gate1BenchmarkSource.includes('spawnSync(\n    "/usr/bin/git"') &&
+    gate1BenchmarkSource.includes('"core.attributesFile=/dev/null"') &&
+    gate1BenchmarkSource.includes('GIT_ATTR_NOSYSTEM: "1"') &&
+    gate1BenchmarkSource.includes("await landingController.prepareCandidate(candidateInput)") &&
+    gate1BenchmarkSource.includes("await restartedController.createAbsentLocalRef({") &&
+    !/(?:\bfetch\s*\(|api\.github\.com|process\.env\.(?:GH|GITHUB)|credentialRef|pushCandidate|createDraftPullRequest)/.test(
+      gate1BenchmarkSource,
+    ),
+  gate1BenchmarkResultCannotMasqueradeAsReleaseEvidence:
+    ignore.includes(".local/\n") &&
+    gate1BenchmarkSource.includes('const reportDirectory = path.join(root, ".local")') &&
+    gate1BenchmarkSource.includes("fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW") &&
+    gate1BenchmarkSource.includes("existing.nlink === 1") &&
+    gate1BenchmarkSource.includes("await rm(output.heldReportPath)") &&
+    gate1BenchmarkSource.includes("validateGate1BenchmarkReport(") &&
+    gate1BenchmarkSource.includes("parseStrictJson(serialized)") &&
+    gate1BenchmarkSource.includes('parseStrictJson(persisted.toString("utf8"))') &&
+    /persisted\.equals\(Buffer\.from\(serialized,\s*"utf8"\)\)/u.test(gate1BenchmarkSource) &&
+    gate1BenchmarkSource.includes("await rename(temporaryPath, output.heldReportPath)") &&
+    gate1BenchmarkSource.includes('assessment: "offline_contract_passed_gate1_incomplete"') &&
+    gate1BenchmarkSource.includes('assessment: "offline_contract_failed_gate1_incomplete"') &&
+    gate1BenchmarkSource.includes('status: "partial_completed_cases_only"') &&
+    gate1BenchmarkSource.includes('status: "not_executed_contract_only"') &&
+    !gate1BenchmarkSource.includes("candidateObjectManifest: undefined") &&
+    gate1BenchmarkResultContractSource.includes("const SUCCESS_REPORT_KEYS = Object.freeze(") &&
+    gate1BenchmarkResultContractSource.includes("const FAILURE_REPORT_KEYS = Object.freeze(") &&
+    gate1BenchmarkResultContractSource.includes("validateCaseResult(") &&
+    gate1BenchmarkResultContractSource.includes("validateFailure(") &&
+    gate1BenchmarkResultContractSource.includes(
+      'fail("success requires a validated manifest and non-null manifest digest")',
+    ) &&
+    gate1BenchmarkResultContractSource.includes(
+      '"Credential-gated real-repository evidence remains required for Gate 1."',
+    ) &&
+    /assertLiteral\(\s*evidence\.syntheticReceiptCompletesGate,\s*false,/.test(
+      gate1BenchmarkContractSource,
     ),
   noFocusedOrSkippedGateTests: testSources.every(
     (source) => !/\.(?:only|skip|todo)(?:\s*\(|\.)/.test(source),

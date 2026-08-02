@@ -27,8 +27,9 @@
     "typecheck:tests": "tsc -p tsconfig.tests.json --pretty false",
     "test": "vitest run tests/unit tests/provider",
     "test:integration": "pnpm build && vitest run tests/integration",
-    "eval": "pnpm build && node scripts/eval-fixtures.mjs",
-    "security": "vitest run tests/security && node scripts/security-check.mjs",
+    "benchmark:gate1": "pnpm build:node && node scripts/gate1-benchmark.mjs",
+    "eval": "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs",
+    "security": "pnpm build:node && vitest run tests/security && node scripts/security-check.mjs",
     "check": "pnpm workflow:lint && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm eval && pnpm security && pnpm build"
   },
   "devDependencies": {

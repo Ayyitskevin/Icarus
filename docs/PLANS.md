@@ -1,5 +1,80 @@
 # Implementation plans
 
+## Current implementation checkpoint: Gate 1 Slice 1 offline benchmark contract
+
+Status: the versioned, deterministic, zero-external-effect offline benchmark
+contract is implementation-complete in the current tree. This closes Slice 1's
+offline contract deliverable only. Gate 1 remains open: no live provider/model run,
+GitHub object or ref effect, draft pull request, receipt, browser/server restart,
+or durable landing-coordinator evidence is claimed.
+
+### Completed offline contract
+
+- [x] Add one closed three-case input manifest for a TypeScript-library
+      repair, Python-CLI repair, and dependency-free React/Node module repair
+      fixture; the React/Node case is not runnable-React-application evidence
+- [x] Pin raw task/source/approved-repair bytes, repository and candidate Git
+      identities, prompt-revision labels and production planning/edit
+      system-instruction hashes, exact ordered registered-check vectors, expected
+      changed paths, immutable sandbox images, and budgets
+- [x] Run the production Ollama adapter only against deterministic loopback HTTP,
+      registered checks only in production no-network sandboxes, and candidate/
+      absent-only-ref work only in temporary Icarus-owned state
+- [x] Generate an ignored closed schema-v1 success/failure result; bind the exact
+      validated manifest digest and all three observations only on success;
+      retain only the ordered completed-case prefix and
+      `partial_completed_cases_only` counters on failure, with bounded stage/
+      case/safe-code-or-null/message-digest identity and a `null` manifest digest
+      only when raw manifest bytes were unavailable
+- [x] Label completed-case draft-PR and receipt effects
+      `not_executed_contract_only`; keep credential, paid-model, external-network,
+      remote-mutation, migration, force-push, merge, and deployment authority at
+      zero
+- [x] Reopen the production runtime and replay a harness-only candidate journal
+      into a new local controller, then reject duplicate local-ref replay; do not
+      present this as browser reload, foreground-server restart, or durable
+      landing-coordinator evidence
+- [x] Treat the manifest's derivative-effect declaration as
+      `contract-only-unassessed`, not as evidence about automation configured on
+      a real repository
+
+### Gate 1 live-evidence hold
+
+- [ ] Define and separately approve a versioned credential-gated live-evidence
+      profile bound to the offline manifest digest and exact immutable case/task/
+      check/source/expected-change/candidate pins
+- [ ] Pin the real provider/model and adapter version, captured pricing and
+      spend/runtime budgets, and an operator-produced assessment of each real
+      repository's branch/PR-triggered automation with disposition and raw digest
+- [ ] Authorize only named, separately approved Git object upload, absent-only
+      remote-ref creation, draft-PR creation, and receipt effects; retain every
+      force-push, update/delete, merge, deployment, and source-checkout mutation
+      prohibition
+- [ ] Record 3/3 live evidence with passing complete checks, exact changed paths,
+      unchanged source checkouts, reviewable draft PRs, matching immutable
+      receipts, restart/reconciliation evidence, and exact candidate/live
+      identities
+
+### Current-tree verification — exact-tree verified
+
+- [x] `pnpm exec vitest run tests/security/gate1-benchmark-contract.test.ts`
+- [x] `pnpm exec vitest run tests/security/gate1-benchmark-fixture-boundary.test.ts`
+- [x] `pnpm exec vitest run tests/security/gate1-benchmark-result-contract.test.ts`
+- [x] `pnpm benchmark:gate1`
+- [x] `pnpm format:check`
+- [x] `pnpm lint`
+- [x] `pnpm typecheck`
+- [x] `pnpm test`
+- [x] `pnpm test:integration`
+- [x] `pnpm eval`
+- [x] `pnpm security`
+- [x] `pnpm build`
+- [x] `pnpm check`
+- [x] workspace and real-browser smoke checks
+- [x] production and full dependency audits
+- [x] `git diff --check`
+- [x] independent review has no remaining blocker, high, or medium finding
+
 ## Accepted implementation record: Change Handoff Pack v1 (ADR 0042)
 
 Status values are evidence claims. ADR 0042 is Accepted. The implementation,

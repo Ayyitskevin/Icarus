@@ -1362,16 +1362,39 @@ tree:
 14. **Platform tests:** Linux exercises the complete path; macOS and Windows
     can read bounded state/receipts but every mutation refuses before store,
     credential, Git, or network effects.
-15. **End-to-end Gate 1 evidence:** one pinned TypeScript library, one pinned
-    Python CLI, and one pinned React/Node application each complete
-    task-to-reviewed-candidate-to-draft-PR with passing registered checks,
-    exactly expected changed paths, exact branch/commit/PR/receipt identities,
-    and an unchanged source checkout. The versioned manifest pins repository
-    commits, tasks and task digests, provider/model and prompt revisions,
-    checks, expected paths, and expected object format.
-    Each benchmark target is a dedicated inert repository under the fixed
-    assessment checklist or carries a separate recorded human approval for its
-    workflows, webhooks, bots, notifications, and possible deployments.
+15. **End-to-end Gate 1 evidence:** the zero-external-effect offline input
+    manifest pins one TypeScript-library repair, one Python-CLI repair, and one
+    dependency-free React/Node module repair. The third fixture checks a
+    JSX-to-module contract plus Node behavior; it is not runnable React
+    application evidence. The manifest binds immutable repository/commit, task,
+    prompt-revision and production system-instruction, registered-check, source,
+    expected-path, and candidate identities. Its schema-v1 result is a closed
+    success/failure union: success
+    binds all three observations, while failure retains only an ordered
+    completed-case prefix, `partial_completed_cases_only` counters, and bounded
+    stage/case/safe-code-or-null/message-digest identity. A failure result's
+    manifest digest is `null` only when raw manifest bytes were unavailable.
+
+    Repository fixtures are untrusted plain trees: root `.git` must be absent,
+    and pinned inventory paths reject `.git` components and `.gitattributes`.
+    Copying excludes and rechecks root `.git`; fixture Git uses fixed
+    `/usr/bin/git`, isolated home/configuration, disabled system/global config
+    and attributes, hooks, credentials, prompts, SSH, and network protocols.
+    Hostile directory/file/symlink `.git` fixtures and a malicious local clean
+    filter must refuse before fixture Git effects.
+
+    A separate versioned, human-approved, credential-gated live-evidence
+    profile binds that offline manifest digest and its exact immutable case pins,
+    then separately pins the real provider/model and adapter, captured pricing
+    and spend/runtime budgets, and the operator's repository-automation
+    assessment disposition and raw digest. It authorizes only named, separately
+    approved object-upload, absent-only remote-ref, draft-PR, and receipt effects.
+    Under that profile all three exact repairs complete task-to-reviewed-
+    candidate-to-draft-PR with passing registered checks, exactly expected
+    changed paths, exact branch/commit/PR/receipt identities, and unchanged
+    source checkouts. Each live target is a dedicated inert repository under the
+    fixed assessment checklist or carries a separate recorded human approval
+    for its workflows, webhooks, bots, notifications, and possible deployments.
 16. **Release evidence:** focused suites, full local checks, dependency audits,
     evaluator, exact-tree diff review, hosted exact-head Linux CI, and the
     repository's native read-only acceptance all pass or are reported honestly

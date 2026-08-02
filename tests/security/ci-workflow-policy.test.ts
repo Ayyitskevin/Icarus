@@ -22,7 +22,7 @@ describe("CI workflow supply-chain policy", () => {
       "pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271",
       "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
     ]);
-    expect(result.sha256).toBe("baedc1de20c4b9f4e1c4e70d3ee93c4c8f6865ea42a03568192fd36b1060ec91");
+    expect(result.sha256).toBe("0b49180d59c1bea3c64d3221f9e92c52989ccb9821847c1174076aaa474f0f9e");
   });
 
   it("rejects a CRLF workflow instead of weakening the byte policy", async () => {

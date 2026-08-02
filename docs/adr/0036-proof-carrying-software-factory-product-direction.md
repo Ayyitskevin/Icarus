@@ -249,6 +249,27 @@ those foundations into guarded routes, terminal reconciliation and recovery,
 durable landing coordination, provider effects, receipts, and benchmark
 evidence.
 
+Slice 1 adds the populated closed benchmark input at
+`fixtures/evals/gate1/manifest.v1.json`. Its focused `pnpm benchmark:gate1`
+command is integrated under `pnpm eval` and owns the ignored schema-v1
+`.local/gate1-benchmark-report.json`. The report is a closed success/failure
+union. Success binds the validated manifest digest and all three case
+observations. Failure retains only the ordered completed-case prefix, labels its
+aggregate counters `partial_completed_cases_only`, and binds the failure stage,
+applicable next case, safe code or `null`, and message digest; its manifest digest
+is `null` only when raw manifest bytes were unavailable. The local evaluator uses
+deterministic loopback production-Ollama transport, production no-network
+sandboxes, and the real local candidate plus absent-only-ref foundation. It has
+no credential, paid-model, external-network, remote-mutation, migration,
+force-push, merge, or deployment authority. Each completed-case record marks
+draft-PR and receipt effects contract-only and not executed, and no command-pass
+claim is made by this record. The manifest's derivative-effect declaration is
+`contract-only-unassessed`; it is not an operator assessment of real repository
+automation. For each completed case, the runner reopens the production runtime
+and replays a harness-only candidate journal into a new local controller, but
+does not execute browser reload, foreground-server restart, or durable landing
+coordination.
+
 - server-start session token, same-origin/CSRF protection, digest-bound action
   forms, CLI parity, live activity, and explicit capability display;
 - deterministic candidate commit plus an absent-only
@@ -261,15 +282,42 @@ evidence.
   repository automation that branch and draft-PR events may trigger.
 
 Exit gate: task → plan/grants → repair → review → draft PR succeeds on three
-representative repositories; reload/restart preserves the session; rejection
-and interruption are reversible; every external mutation has an exact approval.
-Before claiming this gate, publish a versioned benchmark manifest that pins one
-TypeScript library, one Python CLI, and one React/Node application by repository
-and commit; pins one repair task, task digest, provider/model version, prompt
-revision, registered checks, and expected changed-path set per repository; and
-records the resulting branch, commit, draft-PR, and evidence-receipt identities.
-Success is three of three tasks with passing registered checks, exactly the
-expected changed paths, a reviewable draft PR, and an unchanged source checkout.
+representative repositories. Same-tab reload retains the current tab-scoped
+action session. A foreground-process restart rotates origin and bearer, requires
+operator relaunch through the new URL, and recovers the durable workflow rather
+than preserving the bearer. Rejection and interruption are reversible; every
+external mutation has an exact approval.
+
+The committed versioned input manifest pins exactly one TypeScript-library
+repair, one Python-CLI repair, and one dependency-free React/Node module repair
+fixture by repository and commit. The third fixture checks Node behavior and a
+JSX-to-module contract; it is not runnable-React-application evidence. Each case
+pins one repair task and raw task digest, provider/model version,
+prompt-revision labels and production planning/edit system-instruction hashes,
+complete ordered registered-check IDs, names, and argv, exact expected
+changed-path set, expected object format, raw source and approved-repair pins,
+and deterministic candidate-object identities. The manifest is immutable input,
+not a place to write run outcomes. A separate generated result records the
+input-manifest digest and resulting local candidate and branch identities only
+on success, while explicitly marking draft-PR and receipt effects not executed.
+A failure result instead contains only its completed-case prefix, partial effect
+counters, and bounded failure identity; it cannot infer observations from the
+active failed case.
+
+The committed populated contract and its synthetic local report do not satisfy
+the exit gate. Before claiming Gate 1, a separate versioned, human-approved,
+credential-gated live-evidence profile must bind the offline manifest digest and
+reuse its exact immutable case, task, registered-check, source, expected-change,
+and candidate pins. The live profile must additionally pin the real
+provider/model and adapter version, captured pricing and spend/runtime budgets,
+and an operator-produced assessment of each real repository's branch/PR-triggered
+automation, including the assessment disposition and raw digest. It may authorize
+only named, separately approved Git object upload, absent-only remote-reference
+creation, draft-PR creation, and receipt effects. Success remains three of three
+tasks with passing registered checks, exactly the expected changed paths, exact
+candidate and live branch/commit/draft-PR/receipt identities, a reviewable draft
+PR, and an unchanged source checkout. Mock or synthetic model, GitHub,
+automation, or receipt evidence can never substitute.
 
 ### Gate 2 — context and agent quality
 
