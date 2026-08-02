@@ -4021,6 +4021,14 @@ try {
     (response) => response.status === 503 && response.url?.includes("/events?after="),
   );
   assert.notEqual(failedEventResponse, undefined);
+  await waitForObserved(
+    () => networkFinished.some((finished) => finished.requestId === failedEventResponse.requestId),
+    "the controlled failed event poll body",
+  );
+  const failedEventCompletion = networkFinished.find(
+    (finished) => finished.requestId === failedEventResponse.requestId,
+  );
+  assert.notEqual(failedEventCompletion, undefined);
   await page.waitFor(
     () =>
       document.querySelector(".live-refresh .status")?.textContent?.trim() ===
@@ -4028,14 +4036,15 @@ try {
     [],
     "the stale-evidence state after a failed event poll",
   );
-  const steadyStateRecoveryBoundary = failedEventResponse.observedAt + EVENT_POLL_INTERVAL_MS + 500;
+  const steadyStateRecoveryBoundary =
+    failedEventCompletion.observedAt + EVENT_POLL_INTERVAL_MS + 500;
   await delay(Math.max(0, steadyStateRecoveryBoundary - Date.now()));
   assert.equal(
     networkRequests.some(
       (request) =>
         request.method === "GET" &&
         request.url?.includes("/events?after=") &&
-        request.observedAt > failedEventResponse.observedAt &&
+        request.observedAt > failedEventCompletion.observedAt &&
         request.observedAt <= steadyStateRecoveryBoundary,
     ),
     false,
@@ -4047,7 +4056,7 @@ try {
         (response) =>
           response.status === 200 &&
           response.url?.includes("/events?after=") &&
-          response.observedAt > failedEventResponse.observedAt,
+          response.observedAt > failedEventCompletion.observedAt,
       ),
     "a bounded successful event-poll recovery",
   );
@@ -4055,10 +4064,10 @@ try {
     (response) =>
       response.status === 200 &&
       response.url?.includes("/events?after=") &&
-      response.observedAt > failedEventResponse.observedAt,
+      response.observedAt > failedEventCompletion.observedAt,
   );
   assert.notEqual(recoveredEventResponse, undefined);
-  const recoveryDelayMs = recoveredEventResponse.observedAt - failedEventResponse.observedAt;
+  const recoveryDelayMs = recoveredEventResponse.observedAt - failedEventCompletion.observedAt;
   assert.ok(recoveryDelayMs >= EVENT_POLL_FIRST_BACKOFF_MS - 500);
   assert.ok(recoveryDelayMs <= EVENT_POLL_FIRST_BACKOFF_MS + UI_TIMEOUT_MS);
   await page.waitFor(
