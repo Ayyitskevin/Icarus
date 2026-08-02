@@ -146,6 +146,7 @@ function seedVerifyingRun(iterationCeiling: number): {
     sandbox: UNIT_SANDBOX,
     ceiling: UNIT_CEILING,
     plan,
+    readableManifest: null,
   });
   store.recordPlanAndAwaitApproval(RUN_ID, plan, planSha256);
   store.approvePlan(RUN_ID, planSha256, "unit-operator");
@@ -222,6 +223,7 @@ describe("repair grant", () => {
       checks: [{ id: "unit", name: "Unit check", argv: ["node", "--test"] }],
       sandbox: UNIT_SANDBOX,
       ceiling: UNIT_CEILING,
+      readableManifest: null,
     };
 
     expect(planApprovalDigest({ ...base, plan: withGrant })).not.toBe(

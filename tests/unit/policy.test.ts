@@ -65,6 +65,7 @@ describe("approval digests", () => {
     sandbox: UNIT_SANDBOX,
     ceiling: UNIT_CEILING,
     plan: UNIT_PLAN,
+    readableManifest: null,
   };
 
   it("binds plan approval to every security-relevant manifest section", () => {
@@ -105,6 +106,10 @@ describe("approval digests", () => {
       {
         ...planInput,
         plan: { ...planInput.plan, targets: [...planInput.plan.targets, "src/other.txt"] },
+      },
+      {
+        ...planInput,
+        readableManifest: { baseCommit: UNIT_BASE_COMMIT, entries: [] },
       },
     ];
 

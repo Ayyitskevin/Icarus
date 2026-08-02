@@ -107,6 +107,7 @@ describe("real Docker containment", () => {
         timeoutMs: 30_000,
         maxOutputBytes: 64 * 1024,
         maxRawOutputBytes: 1024 * 1024,
+        signal: undefined,
       },
     );
     expect(containers.exitCode).toBe(0);

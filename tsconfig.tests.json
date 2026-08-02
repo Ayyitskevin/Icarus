@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noEmit": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "paths": {
+      "@icarus/core": ["./packages/core/src/index.ts"]
+    }
+  },
+  "include": ["vitest.config.ts", "tests/**/*.ts", "tests/**/*.tsx"]
+}

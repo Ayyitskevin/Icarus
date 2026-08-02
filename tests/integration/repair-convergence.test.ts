@@ -753,7 +753,7 @@ async function executeRestartWorker(phase: RestartPhase, root: string): Promise<
 }
 
 function launchRestartWorker(root: string, phase: RestartPhase) {
-  const environment = {
+  const environment: NodeJS.ProcessEnv = {
     ...process.env,
     [RESTART_PHASE_ENV]: phase,
     [RESTART_ROOT_ENV]: root,

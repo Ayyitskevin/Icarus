@@ -44,13 +44,14 @@ function largeSecretInput(): Buffer {
 
 function expectNoInputInResult(result: ControllerProcessResult, input: Uint8Array): void {
   const marker = Buffer.from(SECRET_MARKER, "utf8");
+  const inputBuffer = Buffer.from(input);
   expect(result).not.toHaveProperty("stdinBytes");
   expect(result.stdout).not.toContain(SECRET_MARKER);
   expect(result.stderr).not.toContain(SECRET_MARKER);
   expect(Buffer.from(result.stdoutBytes).includes(marker)).toBe(false);
   expect(Buffer.from(result.stderrBytes).includes(marker)).toBe(false);
-  expect(Buffer.from(result.stdoutBytes).includes(input)).toBe(false);
-  expect(Buffer.from(result.stderrBytes).includes(input)).toBe(false);
+  expect(Buffer.from(result.stdoutBytes).includes(inputBuffer)).toBe(false);
+  expect(Buffer.from(result.stderrBytes).includes(inputBuffer)).toBe(false);
 }
 
 function expectNoInputInError(error: unknown): void {

@@ -202,7 +202,8 @@ describe("project context preview", () => {
       { mode: "120000", type: "blob", objectId: "6", path: "src/link.ts" },
       { mode: "100644", type: "blob", objectId: "7", path: "src/private.ts" },
       { mode: "100644", type: "blob", objectId: "8", path: "src/generated/client.ts" },
-    ].reverse();
+    ];
+    tree.reverse();
     const targetBytes = Buffer.from("export const value = 1;\n", "utf8");
     const secretBytes = Buffer.from("API_TOKEN=actual-secret-value-1234567890\n", "utf8");
     const readBlob = vi.fn(async (_repositoryPath: string, objectId: string) => {

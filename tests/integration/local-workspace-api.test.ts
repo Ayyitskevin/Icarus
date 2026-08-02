@@ -1927,7 +1927,7 @@ describe("loopback local workspace API", () => {
       if (signal === undefined) throw new Error("Repository status signal was not provided");
       resolveSignal(signal);
       await new Promise<void>((resolve) =>
-        signal.addEventListener("abort", resolve, { once: true }),
+        signal.addEventListener("abort", () => resolve(), { once: true }),
       );
       resolveAborted();
       throw new IcarusError("CANCELLED", "Synthetic disconnect cancellation");

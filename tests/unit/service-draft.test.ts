@@ -169,7 +169,7 @@ describe("run drafts", () => {
     ["linux", "kernel lease"],
     ["darwin", "portable SQLite operation admission"],
     ["win32", "portable SQLite operation admission"],
-  ] as const)("persists the draft before planning on %s through %s", async (platform) => {
+  ] as const)("persists the draft before planning on %s through %s", async (platform, _kind) => {
     const fixture = createUnitStore();
     cleanupRoots.push(fixture.root);
     cleanupStores.push(fixture.store);

@@ -78,8 +78,15 @@ async function runGit(
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
-    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    const childStdout = child.stdout;
+    const childStderr = child.stderr;
+    if (childStdout === null || childStderr === null) {
+      child.kill();
+      reject(new Error("Git fixture process did not expose configured output pipes"));
+      return;
+    }
+    childStdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    childStderr.on("data", (chunk: Buffer) => stderr.push(chunk));
     child.once("error", reject);
     child.once("close", (exitCode) => {
       resolve({
@@ -88,7 +95,15 @@ async function runGit(
         stderr: Buffer.concat(stderr),
       });
     });
-    if (stdinBytes !== undefined) child.stdin.end(stdinBytes);
+    if (stdinBytes !== undefined) {
+      const childStdin = child.stdin;
+      if (childStdin === null) {
+        child.kill();
+        reject(new Error("Git fixture process did not expose the configured input pipe"));
+        return;
+      }
+      childStdin.end(stdinBytes);
+    }
   });
 }
 

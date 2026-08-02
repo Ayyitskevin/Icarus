@@ -92,7 +92,7 @@ export async function runCli(
   args: readonly string[],
   extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<ProcessResult> {
-  const environment = { ...process.env, ...extraEnv, ICARUS_HOME: stateRoot };
+  const environment: NodeJS.ProcessEnv = { ...process.env, ...extraEnv, ICARUS_HOME: stateRoot };
   for (const [name, value] of Object.entries(extraEnv)) {
     if (value === undefined) delete environment[name];
   }

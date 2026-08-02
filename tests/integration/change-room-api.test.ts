@@ -22,6 +22,7 @@ import {
 const cleanups: Array<() => Promise<void>> = [];
 
 interface TestDatabase {
+  exec(sql: string): this;
   prepare(sql: string): {
     run(...parameters: unknown[]): unknown;
     get(...parameters: unknown[]): unknown;

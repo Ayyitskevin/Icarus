@@ -60,7 +60,9 @@ export async function fetchWorkspace(
           resolve(
             new Response(status === 204 || status === 304 ? null : bytes, {
               status,
-              statusText: response.statusMessage,
+              ...(response.statusMessage === undefined
+                ? {}
+                : { statusText: response.statusMessage }),
               headers: responseHeaders,
             }),
           );
