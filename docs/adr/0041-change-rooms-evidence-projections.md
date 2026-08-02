@@ -28,8 +28,8 @@ That direction tempts three failure modes this ADR exists to foreclose. A room
 could become a chat channel whose messages acquire implicit authority. It
 could become a second workflow state machine that disagrees with the run
 record. Or it could become an execution surface that quietly widens browser
-authority. None of those is compatible with the Icarus safety model: the
-browser is review-only, and every guarded fact must come from the persisted
+authority. None of those is compatible with the Icarus safety model: the Change
+Room surface is read-only, and every guarded fact must come from the persisted
 run, approval, event, verification, and checkpoint records.
 
 Operator review annotations are the one new durable input. They need a home,

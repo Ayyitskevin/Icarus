@@ -28,11 +28,20 @@ that later roadmap features already exist.
 > `30618041483` and native real-Chrome run `30618043377` on both platforms.
 > Explicit human acceptance of the interim operator-controlled
 > browser/resolver/proxy residual risk was recorded on 2026-07-31. This is not
-> a Gate 1 release: the branch has repository-only ledger, shutdown, landing
-> record, and local Git foundations, but guarded browser actions, admitted-row
-> reconciliation, durable landing coordination, and the GitHub gateway remain
-> incomplete. No live state migration, Git landing effect, deployment, or
-> public release was authorized or performed.
+> a Gate 1 release. Packet 2's closed eight-action browser lifecycle is
+> release-accepted at implementation head
+> `3683087066efb65255f05b2493fd31051c3ad7c6`, which was published on `main`.
+> [PR #22](https://github.com/Ayyitskevin/Icarus/pull/22) candidate
+> `701952349e0818cead37672df951ed09c0edd27c` passed hosted run
+> `30760607215` and native macOS/Windows run `30760619650`, then rebase-merged
+> as `ba38856a0e0e63d1045500185b2158a0859469d1`. A post-merge macOS smoke
+> exposed a timing-only acceptance-harness defect; the timing-harness
+> correction at
+> `3683087066efb65255f05b2493fd31051c3ad7c6` passed hosted run `30761189188`
+> and native macOS/Windows run `30761192370`. Durable landing coordination, the
+> landing/GitHub receipt runtime, credential-gated live-evidence profile, and
+> Gate 1 completion remain incomplete. No live-state migration, landing/GitHub,
+> deployment, or public-release authority was authorized by this acceptance.
 
 ## Current scope
 
@@ -66,17 +75,20 @@ The first Milestone 3 vertical slice adds a same-origin React workspace and a
 loopback-only local API. It can persist a repository/project, preview a
 deterministic filtered map of the committed tree, save a task as a draft, ask a
 configured loopback Ollama model for a plan, and reopen browser-safe evidence
-after restart. The current Gate 1 candidate binds exact `127.0.0.1` while using
-a fresh 128-bit `.localhost` public origin and an independent authenticated
-mutation session. That mutation path is supported only in real-accepted
-Chromium-family browsers. Its exact-head technical evidence now passes; release
-support remains held because the remaining Gate 1 slices are incomplete, while
+after restart. The accepted Gate 1 browser transport binds exact `127.0.0.1`
+and uses a fresh 128-bit `.localhost` public origin plus an independent
+authenticated mutation session. That path is supported only in real-accepted
+Chromium-family browsers. Its exact-head technical evidence now passes; the
+Gate 1 release remains held because the remaining slices are incomplete, while
 the operator-controlled browser/resolver/proxy residual risk was explicitly
-accepted on 2026-07-31. Explicit-port sessions remain bearer-free and
-review-only for Safari and every unverified browser. The guarded lifecycle
-remains review-only in the browser: it cannot approve a plan, create a worktree,
-execute checks, mutate the imported repository, or claim that unrun work
-completed.
+accepted on 2026-07-31. On Linux, an accepted Chromium-family mutation session
+now exposes exactly eight server-derived, descriptor-bound lifecycle actions:
+egress approval, plan approval, review accept/reject, rollback, restore, resume,
+and cancellation. Effects stay inside the existing private-worktree, provider,
+checkpoint, and sandbox lifecycle; the browser cannot invent an action or
+mutate the imported repository. Explicit-port sessions, non-Linux platforms,
+Safari, and every unverified browser remain review-only and expose no guarded
+actions.
 The workspace reports mutation and planning capability from both the server
 mode and the tab's live session; stable or revoked sessions become visibly
 review-only and disable the corresponding controls.
@@ -108,7 +120,10 @@ checkpoint provenance view. It examines only the latest 200 event sequences,
 returns at most eight evidence-backed verification intervals, and exposes only
 validated states, sequences, timestamps, digests, coverage, and recorded
 checkpoint relations. Raw payloads, diffs, paths, checks, output, checkpoint
-bytes, complete history, and every guarded action remain CLI-only.
+bytes, complete history, and guarded actions remained CLI-only at that
+observation slice boundary. Packet 2 later exposed only its closed eight-action
+matrix through a separate guarded action contract; the omitted evidence remains
+CLI-only.
 
 The sixth merged observation slice bounds ordinary selected-run approval provenance to
 the newest 12 validated recorded decisions, reports when earlier decisions were
@@ -152,8 +167,8 @@ local evidence, and it revalidates mutation grants against the plan's narrowed
 targets before session admission or worktree effects. Roomy, compacted, live
 tool, loopback, legacy-resume, and malformed-grant regressions pass with the
 complete local gate. Exact-head Linux and native evidence are linked in
-`docs/PLANS.md`; that Gate 0 evidence does not validate the current Gate 1
-worktree until it is published and rerun at the new exact head.
+`docs/PLANS.md`; that Gate 0 record remains distinct from Packet 2's later
+exact-head acceptance.
 
 [ADR 0036](docs/adr/0036-proof-carrying-software-factory-product-direction.md)
 sets the next product direction: Verified Change Gate, browser and VS Code
@@ -179,8 +194,8 @@ Annotations are CLI-only and append-only — at most 32 per run with 1 KiB bodie
 with recognizable credential material rejected before write — and never advance
 run state, events, gates, or digests. Existing state requires a verified backup
 and one explicitly approved `run-annotations-v1` migration; see
-`docs/OPERATIONS.md`. The three new routes are GET-only reads and add no
-browser authority beyond the existing observation boundary.
+`docs/OPERATIONS.md`. Those Change Room routes are GET-only reads and add no
+browser authority beyond their observation boundary.
 
 The accepted Change Handoff Pack v1 implementation
 ([ADR 0042](docs/adr/0042-change-handoff-packs.md)) is deliberately separate.
@@ -218,8 +233,9 @@ client, shared protocol/runtime, receiver identity, delivery, callback, retry,
 outbox, message bus, Task Room creation, Minerva trigger, API route, browser
 action, Git action, landing, or deployment.
 
-Not yet included: browser approval or execution, arbitrary/provider-native
-tools, model-written shell commands, semantic search, commits or pushes,
+Not yet included: browser actions outside Packet 2's closed eight-kind
+lifecycle matrix, arbitrary/provider-native tools, model-written shell commands,
+semantic search, commits or pushes,
 application previews, current file/status or multi-file and payload-bearing
 browser diff/history navigation, deployment, backend platform primitives,
 multi-agent orchestration, distributed workers, browser annotation authoring,
@@ -291,11 +307,14 @@ passed, and the residual operator-controlled browser/resolver/proxy risk was
 accepted as an interim boundary on 2026-07-31. Gate 1 remains incomplete and
 unreleased. Importing and previewing a repository reads its committed Git objects;
 it does not copy, edit, check, commit, or push the source. Planning is available
-through the candidate mutation session only when the chosen model is served by
+through the authenticated mutation session only when the chosen model is served by
 loopback Ollama. Until an endpoint and model are entered, the workspace clearly
-reports provider and execution capabilities as `unconfigured`. Saving a
-configured draft contacts no provider; the separate plan action does. Approval
-and execution continue through the Linux CLI only.
+reports provider capability as `unconfigured`; execution is `unconfigured` on
+Linux and `unsupported` elsewhere. Saving a configured draft contacts no
+provider; the separate plan action does. On Linux, an accepted Chromium-family
+session offers Packet 2's exact guarded lifecycle matrix, with the guarded CLI
+as the full-fidelity fallback. Non-Linux and review-only browser sessions
+expose no action buttons.
 
 For presentation-only Vite development, start a stable GET-only API with
 `ICARUS_PORT=8787 pnpm workspace:start`, then run `pnpm workspace:ui` in a

@@ -172,14 +172,15 @@ The first browser path is intentionally narrower than the guarded CLI lifecycle:
    warnings, approvals, usage, failures, and timestamps without
    returning raw context/source blobs or private cache/worktree paths. Explicit
    diff/check output remains bounded and redacted. An absent check is `not_run`;
-   missing provider/execution capability is `unconfigured`.
+   missing provider capability is `unconfigured`; execution is `unconfigured`
+   on Linux and `unsupported` elsewhere.
 7. This original route set has no approval, edit, check-execution,
    arbitrary-shell, commit, push, deployment, account, telemetry, cloud-control,
    or fleet-control route. Packet 2 below adds only the closed guarded lifecycle
    actions; execution remains under the Linux kernel lease and existing Docker
    sandbox boundary.
 
-## Gate 1 Packet 2 guarded action candidate
+## Gate 1 Packet 2 guarded action slice
 
 Packet 2 narrows browser mutation to the existing governed lifecycle rather than
 adding general execution authority:
@@ -205,10 +206,15 @@ adding general execution authority:
    evidence. Missing or ambiguous evidence becomes `reconciliation_required`
    rather than replay.
 6. Non-Linux authority contains no guarded actions, and execution fails before
-   intent persistence. Local API and compiled Chrome 149 acceptance passed on
-   2026-08-02. The guarded CLI remains the release-supported fallback until
-   Packet 2's exact candidate-head hosted CI and native macOS/Windows acceptance
-   is recorded.
+   intent persistence. [PR #22](https://github.com/Ayyitskevin/Icarus/pull/22)
+   candidate `701952349e0818cead37672df951ed09c0edd27c` passed hosted run
+   `30760607215` and native macOS/Windows run `30760619650`, then rebase-merged
+   as `ba38856a0e0e63d1045500185b2158a0859469d1`. A post-merge macOS smoke
+   exposed a timing-only acceptance-harness defect. The corrected Packet 2
+   implementation head `3683087066efb65255f05b2493fd31051c3ad7c6`, published
+   on `main`, passed hosted run `30761189188` and native run `30761192370`. The
+   guarded CLI remains the full-fidelity fallback, not an alternate source of
+   browser authority.
 7. These actions reuse existing private-worktree, provider, checkpoint, and
    sandbox operations. They add no commit, push, Git-ref, pull-request, merge,
    deployment, or imported source-checkout mutation authority. Gate 1 remains
@@ -475,7 +481,9 @@ is to:
    digests, approvals, verification, or execution. Show them in the browser only
    as read-only text inside the room projection; provide no browser annotation
    route.
-6. Keep the browser review-only. All three new routes are GET-only; non-GET
+6. Keep the Change Rooms routes browser-read-only. All three new routes are
+   GET-only and add no action control; Packet 2's separately accepted guarded
+   action routes remain outside the Change Room contract. Non-GET
    verbs are refused by the ADR 0029 action-session boundary (401 without it, 404 behind it), unknown runs receive 404, invalid query contracts receive
    422, and GET reads perform no durable writes. The React Change Rooms section
    pages its index explicitly (12-row replace-not-accumulate pages, at most a
@@ -673,15 +681,17 @@ the gate.
 
 ## Current-slice exclusions and durable non-goals
 
-The current candidate has no public signup, billing, teams, browser-held
+The current implementation has no public signup, billing, teams, browser-held
 provider keys, semantic retrieval, end-to-end landing, remote pushes,
 deployments, application previews, remote API exposure, customer-data access,
 production access, distributed execution, accounts, telemetry, or arbitrary
 provider-native tool path. Packet 2's local guarded lifecycle actions do not
 widen Git, landing, deployment, credential, provider-native-tool, or public
-authority, and they are not release-accepted until exact candidate-head hosted
-CI and native macOS/Windows evidence is recorded. No roadmap statement implies
-that any excluded capability exists now.
+authority. Packet 2 is release-accepted at implementation head
+`3683087066efb65255f05b2493fd31051c3ad7c6`, which was published on `main` and
+passed hosted run `30761189188` plus native run `30761192370`. That acceptance
+does not complete Gate 1 or authorize migration, landing/GitHub, deployment,
+or public release. No roadmap statement implies that any excluded capability exists now.
 
 ADR 0036 deliberately moves semantic retrieval, browser/VS Code actions, gated
 Git landing, previews, deployment adapters, isolated database migrations,

@@ -103,9 +103,13 @@ receipts, all eight protected route mappings, same-ID admitted no-replay,
 prepared/admitted restart reconciliation, non-Linux refusal, and exact,
 mismatched, and stale in-flight cancellation signals. Its compiled Chrome 149
 smoke additionally covers confirmation, stale refusal, receipt recovery,
-cancellation, and same-tab reload. That local evidence is not part of the
-offline benchmark report and cannot replace exact candidate-head hosted CI,
-native macOS/Windows acceptance, or the live landing profile.
+cancellation, and same-tab reload. Candidate
+`701952349e0818cead37672df951ed09c0edd27c` separately passed hosted run
+`30760607215` and native run `30760619650`; corrected implementation head
+`3683087066efb65255f05b2493fd31051c3ad7c6` passed hosted run `30761189188` and
+native run `30761192370`. Those exact-head results close only Packet 2's
+eight-action Linux browser-authority slice; they do not constitute the
+credential-gated live landing profile or complete Gate 1.
 
 Neither synthetic report variant can complete Gate 1 regardless of its local
 outcome. Gate 1 still requires a separate, versioned, human-approved,

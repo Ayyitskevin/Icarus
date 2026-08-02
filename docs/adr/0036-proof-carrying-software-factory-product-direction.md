@@ -1,8 +1,10 @@
 # ADR 0036: Proof-carrying software factory product direction
 
 - Status: Accepted product direction — Gate 0 release/evidence head
-  `802b91e6f6c9b392f56c9ee3660be818a0f74a62`; Gate 1 is current with PR #20's
-  repository-only local authority foundations merged
+  `802b91e6f6c9b392f56c9ee3660be818a0f74a62`; Gate 1 is active with PR #20's
+  repository-only foundations and PR #22's browser-authority slice published;
+  durable landing, landing/PR receipts, and credential-gated live evidence
+  remain incomplete
 - Date: 2026-07-30
 - Supersedes: the current product positioning and roadmap sequencing in
   [`FABLE_ICARUS_VISION.md`](../FABLE_ICARUS_VISION.md) sections 1, 11, and 13.
@@ -27,11 +29,11 @@ worktrees, no-network registered checks, append-only evidence, rollback and
 restore, and Ollama, OpenAI, and Anthropic adapters. That candidate is now the
 released Gate 0 baseline recorded below.
 
-That foundation is unusually rigorous, but it is not yet a competitive product.
-The workspace is review-only, finished work cannot land on a branch or pull
-request, context retrieval is shallow, and Icarus has no editor integration,
-preview environment, application service catalog, customer database, deployment
-plane, collaboration model, or extension protocol.
+That Gate 0 foundation was unusually rigorous, but it was not yet a competitive
+product. At that baseline, the workspace was review-only and finished work could
+not land on a branch or pull request; context retrieval was shallow, and Icarus
+had no editor integration, preview environment, application service catalog,
+customer database, deployment plane, collaboration model, or extension protocol.
 
 The operator has now made the intended category explicit: Icarus should become
 his AI software factory and compete directly for the outcomes served by Cursor,
@@ -239,15 +241,21 @@ reviewer.
 ### Gate 1 — Verified Change Gate
 
 ADR 0029 browser approval authority and ADR 0027 Git landing authority are
-accepted. Complete their implementations:
+accepted. Complete the remaining implementation:
 
 PR #20 (`79e6dc7`, implementation head `bba1591`) merged the repository-only
 browser-action ledger and shutdown settlement plus the landing schema, records,
 deterministic candidate builder, and absent-only local-reference foundations.
-The list below names the complete Gate 1 outcome; remaining work must integrate
-those foundations into guarded routes, terminal reconciliation and recovery,
-durable landing coordination, provider effects, receipts, and benchmark
-evidence.
+PR #22 then completed the guarded browser routes, terminal reconciliation, and
+bounded recovery slice. Its exact implementation candidate
+`701952349e0818cead37672df951ed09c0edd27c` passed hosted run `30760607215` and
+native macOS/Windows run `30760619650`, then rebase-merged as
+`ba38856a0e0e63d1045500185b2158a0859469d1`. The timing-harness correction is
+the Packet 2 implementation head published on `main` as
+`3683087066efb65255f05b2493fd31051c3ad7c6`; hosted run `30761189188` and native
+run `30761192370` succeeded there. The list below names the complete Gate 1
+outcome; remaining work is durable landing coordination, landing/PR receipts,
+and credential-gated live benchmark evidence.
 
 Slice 1 adds the populated closed benchmark input at
 `fixtures/evals/gate1/manifest.v1.json`. Its focused `pnpm benchmark:gate1`

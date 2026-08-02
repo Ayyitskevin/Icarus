@@ -85,7 +85,7 @@ draft, plan that draft with loopback Ollama, and read a run. Repository import,
 preview, draft, and planning do not create a private worktree or modify the
 source checkout.
 
-The Gate 1 Packet 2 candidate adds exact browser authority descriptors and
+The accepted Gate 1 Packet 2 slice adds exact browser authority descriptors and
 bounded receipts for eight existing lifecycle operations: egress approval, plan
 approval, review accept/reject, rollback, restore, resume, and cancellation.
 Execution is Linux-only, acquires one kernel run lease, persists
@@ -108,10 +108,15 @@ only from durable terminal evidence; incomplete evidence becomes
 no action buttons and execution fails before intent persistence. Fresh local API
 and compiled-product browser acceptance passed on 2026-08-02, including all
 eight protected route mappings, stale refusal, receipt recovery, cancellation,
-reload, and unchanged-source evidence in Chrome 149. Packet 2 still requires
-exact candidate-head hosted CI and native macOS/Windows acceptance before
-release. It does not complete Gate 1 or authorize any live migration, GitHub
-effect, merge, deployment, or public release.
+reload, and unchanged-source evidence in Chrome 149. PR #22 candidate
+`701952349e0818cead37672df951ed09c0edd27c` passed hosted run `30760607215` and
+native run `30760619650`, then rebase-merged as
+`ba38856a0e0e63d1045500185b2158a0859469d1`.
+After a timing-only smoke-harness correction, implementation head
+`3683087066efb65255f05b2493fd31051c3ad7c6` passed hosted run `30761189188` and
+native run `30761192370`. This closes only Packet 2; Gate 1, durable landing, and
+live evidence remain incomplete, while GitHub, deployment, and migration effects
+remain unauthorized.
 
 The API presenter allowlists product evidence instead of returning `RunRecord`
 or history rows. It omits raw context/source blobs and private cache, worktree,
@@ -867,9 +872,13 @@ fail-closed audit or make imported repositories writable.
 - Browser repository data is rendered as untrusted text from allowlisted
   presenters. Raw domain records, context/source blobs, private runtime paths,
   and provider credentials do not cross the response boundary.
-- The browser exposes protected project/draft/planning mutations plus review;
-  it still cannot approve a digest, execute an edit/check/command, or commit,
-  publish a ref/PR, push, or deploy.
+- The supported Linux Chromium browser exposes protected project/draft/planning
+  mutations plus exactly eight server-derived guarded lifecycle actions: egress
+  approval, plan approval, review accept/reject, rollback, restore, resume, and
+  cancellation. It cannot invent an action descriptor or invoke an arbitrary
+  command, commit, publish a ref or PR, push, merge, or deploy. Non-Linux and
+  explicit-port presentations remain review-only with no guarded action
+  controls.
 - Remote-context approval gates non-loopback egress, plan approval gates the
   first write/edit call, and human review gates completion.
 - Provider output with recognizable credential material fails before plan/edit

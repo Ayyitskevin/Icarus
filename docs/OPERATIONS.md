@@ -145,9 +145,14 @@ The browser golden path is:
 7. These lifecycle actions stop before every commit, push, Git-ref, pull-request,
    merge, and deployment effect. Non-Linux hosts show no guarded action buttons.
    Fresh local API and compiled Chrome 149 acceptance passed on 2026-08-02.
-   Until Packet 2's exact candidate-head hosted CI and native macOS/Windows
-   acceptance record is published, use the guarded CLI as the release-supported
-   fallback.
+   PR #22 candidate `701952349e0818cead37672df951ed09c0edd27c` then
+   passed hosted run `30760607215` and both native jobs in run `30760619650`.
+   Rebase-merged `main` `ba38856a0e0e63d1045500185b2158a0859469d1`
+   passed hosted run `30760769288`; its post-merge native run exposed a macOS
+   timing-only smoke-harness assertion. The corrected Packet 2 implementation
+   head `3683087066efb65255f05b2493fd31051c3ad7c6`, published on `main`, passed
+   hosted run `30761189188` and both native jobs in run `30761192370`. The guarded
+   CLI remains the full-fidelity fallback; this does not widen browser authority.
 
 With `ICARUS_CHROMIUM_EXECUTABLE` set to an explicit local Chromium binary,
 `pnpm smoke:workspace:browser` drives this path through the compiled application
@@ -162,12 +167,14 @@ macOS 15 arm64 and Windows Server 2025 x64 used
 Node HTTP client, resolver injection, hosts-file edit, review-only run, or
 mocked browser is not substitute evidence.
 
-The 2026-08-02 local Packet 2 run used `Chrome/149.0.7827.55` with CDP `1.3`
-and additionally proved complete immutable action confirmation, one protected
-POST per submission, stale `409 refused/STALE_ACTION` recovery without a
-provider effect, exact parent-bound cancellation, focus recovery, and bounded
-receipts through the compiled product. This is local candidate evidence, not
-exact-head hosted or native release acceptance.
+The local Packet 2 run used `Chrome/149.0.7827.55` with CDP `1.3` and
+additionally proved complete immutable action confirmation, one protected POST
+per submission, stale `409 refused/STALE_ACTION` recovery without a provider
+effect, exact parent-bound cancellation, focus recovery, and bounded receipts.
+This local evidence is complemented by the candidate and corrected
+implementation-head hosted/native acceptance above. It remains separate from Gate 1's live
+provider and landing profile and grants no commit, push, Git-ref, pull-request,
+merge, deployment, or migration authority.
 
 Treat the loopback server and launch URL as same-user local authority. The
 per-start bearer authenticates POST transport but is not a remote-service or
@@ -307,11 +314,13 @@ window.
 
 Other than the explicitly operator-gated `approval-index-v1` index build above,
 these observation slices add no table/column migration, dependency install,
-daemon, watcher, Server-Sent Events, or WebSocket setup. They add no browser
-approval, mutation, execution, command, commit, push, or deployment authority.
-Current file/status, multi-file or payload-bearing diff/history, and action
-controls remain deferred, and ADR 0025's third-party review and secret-rotation
-release holds remain in force.
+daemon, watcher, Server-Sent Events, or WebSocket setup. They themselves add no
+browser approval, mutation, execution, command, commit, push, or deployment
+authority. Packet 2 separately adds only its closed, server-derived guarded
+lifecycle descriptors and receipts; it still adds no arbitrary command, commit,
+push, Git-ref, pull-request, merge, or deployment effect. Current file/status
+and multi-file or payload-bearing diff/history remain deferred, and ADR 0025's
+third-party review and secret-rotation release holds remain in force.
 
 ## Fifth M3 verification-attempt view
 
@@ -436,9 +445,11 @@ its digests prove byte binding and recorded-evidence integrity only, never fresh
 authorization or semantic correctness, and the checkpoint digest is a recorded
 byte binding rather than a fresh rehash. Operator annotations are read through
 the room but authored only through `run annotate`; they carry no authority over
-the run. Complete payload-bearing history remains CLI-only through
-`run history`; the browser stays review-only and gains no annotation-authoring,
-approval, mutation, execution, command, commit, push, or deployment route.
+the run. Complete payload-bearing history remains CLI-only through `run history`;
+the Change Room surface stays read-only and gains no annotation-authoring or
+Packet 2 action control. Packet 2's separately accepted guarded action routes
+remain outside the Change Room contract and add no arbitrary command, commit,
+push, Git-ref, pull-request, merge, or deployment authority.
 
 ## Offline Change Handoff Pack runbook
 

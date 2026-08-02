@@ -120,18 +120,18 @@ published-head `ci` run `30725709403` passed. It exports fixed local files for a
 operator to review and move deliberately. It does not send to Athena, add a
 receiver, synchronize lifecycle state, or grant landing or execution authority.
 
-The first slice adds a fixed-loopback Node API and same-origin React workspace
+The first slice added a fixed-loopback Node API and same-origin React workspace
 for persisted project registration, deterministic committed-tree context
 metadata, persisted task drafts, loopback Ollama planning, exact internal run
 state plus product phases, and allowlisted plan/action/file/check/output/warning/
 timestamp evidence. Registration, preview, drafts, and loopback planning support
-Linux, macOS, and Windows under atomic SQLite operation admission. It is
-review-only for the guarded lifecycle: protected project registration, draft,
-and loopback-planning POSTs exist, but browser approval, edit execution, checks,
-commit, push, and deployment are not exposed. Guarded approval and execution
-remain Linux CLI-only under the kernel lease and Docker boundary. Missing
-providers/execution are shown as `unconfigured`, and checks that did not run
-remain `not_run`.
+Linux, macOS, and Windows under atomic SQLite operation admission. At that slice
+boundary, it was review-only for the guarded lifecycle: protected project
+registration, draft, and loopback-planning POSTs existed, but browser approval,
+edit execution, checks, commit, push, and deployment were not exposed. Guarded
+approval and execution remained Linux CLI-only under the kernel lease and Docker
+boundary. Missing providers/execution were `unconfigured`; checks that did not
+run remain `not_run`.
 
 Acceptance was recorded from fresh output of these commands; exact results are
 in `docs/PLANS.md`:
@@ -172,8 +172,9 @@ file/status, multi-file or payload-bearing diff/history navigation, checkpoints,
 prompt history, a small task board, token/cost telemetry, server-held provider
 profiles, and deliberately designed approval/recovery controls. Patch
 materialization is not the next slice.
-Any browser execution path needs a separate safety contract and evidence;
-provider keys remain server-side.
+Packet 2 now supplies that separate safety contract and acceptance evidence for
+exactly eight existing lifecycle actions. Any wider browser execution path needs
+another explicit contract and evidence; provider keys remain server-side.
 
 ADR 0016 implements the smallest substantive history extension: an explicit,
 selected-run page immediately before the recent 200-event tail. It pins a
@@ -203,8 +204,9 @@ Missing starts, timeout detail, process identity, formal supersession, and
 rollback causality remain unknown. Selected payload scalars sit behind fixed
 byte and strict-JSON gates; existing activity routes remain payload-free.
 
-The implementation does not expose raw evidence, checkpoint bytes, complete
-invocation history, or guarded actions; those remain CLI concerns.
+That observation slice did not expose raw evidence, checkpoint bytes, complete
+invocation history, or guarded actions; those remained CLI concerns at its
+boundary. Packet 2 later exposed only its closed eight-action matrix.
 
 ADR 0019 implements the sixth merged observation slice. The ordinary selected-run
 response retains the newest 12 validated approval decisions and explicit
@@ -303,16 +305,21 @@ before the approval-index migration.
 Current forward work is Gate 1. PR #20 (`79e6dc7`, implementation head
 `bba1591`) merged repository-only foundations for ADR 0029's browser-action
 ledger and shutdown settlement plus ADR 0027's landing schema, records,
-deterministic candidate construction, and absent-only local reference. The
-Packet 2 worktree now adds the closed eight-action Linux dispatcher, exact
-descriptor/receipt authority, coordinator-bound in-flight cancellation, and
-prepared/admitted restart reconciliation without replay. These guarded
-lifecycle actions stop before every commit, push, ref, pull-request, merge, and
-deployment effect. Fresh local API integration and compiled Chrome 149
-acceptance passed on 2026-08-02; Packet 2 still needs exact candidate-head
-hosted CI and native macOS/Windows acceptance. Durable landing coordination, the
-GitHub gateway, live-evidence receipt runtime, and Gate 1 completion remain
-incomplete.
+deterministic candidate construction, and absent-only local reference.
+[PR #22](https://github.com/Ayyitskevin/Icarus/pull/22) published the
+closed eight-action Linux dispatcher, exact descriptor/receipt authority,
+coordinator-bound in-flight cancellation, and prepared/admitted restart
+reconciliation without replay. Candidate
+`701952349e0818cead37672df951ed09c0edd27c` passed hosted run `30760607215` and
+native macOS/Windows run `30760619650`, then rebase-merged as
+`ba38856a0e0e63d1045500185b2158a0859469d1`. A post-merge macOS smoke exposed a
+timing-only harness defect; corrected Packet 2 implementation head
+`3683087066efb65255f05b2493fd31051c3ad7c6`, published on `main`, passed hosted
+run `30761189188` plus native run `30761192370` and completed Packet 2 release
+acceptance. These guarded lifecycle actions
+stop before every commit, push, ref, pull-request, merge, and deployment effect.
+Durable landing coordination, the landing/GitHub receipt runtime, credential-
+gated live evidence, and Gate 1 completion remain incomplete.
 
 Slice 1 adds the populated closed input contract at
 `fixtures/evals/gate1/manifest.v1.json`, the focused `pnpm benchmark:gate1`

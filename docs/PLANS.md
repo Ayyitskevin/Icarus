@@ -1,12 +1,13 @@
 # Implementation plans
 
-## Current implementation checkpoint: Gate 1 Slice 1 offline benchmark contract
+## Accepted Gate 1 Slice 1 offline benchmark checkpoint
 
 Status: the versioned, deterministic, zero-external-effect offline benchmark
 contract is implementation-complete in the current tree. This closes Slice 1's
-offline contract deliverable only. Gate 1 remains open: no live provider/model run,
-GitHub object or ref effect, draft pull request, receipt, browser/server restart,
-or durable landing-coordinator evidence is claimed.
+offline contract deliverable only. Gate 1 remains open. This offline report
+itself claims no live provider/model run, GitHub object or ref effect, draft pull
+request, landing/GitHub receipt, or durable landing-coordinator evidence;
+Packet 2's separate browser-authority record appears below.
 
 ### Completed offline contract
 
@@ -445,8 +446,8 @@ succeeded at that exact head.
 
 The immediate forward sequence continues through Gate 1:
 
-1. record Packet 2's exact candidate-head hosted CI and native macOS/Windows
-   acceptance for ADR 0029's locally verified guarded lifecycle actions;
+1. preserve Packet 2's published exact-head hosted and native macOS/Windows
+   acceptance for ADR 0029's closed guarded lifecycle actions;
 2. complete ADR 0027's durable landing coordinator and digest-bound decision
    flow on the merged schema, records, deterministic candidate builder, and
    absent-only local `icarus/<run-id>` reference, then add bounded GitHub REST
@@ -458,8 +459,8 @@ The immediate forward sequence continues through Gate 1:
 
 ### Gate 1 implementation checkpoint
 
-ADR 0029 is accepted. Packet 2's current worktree extends the merged origin,
-authentication, request-ledger, and shutdown foundations with exact
+ADR 0029 is accepted. PR #22's published Packet 2 slice extends the merged
+origin, authentication, request-ledger, and shutdown foundations with exact
 server-derived descriptors, readable authority context, bounded receipts, and
 one Linux service dispatcher for egress approval, plan approval, review
 accept/reject, rollback, restore, resume, and cancellation. Each ordinary
@@ -477,8 +478,13 @@ source-checkout effect. Fresh local acceptance on 2026-08-02 covers same-ID
 admitted no-replay, exact and mismatched cancellation bindings, stale structured
 signals, bounded receipts, prepared/admitted restart reconciliation, all eight
 protected API mappings, and the compiled guarded-action workflow in
-`Chrome/149.0.7827.55`. Exact candidate-head hosted CI and native macOS/Windows
-acceptance are still required; Gate 1 remains incomplete.
+`Chrome/149.0.7827.55`. Candidate
+`701952349e0818cead37672df951ed09c0edd27c` passed hosted run `30760607215` and
+native run `30760619650`, then rebase-merged as
+`ba38856a0e0e63d1045500185b2158a0859469d1`. After a timing-only smoke-harness
+correction, implementation head `3683087066efb65255f05b2493fd31051c3ad7c6`
+passed hosted run `30761189188` and native run `30761192370`. This closes only
+Packet 2's eight guarded Linux browser action kinds; Gate 1 remains incomplete.
 
 ADR 0027 and its normative v1 record companion are accepted after independent
 P0/P1 authority reviews. PR #20 implements the exact landing schema and
@@ -492,8 +498,10 @@ incomplete. No live state migration was run.
 The local server now closes mutation admission, drains registered handlers, and
 closes SQLite last. Fresh handler, API, and real-browser suites prove action
 admission, stale confirmation, disconnect, shutdown, receipt, and settlement
-boundaries against the wired route. That local evidence does not silently
-satisfy the remaining exact-head hosted and native release record.
+boundaries against the wired route. Those local suites support the separately
+accepted exact-head record above. Neither evidence set satisfies durable landing,
+landing/GitHub receipts, the credential-gated live profile, deployment,
+migration, or Gate 1 completion.
 
 ## Released Gate 0 baseline: ADR 0026 slice 2b production wiring
 
@@ -1586,6 +1594,7 @@ the legacy browser projection of an already persisted one-file diff. ADR 0021
 bounds the project/repository catalog and aggregate JSON transport. ADR 0023's
 CLI transactional PatchSets and ADR 0026's failed-verification session are now
 implemented in the released Gate 0 baseline. Older approval pagination, current
-file/status views, multi-file or payload-bearing browser diff/history, browser
-approval, and browser execution remain later, explicitly reviewed expansions.
+file/status views, multi-file or payload-bearing browser diff/history, and
+browser action kinds outside ADR 0029's closed eight-kind Linux matrix remain
+later, explicitly reviewed expansions.
 See `docs/ROADMAP.md`.

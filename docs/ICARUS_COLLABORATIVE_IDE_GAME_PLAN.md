@@ -336,7 +336,7 @@ review-only for Safari and every unverified browser. This is an architecture
 risk acceptance, not a Gate 1 release approval. PR #20 subsequently merged the
 repository-only browser-action ledger and shutdown foundation plus the landing
 schema, records, deterministic candidate builder, and absent-only local-ref
-foundation. Complete these remaining slices:
+foundation. PR #22 completes items 1–2 below; items 3–7 remain:
 
 1. guarded browser action routes using the existing server-start session and
    ledger, with fixed-actor service propagation, digest/revision binding,
@@ -584,9 +584,9 @@ harness-only candidate journal into a new local controller; it does not execute
 browser reload or foreground-server restart and does not prove durable landing
 coordination.
 
-Guarded browser paths, durable landing coordination, the GitHub gateway and
-receipt runtime, and a separate versioned human-approved credential-gated
-live-evidence profile remain outstanding. That profile must bind the offline
+Durable landing coordination, the landing/GitHub receipt runtime, and a separate
+versioned human-approved credential-gated live-evidence profile remain
+outstanding. That profile must bind the offline
 manifest digest and immutable case/task/check/source/expected-change/candidate
 pins; pin the real provider/model and adapter version, captured pricing and
 budgets, and an operator-produced repository-automation assessment/disposition/
@@ -610,20 +610,23 @@ through the existing service boundary. The public origin must use ADR 0040's
 lookup or resolver injection, and the full composition must pass real Chrome
 at the exact head on both native platforms. Git behavior remains unchanged.
 
-Checkpoint: the accepted interim origin/session transport, strict-JSON
-boundary, and truthful client capability state are implemented locally and
-cold-reviewed.
-Exact-head native real-Chrome evidence passed at
-`eb01b6406c12126c60add7ac83800f8eba8ffdc9` in run `30618043377`, and human
-acceptance of ADR 0040's interim residual risk was recorded on 2026-07-31. The
-local foundation now includes the exact repository-only ledger schema, closed
-descriptor/settlement validators, prepared/admitted/settled store transitions,
-Linux lease-protected startup refusal of orphaned prepared rows, process-local
-request drain, and bounded transient controller stdin. Guarded action routes,
-fixed-actor descriptors, exact action/service propagation, admitted-row
-terminal reconciliation, bounded recovery presentation, and end-to-end signal
-evidence remain incomplete; therefore Packet 2 remains partial. No live
-state migration, Git landing effect, deployment, or public release was
+Checkpoint: Packet 2 is published. Its exact implementation candidate
+`701952349e0818cead37672df951ed09c0edd27c` passed hosted Linux CI in
+[run 30760607215](https://github.com/Ayyitskevin/Icarus/actions/runs/30760607215)
+and real-Chrome macOS/Windows acceptance in native
+[run 30760619650](https://github.com/Ayyitskevin/Icarus/actions/runs/30760619650).
+[PR #22](https://github.com/Ayyitskevin/Icarus/pull/22) rebase-merged the
+candidate as `ba38856a0e0e63d1045500185b2158a0859469d1`. The browser backoff
+timing-harness correction then published the Packet 2 implementation head on
+`main` as `3683087066efb65255f05b2493fd31051c3ad7c6`, where hosted Linux
+[run 30761189188](https://github.com/Ayyitskevin/Icarus/actions/runs/30761189188)
+and native real-Chrome macOS/Windows
+[run 30761192370](https://github.com/Ayyitskevin/Icarus/actions/runs/30761192370)
+succeeded. The completed slice supplies the closed eight-action dispatcher,
+fixed-actor and digest/revision-bound service propagation, durable receipts,
+cancellation binding, admitted-row terminal reconciliation, bounded recovery
+presentation, and signal/browser acceptance without changing Git behavior.
+No live state migration, Git landing effect, deployment, or Gate 1 release was
 authorized or performed.
 
 ### Packet 3 — durable local landing
