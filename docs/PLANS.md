@@ -368,13 +368,14 @@ and both native jobs in
 [run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
 succeeded at that exact head.
 
-The immediate forward sequence now begins with Gate 1:
+The immediate forward sequence continues through Gate 1:
 
-1. complete the accepted ADR 0029 guarded browser-action implementation and
-   implement the accepted ADR 0027 Git landing authority;
-2. implement browser parity, a separate landing ledger, deterministic
-   candidate commit, absent-only `icarus/<run-id>` reference, bounded GitHub
-   REST object upload, draft PR, and metadata-only reconciliation receipt;
+1. complete the accepted ADR 0029 guarded browser-action routes and terminal
+   reconciliation on the merged repository-only ledger and shutdown foundation;
+2. complete ADR 0027's durable landing coordinator and digest-bound decision
+   flow on the merged schema, records, deterministic candidate builder, and
+   absent-only local `icarus/<run-id>` reference, then add bounded GitHub REST
+   object upload, draft PR, and metadata-only reconciliation receipt;
 3. prove deterministic retrieval and typed read-only outcomes;
 4. ship the shared client and VS Code workbench; and
 5. accept ADR 0037, then prove read-only Council lift before ADR 0033/0038
@@ -386,23 +387,30 @@ ADR 0029 is accepted. The current worktree implements and cold-reviews its
 portable transport bootstrap: random per-start origin and bearer, universal
 POST authentication before body/service work, strict JSON, stable GET-only
 mode, synchronous fragment removal, tab-scoped session revocation, and
-truthful mutation/planning capability controls. It does **not** implement the
-ADR 0029 guarded-action request ledger, browser approval/execution routes, or
-restart reconciliation.
+truthful mutation/planning capability controls. PR #20 also implements the
+exact repository-only request ledger, prepared/admitted/settled transitions,
+process-local request drain, and lease-protected startup refusal of orphaned
+prepared rows. Guarded approval/execution routes, fixed-actor action/service
+propagation, admitted-row terminal reconciliation, bounded recovery
+presentation, and end-to-end signal evidence remain incomplete.
 
 ADR 0027 and its normative v1 record companion are accepted after independent
-P0/P1 authority reviews. No landing schema, candidate builder, provider
-gateway, branch, pull request, or migration is implemented by this checkpoint.
+P0/P1 authority reviews. PR #20 implements the exact landing schema and
+migration gates, closed records and state tables, deterministic local candidate
+construction, and an absent-only local `refs/heads/icarus/<run-id>` reference.
+Durable landing persistence and service coordination, the digest-bound decision
+transaction, CLI/browser presentation, interruption reconciliation and full
+crash matrix, the provider gateway, remote branch, and pull request remain
+incomplete. No live state migration was run.
 
-Before guarded browser actions are admitted, the local server must replace its
-current immediate connection close with a proven drain-or-durable-settlement
-path for authenticated in-flight mutations. The acceptance evidence must cover
-signals at every action-admission and settlement boundary; documentation alone
-does not close this debt.
+The local server now closes mutation admission, drains registered handlers, and
+closes SQLite last. Before guarded browser actions ship, acceptance evidence
+must additionally cover signals at every action-admission and settlement
+boundary; documentation alone does not close this debt.
 
 ## Released Gate 0 baseline: ADR 0026 slice 2b production wiring
 
-Status: **MERGED AND RELEASED AT EXACT MAIN**. The corrected ADR 0026
+Status: **MERGED AND RELEASED AT THE GATE 0 RELEASE HEAD**. The corrected ADR 0026
 implementation, exact-head Linux gate, and exact-head macOS/Windows native
 acceptance pass at `802b91e6f6c9b392f56c9ee3660be818a0f74a62`. Gate 1 is
 the current forward work.

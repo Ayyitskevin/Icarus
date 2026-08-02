@@ -17,9 +17,9 @@ registry; it never becomes arbitrary shell or deployment authority.
 Icarus is not a chatbot shell, an autonomous production deployer, or a claim
 that later roadmap features already exist.
 
-> **Release status:** Gate 0 is released at exact `main`
-> `802b91e6f6c9b392f56c9ee3660be818a0f74a62` with Linux, macOS, and Windows
-> evidence. The current Gate 1 branch carries an implemented interim
+> **Release status:** Gate 0's release/evidence head is
+> `802b91e6f6c9b392f56c9ee3660be818a0f74a62`, with Linux, macOS, and Windows
+> evidence. The current repository carries an implemented interim
 > authenticated browser-mutation session and its client capability state.
 > Random numeric `127/8` origins were rejected after native run `30613980911`
 > passed Windows and failed macOS. ADR 0040's technical gate subsequently
@@ -31,8 +31,8 @@ that later roadmap features already exist.
 > a Gate 1 release: the branch has repository-only ledger, shutdown, landing
 > record, and local Git foundations, but guarded browser actions, admitted-row
 > reconciliation, durable landing coordination, and the GitHub gateway remain
-> incomplete. No live migration, merge, deployment, or public release was
-> authorized or performed.
+> incomplete. No live state migration, Git landing effect, deployment, or
+> public release was authorized or performed.
 
 ## Current scope
 
@@ -260,6 +260,10 @@ pnpm check
 actionlint release into ignored `.local/` state. The release gate then lints
 every GitHub Actions workflow and proves the validator rejects a known-invalid
 fixture before running the remaining checks.
+
+`pnpm typecheck`, and therefore `pnpm check`, strictly type-checks the production
+Node projects, workspace, tests, native acceptance tests, and shared test
+support; `tsconfig.tests.json` closes the test and support source boundary.
 
 Start the local workspace with a dedicated state root:
 

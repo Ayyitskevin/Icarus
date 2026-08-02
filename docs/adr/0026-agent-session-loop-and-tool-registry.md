@@ -1,6 +1,6 @@
 # ADR 0026: AgentSession loop and host-owned tool registry
 
-- Status: Accepted and released through 2b at exact `main`
+- Status: Accepted and released through 2b at the Gate 0 release/evidence head
   `802b91e6f6c9b392f56c9ee3660be818a0f74a62`; 2c is separate Gate 1 work
 - Date: 2026-07-26
 - Related: [ADR 0023](0023-transactional-multi-file-patch-sets.md) (patch sets),

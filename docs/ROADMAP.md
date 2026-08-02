@@ -42,12 +42,14 @@ the remaining release reviews had not yet been recorded.
 
 That historical hold is closed. [PR #18](https://github.com/Ayyitskevin/Icarus/pull/18)
 merged as `d4bbcd4aab713bee23237099286e6d9b9f74283b`; the native-fixture
-correction followed as `802b91e6f6c9b392f56c9ee3660be818a0f74a62`, now exact
-`main`. Linux [run 30602942008](https://github.com/Ayyitskevin/Icarus/actions/runs/30602942008)
+correction followed as the Gate 0 release/evidence head
+`802b91e6f6c9b392f56c9ee3660be818a0f74a62`. Linux
+[run 30602942008](https://github.com/Ayyitskevin/Icarus/actions/runs/30602942008)
 and both macOS and Windows jobs in native
 [run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
-succeeded at that exact head. Gate 0 is merged and released; current forward
-work begins with Gate 1 authority contracts and benchmark evidence.
+succeeded at that exact head. Gate 0 is merged and released. At that point,
+forward work began with Gate 1 authority contracts and benchmark evidence;
+those contracts and PR #20's repository-only foundations have since landed.
 
 The milestone records below are retained as history and as the source of release
 holds that remain open. Where their order conflicts with ADR 0036, ADR 0036
@@ -290,7 +292,7 @@ schema changes, and secrets remain human-gated and outside automatic dogfood.
 
 ## Current release and acceptance gates
 
-Gate 0 is merged and released at exact `main`
+Gate 0 is merged and released at release/evidence head
 `802b91e6f6c9b392f56c9ee3660be818a0f74a62`, with successful Linux and native
 evidence linked above. This does not claim that the historical observation
 slices complete the broader M3/IDE outcome, nor does it silently discharge ADR
@@ -298,12 +300,14 @@ slices complete the broader M3/IDE outcome, nor does it silently discharge ADR
 non-test state still requires a verified backup and explicit operator approval
 before the approval-index migration.
 
-Current forward work is Gate 1. ADR 0029 browser authority is accepted and its
-portable mutation-session/client bootstrap is the first local candidate; the
-guarded action ledger and routes remain unimplemented. ADR 0027 Git landing is
-accepted, but no landing runtime or migration exists. After the versioned
-benchmark closes, implementation continues through the bounded
-browser-to-draft-PR path.
+Current forward work is Gate 1. PR #20 (`79e6dc7`, implementation head
+`bba1591`) merged repository-only foundations for ADR 0029's browser-action
+ledger and shutdown settlement plus ADR 0027's landing schema, records,
+deterministic candidate construction, and absent-only local reference. Guarded
+action routes, admitted-row terminal reconciliation and recovery presentation,
+durable landing coordination, the GitHub gateway, and the versioned benchmark
+remain incomplete. No live state migration, Git landing effect, deployment, or
+public release was authorized or performed by that foundation work.
 
 The merged Change Rooms implementation is available as a read-only observation
 surface, but ADR 0041 remains Proposed until an independent review is recorded.
