@@ -155,6 +155,7 @@ function approvePreparedRun(store: IcarusStore): void {
     sandbox: project.sandbox,
     ceiling: project.ceiling,
     plan: UNIT_PLAN,
+    readableManifest: null,
   });
   store.recordPlanAndAwaitApproval(UNIT_RUN_ID, UNIT_PLAN, digest);
   store.approvePlan(UNIT_RUN_ID, digest, "unit-operator");
@@ -509,6 +510,7 @@ describe("SQLite run persistence", () => {
       sandbox: UNIT_SANDBOX,
       ceiling: UNIT_CEILING,
       plan: UNIT_PLAN,
+      readableManifest: null,
     });
     fixture.store.recordPlanAndAwaitApproval(UNIT_RUN_ID, UNIT_PLAN, digest);
 
@@ -578,6 +580,7 @@ describe("SQLite run persistence", () => {
       sandbox: project.sandbox,
       ceiling: project.ceiling,
       plan: UNIT_PLAN,
+      readableManifest: null,
     });
     fixture.store.recordPlanAndAwaitApproval(UNIT_RUN_ID, UNIT_PLAN, digest);
     const secretActor = ["sk-", "a".repeat(24)].join("");

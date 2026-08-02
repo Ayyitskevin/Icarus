@@ -138,6 +138,7 @@ describe("Change-context packet", () => {
       sandbox: projectRecord.sandbox,
       ceiling: projectRecord.ceiling,
       plan: UNIT_PLAN,
+      readableManifest: null,
     });
     fixture.store.recordPlanAndAwaitApproval(UNIT_RUN_ID, UNIT_PLAN, digest);
 

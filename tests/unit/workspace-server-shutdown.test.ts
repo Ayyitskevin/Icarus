@@ -157,6 +157,8 @@ describe("workspace server shutdown", () => {
         void releaseResponse.promise.then(() => {
           if (typeof encodingOrCallback === "function") {
             originalEnd(chunk, encodingOrCallback);
+          } else if (encodingOrCallback === undefined) {
+            originalEnd(chunk);
           } else {
             originalEnd(chunk, encodingOrCallback, callback);
           }

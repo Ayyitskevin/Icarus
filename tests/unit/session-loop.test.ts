@@ -79,7 +79,7 @@ function harness(input: {
 
   const deps: SessionLoopDeps = {
     iterationCeiling: input.iterationCeiling,
-    initialEvidence: input.initialEvidence,
+    ...(input.initialEvidence === undefined ? {} : { initialEvidence: input.initialEvidence }),
     spentIterations: () => spent,
     callProvider: (prompt) => {
       spent += input.providerCharge ?? 1;

@@ -194,6 +194,7 @@ function prepareIterationPlan(fixture: ChangeRoomFixture, iterationCeiling = 1):
     sandbox: project.sandbox,
     ceiling: project.ceiling,
     plan,
+    readableManifest: null,
   });
   fixture.store.recordPlanAndAwaitApproval(fixture.runId, plan, planSha256);
   fixture.store.approvePlan(fixture.runId, planSha256, "unit-operator");
@@ -529,6 +530,7 @@ function seedCompletedPrivateCanaryRun(fixture: ChangeRoomFixture): void {
     sandbox: project.sandbox,
     ceiling: project.ceiling,
     plan,
+    readableManifest: null,
   });
   fixture.store.recordPlanAndAwaitApproval(fixture.runId, plan, planSha256);
   fixture.store.approvePlan(fixture.runId, planSha256, "private-plan-actor-canary");
@@ -1384,6 +1386,7 @@ describe("Change Handoff authoritative reader", () => {
     if (completed.diff === null || completed.verification === null || completed.patchSet === null) {
       throw new Error("Expected completed revision evidence");
     }
+    const completedPatchSet = completed.patchSet;
     const reportDone = fixture.store.beginOperation(
       fixture.runId,
       "session.control.report_done",
@@ -1432,7 +1435,7 @@ describe("Change Handoff authoritative reader", () => {
     fixture.store.beginSessionIteration(fixture.runId);
     const checkpointFiles = fixture.store.listCheckpointFiles(fixture.runId);
     expectCode(
-      () => fixture.store.recordPatchSetIntent(fixture.runId, completed.patchSet, checkpointFiles),
+      () => fixture.store.recordPatchSetIntent(fixture.runId, completedPatchSet, checkpointFiles),
       "IMMUTABLE_ARTIFACT_CONFLICT",
     );
     chargeRepairIteration(fixture.store);
@@ -1444,7 +1447,7 @@ describe("Change Handoff authoritative reader", () => {
       1_000,
       "running",
     );
-    fixture.store.recordPatchSetIntent(fixture.runId, completed.patchSet, checkpointFiles);
+    fixture.store.recordPatchSetIntent(fixture.runId, completedPatchSet, checkpointFiles);
     fixture.store.saveTreeCheckpoint(fixture.runId, checkpointSha256);
     fixture.store.finishSessionVerificationOperation(
       replacement,
@@ -3106,6 +3109,7 @@ describe("Change Handoff authoritative reader", () => {
       sandbox: project.sandbox,
       ceiling: project.ceiling,
       plan: repairPlan,
+      readableManifest: null,
     });
     fixture.store.recordPlanAndAwaitApproval(fixture.runId, repairPlan, planSha256);
     fixture.store.approvePlan(fixture.runId, planSha256, "unit-operator");
@@ -3258,6 +3262,7 @@ describe("Change Handoff authoritative reader", () => {
       sandbox: project.sandbox,
       ceiling: project.ceiling,
       plan: repairPlan,
+      readableManifest: null,
     });
     fixture.store.recordPlanAndAwaitApproval(fixture.runId, repairPlan, planSha256);
     fixture.store.approvePlan(fixture.runId, planSha256, "unit-operator");
