@@ -51,8 +51,9 @@ import {
   treeCheckpointDigest,
 } from "../../packages/core/src/policy.js";
 import { createProviderConfig } from "../../packages/core/src/provider.js";
-import { SESSION_ITERATION_OPERATION_KIND } from "../../packages/core/src/store.js";
 import type { IcarusStore } from "../../packages/core/src/store.js";
+import { SESSION_ITERATION_OPERATION_KIND } from "../../packages/core/src/store.js";
+import type { JsonValue } from "../../packages/core/src/types.js";
 import {
   approveChangeRoomPlan,
   type ChangeRoomFixture,
@@ -62,7 +63,6 @@ import {
   finishToAwaitingReview,
   prepareChangeRoomRun,
 } from "../support/change-room-fixtures.js";
-import type { JsonValue } from "../../packages/core/src/types.js";
 import {
   UNIT_BASE_COMMIT,
   UNIT_CEILING,
@@ -107,6 +107,38 @@ function completedFixture(): ChangeRoomFixture {
   driveToCompleted(fixture.store);
   closeFixture(fixture);
   return fixture;
+}
+
+function admitPlanApprovalAction(
+  fixture: ChangeRoomFixture,
+  actionId: string,
+  iterationCeiling = UNIT_PLAN.iterationCeiling,
+): { readonly actionDigest: string; readonly planSha256: string } {
+  prepareChangeRoomRun(fixture.store);
+  const plan = { ...UNIT_PLAN, iterationCeiling };
+  const run = fixture.store.getRun(fixture.runId);
+  const project = fixture.store.getProject(run.projectId);
+  const planSha256 = planApprovalDigest({
+    task: run.task,
+    baseCommit: run.baseCommit,
+    contextSha256: run.contextSha256,
+    targets: run.context.targets,
+    provider: run.provider,
+    checks: project.checks,
+    sandbox: project.sandbox,
+    ceiling: project.ceiling,
+    plan,
+    readableManifest: null,
+  });
+  fixture.store.recordPlanAndAwaitApproval(fixture.runId, plan, planSha256);
+  const descriptor = fixture.store
+    .getBrowserActionAuthoritySnapshot(fixture.runId)
+    .actions.find((candidate) => candidate.kind === "plan.approve");
+  if (descriptor === undefined) throw new Error("Expected plan approval authority");
+  fixture.store.prepareBrowserAction({ actionId, ...descriptor }, "browser-fixed-operator");
+  fixture.store.admitBrowserAction(actionId);
+  fixture.store.approvePlan(fixture.runId, planSha256, "browser-fixed-operator", actionId);
+  return { actionDigest: descriptor.actionDigest, planSha256 };
 }
 
 function expectCode(action: () => unknown, code: string): void {
@@ -1104,6 +1136,174 @@ describe("Change Handoff authoritative reader", () => {
 
     expect(second).toEqual(first);
     expect(sourceFamilyFingerprint(fixture.databasePath)).toEqual(before);
+  });
+
+  it("accepts prior-admitted review action evidence without exporting it", () => {
+    const fixture = trackedFixture();
+    prepareChangeRoomRun(fixture.store);
+    approveChangeRoomPlan(fixture.store);
+    const evidence = finishToAwaitingReview(fixture.store, "passed");
+    const descriptor = fixture.store
+      .getBrowserActionAuthoritySnapshot(fixture.runId)
+      .actions.find((candidate) => candidate.kind === "review.approve");
+    if (descriptor === undefined) throw new Error("Expected review approval authority");
+    const actionId = "11111111-1111-4111-8111-111111111111";
+    fixture.store.prepareBrowserAction({ actionId, ...descriptor }, "browser-fixed-operator");
+    fixture.store.admitBrowserAction(actionId);
+    const operation = fixture.store.beginOperation(
+      fixture.runId,
+      "review.validate",
+      0,
+      0,
+      1_000,
+      "awaiting_review",
+      actionId,
+    );
+    fixture.store.finishReviewValidationAndApprove(
+      operation,
+      {
+        outcome: "succeeded",
+        activeRuntimeMs: 1,
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCostUsd: 0,
+        detail: {},
+      },
+      evidence.diffSha256,
+      "browser-fixed-operator",
+    );
+    closeFixture(fixture);
+
+    const source = readChangeHandoffSource(fixture.databasePath, fixture.runId);
+    const preview = buildChangeHandoffPreview(source, { correlationId: "action-linked-review" });
+    expect(source).toMatchObject({ state: "completed", reviewDecision: "approve" });
+    expect(preview.payloadBytes.includes(Buffer.from(actionId))).toBe(false);
+    expect(preview.payloadBytes.includes(Buffer.from(descriptor.actionDigest))).toBe(false);
+  });
+
+  it("accepts only a prior-admitted browser action identity on verification roots", () => {
+    const buildFixture = (): { readonly fixture: ChangeRoomFixture; readonly actionId: string } => {
+      const fixture = trackedFixture();
+      const actionId = "33333333-3333-4333-8333-333333333333";
+      admitPlanApprovalAction(fixture, actionId);
+      finishToAwaitingReview(fixture.store, "passed");
+      mutateDatabase(fixture, (database) => {
+        const updated = database
+          .prepare(
+            "UPDATE run_events SET payload_json = json_set(payload_json, '$.browserActionId', ?) " +
+              "WHERE run_id = ? AND type = 'verification.completed'",
+          )
+          .run(actionId, fixture.runId) as { readonly changes: number };
+        expect(updated.changes).toBe(1);
+      });
+      return { fixture, actionId };
+    };
+
+    const valid = buildFixture();
+    expect(readChangeHandoffSource(valid.fixture.databasePath, valid.fixture.runId).state).toBe(
+      "awaiting_review",
+    );
+
+    for (const replacement of ["44444444-4444-4444-8444-444444444444", null] as const) {
+      const invalid = buildFixture();
+      mutateDatabase(invalid.fixture, (database) => {
+        database
+          .prepare(
+            "UPDATE run_events SET payload_json = json_set(payload_json, '$.browserActionId', ?) " +
+              "WHERE run_id = ? AND type = 'verification.completed'",
+          )
+          .run(replacement, invalid.fixture.runId);
+      });
+      expectCode(
+        () => readChangeHandoffSource(invalid.fixture.databasePath, invalid.fixture.runId),
+        "HANDOFF_SOURCE_INVALID",
+      );
+    }
+  });
+
+  it("accepts an action-linked session completion without exporting its identity", () => {
+    const fixture = trackedFixture();
+    const actionId = "55555555-5555-4555-8555-555555555555";
+    const action = admitPlanApprovalAction(fixture, actionId, 1);
+    finishToAwaitingReview(fixture.store, "failed", "verifying");
+    fixture.store.beginSessionIteration(fixture.runId);
+    chargeRepairIteration(fixture.store);
+    recordPassingSessionVerification(fixture);
+    const reportDone = fixture.store.beginOperation(
+      fixture.runId,
+      "session.control.report_done",
+      0,
+      0,
+      1_000,
+      "running",
+    );
+    fixture.store.finishSessionControlOperation(
+      reportDone,
+      {
+        outcome: "succeeded",
+        activeRuntimeMs: 1,
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCostUsd: 0,
+        detail: { tool: "report_done" },
+      },
+      "completed",
+      "The registered check passes.",
+      1,
+      actionId,
+    );
+    fixture.store.recordSessionIterationBoundary(fixture.runId, 1);
+    closeFixture(fixture);
+
+    const source = readChangeHandoffSource(fixture.databasePath, fixture.runId);
+    const preview = buildChangeHandoffPreview(source, { correlationId: "action-linked-session" });
+    expect(source).toMatchObject({
+      state: "awaiting_review",
+      verification: { outcome: "passed" },
+      reviewDecision: null,
+    });
+    expect(preview.payloadBytes.includes(Buffer.from(actionId))).toBe(false);
+    expect(preview.payloadBytes.includes(Buffer.from(action.actionDigest))).toBe(false);
+  });
+
+  it("rejects unknown, late, and malformed browser action event identities", () => {
+    for (const scenario of ["unknown", "late", "malformed"] as const) {
+      const fixture = completedFixture();
+      const actionId =
+        scenario === "malformed"
+          ? "NOT-A-CANONICAL-ACTION-ID"
+          : "22222222-2222-4222-8222-222222222222";
+      mutateDatabase(fixture, (database) => {
+        const updated = database
+          .prepare(
+            "UPDATE run_events SET payload_json = json_set(payload_json, '$.browserActionId', ?) " +
+              "WHERE run_id = ? AND type = 'review.accepted'",
+          )
+          .run(actionId, fixture.runId) as { readonly changes: number };
+        expect(updated.changes).toBe(1);
+        if (scenario === "late") {
+          database
+            .prepare(
+              "INSERT INTO run_events (run_id, sequence, type, payload_json, created_at) " +
+                "VALUES (?, (SELECT MAX(sequence) + 1 FROM run_events WHERE run_id = ?), " +
+                "'browser.action.admitted', ?, '2026-08-01T12:30:00.000Z')",
+            )
+            .run(
+              fixture.runId,
+              fixture.runId,
+              JSON.stringify({
+                browserActionId: actionId,
+                kind: "review.approve",
+                actionDigest: "a".repeat(64),
+              }),
+            );
+        }
+      });
+      expectCode(
+        () => readChangeHandoffSource(fixture.databasePath, fixture.runId),
+        "HANDOFF_SOURCE_INVALID",
+      );
+    }
   });
 
   it("leaves checkout, Git metadata, cache, worktree, artifacts, and fetch count unchanged", () => {

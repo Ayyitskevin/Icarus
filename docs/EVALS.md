@@ -98,6 +98,15 @@ origin and bearer and requires an operator relaunch before durable work is
 recovered. The offline report must never describe that separate contract, or the
 bearer itself, as benchmark evidence.
 
+Packet 2's local action and API tests cover exact descriptors and bounded
+receipts, all eight protected route mappings, same-ID admitted no-replay,
+prepared/admitted restart reconciliation, non-Linux refusal, and exact,
+mismatched, and stale in-flight cancellation signals. Its compiled Chrome 149
+smoke additionally covers confirmation, stale refusal, receipt recovery,
+cancellation, and same-tab reload. That local evidence is not part of the
+offline benchmark report and cannot replace exact candidate-head hosted CI,
+native macOS/Windows acceptance, or the live landing profile.
+
 Neither synthetic report variant can complete Gate 1 regardless of its local
 outcome. Gate 1 still requires a separate, versioned, human-approved,
 credential-gated live-evidence profile. That profile must bind the offline

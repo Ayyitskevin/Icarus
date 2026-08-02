@@ -51,6 +51,26 @@ afterEach(async () => {
 });
 
 describe("workspace exact binding", () => {
+  test.each(["", "\n", "x".repeat(201)])(
+    "rejects invalid fixed actor attribution before binding",
+    async (operatorActor) => {
+      let listenCalls = 0;
+      let originCreated = false;
+      await expect(
+        startWorkspaceServerWithBindingHooks({ ...options, operatorActor }, 0, {
+          createMutationHostname: () => {
+            originCreated = true;
+            return "0123456789abcdef0123456789abcdef.localhost";
+          },
+          listen: async () => {
+            listenCalls += 1;
+          },
+        }),
+      ).rejects.toMatchObject({ code: "INVALID_ACTOR" });
+      expect(listenCalls).toBe(0);
+      expect(originCreated).toBe(false);
+    },
+  );
   test("binds exact 127.0.0.1 before creating the random public origin", async () => {
     const calls: Array<{ readonly port: number; readonly host: string }> = [];
     const order: string[] = [];
@@ -87,6 +107,65 @@ describe("workspace exact binding", () => {
       ),
     );
   });
+
+  test("reconciles Linux browser actions after binding and before origin creation", async () => {
+    const order: string[] = [];
+    Object.defineProperty(runtime.service, "reconcileBrowserActionRequests", {
+      configurable: true,
+      value: async () => {
+        order.push("reconcile");
+        return { settledPrepared: 1, settledAdmitted: 1, busyRunIds: ["busy-run"] };
+      },
+    });
+    const originHostname = "0123456789abcdef0123456789abcdef.localhost";
+    const workspace = await startWorkspaceServerWithBindingHooks(
+      { ...options, platform: "linux" },
+      0,
+      {
+        createMutationHostname: () => {
+          order.push("origin");
+          return originHostname;
+        },
+        listen: async (server, port, host) => {
+          await listen(server, port, host);
+          order.push("bound");
+        },
+      },
+    );
+    cleanups.push(workspace.close);
+
+    expect(order).toEqual(["bound", "reconcile", "origin"]);
+    const presented = await fetch(`${workspace.url}/api/workspace`);
+    expect(presented.status).toBe(200);
+    expect(order).toEqual(["bound", "reconcile", "origin"]);
+  });
+
+  test.each(["darwin", "win32"] as const)(
+    "skips startup browser reconciliation only on simulated %s",
+    async (platform) => {
+      const order: string[] = [];
+      Object.defineProperty(runtime.service, "reconcileBrowserActionRequests", {
+        configurable: true,
+        value: async () => {
+          order.push("reconcile");
+          return { settledPrepared: 0, settledAdmitted: 0, busyRunIds: [] };
+        },
+      });
+      const workspace = await startWorkspaceServerWithBindingHooks({ ...options, platform }, 0, {
+        createMutationHostname: () => {
+          order.push("origin");
+          return "0123456789abcdef0123456789abcdef.localhost";
+        },
+        listen: async (server, port, host) => {
+          await listen(server, port, host);
+          order.push("bound");
+        },
+      });
+      cleanups.push(workspace.close);
+
+      expect(order).toEqual(["bound", "origin"]);
+    },
+  );
 
   test.each(["EADDRNOTAVAIL", "EINVAL", "EADDRINUSE", "EPERM"])(
     "propagates %s without fallback or origin creation",

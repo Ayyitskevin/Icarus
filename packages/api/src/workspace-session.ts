@@ -24,7 +24,7 @@ export interface WorkspaceSession {
   readonly launchUrl: string;
   assertExactHost(request: IncomingMessage): void;
   assertOptionalExactOrigin(request: IncomingMessage): void;
-  assertProtectedMutation(request: IncomingMessage): void;
+  assertProtectedMutation(request: IncomingMessage, allowedActions?: readonly string[]): string;
 }
 
 function rawHeaderValues(request: IncomingMessage, expectedName: string): readonly string[] {
@@ -128,7 +128,10 @@ class BoundWorkspaceSession implements WorkspaceSession {
     }
   }
 
-  assertProtectedMutation(request: IncomingMessage): void {
+  assertProtectedMutation(
+    request: IncomingMessage,
+    allowedActions: readonly string[] = [WORKSPACE_MUTATION_ACTION],
+  ): string {
     if (this.mode === "review-only" || this.#expectedBearer === null) {
       request.resume();
       throw new IcarusError("WORKSPACE_REVIEW_ONLY", "This workspace session is review-only");
@@ -157,13 +160,15 @@ class BoundWorkspaceSession implements WorkspaceSession {
     }
 
     const actionValues = rawHeaderValues(request, "x-icarus-action");
-    if (actionValues.length !== 1 || actionValues[0] !== WORKSPACE_MUTATION_ACTION) {
+    const action = actionValues.length === 1 ? (actionValues[0] ?? "") : "";
+    if (actionValues.length !== 1 || !allowedActions.includes(action)) {
       request.resume();
       throw new IcarusError(
         "INVALID_REQUEST",
-        "Mutation requests require the workspace.mutate action header",
+        "Mutation requests require one exact allowed action header",
       );
     }
+    return action;
   }
 }
 

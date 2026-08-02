@@ -1,48 +1,5 @@
 export {
-  canonicalJson,
-  canonicalJsonLine,
-  DEFAULT_MAX_JSON_DEPTH,
-  parseStrictJson,
-} from "./canonical-json.js";
-export {
-  assertExpectedChangeHandoffPreview,
-  buildChangeHandoffPreview,
-  CHANGE_HANDOFF_DISCLOSURE_CLASS,
-  CHANGE_HANDOFF_INTEGRITY_STATEMENT,
-  CHANGE_HANDOFF_OMISSIONS,
-  CHANGE_HANDOFF_SCHEMA,
-  CHANGE_HANDOFF_UNCERTAINTIES,
-  CHANGE_HANDOFF_VERSION,
-  changeHandoffPhase,
-  createChangeHandoffExportResult,
-  decodeChangeHandoffExportResultBytes,
-  decodeChangeHandoffPayloadBytes,
-  encodeChangeHandoffExportResult,
-  inspectChangeHandoffDocuments,
-  type ChangeHandoffArtifactReference,
-  type ChangeHandoffArtifactType,
-  type ChangeHandoffExportResult,
-  type ChangeHandoffInspection,
-  type ChangeHandoffPayloadV1,
-  type ChangeHandoffPhase,
-  type ChangeHandoffPreview,
-  type ChangeHandoffRequest,
-  type ChangeHandoffSourceSnapshot,
-  type ChangeHandoffVerification,
-  validateChangeHandoffRequest,
-  verifyChangeHandoffDocuments,
-} from "./change-handoff.js";
-export {
-  CHANGE_HANDOFF_FILENAME,
-  CHANGE_HANDOFF_MAX_BYTES,
-  CHANGE_HANDOFF_RESULT_FILENAME,
-  CHANGE_HANDOFF_RESULT_MAX_BYTES,
-  readSecureHandoffFile,
-  type SecureFileRead,
-  writeChangeHandoffFiles,
-} from "./change-handoff-files.js";
-export { readChangeHandoffSource } from "./change-handoff-reader.js";
-export {
+  type ActiveBrowserActionBinding,
   assertBrowserActionCancellationParent,
   assertBrowserActionDescriptorFields,
   assertBrowserActionIdentity,
@@ -58,6 +15,7 @@ export {
   BROWSER_ACTION_OUTCOMES,
   BROWSER_ACTION_STATUSES,
   type BrowserActionAdmittedRecord,
+  type BrowserActionDescriptor,
   type BrowserActionDescriptorFields,
   type BrowserActionDescriptorTuple,
   type BrowserActionIdentity,
@@ -66,13 +24,16 @@ export {
   type BrowserActionOutcome,
   type BrowserActionParentSnapshot,
   type BrowserActionPreparedRecord,
+  type BrowserActionReceipt,
   type BrowserActionRecord,
   type BrowserActionSettledRecord,
   type BrowserActionSettlement,
   type BrowserActionStatus,
+  browserActionCopy,
   browserActionDescriptorDigest,
   browserActionDescriptorTuple,
   browserActionIdentityTuple,
+  browserActionReceipt,
   browserActionRequiresSubject,
   canTransitionBrowserAction,
   hasSameBrowserActionIdentity,
@@ -82,18 +43,62 @@ export {
   isBrowserActionStatus,
 } from "./browser-action-state.js";
 export {
-  type ContextPreviewCounts,
-  type ContextPreviewEntry,
-  createContextPreview,
-  type ProjectContextPreview,
-} from "./context-preview.js";
+  canonicalJson,
+  canonicalJsonLine,
+  DEFAULT_MAX_JSON_DEPTH,
+  parseStrictJson,
+} from "./canonical-json.js";
+export { buildChangeContext, CHANGE_CONTEXT_QUESTIONS } from "./change-context.js";
+export {
+  assertExpectedChangeHandoffPreview,
+  buildChangeHandoffPreview,
+  CHANGE_HANDOFF_DISCLOSURE_CLASS,
+  CHANGE_HANDOFF_INTEGRITY_STATEMENT,
+  CHANGE_HANDOFF_OMISSIONS,
+  CHANGE_HANDOFF_SCHEMA,
+  CHANGE_HANDOFF_UNCERTAINTIES,
+  CHANGE_HANDOFF_VERSION,
+  type ChangeHandoffArtifactReference,
+  type ChangeHandoffArtifactType,
+  type ChangeHandoffExportResult,
+  type ChangeHandoffInspection,
+  type ChangeHandoffPayloadV1,
+  type ChangeHandoffPhase,
+  type ChangeHandoffPreview,
+  type ChangeHandoffRequest,
+  type ChangeHandoffSourceSnapshot,
+  type ChangeHandoffVerification,
+  changeHandoffPhase,
+  createChangeHandoffExportResult,
+  decodeChangeHandoffExportResultBytes,
+  decodeChangeHandoffPayloadBytes,
+  encodeChangeHandoffExportResult,
+  inspectChangeHandoffDocuments,
+  validateChangeHandoffRequest,
+  verifyChangeHandoffDocuments,
+} from "./change-handoff.js";
+export {
+  CHANGE_HANDOFF_FILENAME,
+  CHANGE_HANDOFF_MAX_BYTES,
+  CHANGE_HANDOFF_RESULT_FILENAME,
+  CHANGE_HANDOFF_RESULT_MAX_BYTES,
+  readSecureHandoffFile,
+  type SecureFileRead,
+  writeChangeHandoffFiles,
+} from "./change-handoff-files.js";
+export { readChangeHandoffSource } from "./change-handoff-reader.js";
 export {
   buildChangeRoom,
   CHANGE_ROOM_ANNOTATION_TARGETS,
   CHANGE_ROOM_CARD_ORDER,
   changeRoomTerminalReason,
 } from "./change-room.js";
-export { buildChangeContext, CHANGE_CONTEXT_QUESTIONS } from "./change-context.js";
+export {
+  type ContextPreviewCounts,
+  type ContextPreviewEntry,
+  createContextPreview,
+  type ProjectContextPreview,
+} from "./context-preview.js";
 export { IcarusError, invariant } from "./errors.js";
 export {
   BROWSER_ACTION_LEDGER_MIGRATION,
@@ -115,6 +120,7 @@ export {
   OPERATOR_ACTOR_MAX_BYTES,
   POLICY_VERSION,
   planApprovalDigest,
+  readableManifestDigest,
 } from "./policy.js";
 export { createProviderConfig, parseProviderBaseUrl } from "./provider.js";
 export {
@@ -128,7 +134,14 @@ export {
   createIcarusRuntime,
   type IcarusRuntime,
 } from "./runtime.js";
-export { IcarusService, type PlanRunInput } from "./service.js";
+export {
+  type BrowserActionAbortReason,
+  type BrowserActionCancellationTarget,
+  type BrowserActionExecutionOptions,
+  type BrowserActionExecutionResult,
+  IcarusService,
+  type PlanRunInput,
+} from "./service.js";
 export {
   MAX_TOOL_CALLS_PER_ITERATION,
   runSessionLoop,
@@ -136,6 +149,7 @@ export {
   type SessionOutcome,
   TOOL_CALL_SCHEMA,
 } from "./session-loop.js";
+export type { BrowserActionAuthoritySnapshot } from "./store.js";
 export {
   type ApplyPatchSetOutcome,
   assertToolCallGranted,

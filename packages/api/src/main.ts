@@ -4,7 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createIcarusRuntime, IcarusError, type IcarusRuntime } from "@icarus/core";
+import {
+  assertOperatorActor,
+  createIcarusRuntime,
+  IcarusError,
+  type IcarusRuntime,
+} from "@icarus/core";
 
 import { type StartedWorkspaceServer, startWorkspaceServer } from "./server.js";
 
@@ -28,6 +33,13 @@ function port(): number {
     throw new IcarusError("INVALID_PORT", "ICARUS_PORT is invalid");
   }
   return parsed;
+}
+
+function operatorActor(): string | null {
+  const actor = process.env.ICARUS_OPERATOR_ACTOR;
+  if (actor === undefined) return null;
+  assertOperatorActor(actor);
+  return actor;
 }
 
 function reportFailure(error: unknown): void {
@@ -76,12 +88,13 @@ async function main(): Promise<void> {
   };
   try {
     const root = stateRoot();
+    const actor = operatorActor();
     runtime = await createIcarusRuntime(root);
-    if (process.platform === "linux") {
-      await runtime.service.reconcilePreparedBrowserActionRequests();
-    }
     const workspaceDist = fileURLToPath(new URL("../../workspace/dist/", import.meta.url));
-    server = await startWorkspaceServer({ runtime, stateRoot: root, workspaceDist }, port());
+    server = await startWorkspaceServer(
+      { runtime, stateRoot: root, workspaceDist, operatorActor: actor },
+      port(),
+    );
     process.stdout.write(
       `${JSON.stringify({ url: server.launchUrl, binding: server.host, stateRoot: root })}\n`,
     );

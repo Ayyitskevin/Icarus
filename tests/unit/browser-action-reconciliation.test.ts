@@ -25,13 +25,17 @@ afterEach(async () => {
   }
 });
 
-function identity(actionId: string, kind: "run.resume" | "run.cancel"): BrowserActionIdentity {
+function identity(
+  actionId: string,
+  kind: "run.resume" | "run.cancel",
+  eventRevision: number,
+): BrowserActionIdentity {
   const descriptor = {
     version: 1 as const,
     kind,
     runId: UNIT_RUN_ID,
     expectedState: "preparing" as const,
-    eventRevision: 1,
+    eventRevision,
     subjectDigest: null,
     activeActionId: null,
     activeActionDigest: null,
@@ -44,7 +48,7 @@ function identity(actionId: string, kind: "run.resume" | "run.cancel"): BrowserA
 }
 
 describe.runIf(process.platform === "linux")("browser action restart reconciliation", () => {
-  test("refuses only prepared intent and holds admitted work for exact boundary reconciliation", async () => {
+  test("interrupts started work and settles prepared and admitted requests without replay", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "icarus-browser-reconcile-"));
     cleanupRoots.push(root);
     const stateRoot = path.join(root, "state");
@@ -58,24 +62,27 @@ describe.runIf(process.platform === "linux")("browser action restart reconciliat
       targets: UNIT_PLAN.targets,
       provider: UNIT_PROVIDER,
     });
-    const admitted = identity("11111111-1111-4111-8111-111111111111", "run.resume");
-    const prepared = identity("22222222-2222-4222-8222-222222222222", "run.cancel");
+    writer.beginOperation(UNIT_RUN_ID, "context.prepare", 0, 0, 1, "preparing");
+    writer.markStartedOperationsInterrupted(UNIT_RUN_ID);
+    const admitted = identity("11111111-1111-4111-8111-111111111111", "run.resume", 3);
+    const prepared = identity("22222222-2222-4222-8222-222222222222", "run.cancel", 5);
     writer.prepareBrowserAction(admitted, "unit operator");
     writer.admitBrowserAction(admitted.actionId);
+    writer.beginOperation(UNIT_RUN_ID, "context.prepare", 0, 0, 1, "preparing", admitted.actionId);
     writer.prepareBrowserAction(prepared, "unit operator");
     writer.close();
 
-    await expect(runtime.service.reconcilePreparedBrowserActionRequests()).resolves.toEqual({
+    await expect(runtime.service.reconcileBrowserActionRequests()).resolves.toEqual({
       settledPrepared: 1,
+      settledAdmitted: 1,
       busyRunIds: [],
-      unresolvedAdmittedRunIds: [UNIT_RUN_ID],
     });
 
     const observer = new IcarusStore(path.join(stateRoot, "icarus.sqlite3"));
     expect(observer.getBrowserAction(admitted.actionId)).toMatchObject({
-      status: "admitted",
-      outcome: null,
-      errorCode: null,
+      status: "settled",
+      outcome: "reconciliation_required",
+      errorCode: "ACTION_RECOVERY_REQUIRED",
     });
     expect(observer.getBrowserAction(prepared.actionId)).toMatchObject({
       status: "settled",
@@ -84,7 +91,11 @@ describe.runIf(process.platform === "linux")("browser action restart reconciliat
     });
     expect(observer.listEvents(UNIT_RUN_ID).map((event) => event.type)).toEqual([
       "run.created",
+      "operation.started",
+      "operation.interrupted",
       "browser.action.admitted",
+      "operation.started",
+      "operation.interrupted",
     ]);
     observer.close();
     runtime.close();

@@ -916,6 +916,102 @@ pre {
   background: rgb(112 79 18 / 16%);
 }
 
+.browser-action-list {
+  display: grid;
+  gap: 0.8rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.browser-action-list li,
+.authority-card {
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  padding: 0.9rem;
+  background: rgb(13 18 27 / 60%);
+}
+
+.browser-action-list li > div,
+.browser-action-dialog__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.browser-action-list li > p,
+.authority-card p {
+  color: var(--muted);
+}
+
+.browser-action-list li > button {
+  margin-top: 0.25rem;
+}
+
+.browser-action-recovery,
+.plan-authority,
+.review-diff-proof {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.browser-action-receipt {
+  margin-bottom: 0;
+}
+
+.plan-authority__consequence {
+  margin-top: 1rem;
+  border-left: 2px solid var(--warning);
+  padding-left: 0.75rem;
+  color: #ffe3a3;
+}
+
+.plan-authority__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.plan-authority > section,
+.plan-authority__grid {
+  margin-top: 1rem;
+}
+
+.authority-card p {
+  margin: 0.4rem 0;
+}
+
+.browser-action-dialog-backdrop {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  overflow-y: auto;
+  padding: clamp(1rem, 4vw, 3rem);
+  background: rgb(3 5 8 / 82%);
+  place-items: start center;
+}
+
+.browser-action-dialog {
+  width: min(70rem, 100%);
+  border: 1px solid rgb(246 199 96 / 55%);
+  border-radius: 0.8rem;
+  padding: clamp(1rem, 3vw, 1.6rem);
+  background: var(--surface-raised);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 55%);
+}
+
+.browser-action-dialog__actions {
+  position: sticky;
+  bottom: -1px;
+  margin: 1.25rem -0.25rem -0.25rem;
+  border-top: 1px solid var(--border);
+  padding: 1rem 0.25rem 0.25rem;
+  background: var(--surface-raised);
+}
+
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
@@ -1071,6 +1167,8 @@ footer p {
   .history-panel__error,
   .change-rooms__heading,
   .change-room-card__heading,
+  .browser-action-list li > div,
+  .browser-action-dialog__actions,
   .timeline li > div {
     align-items: stretch;
     flex-direction: column;
@@ -1080,6 +1178,10 @@ footer p {
     position: static;
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .plan-authority__grid {
+    grid-template-columns: 1fr;
   }
 }
 

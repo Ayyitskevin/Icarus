@@ -9,7 +9,10 @@ import {
   type StartedWorkspaceServer,
   startWorkspaceServer,
 } from "../../packages/api/src/server.js";
-import type { IcarusRuntime } from "../../packages/core/src/index.js";
+import {
+  browserActionDescriptorDigest,
+  type IcarusRuntime,
+} from "../../packages/core/src/index.js";
 import { fetchWorkspace } from "../support/workspace-http.js";
 
 interface Deferred<T> {
@@ -39,19 +42,37 @@ afterEach(async () => {
   }
 });
 
+interface ShutdownFixtureOptions {
+  readonly service?: Readonly<Record<string, unknown>>;
+  readonly operatorActor?: string;
+}
+
 async function startShutdownFixture(
   previewProjectContext: (projectId: string, target: string) => Promise<unknown>,
+  configuration: ShutdownFixtureOptions = {},
 ): Promise<ShutdownFixture> {
   const root = await mkdtemp(path.join(os.tmpdir(), "icarus-shutdown-test-"));
   const workspaceDist = path.join(root, "workspace");
   await mkdir(workspaceDist);
   await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
   const runtime = {
-    service: { previewProjectContext },
+    service: {
+      previewProjectContext,
+      reconcileBrowserActionRequests: () => undefined,
+      settledBrowserActionReplay: () => null,
+      ...(configuration.service ?? {}),
+    },
     close: () => undefined,
   } as unknown as IcarusRuntime;
   const workspace = await startWorkspaceServer(
-    { runtime, stateRoot: path.join(root, "state"), workspaceDist },
+    {
+      runtime,
+      stateRoot: path.join(root, "state"),
+      workspaceDist,
+      ...(configuration.operatorActor === undefined
+        ? {}
+        : { operatorActor: configuration.operatorActor }),
+    },
     0,
   );
   const fixture = { root, workspace };
@@ -95,6 +116,39 @@ function rawPreviewRequest(
     `X-Icarus-Action: ${headers["x-icarus-action"] ?? ""}`,
     `Content-Length: ${Buffer.byteLength(body, "utf8")}`,
     `Connection: ${connection}`,
+    "",
+    body,
+  ].join("\r\n");
+}
+
+function rawBrowserActionRequest(workspace: StartedWorkspaceServer): string {
+  const runId = "11111111-1111-4111-8111-111111111111";
+  const descriptor = {
+    version: 1,
+    kind: "run.cancel",
+    runId,
+    expectedState: "preparing",
+    eventRevision: 1,
+    subjectDigest: null,
+    activeActionId: null,
+    activeActionDigest: null,
+  } as const;
+  const body = JSON.stringify({
+    actionId: "22222222-2222-4222-8222-222222222222",
+    ...descriptor,
+    actionDigest: browserActionDescriptorDigest(descriptor),
+  });
+  const headers = mutationHeaders(workspace);
+  const host = new URL(workspace.url).host;
+  return [
+    `POST /api/runs/${runId}/actions HTTP/1.1`,
+    `Host: ${host}`,
+    `Origin: ${headers.origin ?? ""}`,
+    `Authorization: ${headers.authorization ?? ""}`,
+    "Content-Type: application/json",
+    "X-Icarus-Action: run.cancel",
+    `Content-Length: ${Buffer.byteLength(body, "utf8")}`,
+    "Connection: close",
     "",
     body,
   ].join("\r\n");
@@ -255,5 +309,58 @@ describe("workspace server shutdown", () => {
     expect(received).toContain("HTTP/1.1 200 OK");
     expect(received).toContain("HTTP/1.1 503 Service Unavailable");
     expect(received).toContain('"code":"SHUTTING_DOWN"');
+  });
+  test("does not bind an admitted browser action to disconnect and drains it before close", async () => {
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    let completed = false;
+    let serviceCalls = 0;
+    let observedActor: string | undefined;
+    let observedSignal: AbortSignal | undefined;
+    const { workspace } = await startShutdownFixture(async () => ({ ok: true }), {
+      operatorActor: "fixed-shutdown-operator",
+      service: {
+        executeFencedBrowserAction: async (
+          _identity: unknown,
+          actor: string,
+          options: { readonly signal?: AbortSignal },
+        ): Promise<never> => {
+          serviceCalls += 1;
+          observedActor = actor;
+          observedSignal = options.signal;
+          entered.resolve();
+          await release.promise;
+          completed = true;
+          throw new Error("forced action response after completed effect");
+        },
+      },
+    });
+    const socket = await connect(workspace);
+    const socketClosed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+    socket.write(rawBrowserActionRequest(workspace));
+    await entered.promise;
+
+    expect(serviceCalls).toBe(1);
+    expect(observedActor).toBe("fixed-shutdown-operator");
+    expect(observedSignal?.aborted).toBe(false);
+    socket.destroy();
+    await socketClosed;
+    expect(observedSignal?.aborted).toBe(false);
+
+    const close = workspace.close();
+    let closed = false;
+    void close.then(() => {
+      closed = true;
+    });
+    await Promise.resolve();
+    expect(closed).toBe(false);
+    expect(completed).toBe(false);
+    expect(observedSignal?.aborted).toBe(false);
+
+    release.resolve();
+    await expect(close).resolves.toBeUndefined();
+    expect(completed).toBe(true);
+    expect(serviceCalls).toBe(1);
+    expect(observedSignal?.aborted).toBe(false);
   });
 });

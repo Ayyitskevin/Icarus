@@ -181,6 +181,107 @@ export interface PlanView {
   readonly checkIds?: readonly string[];
 }
 
+export type BrowserActionKind =
+  | "egress.approve"
+  | "plan.approve"
+  | "review.approve"
+  | "review.reject"
+  | "rollback.approve"
+  | "restore.approve"
+  | "run.resume"
+  | "run.cancel";
+
+export interface BrowserActionDescriptorView {
+  readonly version: 1;
+  readonly kind: BrowserActionKind;
+  readonly runId: string;
+  readonly expectedState: RunStateView;
+  readonly eventRevision: number;
+  readonly subjectDigest: string | null;
+  readonly activeActionId: string | null;
+  readonly activeActionDigest: string | null;
+  readonly actionDigest: string;
+  readonly label: string;
+  readonly consequence: string;
+}
+
+/** The exact ten-key action request body. Actor attribution is host configured. */
+export interface BrowserActionRequest {
+  readonly actionId: string;
+  readonly version: 1;
+  readonly kind: BrowserActionKind;
+  readonly runId: string;
+  readonly expectedState: RunStateView;
+  readonly eventRevision: number;
+  readonly subjectDigest: string | null;
+  readonly activeActionId: string | null;
+  readonly activeActionDigest: string | null;
+  readonly actionDigest: string;
+}
+
+export interface BrowserActionReceiptView {
+  readonly actionId: string;
+  readonly kind: BrowserActionKind;
+  readonly status: "prepared" | "admitted" | "settled";
+  readonly outcome:
+    | "succeeded"
+    | "refused"
+    | "failed"
+    | "cancelled"
+    | "reconciliation_required"
+    | null;
+  readonly errorCode: string | null;
+  readonly updatedAt: string;
+}
+
+export interface PlanAuthorityGrantView {
+  readonly kind: "read.manifest" | "read.checks" | "mutation.patchset" | "exec.check";
+  readonly scope: readonly string[];
+  readonly maxCalls: number;
+}
+
+export interface PlanAuthorityView {
+  readonly planDigest: string;
+  readonly targets: readonly string[];
+  readonly checkIds: readonly string[];
+  readonly grants: readonly PlanAuthorityGrantView[];
+  readonly iterationCeiling: number;
+  readonly readableManifest: {
+    readonly digest: string;
+    readonly entries: readonly { readonly path: string; readonly sha256: string }[];
+  } | null;
+  readonly contextDigest: string;
+  readonly baseCommit: string;
+  readonly checks: readonly CheckConfiguration[];
+  readonly sandbox: ProjectSandboxView;
+  readonly provider: {
+    readonly kind: string;
+    readonly model: string;
+    readonly capabilities: {
+      readonly contextSize: number | null;
+      readonly toolSupport: false;
+      readonly visionSupport: false;
+      readonly structuredOutputSupport: true;
+      readonly streamingSupport: false;
+      readonly costClass: "local" | "configured_remote";
+      readonly latencyClass: "local" | "remote";
+      readonly privacyClass: "local_process" | "remote_api";
+      readonly reasoningQuality: "unknown";
+      readonly locality: string;
+    };
+    readonly locality: string;
+    readonly baseUrl: string;
+    readonly inputUsdPerMillionTokens: number | null;
+    readonly outputUsdPerMillionTokens: number | null;
+  };
+  readonly ceiling: ProjectCeilingView;
+  readonly execution: {
+    readonly platform: "linux";
+    readonly checksRequireSandbox: true;
+    readonly consequence: string;
+  };
+}
+
 export interface GateView {
   readonly kind: string;
   readonly status?: string;
@@ -822,13 +923,16 @@ export interface RunView {
   readonly timelineTruncated: boolean;
   readonly phase: RunPhase;
   readonly state: string;
+  readonly resumeState: RunStateView | null;
   readonly gate: GateView | null;
   readonly projectId: string;
   readonly task: string;
   readonly target: string;
+  readonly baseCommit: string | null;
   readonly provider: ProviderView;
   readonly context: ContextMetadataView | null;
   readonly plan: PlanView | null;
+  readonly planSha256: string | null;
   readonly action: ActionView | null;
   readonly files: RunFilesView;
   readonly checks: readonly CheckEvidenceView[];
@@ -843,6 +947,11 @@ export interface RunView {
   readonly lastError: RunErrorView | null;
   readonly timeline: readonly TimelineEntryView[];
   readonly timestamps: RunTimestamps;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly browserActions: readonly BrowserActionDescriptorView[];
+  readonly browserActionRecovery: BrowserActionReceiptView | null;
+  readonly planAuthority: PlanAuthorityView | null;
 }
 
 export interface WorkspaceView {
@@ -920,7 +1029,54 @@ function actionSessionRequired(): ApiError {
   return new ApiError(401, "ACTION_SESSION_REQUIRED", ACTION_SESSION_REQUIRED_MESSAGE);
 }
 
-async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+let pageLifecycleHidden = false;
+let pageLifecycleWindow: Window | null = null;
+
+function markPageLifecycleHidden(): void {
+  pageLifecycleHidden = true;
+}
+
+function markPageLifecycleShown(): void {
+  pageLifecycleHidden = false;
+}
+
+function trackPageLifecycle(): void {
+  if (typeof window === "undefined" || pageLifecycleWindow === window) return;
+  pageLifecycleWindow?.removeEventListener("pagehide", markPageLifecycleHidden);
+  pageLifecycleWindow?.removeEventListener("pageshow", markPageLifecycleShown);
+  pageLifecycleWindow = window;
+  pageLifecycleHidden = false;
+  pageLifecycleWindow.addEventListener("pagehide", markPageLifecycleHidden);
+  pageLifecycleWindow.addEventListener("pageshow", markPageLifecycleShown);
+}
+
+function requestTransportError(init: RequestInit, error: unknown): ApiError {
+  const signal = init.signal ?? null;
+  const reason = signal?.reason as unknown;
+  const errorName =
+    typeof error === "object" && error !== null && "name" in error ? error.name : undefined;
+  const timedOut =
+    typeof reason === "object" &&
+    reason !== null &&
+    "name" in reason &&
+    reason.name === "TimeoutError";
+  const appOwnedAbort =
+    signal !== null && (signal.aborted || errorName === "AbortError" || pageLifecycleHidden);
+  if (appOwnedAbort && !timedOut) {
+    return new ApiError(0, "REQUEST_ABORTED", "The local API request was cancelled.");
+  }
+  clearActionSession();
+  const message = error instanceof Error ? error.message : "The local API could not be reached.";
+  return new ApiError(0, "API_UNREACHABLE", message);
+}
+
+async function requestJson<T>(
+  path: string,
+  init: RequestInit = {},
+  protectedAction = "workspace.mutate",
+  acceptErrorResponse?: (status: number, value: unknown) => boolean,
+): Promise<T> {
+  trackPageLifecycle();
   const headers = new Headers(init.headers);
   const method = (init.method ?? "GET").toUpperCase();
   headers.set("accept", "application/json");
@@ -930,7 +1086,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
       throw actionSessionRequired();
     }
     headers.set("authorization", `Bearer ${actionSession}`);
-    headers.set("x-icarus-action", "workspace.mutate");
+    headers.set("x-icarus-action", protectedAction);
     headers.set("content-type", "application/json");
   } else {
     headers.delete("authorization");
@@ -940,11 +1096,15 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
   try {
     response = await fetch(path, { ...init, headers });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "The local API could not be reached.";
-    throw new ApiError(0, "API_UNREACHABLE", message);
+    throw requestTransportError(init, error);
   }
 
-  const raw = await response.text();
+  let raw: string;
+  try {
+    raw = await response.text();
+  } catch (error) {
+    throw requestTransportError(init, error);
+  }
   let value: unknown = null;
   if (raw.length > 0) {
     try {
@@ -958,9 +1118,10 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
     }
   }
   if (!response.ok) {
+    if (acceptErrorResponse?.(response.status, value) === true) return value as T;
     const body = typeof value === "object" && value !== null ? (value as ApiErrorBody) : undefined;
     const code = body?.error?.code ?? body?.code ?? "API_ERROR";
-    if (code === "ACTION_SESSION_REQUIRED") {
+    if (response.status === 401 && code === "ACTION_SESSION_REQUIRED") {
       clearActionSession();
       throw actionSessionRequired();
     }
@@ -973,10 +1134,17 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
   return value as T;
 }
 
-function postJson<T>(path: string, body?: unknown): Promise<T> {
+function postJson<T>(
+  path: string,
+  body?: unknown,
+  protectedAction = "workspace.mutate",
+  acceptErrorResponse?: (status: number, value: unknown) => boolean,
+): Promise<T> {
   return requestJson<T>(
     path,
     body === undefined ? { method: "POST" } : { method: "POST", body: JSON.stringify(body) },
+    protectedAction,
+    acceptErrorResponse,
   );
 }
 
@@ -1026,6 +1194,122 @@ export function getRepositoryStatus(
 export function getRun(runId: string, signal?: AbortSignal): Promise<RunView> {
   return requestJson<RunView>(
     `/api/runs/${encodeURIComponent(runId)}`,
+    signal === undefined ? {} : { signal },
+  );
+}
+
+const ACTION_EXECUTION_KEYS = ["action", "run"];
+const ACTION_RECEIPT_KEYS = ["actionId", "errorCode", "kind", "outcome", "status", "updatedAt"];
+const ACTION_RUN_KEYS = [
+  "action",
+  "approvalCoverage",
+  "approvals",
+  "baseCommit",
+  "browserActionRecovery",
+  "browserActions",
+  "checks",
+  "context",
+  "createdAt",
+  "diff",
+  "diffReview",
+  "eventCursor",
+  "files",
+  "gate",
+  "id",
+  "lastError",
+  "outputs",
+  "phase",
+  "plan",
+  "planAuthority",
+  "planSha256",
+  "projectId",
+  "provider",
+  "resumeState",
+  "state",
+  "target",
+  "task",
+  "timeline",
+  "timelineTotal",
+  "timelineTruncated",
+  "timestamps",
+  "updatedAt",
+  "usage",
+  "verification",
+  "warnings",
+];
+
+function responseRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function responseHasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).sort().join("\n") === keys.join("\n");
+}
+
+function isExactStaleActionExecution(
+  status: number,
+  value: unknown,
+  request: BrowserActionRequest,
+): boolean {
+  if (status !== 409) return false;
+  const execution = responseRecord(value);
+  const action = responseRecord(execution?.action);
+  const run = responseRecord(execution?.run);
+  return (
+    execution !== null &&
+    responseHasExactKeys(execution, ACTION_EXECUTION_KEYS) &&
+    action !== null &&
+    responseHasExactKeys(action, ACTION_RECEIPT_KEYS) &&
+    action.actionId === request.actionId &&
+    action.kind === request.kind &&
+    action.status === "settled" &&
+    action.outcome === "refused" &&
+    action.errorCode === "STALE_ACTION" &&
+    typeof action.updatedAt === "string" &&
+    run !== null &&
+    responseHasExactKeys(run, ACTION_RUN_KEYS) &&
+    run.id === request.runId &&
+    typeof run.state === "string" &&
+    (run.resumeState === null || typeof run.resumeState === "string") &&
+    (run.baseCommit === null || typeof run.baseCommit === "string") &&
+    (run.planSha256 === null || typeof run.planSha256 === "string") &&
+    typeof run.createdAt === "string" &&
+    typeof run.updatedAt === "string" &&
+    typeof run.eventCursor === "number" &&
+    Number.isSafeInteger(run.eventCursor) &&
+    Array.isArray(run.browserActions) &&
+    "browserActionRecovery" in run &&
+    "planAuthority" in run &&
+    "diff" in run &&
+    responseRecord(run.diffReview) !== null
+  );
+}
+
+export interface BrowserActionExecutionView {
+  readonly action: BrowserActionReceiptView;
+  readonly run: RunView;
+}
+
+export function executeBrowserAction(
+  request: BrowserActionRequest,
+): Promise<BrowserActionExecutionView> {
+  return postJson<BrowserActionExecutionView>(
+    `/api/runs/${encodeURIComponent(request.runId)}/actions`,
+    request,
+    request.kind,
+    (status, value) => isExactStaleActionExecution(status, value, request),
+  );
+}
+
+export function getBrowserActionReceipt(
+  runId: string,
+  actionId: string,
+  signal?: AbortSignal,
+): Promise<BrowserActionReceiptView> {
+  return requestJson<BrowserActionReceiptView>(
+    `/api/runs/${encodeURIComponent(runId)}/actions/${encodeURIComponent(actionId)}`,
     signal === undefined ? {} : { signal },
   );
 }

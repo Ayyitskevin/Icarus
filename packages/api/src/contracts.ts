@@ -1,10 +1,21 @@
-import { CHANGE_CONTEXT_QUESTIONS, type ChangeContextQuestion, IcarusError } from "@icarus/core";
+import {
+  BROWSER_ACTION_DESCRIPTOR_VERSION,
+  BROWSER_ACTION_EXPECTED_STATES,
+  browserActionRequiresSubject,
+  CHANGE_CONTEXT_QUESTIONS,
+  type BrowserActionIdentity,
+  type ChangeContextQuestion,
+  IcarusError,
+  isBrowserActionKind,
+} from "@icarus/core";
 
 const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
 const DIGEST_IMAGE_PATTERN = /^[a-z0-9][a-z0-9._/-]*(?::[a-zA-Z0-9._-]+)?@sha256:[a-f0-9]{64}$/;
 const EVENT_CURSOR_PATTERN = /^(0|[1-9][0-9]*)$/;
 const POSITIVE_EVENT_CURSOR_PATTERN = /^[1-9][0-9]*$/;
 const SAFE_RUN_SNAPSHOT_MAX = Number.MAX_SAFE_INTEGER - 1;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
 function invalid(message: string): never {
   throw new IcarusError("INVALID_REQUEST", message);
@@ -316,4 +327,91 @@ export function changeContextQuery(searchParams: URLSearchParams): {
     );
   }
   return { question: question as ChangeContextQuestion };
+}
+
+function nullableDigest(value: unknown, name: string): string | null {
+  if (value === null) return null;
+  return stringValue(value, name, { maxBytes: 64, pattern: SHA256_PATTERN });
+}
+
+function nullableUuid(value: unknown, name: string): string | null {
+  if (value === null) return null;
+  return stringValue(value, name, { maxBytes: 36, pattern: UUID_PATTERN });
+}
+
+/** Parse the exact ten-field browser action identity from ADR 0029. */
+export function browserActionRequest(value: unknown): BrowserActionIdentity {
+  const body = objectValue(value, "request");
+  exactKeys(
+    body,
+    [
+      "actionId",
+      "version",
+      "kind",
+      "runId",
+      "expectedState",
+      "eventRevision",
+      "subjectDigest",
+      "activeActionId",
+      "activeActionDigest",
+      "actionDigest",
+    ],
+    "request",
+  );
+
+  const actionId = stringValue(body.actionId, "actionId", {
+    maxBytes: 36,
+    pattern: UUID_PATTERN,
+  });
+  if (body.version !== BROWSER_ACTION_DESCRIPTOR_VERSION) {
+    invalid("version is invalid");
+  }
+  if (!isBrowserActionKind(body.kind)) {
+    invalid("kind is invalid");
+  }
+  const kind = body.kind;
+  const runId = stringValue(body.runId, "runId", {
+    maxBytes: 36,
+    pattern: UUID_PATTERN,
+  });
+  const expectedState = stringValue(body.expectedState, "expectedState", { maxBytes: 64 });
+  if (!(BROWSER_ACTION_EXPECTED_STATES[kind] as readonly string[]).includes(expectedState)) {
+    invalid("expectedState is invalid for kind");
+  }
+  if (
+    typeof body.eventRevision !== "number" ||
+    !Number.isSafeInteger(body.eventRevision) ||
+    body.eventRevision < 1
+  ) {
+    invalid("eventRevision must be a positive safe integer");
+  }
+  const subjectDigest = nullableDigest(body.subjectDigest, "subjectDigest");
+  if (browserActionRequiresSubject(kind) !== (subjectDigest !== null)) {
+    invalid("subjectDigest is invalid for kind");
+  }
+  const activeActionId = nullableUuid(body.activeActionId, "activeActionId");
+  const activeActionDigest = nullableDigest(body.activeActionDigest, "activeActionDigest");
+  if ((activeActionId === null) !== (activeActionDigest === null)) {
+    invalid("active action identity is incomplete");
+  }
+  if (kind !== "run.cancel" && activeActionId !== null) {
+    invalid("active action identity is invalid for kind");
+  }
+  const actionDigest = stringValue(body.actionDigest, "actionDigest", {
+    maxBytes: 64,
+    pattern: SHA256_PATTERN,
+  });
+
+  return {
+    actionId,
+    version: BROWSER_ACTION_DESCRIPTOR_VERSION,
+    kind,
+    runId,
+    expectedState: expectedState as BrowserActionIdentity["expectedState"],
+    eventRevision: body.eventRevision,
+    subjectDigest,
+    activeActionId,
+    activeActionDigest,
+    actionDigest,
+  };
 }

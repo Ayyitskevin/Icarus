@@ -151,7 +151,16 @@ const workspaceSessionCreationIndex = workspaceServerSource.indexOf(
   "session = createBoundWorkspaceSession(mode, address.port, originHostname, reviewOnlyReason)",
 );
 const workspaceRequestListenerIndex = workspaceServerSource.indexOf(
-  "workspaceRequestListener(options, session, coordinator, shutdownResponses)",
+  "workspaceRequestListener(\n        options,\n        session,\n        coordinator,\n        browserCoordinator,",
+);
+const workspaceBrowserReconciliationIndex = workspaceServerSource.indexOf(
+  "await options.runtime.service.reconcileBrowserActionRequests()",
+);
+const workspaceSettledReplayIndex = workspaceServerSource.indexOf(
+  "options.runtime.service.settledBrowserActionReplay(identity)",
+);
+const workspaceBrowserCoordinatorExecutionIndex = workspaceServerSource.indexOf(
+  "await browserCoordinator.execute(identity",
 );
 const browserActionSchemaStart = gate1SchemaSource.indexOf(
   "export const BROWSER_ACTION_LEDGER_SCHEMA",
@@ -183,7 +192,7 @@ const repairSessionSource =
 const eventPageMethodStart = storeSource.indexOf("  listEventPage(");
 const historyMethodStart = storeSource.indexOf("  listEventHistoryPage(");
 const historyMethodEnd = storeSource.indexOf(
-  "\n  #assertBrowserActionAnchors(",
+  "\n  #browserActionEventRevision(",
   historyMethodStart,
 );
 const eventPageStoreSource =
@@ -334,6 +343,9 @@ const shutdownResponseTrackIndex = workspaceServerSource.indexOf(
   "trackShutdownResponse(response, shutdownResponses)",
 );
 const shutdownCoordinatorTrackIndex = workspaceServerSource.indexOf("work = coordinator.track(");
+const shutdownBrowserDrainIndex = workspaceServerSource.indexOf(
+  "const browserDrainPromise = browserCoordinator.drain()",
+);
 const shutdownDrainIndex = workspaceServerSource.indexOf(
   "const drainPromise = coordinator.drain()",
 );
@@ -550,11 +562,20 @@ const assertions = {
     gate1SchemaSource.includes("browser_action_requests_active_non_cancel") &&
     gate1SchemaSource.includes("browser_action_requests_active_cancel"),
   browserActionAdmissionAndSettlementAreDurablyFenced:
-    storeSource.includes("current.state !== record.expectedState") &&
-    storeSource.includes("revision !== record.eventRevision") &&
-    storeSource.includes("this.#browserActionSubjectDigest(current, record.kind)") &&
+    storeSource.includes("descriptor.expectedState !== record.expectedState") &&
+    storeSource.includes("descriptor.eventRevision !== record.eventRevision") &&
+    storeSource.includes("descriptor.subjectDigest !== record.subjectDigest") &&
+    storeSource.includes("descriptor.actionDigest !== record.actionDigest") &&
+    storeSource.includes("this.#browserResumeEvidenceAvailable(run, ignoredActionId)") &&
     storeSource.includes('this.#refusePreparedBrowserActionRecord(actionId, "STALE_ACTION")') &&
     storeSource.includes("assertBrowserActionCancellationParent(record, activeNonCancel)") &&
+    serviceSource.includes(
+      "!this.#matchesBrowserCancellationTarget(admitted, target) ||\n      !this.#matchesDurableBrowserCancellationParent(admitted, target)",
+    ) &&
+    serviceSource.includes("#matchesDurableBrowserCancellationParent(") &&
+    serviceSource.includes('parent.status === "admitted"') &&
+    serviceSource.includes("parent.kind === target.binding.kind") &&
+    serviceSource.includes("parent.actionDigest === record.activeActionDigest") &&
     storeSource.includes("settlement.domainEventSequence > record.admissionEventSequence") &&
     storeSource.includes("operationStartSequences.length === 1") &&
     storeSource.includes("operationStartSequence > record.admissionEventSequence") &&
@@ -562,7 +583,26 @@ const assertions = {
     storeSource.includes("BROWSER_ACTION_FAILED_OPERATION_BOUNDARIES") &&
     storeSource.includes("#assertBrowserResumeActionChain(") &&
     storeSource.includes("BROWSER_ACTION_RESUME_CANCELLABLE_STAGES.has(resumedStage)") &&
+    storeSource.includes("#browserActionTerminalEventState(") &&
+    storeSource.includes("BROWSER_ACTION_RESUME_STAGE_OPERATION_KINDS") &&
     storeSource.includes("return runBrowserActionImmediate(transaction)"),
+  browserActionStartupAndReplayOrderingAreDurable:
+    workspaceBrowserReconciliationIndex >= 0 &&
+    workspaceOriginHostnameIndex >= 0 &&
+    workspaceRequestListenerIndex >= 0 &&
+    workspaceBrowserReconciliationIndex < workspaceOriginHostnameIndex &&
+    workspaceBrowserReconciliationIndex < workspaceRequestListenerIndex &&
+    !workspaceMainSource.includes("reconcileBrowserActionRequests()") &&
+    storeSource.includes("getSettledBrowserActionReplay(") &&
+    storeSource.includes("assertSameBrowserActionIdentity(record, identity)") &&
+    serviceSource.includes("settledBrowserActionReplay(") &&
+    workspaceSettledReplayIndex >= 0 &&
+    workspaceBrowserCoordinatorExecutionIndex >= 0 &&
+    workspaceSettledReplayIndex < workspaceBrowserCoordinatorExecutionIndex &&
+    workspaceServerSource.includes('execution.action.errorCode === "STALE_ACTION"') &&
+    workspaceServerSource.includes("? 409") &&
+    actionCoordinatorSource.includes("#nextGeneration = 1") &&
+    !actionCoordinatorSource.includes("new Map<string, number>()"),
   landingContractPinsGitHubAndClosedLifecycle:
     landingRecordsSource.includes('export const GITHUB_API_ORIGIN = "https://api.github.com"') &&
     landingRecordsSource.includes('export const GITHUB_RECEIPT_ORIGIN = "https://github.com"') &&
@@ -604,13 +644,18 @@ const assertions = {
     shutdownResponseTrackIndex < shutdownCoordinatorTrackIndex &&
     workspaceServerSource.includes('response.once("finish", settle)') &&
     workspaceServerSource.includes('response.once("close", settle)') &&
+    shutdownBrowserDrainIndex >= 0 &&
     shutdownDrainIndex >= 0 &&
     shutdownCloseConnectionsIndex >= 0 &&
+    shutdownBrowserDrainIndex < shutdownCloseConnectionsIndex &&
     shutdownDrainIndex < shutdownCloseConnectionsIndex &&
     shutdownServerCloseIndex >= 0 &&
     shutdownRuntimeCloseIndex >= 0 &&
     shutdownServerCloseIndex < shutdownRuntimeCloseIndex &&
-    !actionCoordinatorSource.includes("AbortController"),
+    actionCoordinatorSource.includes("controller: new AbortController()") &&
+    actionCoordinatorSource.includes("entry.controller.abort(reason)") &&
+    actionCoordinatorSource.includes("const active = [...this.#settlements]") &&
+    !actionCoordinatorSource.includes("controller.abort(new IcarusError"),
   environmentFilesIgnored: ignore.split(/\r?\n/).includes(".env") && ignore.includes(".env.*"),
   workflowBootstrapPinnedAndBounded:
     actionlintToolSource.includes('ACTIONLINT_VERSION = "1.7.12"') &&
@@ -666,7 +711,8 @@ const assertions = {
   workspaceAllNonReadMethodsRequireMutationAuthority:
     workspaceServerSource.includes('if (request.method === "GET" || request.method === "HEAD")') &&
     workspaceServerSource.includes("session.assertOptionalExactOrigin(request)") &&
-    workspaceServerSource.includes("session.assertProtectedMutation(request)"),
+    workspaceServerSource.includes("protectedAction = session.assertProtectedMutation(") &&
+    workspaceServerSource.includes("guardedActionRoute ? BROWSER_ACTION_KINDS : undefined"),
   workspaceNoResolverOrBindFallback:
     !/(?:node:dns|dns\.lookup|getaddrinfo)/.test(
       `${workspaceServerSource}\n${workspaceSessionSource}`,
@@ -1160,9 +1206,8 @@ const assertions = {
     ),
   sessionLoopLandsExhaustionHonestly:
     serviceSource.includes("this.#store.remainingIterationBudget(runId) > 0") &&
-    serviceSource.includes(
-      "return this.#store.recordVerificationAndAwaitReview(runId, diff, verification);",
-    ) &&
+    serviceSource.includes("return this.#store.recordVerificationAndAwaitReview(") &&
+    serviceSource.includes("return this.#store.recordSessionAdmissionExhausted(") &&
     storeSource.includes("Only a failing verification may be retained for repair"),
   // ADR 0025: the inherited workflow's authorization boundary is owned by this
   // repository and must not regress to a body-only condition or a mutable ref.
