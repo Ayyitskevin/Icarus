@@ -303,9 +303,15 @@ before the approval-index migration.
 Current forward work is Gate 1. PR #20 (`79e6dc7`, implementation head
 `bba1591`) merged repository-only foundations for ADR 0029's browser-action
 ledger and shutdown settlement plus ADR 0027's landing schema, records,
-deterministic candidate construction, and absent-only local reference. Guarded
-action routes, admitted-row terminal reconciliation and recovery presentation,
-durable landing coordination, and the GitHub gateway and receipt runtime remain
+deterministic candidate construction, and absent-only local reference. The
+Packet 2 worktree now adds the closed eight-action Linux dispatcher, exact
+descriptor/receipt authority, coordinator-bound in-flight cancellation, and
+prepared/admitted restart reconciliation without replay. These guarded
+lifecycle actions stop before every commit, push, ref, pull-request, merge, and
+deployment effect. Fresh local API integration and compiled Chrome 149
+acceptance passed on 2026-08-02; Packet 2 still needs exact candidate-head
+hosted CI and native macOS/Windows acceptance. Durable landing coordination, the
+GitHub gateway, live-evidence receipt runtime, and Gate 1 completion remain
 incomplete.
 
 Slice 1 adds the populated closed input contract at
@@ -352,8 +358,9 @@ Every future release candidate still requires fresh local evidence, independent
 review, merge, and exact published-head hosted CI; platform claims require the
 matching exact-commit native evidence.
 
-Older approval pagination, current file/status views, multi-file or raw payload
-browser diff/history, complete browser checkpoint inspection, browser approval,
-rerun/restore, and execution remain separate expansions until explicitly
-designed and evidenced. CLI PatchSet materialization and the failed-verification
+Older approval pagination, current file/status views, multi-file or raw-payload
+browser diff/history, complete browser checkpoint inspection, and every browser
+action outside Packet 2's closed eight-kind lifecycle matrix remain separate
+expansions until explicitly designed and evidenced. CLI PatchSet materialization
+and the failed-verification
 session are no longer deferred.

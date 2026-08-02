@@ -173,10 +173,46 @@ The first browser path is intentionally narrower than the guarded CLI lifecycle:
    returning raw context/source blobs or private cache/worktree paths. Explicit
    diff/check output remains bounded and redacted. An absent check is `not_run`;
    missing provider/execution capability is `unconfigured`.
-7. The browser has no approval, edit, check-execution, arbitrary-shell, commit,
-   push, deployment, account, telemetry, cloud-control, or fleet-control route.
-   Guarded approval and execution remain Linux CLI-only under the kernel lease;
-   execution also remains inside the Docker sandbox boundary.
+7. This original route set has no approval, edit, check-execution,
+   arbitrary-shell, commit, push, deployment, account, telemetry, cloud-control,
+   or fleet-control route. Packet 2 below adds only the closed guarded lifecycle
+   actions; execution remains under the Linux kernel lease and existing Docker
+   sandbox boundary.
+
+## Gate 1 Packet 2 guarded action candidate
+
+Packet 2 narrows browser mutation to the existing governed lifecycle rather than
+adding general execution authority:
+
+1. The server derives every action from one SQLite authority transaction over
+   the exact run, event revision, approval/checkpoint/readable-manifest evidence,
+   and current active coordinator binding. The browser cannot invent a kind,
+   state, digest, parent, actor, or consequence.
+2. The closed action set is egress approval, plan approval, review accept/reject,
+   rollback, restore, resume, and cancellation. A fresh action UUID plus the
+   complete immutable descriptor is confirmed and submitted once; the response
+   and recovery read expose only the bounded receipt fields.
+3. Linux execution acquires one run lease, persists prepare and admission before
+   dispatch, and settles only at an exact action-linked event or operation
+   boundary. A stale descriptor is refused without an effect. An already
+   admitted same-ID request is reconciled and never dispatched again.
+4. Parent-bound cancellation is the only lease carve-out. It must match the
+   admitted non-cancellation parent action ID, descriptor digest, kind, current
+   coordinator generation, and process-local context before one structured abort
+   signal may propagate. Socket disconnect alone is not cancellation.
+5. Startup under the Linux lease marks started operations interrupted, refuses
+   orphaned prepared requests, and reconciles admitted requests from durable
+   evidence. Missing or ambiguous evidence becomes `reconciliation_required`
+   rather than replay.
+6. Non-Linux authority contains no guarded actions, and execution fails before
+   intent persistence. Local API and compiled Chrome 149 acceptance passed on
+   2026-08-02. The guarded CLI remains the release-supported fallback until
+   Packet 2's exact candidate-head hosted CI and native macOS/Windows acceptance
+   is recorded.
+7. These actions reuse existing private-worktree, provider, checkpoint, and
+   sandbox operations. They add no commit, push, Git-ref, pull-request, merge,
+   deployment, or imported source-checkout mutation authority. Gate 1 remains
+   incomplete, and live landing evidence is a separate human-approved slice.
 
 ## Second M3 read-only observation slice
 
@@ -640,11 +676,12 @@ the gate.
 The current candidate has no public signup, billing, teams, browser-held
 provider keys, semantic retrieval, end-to-end landing, remote pushes,
 deployments, application previews, remote API exposure, customer-data access,
-production access, distributed execution, accounts, telemetry, browser
-approval/execution, or arbitrary provider-native tool path. Its tested local
-candidate-object and absent-only private-ref foundation does not widen those
-exclusions. No roadmap statement implies that any of those capabilities exists
-now.
+production access, distributed execution, accounts, telemetry, or arbitrary
+provider-native tool path. Packet 2's local guarded lifecycle actions do not
+widen Git, landing, deployment, credential, provider-native-tool, or public
+authority, and they are not release-accepted until exact candidate-head hosted
+CI and native macOS/Windows evidence is recorded. No roadmap statement implies
+that any excluded capability exists now.
 
 ADR 0036 deliberately moves semantic retrieval, browser/VS Code actions, gated
 Git landing, previews, deployment adapters, isolated database migrations,

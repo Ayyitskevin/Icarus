@@ -79,23 +79,39 @@ the client-held session. React combines only those booleans, never the bearer,
 and disables protected controls immediately when the server is stable
 review-only or the tab session is absent, malformed, or rejected as stale.
 
-The first route set can inspect workspace state, register a repository/project,
-preview committed-tree context metadata, persist a task draft, plan that draft
-with loopback Ollama, and read a run. Repository import, preview, draft, and
-planning do not create a private worktree or modify the source checkout. There
-is no HTTP route for approval, edit or check execution, arbitrary commands,
-commit, push, or deployment.
+The original route set can inspect workspace state, register a
+repository/project, preview committed-tree context metadata, persist a task
+draft, plan that draft with loopback Ollama, and read a run. Repository import,
+preview, draft, and planning do not create a private worktree or modify the
+source checkout.
 
-Process shutdown now closes mutation admission synchronously, drains the exact
-set of HTTP handlers registered before that boundary, waits for their response
-settlement, and only then closes residual sockets and the SQLite runtime. The
-local ADR 0029 foundation also creates and exactly inspects the browser-action
-ledger, records prepared/admitted/settled transitions, and refuses orphaned
-prepared rows under the Linux run lease at workspace startup. No guarded
-approval/execution route uses that ledger yet, and admitted-row terminal
-reconciliation plus the bounded browser recovery projection remain required
-before such routes can ship. The drain is therefore a lifecycle guarantee, not
-a claim that an existing unguarded POST is idempotent.
+The Gate 1 Packet 2 candidate adds exact browser authority descriptors and
+bounded receipts for eight existing lifecycle operations: egress approval, plan
+approval, review accept/reject, rollback, restore, resume, and cancellation.
+Execution is Linux-only, acquires one kernel run lease, persists
+prepare/admit/settle boundaries, and revalidates the immutable action tuple
+before dispatch. A cancellation of an in-flight browser action is the sole
+parent-bound carve-out: it must match the current coordinator generation,
+action ID, descriptor digest, kind, and process-local execution context before
+one structured abort signal may propagate. These actions use the existing
+private-worktree/provider/sandbox lifecycle. They do not commit, push, create or
+change Git refs, merge, open a pull request, deploy, or mutate the imported
+source checkout.
+
+Process shutdown closes mutation admission synchronously, drains the exact set
+of HTTP handlers registered before that boundary, waits for their response
+settlement, and only then closes residual sockets and the SQLite runtime. At
+Linux startup, started operations are first marked interrupted under the run
+lease, orphaned prepared actions are refused, and admitted actions are settled
+only from durable terminal evidence; incomplete evidence becomes
+`reconciliation_required` and is never replayed. Non-Linux presentations expose
+no action buttons and execution fails before intent persistence. Fresh local API
+and compiled-product browser acceptance passed on 2026-08-02, including all
+eight protected route mappings, stale refusal, receipt recovery, cancellation,
+reload, and unchanged-source evidence in Chrome 149. Packet 2 still requires
+exact candidate-head hosted CI and native macOS/Windows acceptance before
+release. It does not complete Gate 1 or authorize any live migration, GitHub
+effect, merge, deployment, or public release.
 
 The API presenter allowlists product evidence instead of returning `RunRecord`
 or history rows. It omits raw context/source blobs and private cache, worktree,

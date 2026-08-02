@@ -4,18 +4,26 @@ import path from "node:path";
 
 import Database from "better-sqlite3";
 import {
+  type ActiveBrowserActionBinding,
   assertBrowserActionCancellationParent,
   assertBrowserActionIdentity,
   assertBrowserActionSettlement,
   assertSameBrowserActionIdentity,
+  BROWSER_ACTION_DESCRIPTOR_VERSION,
   type BrowserActionAdmittedRecord,
+  type BrowserActionDescriptor,
   type BrowserActionIdentity,
   type BrowserActionPreparedRecord,
+  type BrowserActionReceipt,
   type BrowserActionRecord,
   type BrowserActionSettledRecord,
   type BrowserActionSettlement,
+  browserActionCopy,
+  browserActionDescriptorDigest,
+  browserActionReceipt,
   isBrowserActionKind,
   isBrowserActionOutcome,
+  isBrowserActionRunStateEligible,
   isBrowserActionStatus,
 } from "./browser-action-state.js";
 import { CHANGE_ROOM_ANNOTATION_TARGETS, changeRoomTerminalReason } from "./change-room.js";
@@ -109,6 +117,7 @@ const SESSION_PATCH_OPERATION_KIND = "session.tool.mutation.patchset";
 const SESSION_RECONCILE_OPERATION_KIND = "session.reconcile";
 const SESSION_REPORT_DONE_OPERATION_KIND = "session.control.report_done";
 const SESSION_REQUEST_HUMAN_OPERATION_KIND = "session.control.request_human_input";
+const CONTEXT_PREPARATION_OPERATION_KIND = "context.prepare";
 const REVIEW_VALIDATION_OPERATION_KIND = "review.validate";
 const CHECKPOINT_ROLLBACK_OPERATION_KIND = "checkpoint.rollback";
 const CHECKPOINT_RESTORE_OPERATION_KIND = "checkpoint.restore";
@@ -124,6 +133,7 @@ const REPAIR_SESSION_OPERATION_KINDS: ReadonlySet<string> = new Set([
   SESSION_REQUEST_HUMAN_OPERATION_KIND,
 ]);
 const ATOMIC_SUCCESS_OPERATION_KINDS: ReadonlySet<string> = new Set([
+  CONTEXT_PREPARATION_OPERATION_KIND,
   SESSION_CHECK_OPERATION_KIND,
   SESSION_REPORT_DONE_OPERATION_KIND,
   SESSION_REQUEST_HUMAN_OPERATION_KIND,
@@ -236,6 +246,7 @@ const RUN_STATES: ReadonlySet<string> = new Set<RunState>([
   "restoring",
 ]);
 const RUN_PRESENTATION_ACTION_EVENT_LIMIT = 2;
+const BROWSER_DIFF_DISPLAY_MAX_BYTES = 256 * 1024;
 const APPROVAL_KINDS: ReadonlySet<ApprovalRecord["kind"]> = new Set([
   "egress",
   "plan",
@@ -306,13 +317,28 @@ const BROWSER_ACTION_DOMAIN_OPERATION_KINDS: Readonly<
   "rollback.approve": new Set(["checkpoint.rollback"]),
   "restore.approve": new Set(["checkpoint.restore"]),
   "run.resume": new Set([
-    "context.prepare",
+    CONTEXT_PREPARATION_OPERATION_KIND,
+    "context.load.plan",
     "provider.plan",
+    "execution.prepare",
+    "workspace.create",
+    "edit.prepare",
     "provider.edit",
+    "edit.materialize",
+    SESSION_ITERATION_OPERATION_KIND,
+    SESSION_READ_MANIFEST_OPERATION_KIND,
+    SESSION_READ_CHECKS_OPERATION_KIND,
+    SESSION_CHECK_OPERATION_KIND,
+    SESSION_PATCH_OPERATION_KIND,
+    SESSION_RECONCILE_OPERATION_KIND,
+    SESSION_REPORT_DONE_OPERATION_KIND,
+    SESSION_REQUEST_HUMAN_OPERATION_KIND,
+    "verification.preflight",
     "sandbox.verify",
+    "verification.postflight",
     "checkpoint.rollback",
     "checkpoint.restore",
-    "cancellation.recovery",
+    CANCELLATION_RECOVERY_OPERATION_KIND,
   ]),
   "run.cancel": new Set([]),
 };
@@ -328,17 +354,82 @@ const BROWSER_ACTION_FAILED_OPERATION_BOUNDARIES: Readonly<
   "run.resume": new Set([]),
   "run.cancel": new Set([]),
 };
-const BROWSER_ACTION_RESUME_STAGE_OPERATION_KIND: Readonly<Partial<Record<RunState, string>>> = {
-  preparing: "context.prepare",
-  planned: "provider.plan",
-  running: "provider.edit",
-  verifying: "sandbox.verify",
-  rolling_back: "checkpoint.rollback",
-  restoring: "checkpoint.restore",
-  cancelling: "cancellation.recovery",
+const BROWSER_ACTION_RESUME_STAGE_OPERATION_KINDS: Readonly<
+  Partial<Record<RunState, ReadonlySet<string>>>
+> = {
+  preparing: new Set([CONTEXT_PREPARATION_OPERATION_KIND]),
+  planned: new Set(["context.load.plan", "provider.plan"]),
+  running: new Set([
+    "execution.prepare",
+    "workspace.create",
+    "edit.prepare",
+    "provider.edit",
+    "edit.materialize",
+    SESSION_ITERATION_OPERATION_KIND,
+    SESSION_READ_MANIFEST_OPERATION_KIND,
+    SESSION_READ_CHECKS_OPERATION_KIND,
+    SESSION_CHECK_OPERATION_KIND,
+    SESSION_PATCH_OPERATION_KIND,
+    SESSION_RECONCILE_OPERATION_KIND,
+    SESSION_REPORT_DONE_OPERATION_KIND,
+    SESSION_REQUEST_HUMAN_OPERATION_KIND,
+  ]),
+  verifying: new Set([
+    "verification.preflight",
+    "sandbox.verify",
+    "verification.postflight",
+    SESSION_ITERATION_OPERATION_KIND,
+    SESSION_READ_MANIFEST_OPERATION_KIND,
+    SESSION_READ_CHECKS_OPERATION_KIND,
+    SESSION_CHECK_OPERATION_KIND,
+    SESSION_PATCH_OPERATION_KIND,
+    SESSION_RECONCILE_OPERATION_KIND,
+    SESSION_REPORT_DONE_OPERATION_KIND,
+    SESSION_REQUEST_HUMAN_OPERATION_KIND,
+  ]),
+  rolling_back: new Set(["checkpoint.rollback"]),
+  restoring: new Set(["checkpoint.restore"]),
+  cancelling: new Set([CANCELLATION_RECOVERY_OPERATION_KIND]),
+};
+const BROWSER_ACTION_RESUME_INTERRUPTED_OPERATION_KINDS: Readonly<
+  Partial<Record<RunState, ReadonlySet<string>>>
+> = {
+  preparing: new Set(["context.prepare"]),
+  planned: new Set(["context.load.plan", "provider.plan"]),
+  running: new Set([
+    "execution.prepare",
+    "workspace.create",
+    "edit.prepare",
+    "provider.edit",
+    "edit.materialize",
+    SESSION_ITERATION_OPERATION_KIND,
+    SESSION_READ_MANIFEST_OPERATION_KIND,
+    SESSION_READ_CHECKS_OPERATION_KIND,
+    SESSION_CHECK_OPERATION_KIND,
+    SESSION_PATCH_OPERATION_KIND,
+    SESSION_RECONCILE_OPERATION_KIND,
+    SESSION_REPORT_DONE_OPERATION_KIND,
+    SESSION_REQUEST_HUMAN_OPERATION_KIND,
+  ]),
+  verifying: new Set([
+    "verification.preflight",
+    "sandbox.verify",
+    "verification.postflight",
+    SESSION_ITERATION_OPERATION_KIND,
+    SESSION_READ_MANIFEST_OPERATION_KIND,
+    SESSION_READ_CHECKS_OPERATION_KIND,
+    SESSION_CHECK_OPERATION_KIND,
+    SESSION_PATCH_OPERATION_KIND,
+    SESSION_RECONCILE_OPERATION_KIND,
+    SESSION_REPORT_DONE_OPERATION_KIND,
+    SESSION_REQUEST_HUMAN_OPERATION_KIND,
+  ]),
+  rolling_back: new Set(["checkpoint.rollback"]),
+  restoring: new Set(["checkpoint.restore"]),
+  cancelling: new Set([CANCELLATION_RECOVERY_OPERATION_KIND]),
 };
 const BROWSER_ACTION_RESUME_STAGES: ReadonlySet<RunState> = new Set(
-  Object.keys(BROWSER_ACTION_RESUME_STAGE_OPERATION_KIND) as RunState[],
+  Object.keys(BROWSER_ACTION_RESUME_STAGE_OPERATION_KINDS) as RunState[],
 );
 const BROWSER_ACTION_RESUME_CANCELLABLE_STAGES: ReadonlySet<RunState> = new Set([
   "preparing",
@@ -1337,6 +1428,14 @@ function reviewApprovalTransition(
   };
 }
 
+export interface BrowserActionAuthoritySnapshot {
+  readonly run: RunRecord;
+  readonly eventRevision: number;
+  readonly readableManifest: ReadableManifest | null;
+  readonly actions: readonly BrowserActionDescriptor[];
+  readonly recovery: BrowserActionReceipt | null;
+}
+
 export class IcarusStore {
   readonly #database: Database.Database;
   readonly #now: () => string;
@@ -1449,6 +1548,62 @@ export class IcarusStore {
     return entries.map(browserActionRecordRow);
   }
 
+  getBrowserActionForRun(runId: string, actionId: string): BrowserActionRecord {
+    const record = this.getBrowserAction(actionId);
+    invariant(record.runId === runId, "NOT_FOUND", "Browser action request was not found");
+    return record;
+  }
+
+  getBrowserActionReceipt(runId: string, actionId: string): BrowserActionReceipt {
+    return browserActionReceipt(this.getBrowserActionForRun(runId, actionId));
+  }
+
+  getSettledBrowserActionReplay(
+    identity: BrowserActionIdentity,
+  ): BrowserActionSettledRecord | null {
+    assertBrowserActionIdentity(identity);
+    const existing = this.#database
+      .prepare(`${BROWSER_ACTION_SELECT} WHERE action_id = ?`)
+      .get(identity.actionId);
+    if (existing === undefined) return null;
+
+    const record = browserActionRecordRow(existing);
+    assertSameBrowserActionIdentity(record, identity);
+    return record.status === "settled" ? record : null;
+  }
+
+  getBrowserActionAuthoritySnapshot(
+    runId: string,
+    active: ActiveBrowserActionBinding | null = null,
+  ): BrowserActionAuthoritySnapshot {
+    const transaction = this.#database.transaction((): BrowserActionAuthoritySnapshot => {
+      const run = this.getRun(runId);
+      const eventRevision = this.#browserActionEventRevision(runId);
+      const readableManifest = this.readableManifest(runId);
+      const actions = this.#availableBrowserActionDescriptors(run, eventRevision, active, null);
+      const recoveryEntry = this.#database
+        .prepare(
+          `${BROWSER_ACTION_SELECT}
+           WHERE run_id = ?
+             AND (status IN ('prepared', 'admitted') OR outcome = 'reconciliation_required')
+           ORDER BY updated_at DESC, rowid DESC
+           LIMIT 1`,
+        )
+        .get(runId);
+      return {
+        run,
+        eventRevision,
+        readableManifest,
+        actions,
+        recovery:
+          recoveryEntry === undefined
+            ? null
+            : browserActionReceipt(browserActionRecordRow(recoveryEntry)),
+      };
+    });
+    return transaction();
+  }
+
   prepareBrowserAction(identity: BrowserActionIdentity, actor: string): BrowserActionRecord {
     assertBrowserActionIdentity(identity);
     assertOperatorActor(actor);
@@ -1517,46 +1672,71 @@ export class IcarusStore {
   }
 
   admitBrowserAction(actionId: string): BrowserActionAdmittedRecord | BrowserActionSettledRecord {
+    return this.#admitBrowserAction(actionId, false);
+  }
+
+  admitInFlightBrowserActionCancellation(
+    actionId: string,
+  ): BrowserActionAdmittedRecord | BrowserActionSettledRecord {
+    return this.#admitBrowserAction(actionId, true);
+  }
+
+  #admitBrowserAction(
+    actionId: string,
+    parentBoundCancellation: boolean,
+  ): BrowserActionAdmittedRecord | BrowserActionSettledRecord {
     const transaction = this.#database.transaction(
       (): BrowserActionAdmittedRecord | BrowserActionSettledRecord => {
         const record = this.getBrowserAction(actionId);
+        invariant(
+          parentBoundCancellation
+            ? record.kind === "run.cancel" && record.activeActionId !== null
+            : record.activeActionId === null,
+          "COORDINATOR_REQUIRED",
+          "Parent-bound cancellation requires the live coordinator admission path",
+        );
         if (record.status === "settled") return record;
         if (record.status === "admitted") return record;
         const current = this.getRun(record.runId);
-        const revision = numberValue(
-          row(
-            this.#database
-              .prepare(
-                "SELECT COALESCE(MAX(sequence), 0) AS revision FROM run_events WHERE run_id = ?",
-              )
-              .get(record.runId),
-            "browser action event revision",
-          ).revision,
-          "browser action event revision.revision",
-        );
-        const activeNonCancelEntry =
-          record.kind === "run.cancel"
-            ? this.#database
-                .prepare(
-                  `${BROWSER_ACTION_SELECT}
-                   WHERE run_id = ? AND kind <> 'run.cancel'
-                     AND status IN ('prepared', 'admitted')`,
-                )
-                .get(record.runId)
-            : undefined;
+        const revision = this.#browserActionEventRevision(record.runId);
+        const activeNonCancelEntry = this.#database
+          .prepare(
+            `${BROWSER_ACTION_SELECT}
+             WHERE run_id = ? AND kind <> 'run.cancel'
+               AND action_id <> ?
+               AND status IN ('prepared', 'admitted')`,
+          )
+          .get(record.runId, record.actionId);
         const activeNonCancel =
           activeNonCancelEntry === undefined ? null : browserActionRecordRow(activeNonCancelEntry);
-        let cancellationParentMatches = true;
-        try {
+        if (parentBoundCancellation) {
           assertBrowserActionCancellationParent(record, activeNonCancel);
-        } catch {
-          cancellationParentMatches = false;
         }
+        const activeBinding: ActiveBrowserActionBinding | null =
+          activeNonCancel === null
+            ? null
+            : {
+                actionId: activeNonCancel.actionId,
+                actionDigest: activeNonCancel.actionDigest,
+                kind: activeNonCancel.kind,
+                generation: 1,
+                cancellable: this.#browserActionParentIsCancellable(activeNonCancel),
+              };
+        const descriptor = this.#availableBrowserActionDescriptors(
+          current,
+          revision,
+          activeBinding,
+          record.actionId,
+        ).find((candidate) => candidate.kind === record.kind);
         if (
-          current.state !== record.expectedState ||
-          revision !== record.eventRevision ||
-          this.#browserActionSubjectDigest(current, record.kind) !== record.subjectDigest ||
-          !cancellationParentMatches
+          descriptor === undefined ||
+          descriptor.runId !== record.runId ||
+          descriptor.expectedState !== record.expectedState ||
+          descriptor.eventRevision !== record.eventRevision ||
+          descriptor.subjectDigest !== record.subjectDigest ||
+          descriptor.activeActionId !== record.activeActionId ||
+          descriptor.activeActionDigest !== record.activeActionDigest ||
+          descriptor.actionDigest !== record.actionDigest
         ) {
           return this.#refusePreparedBrowserActionRecord(actionId, "STALE_ACTION");
         }
@@ -1620,41 +1800,7 @@ export class IcarusStore {
         "INVALID_BROWSER_ACTION_TRANSITION",
         "Browser action must be admitted before this settlement",
       );
-      assertBrowserActionSettlement("admitted", settlement);
-      invariant(
-        settlement.admissionEventSequence === record.admissionEventSequence,
-        "INVALID_BROWSER_ACTION_SETTLEMENT",
-        "Settlement admission event does not match the durable action",
-      );
-      this.#assertBrowserActionAnchors(record, settlement);
-      const updatedAt = this.#now();
-      const result = this.#database
-        .prepare(
-          `UPDATE browser_action_requests
-           SET status = 'settled', outcome = ?, domain_event_sequence = ?,
-               domain_operation_id = ?, error_code = ?, updated_at = ?
-           WHERE action_id = ? AND status = 'admitted'`,
-        )
-        .run(
-          settlement.outcome,
-          settlement.domainEventSequence,
-          settlement.domainOperationId,
-          settlement.errorCode,
-          updatedAt,
-          actionId,
-        );
-      invariant(
-        result.changes === 1,
-        "CONCURRENT_BROWSER_ACTION_UPDATE",
-        "Browser action changed during settlement",
-      );
-      const settled = this.getBrowserAction(actionId);
-      invariant(
-        settled.status === "settled",
-        "DATABASE_ERROR",
-        "Browser settlement did not persist",
-      );
-      return settled;
+      return this.#settleAdmittedBrowserActionRecord(record, settlement);
     });
     return runBrowserActionImmediate(transaction);
   }
@@ -1673,6 +1819,150 @@ export class IcarusStore {
       return prepared.map((record) =>
         this.refusePreparedBrowserAction(record.actionId, "ACTION_NOT_ADMITTED"),
       );
+    });
+    return runBrowserActionImmediate(transaction);
+  }
+
+  /**
+   * Reconcile one admitted request from append-only domain evidence without
+   * invoking any provider, filesystem, Git, sandbox, network, or recovery
+   * effect. An incomplete or ambiguous chain is terminally marked for human
+   * recovery rather than replayed.
+   */
+  reconcileAdmittedBrowserAction(
+    actionId: string,
+    failureBeforeFirstEffect: string | null = null,
+  ): BrowserActionSettledRecord {
+    const transaction = this.#database.transaction((): BrowserActionSettledRecord => {
+      const record = this.getBrowserAction(actionId);
+      if (record.status === "settled") return record;
+      invariant(
+        record.status === "admitted",
+        "INVALID_BROWSER_ACTION_TRANSITION",
+        "Only an admitted browser action can be reconciled",
+      );
+      const linkedEvents = (
+        this.#database
+          .prepare(
+            `SELECT sequence, type, payload_json
+             FROM run_events
+             WHERE run_id = ? AND sequence > ?
+             ORDER BY sequence`,
+          )
+          .all(record.runId, record.admissionEventSequence) as unknown[]
+      ).flatMap((entry) => {
+        const event = row(entry, "browser action reconciliation event");
+        const payload = parseJson<Record<string, unknown>>(
+          event.payload_json,
+          "browser action reconciliation event.payload_json",
+        );
+        if (payload.browserActionId !== record.actionId) return [];
+        const type = text(event.type, "browser action reconciliation event.type");
+        if (!BROWSER_ACTION_DOMAIN_EVENT_TYPES[record.kind].has(type)) return [];
+        return [
+          {
+            sequence: numberValue(event.sequence, "browser action reconciliation event.sequence"),
+            type,
+            payload,
+          },
+        ];
+      });
+      const resumeCancellationStage = (event: (typeof linkedEvents)[number]): RunState | null =>
+        record.kind === "run.resume" && event.type === "cancellation.completed"
+          ? this.#assertBrowserResumeActionChain(record, event.sequence, null, null, null)
+          : null;
+      const successEvents = linkedEvents.filter((event) => {
+        const terminalState = this.#browserActionTerminalEventState(event.type, event.payload);
+        const resumedStage = resumeCancellationStage(event);
+        return resumedStage === null
+          ? terminalState !== null &&
+              BROWSER_ACTION_SUCCESS_BOUNDARIES[record.kind][event.type]?.includes(terminalState)
+          : resumedStage === "cancelling" && terminalState === "cancelled";
+      });
+      const cancellationEvents = linkedEvents.filter((event) => {
+        const terminalState = this.#browserActionTerminalEventState(event.type, event.payload);
+        const resumedStage = resumeCancellationStage(event);
+        return (
+          record.kind !== "run.cancel" &&
+          event.type === "cancellation.completed" &&
+          terminalState === "cancelled" &&
+          resumedStage !== "cancelling"
+        );
+      });
+      const failureEvents = linkedEvents.filter(
+        (event) =>
+          record.kind !== "run.cancel" &&
+          event.type === "run.failed" &&
+          this.#browserActionTerminalEventState(event.type, event.payload) === "failed",
+      );
+      const terminalGroups = [successEvents, cancellationEvents, failureEvents].filter(
+        (events) => events.length > 0,
+      );
+      if (terminalGroups.length === 1) {
+        const group = terminalGroups[0] ?? [];
+        const terminal = record.kind === "run.cancel" ? group[0] : group.at(-1);
+        invariant(terminal !== undefined, "DATABASE_ERROR", "Browser terminal event is missing");
+        if (failureEvents.length > 0) {
+          return this.#settleAdmittedBrowserActionRecord(record, {
+            outcome: "failed",
+            admissionEventSequence: record.admissionEventSequence,
+            domainEventSequence: terminal.sequence,
+            domainOperationId: null,
+            errorCode:
+              typeof terminal.payload.code === "string" &&
+              /^[A-Z0-9_]{2,128}$/.test(terminal.payload.code)
+                ? terminal.payload.code
+                : "ACTION_FAILED",
+          });
+        }
+        return this.#settleAdmittedBrowserActionRecord(record, {
+          outcome: cancellationEvents.length > 0 ? "cancelled" : "succeeded",
+          admissionEventSequence: record.admissionEventSequence,
+          domainEventSequence: terminal.sequence,
+          domainOperationId: null,
+          errorCode: null,
+        });
+      }
+
+      const failedOperations = this.#browserActionLinkedOperations(record).filter(
+        (operation) =>
+          operation.status === "failed" &&
+          BROWSER_ACTION_FAILED_OPERATION_BOUNDARIES[record.kind].has(operation.kind),
+      );
+      if (linkedEvents.length === 0 && failedOperations.length === 1) {
+        const operation = failedOperations[0];
+        invariant(operation !== undefined, "DATABASE_ERROR", "Browser operation is missing");
+        return this.#settleAdmittedBrowserActionRecord(record, {
+          outcome: "failed",
+          admissionEventSequence: record.admissionEventSequence,
+          domainEventSequence: null,
+          domainOperationId: operation.id,
+          errorCode: operation.errorCode ?? "ACTION_FAILED",
+        });
+      }
+
+      if (
+        linkedEvents.length === 0 &&
+        this.#browserActionLinkedOperations(record).length === 0 &&
+        !this.#hasPostAdmissionBrowserActionAnchor(record) &&
+        failureBeforeFirstEffect !== null
+      ) {
+        return this.#settleAdmittedBrowserActionRecord(record, {
+          outcome: "failed",
+          admissionEventSequence: record.admissionEventSequence,
+          domainEventSequence: null,
+          domainOperationId: null,
+          errorCode: failureBeforeFirstEffect,
+        });
+      }
+
+      return this.#settleAdmittedBrowserActionRecord(record, {
+        outcome: "reconciliation_required",
+        admissionEventSequence: record.admissionEventSequence,
+        domainEventSequence: null,
+        domainOperationId: null,
+        errorCode: "ACTION_RECOVERY_REQUIRED",
+      });
     });
     return runBrowserActionImmediate(transaction);
   }
@@ -2039,6 +2329,7 @@ export class IcarusStore {
     context: ContextManifest,
     contextArtifactPath: string,
     contextSha256: string,
+    browserActionId: string | null = null,
   ): RunRecord {
     invariant(
       /^[a-f0-9]{64}$/.test(contextSha256),
@@ -2086,11 +2377,38 @@ export class IcarusStore {
         contextSha256,
       });
       if (nextState === "awaiting_egress_approval") {
-        this.#appendEvent(runId, "egress.requested", { contextSha256 });
+        this.#appendEvent(runId, "egress.requested", {
+          from: "preparing",
+          to: nextState,
+          contextSha256,
+          ...(browserActionId === null ? {} : { browserActionId }),
+        });
       }
     });
     transaction();
     return this.getRun(runId);
+  }
+
+  finishPreparationOperation(
+    token: OperationToken,
+    finish: OperationFinish,
+    context: ContextManifest,
+    contextArtifactPath: string,
+    contextSha256: string,
+  ): RunRecord {
+    this.#assertAtomicOperationSettlementInput(token, finish, [CONTEXT_PREPARATION_OPERATION_KIND]);
+    const transaction = this.#database.transaction(() => {
+      this.#finishOperationInTransaction(token, finish, false);
+      this.completePreparation(
+        token.runId,
+        context,
+        contextArtifactPath,
+        contextSha256,
+        token.browserActionId,
+      );
+    });
+    transaction();
+    return this.getRun(token.runId);
   }
 
   getRun(id: string): RunRecord {
@@ -2250,6 +2568,7 @@ export class IcarusStore {
     type: string,
     payload: JsonValue = {},
     resumeState: RunState | null = null,
+    browserActionId: string | null = null,
   ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
@@ -2269,7 +2588,12 @@ export class IcarusStore {
         )
         .run(to, resumeState, now, runId, current.state);
       invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
-      this.#appendEvent(runId, type, { from: current.state, to, detail: payload });
+      this.#appendEvent(runId, type, {
+        from: current.state,
+        to,
+        detail: payload,
+        ...(browserActionId === null ? {} : { browserActionId }),
+      });
     });
     transaction();
     return this.getRun(runId);
@@ -2287,6 +2611,7 @@ export class IcarusStore {
     plan: PlanProposal,
     planSha256: string,
     readableManifest: ReadableManifest | null = null,
+    browserActionId: string | null = null,
   ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
@@ -2361,6 +2686,7 @@ export class IcarusStore {
         to: "awaiting_approval",
         planSha256,
         readableFiles: readableManifest === null ? 0 : readableManifest.entries.length,
+        ...(browserActionId === null ? {} : { browserActionId }),
       });
     });
     transaction();
@@ -2407,16 +2733,36 @@ export class IcarusStore {
     return this.#validateApprovalRequest(runId, egressApprovalTransition(digest, actor));
   }
 
-  approveEgress(runId: string, digest: string, actor: string): RunRecord {
-    return this.#approveAndTransition(runId, egressApprovalTransition(digest, actor));
+  approveEgress(
+    runId: string,
+    digest: string,
+    actor: string,
+    browserActionId: string | null = null,
+  ): RunRecord {
+    return this.#approveAndTransition(
+      runId,
+      egressApprovalTransition(digest, actor),
+      undefined,
+      browserActionId,
+    );
   }
 
   preflightPlanApproval(runId: string, digest: string, actor: string): RunRecord {
     return this.#validateApprovalRequest(runId, planApprovalTransition(digest, actor));
   }
 
-  approvePlan(runId: string, digest: string, actor: string): RunRecord {
-    return this.#approveAndTransition(runId, planApprovalTransition(digest, actor));
+  approvePlan(
+    runId: string,
+    digest: string,
+    actor: string,
+    browserActionId: string | null = null,
+  ): RunRecord {
+    return this.#approveAndTransition(
+      runId,
+      planApprovalTransition(digest, actor),
+      undefined,
+      browserActionId,
+    );
   }
 
   preflightReviewDecision(
@@ -2436,75 +2782,112 @@ export class IcarusStore {
     digest: string,
     actor: string,
     decision: "approve" | "reject",
+    browserActionId: string | null = null,
   ): RunRecord {
     return this.#approveAndTransition(
       runId,
       reviewApprovalTransition(digest, actor, decision),
       decision === "approve" ? () => this.#assertSessionCompletedForApproval(runId) : undefined,
+      browserActionId,
     );
   }
 
-  approveRollback(runId: string, digest: string, actor: string): RunRecord {
+  approveRollback(
+    runId: string,
+    digest: string,
+    actor: string,
+    browserActionId: string | null = null,
+  ): RunRecord {
     const current = this.getRun(runId);
     invariant(
       current.state === "awaiting_review" || current.state === "completed",
       "INVALID_STATE",
       "Run cannot be rolled back from its current state",
     );
-    return this.#approveAndTransition(runId, {
-      kind: "rollback",
-      digest,
-      actor,
-      decision: "approve",
-      expectedState: current.state,
-      to: "rolling_back",
-      expectedDigest: (run) => run.verification?.diffSha256 ?? null,
-      eventType: "rollback.approved",
-    });
+    return this.#approveAndTransition(
+      runId,
+      {
+        kind: "rollback",
+        digest,
+        actor,
+        decision: "approve",
+        expectedState: current.state,
+        to: "rolling_back",
+        expectedDigest: (run) => run.verification?.diffSha256 ?? null,
+        eventType: "rollback.approved",
+      },
+      undefined,
+      browserActionId,
+    );
   }
 
-  approveRestore(runId: string, digest: string, actor: string): RunRecord {
+  approveRestore(
+    runId: string,
+    digest: string,
+    actor: string,
+    browserActionId: string | null = null,
+  ): RunRecord {
     const checkpoint = this.getCheckpoint(runId);
-    return this.#approveAndTransition(runId, {
-      kind: "restore",
-      digest,
-      actor,
-      decision: "approve",
-      expectedState: "rolled_back",
-      to: "restoring",
-      expectedDigest: () => checkpoint.checkpointSha256,
-      eventType: "restore.approved",
-    });
+    return this.#approveAndTransition(
+      runId,
+      {
+        kind: "restore",
+        digest,
+        actor,
+        decision: "approve",
+        expectedState: "rolled_back",
+        to: "restoring",
+        expectedDigest: () => checkpoint.checkpointSha256,
+        eventType: "restore.approved",
+      },
+      undefined,
+      browserActionId,
+    );
   }
 
-  finishRollback(runId: string): RunRecord {
+  finishRollback(runId: string, browserActionId: string | null = null): RunRecord {
     return this.#finishInternalTransition(
       runId,
       "rolling_back",
       "rolled_back",
       "rollback.completed",
+      browserActionId,
     );
   }
 
-  finishRestore(runId: string): RunRecord {
-    return this.#finishInternalTransition(runId, "restoring", "verifying", "restore.completed");
+  finishRestore(runId: string, browserActionId: string | null = null): RunRecord {
+    return this.#finishInternalTransition(
+      runId,
+      "restoring",
+      "verifying",
+      "restore.completed",
+      browserActionId,
+    );
   }
 
-  finishCancellation(runId: string): RunRecord {
+  finishCancellation(runId: string, browserActionId: string | null = null): RunRecord {
     return this.#finishInternalTransition(
       runId,
       "cancelling",
       "cancelled",
       "cancellation.completed",
+      browserActionId,
     );
   }
 
-  recordResumeRequested(runId: string): RunRecord {
+  recordResumeRequested(
+    runId: string,
+    actor?: string,
+    browserActionId: string | null = null,
+  ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
+      if (actor !== undefined) assertOperatorActor(actor);
       this.#appendEvent(runId, "resume.requested", {
         state: current.state,
         resumeState: current.resumeState,
+        ...(actor === undefined ? {} : { actor }),
+        ...(browserActionId === null ? {} : { browserActionId }),
       });
     });
     transaction();
@@ -2805,16 +3188,6 @@ export class IcarusStore {
     );
   }
 
-  #countEvents(runId: string, type: string): number {
-    const value = row(
-      this.#database
-        .prepare("SELECT COUNT(*) AS total FROM run_events WHERE run_id = ? AND type = ?")
-        .get(runId, type),
-      "run event count",
-    );
-    return numberValue(value.total, "run_events.total");
-  }
-
   /**
    * Tool-grant spend is derived from durable operation admission, including
    * refused, failed, and interrupted calls. Counting started rows means a
@@ -2893,7 +3266,7 @@ export class IcarusStore {
    * Lands a failed verification directly in non-approvable review when a
    * session cannot retain the ordinary reconciliation margin at entry.
    */
-  recordSessionAdmissionExhausted(runId: string): RunRecord {
+  recordSessionAdmissionExhausted(runId: string, browserActionId: string | null = null): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
       invariant(current.state === "verifying", "INVALID_STATE", "Run is not verifying");
@@ -2919,6 +3292,13 @@ export class IcarusStore {
       this.#appendEvent(runId, "session.exhausted", {
         iterations: this.countSessionIterations(runId),
         reason: "recovery_margin",
+        ...(browserActionId === null
+          ? {}
+          : {
+              from: "verifying",
+              to: "awaiting_review",
+              browserActionId,
+            }),
       });
     });
     transaction();
@@ -2935,10 +3315,18 @@ export class IcarusStore {
     kind: "completed" | "awaiting_human" | "exhausted",
     textValue: string | null,
     iterations: number,
+    browserActionId: string | null = null,
   ): RunRecord {
     this.#assertSessionOutcomeInput(kind, textValue, iterations);
     const transaction = this.#database.transaction(() => {
-      this.#recordSessionOutcomeInTransaction(runId, kind, textValue, iterations);
+      this.#recordSessionOutcomeInTransaction(
+        runId,
+        kind,
+        textValue,
+        iterations,
+        undefined,
+        browserActionId,
+      );
     });
     transaction();
     return this.getRun(runId);
@@ -2974,6 +3362,7 @@ export class IcarusStore {
     textValue: string | null,
     iterations: number,
     operationId?: string,
+    browserActionId: string | null = null,
   ): void {
     const current = this.getRun(runId);
     invariant(current.state === "running", "INVALID_STATE", "Agent session is not running");
@@ -3013,6 +3402,13 @@ export class IcarusStore {
     this.#appendEvent(runId, eventType, {
       iterations,
       ...(operationId === undefined ? {} : { operationId }),
+      ...(browserActionId === null
+        ? {}
+        : {
+            from: "running",
+            to: "awaiting_review",
+            browserActionId,
+          }),
       ...(kind === "completed"
         ? { summary: textValue as string }
         : kind === "awaiting_human"
@@ -3292,6 +3688,7 @@ export class IcarusStore {
     diff: string,
     verification: VerificationEvidence,
     nextState: "awaiting_review" | "verifying" | "running" = "awaiting_review",
+    browserActionId: string | null = null,
   ): RunRecord {
     invariant(
       nextState !== "running",
@@ -3299,7 +3696,7 @@ export class IcarusStore {
       "Running session verification must settle atomically with its operation",
     );
     const transaction = this.#database.transaction(() => {
-      this.#recordVerificationInTransaction(runId, diff, verification, nextState);
+      this.#recordVerificationInTransaction(runId, diff, verification, nextState, browserActionId);
     });
     transaction();
     return this.getRun(runId);
@@ -3310,6 +3707,7 @@ export class IcarusStore {
     diff: string,
     verification: VerificationEvidence,
     nextState: "awaiting_review" | "verifying" | "running",
+    browserActionId: string | null = null,
   ): void {
     const current = this.getRun(runId);
     invariant(
@@ -3395,6 +3793,7 @@ export class IcarusStore {
       diffSha256: verification.diffSha256,
       diff,
       verification,
+      ...(browserActionId === null ? {} : { browserActionId }),
     });
   }
 
@@ -3536,7 +3935,12 @@ export class IcarusStore {
     };
   }
 
-  failRun(runId: string, resumeState: RunState, error: IcarusError): RunRecord {
+  failRun(
+    runId: string,
+    resumeState: RunState,
+    error: IcarusError,
+    browserActionId: string | null = null,
+  ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
       if (current.state !== "failed") {
@@ -3555,13 +3959,14 @@ export class IcarusStore {
         resumeState,
         code: error.code,
         message: error.message,
+        ...(browserActionId === null ? {} : { browserActionId }),
       });
     });
     transaction();
     return this.getRun(runId);
   }
 
-  resumeFailed(runId: string): RunRecord {
+  resumeFailed(runId: string, browserActionId: string | null = null): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
       invariant(current.state === "failed", "INVALID_STATE", "Only a failed run can be resumed");
@@ -3654,10 +4059,117 @@ export class IcarusStore {
       this.#appendEvent(runId, "run.resumed", {
         from: "failed",
         to: current.resumeState,
+        ...(browserActionId === null ? {} : { browserActionId }),
       });
     });
     transaction();
     return this.getRun(runId);
+  }
+
+  beginBrowserResume(runId: string, actor: string, actionId: string): RunRecord {
+    assertOperatorActor(actor);
+    const transaction = this.#database.transaction(() => {
+      const record = this.getBrowserActionForRun(runId, actionId);
+      invariant(
+        record.status === "admitted" && record.kind === "run.resume" && record.actor === actor,
+        "INVALID_BROWSER_ACTION",
+        "Browser resume is not bound to its admitted actor and action",
+      );
+      const current = this.getRun(runId);
+      invariant(
+        this.#browserResumeEvidenceAvailable(current, actionId),
+        "STALE_ACTION",
+        "Browser resume recovery evidence is no longer current",
+      );
+      this.#assertRunResumePrerequisites(current);
+      this.#appendEvent(runId, "resume.requested", {
+        state: current.state,
+        resumeState: current.resumeState,
+        actor,
+        browserActionId: actionId,
+      });
+      if (current.state === "failed") {
+        this.resumeFailed(runId, actionId);
+      }
+    });
+    runBrowserActionImmediate(transaction);
+    return this.getRun(runId);
+  }
+
+  #assertRunResumePrerequisites(current: RunRecord): RunState {
+    const resumeState = current.state === "failed" ? current.resumeState : current.state;
+    invariant(
+      resumeState !== null && BROWSER_ACTION_RESUME_STAGES.has(resumeState),
+      "INVALID_RESUME_STATE",
+      "Run has no safe resume state",
+    );
+    invariant(
+      this.#database
+        .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
+        .get(current.id) === undefined,
+      "RUN_BUSY",
+      "Run cannot resume while an operation is still active",
+    );
+    this.#assertNoOtherActiveRun(current.projectId, current.id);
+    if (resumeState === "running" || resumeState === "verifying") {
+      invariant(
+        current.planSha256 !== null &&
+          this.#hasApproval(current.id, "plan", current.planSha256, "approve"),
+        "MISSING_APPROVAL",
+        "Run cannot resume execution without its exact plan approval",
+      );
+    }
+    if (
+      resumeState === "verifying" ||
+      resumeState === "rolling_back" ||
+      resumeState === "restoring"
+    ) {
+      invariant(
+        current.worktreePath !== null,
+        "MISSING_CHECKPOINT",
+        "Run cannot resume recovery without its private worktree",
+      );
+      const modernPatchSet =
+        this.#database.prepare("SELECT 1 FROM patch_sets WHERE run_id = ?").get(current.id) !==
+        undefined;
+      if (modernPatchSet) {
+        const checkpointFileCount = numberValue(
+          row(
+            this.#database
+              .prepare("SELECT COUNT(*) AS total FROM checkpoint_files WHERE run_id = ?")
+              .get(current.id),
+            "checkpoint file count",
+          ).total,
+          "checkpoint_files.total",
+        );
+        invariant(
+          checkpointFileCount > 0,
+          "MISSING_CHECKPOINT",
+          "Patch-set run cannot resume without persisted checkpoint files",
+        );
+      } else {
+        const legacy = row(
+          this.#database.prepare("SELECT edit_json FROM runs WHERE id = ?").get(current.id),
+          "legacy edit state",
+        );
+        invariant(
+          typeof legacy.edit_json === "string" &&
+            current.baselineBase64 !== null &&
+            current.approvedBase64 !== null,
+          "MISSING_CHECKPOINT",
+          "Legacy run cannot resume without its applied edit bytes",
+        );
+      }
+      if (resumeState === "rolling_back" || resumeState === "restoring") {
+        invariant(
+          this.#database.prepare("SELECT 1 FROM checkpoints WHERE run_id = ?").get(current.id) !==
+            undefined,
+          "MISSING_CHECKPOINT",
+          "Recovery state cannot resume without its immutable checkpoint",
+        );
+      }
+    }
+    return resumeState;
   }
 
   beginOperation(
@@ -3667,6 +4179,7 @@ export class IcarusStore {
     reservedTokens: number,
     reservedRuntimeMs: number,
     expectedState?: RunState,
+    browserActionId: string | null = null,
   ): OperationToken {
     return this.#beginOperation(
       runId,
@@ -3676,10 +4189,14 @@ export class IcarusStore {
       reservedRuntimeMs,
       "ordinary",
       expectedState,
+      browserActionId,
     );
   }
 
-  beginCancellationRecoveryOperation(runId: string): OperationToken {
+  beginCancellationRecoveryOperation(
+    runId: string,
+    browserActionId: string | null = null,
+  ): OperationToken {
     return this.#beginOperation(
       runId,
       CANCELLATION_RECOVERY_OPERATION_KIND,
@@ -3687,6 +4204,8 @@ export class IcarusStore {
       0,
       CANCELLATION_RECOVERY_RUNTIME_MS,
       "emergency",
+      undefined,
+      browserActionId,
     );
   }
 
@@ -3698,6 +4217,7 @@ export class IcarusStore {
     reservedRuntimeMs: number,
     budgetClass: "ordinary" | "emergency",
     expectedState?: RunState,
+    browserActionId: string | null = null,
   ): OperationToken {
     assertOperationKind(kind);
     invariant(
@@ -3715,9 +4235,17 @@ export class IcarusStore {
       "INVALID_RESERVATION",
       "Reserved runtime must be a positive integer",
     );
+    invariant(
+      browserActionId === null || RUN_ID_PATTERN.test(browserActionId),
+      "INVALID_BROWSER_ACTION",
+      "Browser action operation identity is invalid",
+    );
     let token: OperationToken | undefined;
     const transaction = this.#database.transaction(() => {
       const run = this.getRun(runId);
+      if (browserActionId !== null) {
+        this.#assertAdmittedBrowserActionOperation(runId, browserActionId, kind);
+      }
       invariant(
         expectedState === undefined || run.state === expectedState,
         "RUN_BUSY",
@@ -3822,6 +4350,7 @@ export class IcarusStore {
         reservedCostUsd,
         reservedTokens,
         reservedRuntimeMs,
+        ...(browserActionId === null ? {} : { browserActionId }),
         ...(budgetClass === "emergency"
           ? { budgetClass: "emergency", attempt: recoveryAttempt ?? 0 }
           : {}),
@@ -3833,6 +4362,7 @@ export class IcarusStore {
         reservedCostUsd,
         reservedTokens,
         reservedRuntimeMs,
+        browserActionId,
       };
     });
     try {
@@ -3920,7 +4450,13 @@ export class IcarusStore {
         "Session verification can only settle while the session is running",
       );
       this.#finishOperationInTransaction(token, finish, false);
-      this.#recordVerificationInTransaction(token.runId, diff, verification, "running");
+      this.#recordVerificationInTransaction(
+        token.runId,
+        diff,
+        verification,
+        "running",
+        token.browserActionId,
+      );
     });
     transaction();
     return this.getRun(token.runId);
@@ -3976,7 +4512,13 @@ export class IcarusStore {
         "Failed patch settlement does not match its durable effects",
       );
       this.#finishOperationInTransaction(token, finish, false);
-      this.#recordVerificationInTransaction(token.runId, diff, verification, "running");
+      this.#recordVerificationInTransaction(
+        token.runId,
+        diff,
+        verification,
+        "running",
+        token.browserActionId,
+      );
     });
     transaction();
     return this.getRun(token.runId);
@@ -3989,6 +4531,7 @@ export class IcarusStore {
     kind: "completed" | "awaiting_human",
     textValue: string,
     iterations: number,
+    browserActionId: string | null = token.browserActionId,
   ): RunRecord {
     const expectedKind =
       kind === "completed"
@@ -4003,7 +4546,14 @@ export class IcarusStore {
         "Session control can only settle while the session is running",
       );
       this.#finishOperationInTransaction(token, finish, false);
-      this.#recordSessionOutcomeInTransaction(token.runId, kind, textValue, iterations, token.id);
+      this.#recordSessionOutcomeInTransaction(
+        token.runId,
+        kind,
+        textValue,
+        iterations,
+        token.id,
+        browserActionId,
+      );
     });
     transaction();
     return this.getRun(token.runId);
@@ -4026,7 +4576,7 @@ export class IcarusStore {
       );
       this.#finishOperationInTransaction(token, finish, false);
       this.#assertSessionCompletedForApproval(token.runId);
-      this.#approveAndTransitionInTransaction(token.runId, approval);
+      this.#approveAndTransitionInTransaction(token.runId, approval, token.browserActionId);
     });
     transaction();
     return this.getRun(token.runId);
@@ -4048,8 +4598,20 @@ export class IcarusStore {
         "INVALID_STATE",
         "Checkpoint recovery operation is not at its expected state",
       );
+      const transitionBrowserActionId =
+        !rollback &&
+        token.browserActionId !== null &&
+        this.getBrowserActionForRun(token.runId, token.browserActionId).kind === "restore.approve"
+          ? null
+          : token.browserActionId;
       this.#finishOperationInTransaction(token, finish, false);
-      this.#finishInternalTransitionInTransaction(token.runId, expectedState, to, eventType);
+      this.#finishInternalTransitionInTransaction(
+        token.runId,
+        expectedState,
+        to,
+        eventType,
+        transitionBrowserActionId,
+      );
     });
     transaction();
     return this.getRun(token.runId);
@@ -4167,6 +4729,21 @@ export class IcarusStore {
     finish: OperationFinish,
     emergency: boolean,
   ): void {
+    if (token.browserActionId !== null) {
+      invariant(
+        typeof finish.detail === "object" &&
+          finish.detail !== null &&
+          !Array.isArray(finish.detail) &&
+          (finish.detail.browserActionId === undefined ||
+            finish.detail.browserActionId === token.browserActionId),
+        "INVALID_BROWSER_ACTION",
+        "Browser action operation detail cannot replace its durable identity",
+      );
+      finish = {
+        ...finish,
+        detail: { ...finish.detail, browserActionId: token.browserActionId },
+      };
+    }
     const operation = row(
       this.#database
         .prepare("SELECT * FROM operations WHERE id = ? AND run_id = ?")
@@ -4174,6 +4751,29 @@ export class IcarusStore {
       "operation",
     );
     const persistedKind = text(operation.kind, "operation.kind");
+    if (token.browserActionId !== null) {
+      this.#assertAdmittedBrowserActionOperation(token.runId, token.browserActionId, persistedKind);
+      const start = row(
+        this.#database
+          .prepare(
+            `SELECT payload_json FROM run_events
+             WHERE run_id = ? AND type = 'operation.started'
+               AND json_extract(payload_json, '$.operationId') = ?`,
+          )
+          .get(token.runId, token.id),
+        "browser action operation start",
+      );
+      const startPayload = parseJson<Record<string, unknown>>(
+        start.payload_json,
+        "browser action operation start.payload_json",
+      );
+      invariant(
+        startPayload.kind === persistedKind &&
+          startPayload.browserActionId === token.browserActionId,
+        "OPERATION_TOKEN_MISMATCH",
+        "Operation token does not match its browser action admission",
+      );
+    }
     invariant(
       persistedKind === token.kind &&
         numberValue(operation.reserved_cost_usd, "operation.reserved_cost_usd") ===
@@ -4297,9 +4897,35 @@ export class IcarusStore {
         token.runId,
       );
     this.#appendEvent(token.runId, "operation.finished", finishedEventPayload);
+    if (token.browserActionId !== null && finish.outcome === "failed") {
+      const record = this.getBrowserActionForRun(token.runId, token.browserActionId);
+      if (
+        record.status === "admitted" &&
+        BROWSER_ACTION_FAILED_OPERATION_BOUNDARIES[record.kind].has(token.kind)
+      ) {
+        const candidateCode =
+          typeof finish.detail === "object" &&
+          finish.detail !== null &&
+          !Array.isArray(finish.detail) &&
+          typeof finish.detail.code === "string" &&
+          /^[A-Z0-9_]{2,128}$/.test(finish.detail.code)
+            ? finish.detail.code
+            : "ACTION_FAILED";
+        this.#settleAdmittedBrowserActionRecord(record, {
+          outcome: "failed",
+          admissionEventSequence: record.admissionEventSequence,
+          domainEventSequence: null,
+          domainOperationId: token.id,
+          errorCode: candidateCode,
+        });
+      }
+    }
   }
 
-  markStartedOperationsInterrupted(runId: string): RunRecord {
+  markStartedOperationsInterrupted(
+    runId: string,
+    browserActionId: string | null = null,
+  ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const operations = this.#database
         .prepare("SELECT * FROM operations WHERE run_id = ? AND status = 'started'")
@@ -4339,6 +4965,7 @@ export class IcarusStore {
           reservedCostUsd: reservedCost,
           reservedTokens,
           reservedRuntimeMs,
+          ...(browserActionId === null ? {} : { browserActionId }),
           ...(operationKind === CANCELLATION_RECOVERY_OPERATION_KIND
             ? { budgetClass: "emergency" }
             : {}),
@@ -5044,6 +5671,257 @@ export class IcarusStore {
     return transaction();
   }
 
+  #browserActionEventRevision(runId: string): number {
+    const revision = numberValue(
+      row(
+        this.#database
+          .prepare("SELECT COALESCE(MAX(sequence), 0) AS revision FROM run_events WHERE run_id = ?")
+          .get(runId),
+        "browser action event revision",
+      ).revision,
+      "browser action event revision.revision",
+    );
+    invariant(
+      Number.isSafeInteger(revision) && revision >= 1,
+      "DATABASE_ERROR",
+      "Browser action event revision is invalid",
+    );
+    return revision;
+  }
+
+  #browserActionParentIsCancellable(record: BrowserActionRecord): boolean {
+    if (record.status !== "admitted" || record.kind === "run.cancel") return false;
+    if (
+      record.kind === "review.reject" ||
+      record.kind === "rollback.approve" ||
+      record.kind === "restore.approve"
+    ) {
+      return false;
+    }
+    if (record.kind !== "run.resume") return true;
+    const resumedStage = this.#browserActionResumedStage(record);
+    return resumedStage !== null && BROWSER_ACTION_RESUME_CANCELLABLE_STAGES.has(resumedStage);
+  }
+
+  #browserActionResumedStage(record: BrowserActionAdmittedRecord): RunState | null {
+    if (record.kind !== "run.resume") return null;
+    if (record.expectedState !== "failed") return record.expectedState;
+    const entries = this.#database
+      .prepare(
+        `SELECT type, payload_json FROM run_events
+         WHERE run_id = ? AND sequence > ?
+         ORDER BY sequence`,
+      )
+      .all(record.runId, record.admissionEventSequence) as unknown[];
+    for (const entry of entries) {
+      const event = row(entry, "browser resume stage event");
+      const payload = parseJson<Record<string, unknown>>(
+        event.payload_json,
+        "browser resume stage event.payload_json",
+      );
+      if (payload.browserActionId !== record.actionId) continue;
+      const type = text(event.type, "browser resume stage event.type");
+      const candidate =
+        type === "resume.requested"
+          ? payload.resumeState
+          : type === "run.resumed"
+            ? payload.to
+            : null;
+      if (
+        typeof candidate === "string" &&
+        RUN_STATES.has(candidate) &&
+        BROWSER_ACTION_RESUME_STAGES.has(candidate as RunState)
+      ) {
+        return candidate as RunState;
+      }
+    }
+    return null;
+  }
+
+  #browserResumeEvidenceAvailable(run: RunRecord, ignoredActionId: string | null = null): boolean {
+    try {
+      this.#assertRunResumePrerequisites(run);
+    } catch (error) {
+      if (error instanceof IcarusError) return false;
+      throw error;
+    }
+    const resumeState = run.state === "failed" ? run.resumeState : run.state;
+    if (
+      resumeState !== "preparing" &&
+      resumeState !== "planned" &&
+      resumeState !== "running" &&
+      resumeState !== "verifying" &&
+      resumeState !== "rolling_back" &&
+      resumeState !== "restoring" &&
+      resumeState !== "cancelling"
+    ) {
+      return false;
+    }
+    const newestAction = this.#database
+      .prepare(
+        `SELECT outcome FROM browser_action_requests
+         WHERE run_id = ? AND (? IS NULL OR action_id <> ?)
+         ORDER BY updated_at DESC, rowid DESC LIMIT 1`,
+      )
+      .get(run.id, ignoredActionId, ignoredActionId);
+    const hasCurrentRecovery =
+      newestAction !== undefined &&
+      nullableText(
+        row(newestAction, "browser resume recovery").outcome,
+        "browser resume recovery.outcome",
+      ) === "reconciliation_required";
+    const latest = this.#database
+      .prepare(
+        `SELECT kind, status FROM operations
+         WHERE run_id = ?
+         ORDER BY rowid DESC LIMIT 1`,
+      )
+      .get(run.id);
+    if (latest === undefined) return run.state === "failed" || hasCurrentRecovery;
+    const operation = row(latest, "browser resume operation");
+    const status = text(operation.status, "operations.status");
+    const kind = text(operation.kind, "operations.kind");
+    if (run.state === "failed" && status !== "started") return true;
+    if (
+      status === "interrupted" &&
+      BROWSER_ACTION_RESUME_INTERRUPTED_OPERATION_KINDS[resumeState]?.has(kind) === true
+    ) {
+      return true;
+    }
+    return hasCurrentRecovery && status !== "started";
+  }
+
+  #browserActionTerminalEventState(
+    eventType: string,
+    payload: Record<string, unknown>,
+  ): RunState | null {
+    if (
+      typeof payload.from !== "string" ||
+      !RUN_STATES.has(payload.from) ||
+      typeof payload.to !== "string" ||
+      !RUN_STATES.has(payload.to)
+    ) {
+      return null;
+    }
+    if (
+      eventType === "verification.completed" &&
+      payload.outcome !== "passed" &&
+      payload.outcome !== "failed" &&
+      payload.outcome !== "unavailable"
+    ) {
+      return null;
+    }
+    return payload.to as RunState;
+  }
+
+  #browserReviewApprovalAvailable(run: RunRecord): boolean {
+    if (
+      run.state !== "awaiting_review" ||
+      run.diff === null ||
+      run.diff.length === 0 ||
+      run.diff.includes("\0") ||
+      run.verification === null ||
+      run.verification.outcome !== "passed" ||
+      Buffer.byteLength(run.diff, "utf8") > BROWSER_DIFF_DISPLAY_MAX_BYTES ||
+      sha256(run.diff) !== run.verification.diffSha256
+    ) {
+      return false;
+    }
+    try {
+      this.#assertSessionCompletedForApproval(run.id);
+      return true;
+    } catch (error) {
+      if (error instanceof IcarusError) return false;
+      throw error;
+    }
+  }
+
+  #availableBrowserActionDescriptors(
+    run: RunRecord,
+    eventRevision: number,
+    active: ActiveBrowserActionBinding | null,
+    ignoredActionId: string | null,
+  ): readonly BrowserActionDescriptor[] {
+    const activeRecords = this.listActiveBrowserActions(run.id).filter(
+      (record) => record.actionId !== ignoredActionId,
+    );
+    if (activeRecords.length > 0) {
+      if (activeRecords.length !== 1 || active === null || !active.cancellable) return [];
+      const parent = activeRecords[0];
+      if (
+        parent === undefined ||
+        parent.status !== "admitted" ||
+        parent.actionId !== active.actionId ||
+        parent.actionDigest !== active.actionDigest ||
+        parent.kind !== active.kind ||
+        !this.#browserActionParentIsCancellable(parent) ||
+        !isBrowserActionRunStateEligible("run.cancel", run.state)
+      ) {
+        return [];
+      }
+      return [
+        this.#browserActionDescriptor(run, eventRevision, "run.cancel", {
+          actionId: parent.actionId,
+          actionDigest: parent.actionDigest,
+        }),
+      ];
+    }
+    if (active !== null) return [];
+
+    const kinds: BrowserActionIdentity["kind"][] = [];
+    if (run.state === "awaiting_egress_approval" && run.contextSha256.length > 0) {
+      kinds.push("egress.approve");
+    }
+    if (run.state === "awaiting_approval" && run.plan !== null && run.planSha256 !== null) {
+      kinds.push("plan.approve");
+    }
+    if (run.state === "awaiting_review" && run.verification !== null) {
+      if (this.#browserReviewApprovalAvailable(run)) kinds.push("review.approve");
+      kinds.push("review.reject");
+    }
+    if (run.state === "completed" && run.verification !== null) {
+      kinds.push("rollback.approve");
+    }
+    if (run.state === "rolled_back") {
+      const checkpoint = this.#database
+        .prepare("SELECT 1 FROM checkpoints WHERE run_id = ?")
+        .get(run.id);
+      if (checkpoint !== undefined) kinds.push("restore.approve");
+    }
+    if (
+      isBrowserActionRunStateEligible("run.resume", run.state) &&
+      this.#browserResumeEvidenceAvailable(run, ignoredActionId)
+    ) {
+      kinds.push("run.resume");
+    }
+    if (isBrowserActionRunStateEligible("run.cancel", run.state)) kinds.push("run.cancel");
+    return kinds.map((kind) => this.#browserActionDescriptor(run, eventRevision, kind, null));
+  }
+
+  #browserActionDescriptor(
+    run: RunRecord,
+    eventRevision: number,
+    kind: BrowserActionIdentity["kind"],
+    parent: { readonly actionId: string; readonly actionDigest: string } | null,
+  ): BrowserActionDescriptor {
+    const fields = {
+      version: BROWSER_ACTION_DESCRIPTOR_VERSION,
+      kind,
+      runId: run.id,
+      expectedState: run.state,
+      eventRevision,
+      subjectDigest: this.#browserActionSubjectDigest(run, kind),
+      activeActionId: parent?.actionId ?? null,
+      activeActionDigest: parent?.actionDigest ?? null,
+    };
+    const copy = browserActionCopy(kind);
+    return {
+      ...fields,
+      actionDigest: browserActionDescriptorDigest(fields),
+      ...copy,
+    };
+  }
+
   #browserActionSubjectDigest(run: RunRecord, kind: BrowserActionIdentity["kind"]): string | null {
     switch (kind) {
       case "egress.approve":
@@ -5120,6 +5998,101 @@ export class IcarusStore {
     return settled;
   }
 
+  #settleAdmittedBrowserActionRecord(
+    record: BrowserActionAdmittedRecord,
+    settlement: BrowserActionSettlement,
+  ): BrowserActionSettledRecord {
+    assertBrowserActionSettlement("admitted", settlement);
+    invariant(
+      settlement.admissionEventSequence === record.admissionEventSequence,
+      "INVALID_BROWSER_ACTION_SETTLEMENT",
+      "Settlement admission event does not match the durable action",
+    );
+    this.#assertBrowserActionAnchors(record, settlement);
+    const updatedAt = this.#now();
+    const result = this.#database
+      .prepare(
+        `UPDATE browser_action_requests
+         SET status = 'settled', outcome = ?, domain_event_sequence = ?,
+             domain_operation_id = ?, error_code = ?, updated_at = ?
+         WHERE action_id = ? AND status = 'admitted'`,
+      )
+      .run(
+        settlement.outcome,
+        settlement.domainEventSequence,
+        settlement.domainOperationId,
+        settlement.errorCode,
+        updatedAt,
+        record.actionId,
+      );
+    invariant(
+      result.changes === 1,
+      "CONCURRENT_BROWSER_ACTION_UPDATE",
+      "Browser action changed during settlement",
+    );
+    const settled = this.getBrowserAction(record.actionId);
+    invariant(settled.status === "settled", "DATABASE_ERROR", "Browser settlement did not persist");
+    return settled;
+  }
+
+  #browserActionLinkedOperations(record: BrowserActionAdmittedRecord): readonly {
+    readonly id: string;
+    readonly kind: string;
+    readonly status: string;
+    readonly errorCode: string | null;
+  }[] {
+    const starts = this.#database
+      .prepare(
+        `SELECT sequence, payload_json
+         FROM run_events
+         WHERE run_id = ? AND type = 'operation.started' AND sequence > ?
+         ORDER BY sequence`,
+      )
+      .all(record.runId, record.admissionEventSequence) as unknown[];
+    const linked: {
+      id: string;
+      kind: string;
+      status: string;
+      errorCode: string | null;
+    }[] = [];
+    for (const entry of starts) {
+      const start = row(entry, "browser action reconciliation operation start");
+      const payload = parseJson<Record<string, unknown>>(
+        start.payload_json,
+        "browser action reconciliation operation start.payload_json",
+      );
+      if (
+        payload.browserActionId !== record.actionId ||
+        typeof payload.operationId !== "string" ||
+        typeof payload.kind !== "string" ||
+        !BROWSER_ACTION_DOMAIN_OPERATION_KINDS[record.kind].has(payload.kind)
+      ) {
+        continue;
+      }
+      const operationEntry = this.#database
+        .prepare("SELECT id, kind, status, result_json FROM operations WHERE id = ? AND run_id = ?")
+        .get(payload.operationId, record.runId);
+      if (operationEntry === undefined) continue;
+      const operation = row(operationEntry, "browser action reconciliation operation");
+      const result =
+        operation.result_json === null
+          ? null
+          : parseJson<Record<string, unknown>>(
+              operation.result_json,
+              "browser action reconciliation operation.result_json",
+            );
+      if (result !== null && result.browserActionId !== record.actionId) continue;
+      const code = result?.code;
+      linked.push({
+        id: text(operation.id, "browser action reconciliation operation.id"),
+        kind: text(operation.kind, "browser action reconciliation operation.kind"),
+        status: text(operation.status, "browser action reconciliation operation.status"),
+        errorCode: typeof code === "string" && /^[A-Z0-9_]{2,128}$/.test(code) ? code : null,
+      });
+    }
+    return linked;
+  }
+
   #assertBrowserActionAnchors(
     record: BrowserActionAdmittedRecord,
     settlement: BrowserActionSettlement,
@@ -5161,14 +6134,6 @@ export class IcarusStore {
     }
 
     if (settlement.domainEventSequence !== null) {
-      const runState = text(
-        row(
-          this.#database.prepare("SELECT state FROM runs WHERE id = ?").get(record.runId),
-          "browser action run state",
-        ).state,
-        "browser action run state.state",
-      ) as RunState;
-      invariant(RUN_STATES.has(runState), "DATABASE_ERROR", "Browser action run state is invalid");
       const domainEvent = row(
         this.#database
           .prepare(
@@ -5190,26 +6155,27 @@ export class IcarusStore {
         "INVALID_BROWSER_ACTION_SETTLEMENT",
         "Browser action domain event is not an allowed action-linked boundary",
       );
+      const terminalState = this.#browserActionTerminalEventState(domainType, domainPayload);
       if (settlement.outcome === "succeeded") {
         const allowedStates = BROWSER_ACTION_SUCCESS_BOUNDARIES[record.kind][domainType];
         invariant(
-          allowedStates?.includes(runState) === true,
+          terminalState !== null && allowedStates?.includes(terminalState) === true,
           "INVALID_BROWSER_ACTION_SETTLEMENT",
-          "Browser action success does not name its exact terminal event and run state",
+          "Browser action success does not name its exact terminal event transition",
         );
       } else if (settlement.outcome === "cancelled") {
         invariant(
           record.kind !== "run.cancel" &&
             domainType === "cancellation.completed" &&
-            runState === "cancelled",
+            terminalState === "cancelled",
           "INVALID_BROWSER_ACTION_SETTLEMENT",
-          "Browser action cancellation does not name its exact terminal event and run state",
+          "Browser action cancellation does not name its exact terminal event transition",
         );
       } else if (settlement.outcome === "failed") {
         invariant(
-          record.kind !== "run.cancel" && domainType === "run.failed" && runState === "failed",
+          record.kind !== "run.cancel" && domainType === "run.failed" && terminalState === "failed",
           "INVALID_BROWSER_ACTION_SETTLEMENT",
-          "Browser action failure does not name its exact terminal event and run state",
+          "Browser action failure does not name its exact terminal event transition",
         );
       }
     }
@@ -5436,10 +6402,12 @@ export class IcarusStore {
           kind: payload.kind,
           sequence,
         };
-        const operationStage = Object.entries(BROWSER_ACTION_RESUME_STAGE_OPERATION_KIND).find(
-          ([, kind]) => kind === payload.kind,
-        )?.[0];
-        bindStage(operationStage, "operation");
+        invariant(
+          resumedStage !== null &&
+            BROWSER_ACTION_RESUME_STAGE_OPERATION_KINDS[resumedStage]?.has(payload.kind) === true,
+          "INVALID_BROWSER_ACTION_SETTLEMENT",
+          "Browser resume operation does not match its resumed stage",
+        );
         hasFirstAnchor = true;
       }
     }
@@ -5459,7 +6427,8 @@ export class IcarusStore {
           firstActionOperation.id === namedOperationId &&
           firstActionOperation.kind === namedOperationKind &&
           firstActionOperation.sequence === namedOperationStartSequence &&
-          BROWSER_ACTION_RESUME_STAGE_OPERATION_KIND[resumedStage] === namedOperationKind,
+          BROWSER_ACTION_RESUME_STAGE_OPERATION_KINDS[resumedStage]?.has(namedOperationKind) ===
+            true,
         "INVALID_BROWSER_ACTION_SETTLEMENT",
         "Browser resume operation does not match the resumed stage's first operation",
       );
@@ -5535,7 +6504,132 @@ export class IcarusStore {
     return false;
   }
 
+  #assertAdmittedBrowserActionOperation(
+    runId: string,
+    actionId: string,
+    operationKind: string,
+  ): BrowserActionAdmittedRecord {
+    const record = this.getBrowserActionForRun(runId, actionId);
+    invariant(
+      record.status === "admitted" &&
+        BROWSER_ACTION_DOMAIN_OPERATION_KINDS[record.kind].has(operationKind),
+      "INVALID_BROWSER_ACTION",
+      "Browser action operation is not allowed by its admitted action",
+    );
+    return record;
+  }
+
+  #assertAdmittedBrowserActionEvent(
+    runId: string,
+    actionId: string,
+    eventType: string,
+  ): BrowserActionAdmittedRecord {
+    const record = this.getBrowserActionForRun(runId, actionId);
+    invariant(
+      record.status === "admitted" && BROWSER_ACTION_DOMAIN_EVENT_TYPES[record.kind].has(eventType),
+      "INVALID_BROWSER_ACTION",
+      "Browser action event is not allowed by its admitted action",
+    );
+    return record;
+  }
+
+  #settleBrowserActionTerminalEvent(
+    runId: string,
+    actionId: string,
+    eventType: string,
+    eventSequence: number,
+    eventPayload: Record<string, unknown>,
+  ): void {
+    const record = this.getBrowserActionForRun(runId, actionId);
+    if (record.status !== "admitted") return;
+    const terminalState = this.#browserActionTerminalEventState(eventType, eventPayload);
+
+    if (
+      record.kind === "run.resume" &&
+      eventType === "cancellation.completed" &&
+      terminalState === "cancelled"
+    ) {
+      const resumedStage = this.#assertBrowserResumeActionChain(
+        record,
+        eventSequence,
+        null,
+        null,
+        null,
+      );
+      this.#settleAdmittedBrowserActionRecord(record, {
+        outcome: resumedStage === "cancelling" ? "succeeded" : "cancelled",
+        admissionEventSequence: record.admissionEventSequence,
+        domainEventSequence: eventSequence,
+        domainOperationId: null,
+        errorCode: null,
+      });
+      return;
+    }
+
+    if (
+      terminalState !== null &&
+      BROWSER_ACTION_SUCCESS_BOUNDARIES[record.kind][eventType]?.includes(terminalState) === true
+    ) {
+      this.#settleAdmittedBrowserActionRecord(record, {
+        outcome: "succeeded",
+        admissionEventSequence: record.admissionEventSequence,
+        domainEventSequence: eventSequence,
+        domainOperationId: null,
+        errorCode: null,
+      });
+      return;
+    }
+    if (
+      record.kind !== "run.cancel" &&
+      eventType === "cancellation.completed" &&
+      terminalState === "cancelled"
+    ) {
+      this.#settleAdmittedBrowserActionRecord(record, {
+        outcome: "cancelled",
+        admissionEventSequence: record.admissionEventSequence,
+        domainEventSequence: eventSequence,
+        domainOperationId: null,
+        errorCode: null,
+      });
+      return;
+    }
+    if (record.kind !== "run.cancel" && eventType === "run.failed" && terminalState === "failed") {
+      this.#settleAdmittedBrowserActionRecord(record, {
+        outcome: "failed",
+        admissionEventSequence: record.admissionEventSequence,
+        domainEventSequence: eventSequence,
+        domainOperationId: null,
+        errorCode:
+          typeof eventPayload.code === "string" && /^[A-Z0-9_]{2,128}$/.test(eventPayload.code)
+            ? eventPayload.code
+            : "ACTION_FAILED",
+      });
+    }
+  }
+
   #appendEvent(runId: string, type: string, payload: unknown): number {
+    const eventPayload = asJsonValue(payload);
+    const eventRecord =
+      typeof eventPayload === "object" && eventPayload !== null && !Array.isArray(eventPayload)
+        ? (eventPayload as Record<string, JsonValue>)
+        : null;
+    const browserActionId =
+      eventRecord !== null && typeof eventRecord.browserActionId === "string"
+        ? eventRecord.browserActionId
+        : null;
+    if (browserActionId !== null && type !== "browser.action.admitted") {
+      if (type === "operation.started") {
+        invariant(
+          typeof eventRecord?.kind === "string",
+          "INVALID_BROWSER_ACTION",
+          "Browser action operation event is missing its kind",
+        );
+        this.#assertAdmittedBrowserActionOperation(runId, browserActionId, eventRecord.kind);
+      } else {
+        this.#assertAdmittedBrowserActionEvent(runId, browserActionId, type);
+      }
+    }
+
     const activeOperation = this.#database
       .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
       .get(runId);
@@ -5557,7 +6651,15 @@ export class IcarusStore {
       .prepare(
         "INSERT INTO run_events (run_id, sequence, type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
       )
-      .run(runId, sequence, type, json(asJsonValue(payload)), this.#now());
+      .run(runId, sequence, type, json(eventPayload), this.#now());
+    if (
+      browserActionId !== null &&
+      eventRecord !== null &&
+      type !== "browser.action.admitted" &&
+      type !== "operation.started"
+    ) {
+      this.#settleBrowserActionTerminalEvent(runId, browserActionId, type, sequence, eventRecord);
+    }
     return sequence;
   }
 
@@ -5580,16 +6682,21 @@ export class IcarusStore {
     runId: string,
     approval: ApprovalTransition,
     precondition?: () => void,
+    browserActionId: string | null = null,
   ): RunRecord {
     const transaction = this.#database.transaction(() => {
       precondition?.();
-      this.#approveAndTransitionInTransaction(runId, approval);
+      this.#approveAndTransitionInTransaction(runId, approval, browserActionId);
     });
     transaction();
     return this.getRun(runId);
   }
 
-  #approveAndTransitionInTransaction(runId: string, approval: ApprovalTransition): void {
+  #approveAndTransitionInTransaction(
+    runId: string,
+    approval: ApprovalTransition,
+    browserActionId: string | null = null,
+  ): number {
     this.#assertApprovalInput(approval);
     const current = this.getRun(runId);
     this.#assertApprovalGate(runId, current, approval);
@@ -5618,13 +6725,14 @@ export class IcarusStore {
       )
       .run(approval.to, now, runId, approval.expectedState);
     invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
-    this.#appendEvent(runId, approval.eventType, {
+    return this.#appendEvent(runId, approval.eventType, {
       from: current.state,
       to: approval.to,
       kind: approval.kind,
       digest: approval.digest,
       actor: approval.actor,
       decision: approval.decision,
+      ...(browserActionId === null ? {} : { browserActionId }),
     });
   }
 
@@ -5663,9 +6771,16 @@ export class IcarusStore {
     expectedState: RunState,
     to: RunState,
     eventType: string,
+    browserActionId: string | null = null,
   ): RunRecord {
     const transaction = this.#database.transaction(() => {
-      this.#finishInternalTransitionInTransaction(runId, expectedState, to, eventType);
+      this.#finishInternalTransitionInTransaction(
+        runId,
+        expectedState,
+        to,
+        eventType,
+        browserActionId,
+      );
     });
     transaction();
     return this.getRun(runId);
@@ -5676,7 +6791,8 @@ export class IcarusStore {
     expectedState: RunState,
     to: RunState,
     eventType: string,
-  ): void {
+    browserActionId: string | null = null,
+  ): number {
     const current = this.getRun(runId);
     invariant(
       current.state === expectedState,
@@ -5693,7 +6809,11 @@ export class IcarusStore {
       )
       .run(to, now, runId, expectedState);
     invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
-    this.#appendEvent(runId, eventType, { from: expectedState, to });
+    return this.#appendEvent(runId, eventType, {
+      from: expectedState,
+      to,
+      ...(browserActionId === null ? {} : { browserActionId }),
+    });
   }
 
   #assertNoOtherActiveRun(projectId: string, runId: string): void {

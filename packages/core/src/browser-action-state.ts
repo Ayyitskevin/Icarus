@@ -184,6 +184,94 @@ export type BrowserActionRecord =
   | BrowserActionAdmittedRecord
   | BrowserActionSettledRecord;
 
+export interface BrowserActionDescriptor extends BrowserActionDescriptorFields {
+  readonly actionDigest: string;
+  readonly label: string;
+  readonly consequence: string;
+}
+
+/** The only durable request fields a browser receipt may disclose. */
+export interface BrowserActionReceipt {
+  readonly actionId: string;
+  readonly kind: BrowserActionKind;
+  readonly status: BrowserActionStatus;
+  readonly outcome: BrowserActionOutcome | null;
+  readonly errorCode: string | null;
+  readonly updatedAt: string;
+}
+
+/** Process-local coordinator evidence supplied to descriptor construction. */
+export interface ActiveBrowserActionBinding {
+  readonly actionId: string;
+  readonly actionDigest: string;
+  readonly kind: BrowserActionKind;
+  readonly generation: number;
+  readonly cancellable: boolean;
+}
+
+const BROWSER_ACTION_COPY: Readonly<
+  Record<BrowserActionKind, { readonly label: string; readonly consequence: string }>
+> = {
+  "egress.approve": {
+    label: "Approve exact context egress",
+    consequence:
+      "Validate the pinned context, call the configured provider for a plan, and stop at plan approval. This does not commit, push, merge, or deploy.",
+  },
+  "plan.approve": {
+    label: "Approve bounded plan and execute",
+    consequence:
+      "Create only Icarus-private Git cache/worktree state, call the configured provider, apply only the approved targets, run registered sandbox checks, and stop at review. This does not commit, push, merge, or deploy.",
+  },
+  "review.approve": {
+    label: "Accept reviewed change",
+    consequence:
+      "Revalidate the complete displayed diff, passing checks, checkpoint, and private worktree, then record acceptance. This does not commit, push, merge, or deploy.",
+  },
+  "review.reject": {
+    label: "Reject and roll back change",
+    consequence:
+      "Record rejection and restore the approved baseline bytes inside the Icarus-private worktree. The source checkout and Git refs remain unchanged.",
+  },
+  "rollback.approve": {
+    label: "Roll back accepted change",
+    consequence:
+      "Restore the approved baseline bytes inside the Icarus-private worktree. The source checkout and Git refs remain unchanged.",
+  },
+  "restore.approve": {
+    label: "Restore rolled-back change",
+    consequence:
+      "Restore the checkpointed approved bytes inside the Icarus-private worktree and rerun registered sandbox checks. This does not commit, push, merge, or deploy.",
+  },
+  "run.resume": {
+    label: "Resume interrupted run",
+    consequence:
+      "Resume only the persisted recovery stage under existing approvals and ceilings. Interrupted effects are not treated as successful or replayed blindly.",
+  },
+  "run.cancel": {
+    label: "Cancel run",
+    consequence:
+      "Persist cancellation intent, stop the bound in-flight browser action when present, and restore baseline bytes in the Icarus-private worktree. Socket disconnect alone never cancels.",
+  },
+};
+
+export function browserActionCopy(kind: BrowserActionKind): {
+  readonly label: string;
+  readonly consequence: string;
+} {
+  return BROWSER_ACTION_COPY[kind];
+}
+
+export function browserActionReceipt(record: BrowserActionRecord): BrowserActionReceipt {
+  return {
+    actionId: record.actionId,
+    kind: record.kind,
+    status: record.status,
+    outcome: record.outcome,
+    errorCode: record.errorCode,
+    updatedAt: record.updatedAt,
+  };
+}
+
 /**
  * Only these fields are needed to prove a bound cancellation names the exact
  * same-run, admitted, non-cancellation action and descriptor digest.

@@ -4,8 +4,16 @@ import path from "node:path";
 import { TextDecoder } from "node:util";
 
 import type { ArtifactStore } from "./artifacts.js";
-import { buildChangeRoom } from "./change-room.js";
+import {
+  type ActiveBrowserActionBinding,
+  type BrowserActionAdmittedRecord,
+  type BrowserActionIdentity,
+  type BrowserActionKind,
+  type BrowserActionReceipt,
+  browserActionReceipt,
+} from "./browser-action-state.js";
 import { buildChangeContext } from "./change-context.js";
+import { buildChangeRoom } from "./change-room.js";
 import { assembleContext, containsSecretShapedContent, renderContextPrompt } from "./context.js";
 import { createContextPreview, type ProjectContextPreview } from "./context-preview.js";
 import { digestJson, sha256 } from "./digest.js";
@@ -40,7 +48,7 @@ import { resolveReadableManifest } from "./read-manifest.js";
 import { sanitizeText } from "./redaction.js";
 import type { CheckRunner } from "./sandbox.js";
 import { renderToolFailure, runSessionLoop, TOOL_CALL_SCHEMA } from "./session-loop.js";
-import type { IcarusStore } from "./store.js";
+import type { BrowserActionAuthoritySnapshot, IcarusStore } from "./store.js";
 import { SESSION_ITERATION_OPERATION_KIND } from "./store.js";
 import {
   type ApplyPatchSetOutcome,
@@ -523,6 +531,37 @@ export interface IcarusServiceOptions {
   readonly gatewayFactory?: GatewayFactory;
   readonly id?: () => string;
   readonly now?: () => string;
+  /** Test seam only; production always defaults to the live Node platform. */
+  readonly platform?: NodeJS.Platform;
+}
+
+export interface BrowserActionExecutionResult {
+  readonly action: BrowserActionReceipt;
+  readonly run: RunRecord;
+}
+
+export interface BrowserActionAbortReason {
+  readonly code: "ICARUS_BROWSER_ACTION_CANCEL";
+  readonly actionId: string;
+  readonly actor: string;
+}
+
+export interface BrowserActionCancellationTarget {
+  readonly binding: ActiveBrowserActionBinding;
+  isCurrent(): boolean;
+  abort(reason: BrowserActionAbortReason): void;
+}
+
+export interface BrowserActionExecutionOptions {
+  readonly signal?: AbortSignal;
+  readonly inFlightCancellation?: BrowserActionCancellationTarget;
+}
+
+interface BrowserActionExecutionContext {
+  readonly actionId: string;
+  readonly actionDigest: string;
+  readonly kind: BrowserActionKind;
+  readonly actor: string;
 }
 
 export type PlanRunInput = (
@@ -549,6 +588,7 @@ export class IcarusService {
   readonly #now: () => string;
   readonly #leases: RunLeaseManager;
   readonly #platform: NodeJS.Platform;
+  readonly #browserActionContexts = new Map<string, BrowserActionExecutionContext>();
 
   constructor(options: IcarusServiceOptions) {
     this.#stateRoot = path.resolve(options.stateRoot);
@@ -561,7 +601,7 @@ export class IcarusService {
     this.#id = options.id ?? randomUUID;
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#leases = new RunLeaseManager(this.#stateRoot);
-    this.#platform = process.platform;
+    this.#platform = options.platform ?? process.platform;
   }
 
   async initialize(): Promise<void> {
@@ -580,13 +620,121 @@ export class IcarusService {
     await this.#leases.initialize();
   }
 
-  async reconcilePreparedBrowserActionRequests(): Promise<{
+  browserActionAuthority(
+    runId: string,
+    active: ActiveBrowserActionBinding | null = null,
+  ): BrowserActionAuthoritySnapshot {
+    const snapshot = this.#store.getBrowserActionAuthoritySnapshot(runId, active);
+    return this.#platform === "linux" ? snapshot : { ...snapshot, actions: [] };
+  }
+
+  getBrowserActionReceipt(runId: string, actionId: string): BrowserActionReceipt {
+    return this.#store.getBrowserActionReceipt(runId, actionId);
+  }
+
+  settledBrowserActionReplay(identity: BrowserActionIdentity): BrowserActionExecutionResult | null {
+    invariant(
+      this.#platform === "linux",
+      "UNSUPPORTED_PLATFORM",
+      "Guarded browser actions require the Linux run lease",
+    );
+    const settled = this.#store.getSettledBrowserActionReplay(identity);
+    return settled === null ? null : this.#browserActionExecutionResult(settled.actionId);
+  }
+
+  async executeFencedBrowserAction(
+    identity: BrowserActionIdentity,
+    actor: string,
+    options: BrowserActionExecutionOptions = {},
+  ): Promise<BrowserActionExecutionResult> {
+    invariant(
+      this.#platform === "linux",
+      "UNSUPPORTED_PLATFORM",
+      "Guarded browser actions require the Linux run lease",
+    );
+    assertOperatorActor(actor);
+    const prepared = this.#store.prepareBrowserAction(identity, actor);
+    if (prepared.status === "settled") {
+      return this.#browserActionExecutionResult(prepared.actionId);
+    }
+    if (prepared.activeActionId !== null) {
+      return this.#executeInFlightBrowserCancellation(prepared, options.inFlightCancellation);
+    }
+    invariant(
+      options.inFlightCancellation === undefined,
+      "INVALID_BROWSER_ACTION",
+      "Only parent-bound cancellation may use a coordinator target",
+    );
+
+    let enteredLease = false;
+    try {
+      return await this.#leases.withLease(prepared.runId, async () => {
+        enteredLease = true;
+        const current = this.#store.getBrowserAction(prepared.actionId);
+        if (current.status === "settled") {
+          return this.#browserActionExecutionResult(current.actionId);
+        }
+        if (current.status === "admitted") {
+          this.#store.reconcileAdmittedBrowserAction(current.actionId);
+          return this.#browserActionExecutionResult(current.actionId);
+        }
+
+        const admitted = this.#store.admitBrowserAction(current.actionId);
+        if (admitted.status === "settled") {
+          return this.#browserActionExecutionResult(admitted.actionId);
+        }
+        const context: BrowserActionExecutionContext = {
+          actionId: admitted.actionId,
+          actionDigest: admitted.actionDigest,
+          kind: admitted.kind,
+          actor: admitted.actor,
+        };
+        invariant(
+          !this.#browserActionContexts.has(admitted.runId),
+          "RUN_BUSY",
+          "Another browser action is already executing this run",
+        );
+        this.#browserActionContexts.set(admitted.runId, context);
+        try {
+          await this.#dispatchFencedBrowserAction(admitted, options.signal);
+        } catch (error) {
+          const failure = asIcarusError(error, "ACTION_FAILED");
+          const errorCode = /^[A-Z0-9_]{2,128}$/.test(failure.code)
+            ? failure.code
+            : "ACTION_FAILED";
+          this.#store.reconcileAdmittedBrowserAction(admitted.actionId, errorCode);
+          return this.#browserActionExecutionResult(admitted.actionId);
+        } finally {
+          const active = this.#browserActionContexts.get(admitted.runId);
+          if (active?.actionId === admitted.actionId) {
+            this.#browserActionContexts.delete(admitted.runId);
+          }
+        }
+
+        const finished = this.#store.getBrowserAction(admitted.actionId);
+        if (finished.status === "admitted") {
+          this.#store.reconcileAdmittedBrowserAction(finished.actionId);
+        }
+        return this.#browserActionExecutionResult(admitted.actionId);
+      });
+    } catch (error) {
+      if (enteredLease) throw error;
+      const current = this.#store.getBrowserAction(prepared.actionId);
+      if (current.status !== "prepared") throw error;
+      const failure = asIcarusError(error, "ACTION_FAILED");
+      const errorCode = /^[A-Z0-9_]{2,128}$/.test(failure.code) ? failure.code : "ACTION_FAILED";
+      this.#store.refusePreparedBrowserAction(current.actionId, errorCode);
+      return this.#browserActionExecutionResult(current.actionId);
+    }
+  }
+
+  async reconcileBrowserActionRequests(): Promise<{
     readonly settledPrepared: number;
+    readonly settledAdmitted: number;
     readonly busyRunIds: readonly string[];
-    readonly unresolvedAdmittedRunIds: readonly string[];
   }> {
     invariant(
-      process.platform === "linux",
+      this.#platform === "linux",
       "UNSUPPORTED_PLATFORM",
       "Browser action startup inspection requires Linux run leases",
     );
@@ -594,16 +742,19 @@ export class IcarusService {
       ...new Set(this.#store.listActiveBrowserActions().map((record) => record.runId)),
     ].sort();
     let settledPrepared = 0;
+    let settledAdmitted = 0;
     const busyRunIds: string[] = [];
-    const unresolvedAdmittedRunIds: string[] = [];
     for (const runId of runIds) {
       const result = await this.#leases.tryWithLease(runId, async () => {
-        const records = this.#store.settleOrphanedPreparedBrowserActions(runId);
+        this.#store.markStartedOperationsInterrupted(runId);
+        const prepared = this.#store.settleOrphanedPreparedBrowserActions(runId);
+        const admitted = this.#store
+          .listActiveBrowserActions(runId)
+          .filter((record): record is BrowserActionAdmittedRecord => record.status === "admitted")
+          .map((record) => this.#store.reconcileAdmittedBrowserAction(record.actionId));
         return {
-          settledPrepared: records.length,
-          hasAdmitted: this.#store
-            .listActiveBrowserActions(runId)
-            .some((record) => record.status === "admitted"),
+          settledPrepared: prepared.length,
+          settledAdmitted: admitted.length,
         };
       });
       if (!result.acquired) {
@@ -611,9 +762,25 @@ export class IcarusService {
         continue;
       }
       settledPrepared += result.value.settledPrepared;
-      if (result.value.hasAdmitted) unresolvedAdmittedRunIds.push(runId);
+      settledAdmitted += result.value.settledAdmitted;
     }
-    return { settledPrepared, busyRunIds, unresolvedAdmittedRunIds };
+    return { settledPrepared, settledAdmitted, busyRunIds };
+  }
+
+  /** Compatibility alias while callers move to the complete reconciler. */
+  async reconcilePreparedBrowserActionRequests(): Promise<{
+    readonly settledPrepared: number;
+    readonly busyRunIds: readonly string[];
+    readonly unresolvedAdmittedRunIds: readonly string[];
+  }> {
+    const result = await this.reconcileBrowserActionRequests();
+    return {
+      settledPrepared: result.settledPrepared,
+      busyRunIds: result.busyRunIds,
+      unresolvedAdmittedRunIds: result.busyRunIds.filter((runId) =>
+        this.#store.listActiveBrowserActions(runId).some((record) => record.status === "admitted"),
+      ),
+    };
   }
 
   async registerRepository(
@@ -956,26 +1123,9 @@ export class IcarusService {
     actor: string,
     signal?: AbortSignal,
   ): Promise<RunRecord> {
-    return this.#leases.withLease(runId, async () => {
-      const run = this.#store.preflightEgressApproval(runId, contextSha256, actor);
-      const project = this.#store.getProject(run.projectId);
-      try {
-        await this.#runHostStage(
-          runId,
-          "egress.validate",
-          project.ceiling.commandTimeoutMs,
-          signal,
-          () => this.#loadContext(run),
-        );
-      } catch (error) {
-        if (signal?.aborted) {
-          return this.#landSignalCancellation(runId);
-        }
-        throw error;
-      }
-      this.#store.approveEgress(runId, contextSha256, actor);
-      return this.#guarded(runId, "planned", () => this.#createPlan(runId, signal), signal);
-    });
+    return this.#leases.withLease(runId, () =>
+      this.#approveEgressUnleased(runId, contextSha256, actor, signal, null),
+    );
   }
 
   async approvePlan(
@@ -984,29 +1134,9 @@ export class IcarusService {
     actor: string,
     signal?: AbortSignal,
   ): Promise<RunRecord> {
-    return this.#leases.withLease(runId, async () => {
-      const run = this.#store.preflightPlanApproval(runId, planSha256, actor);
-      const project = this.#store.getProject(run.projectId);
-      try {
-        await this.#runHostStage(
-          runId,
-          "approval.validate",
-          project.ceiling.commandTimeoutMs,
-          signal,
-          async (aggregateSignal) => {
-            await this.#loadContext(run);
-            await this.#assertRunSourceCurrent(run, aggregateSignal);
-          },
-        );
-      } catch (error) {
-        if (signal?.aborted) {
-          return this.#landSignalCancellation(runId);
-        }
-        throw error;
-      }
-      this.#store.approvePlan(runId, planSha256, actor);
-      return this.#guarded(runId, "running", () => this.#execute(runId, signal), signal);
-    });
+    return this.#leases.withLease(runId, () =>
+      this.#approvePlanUnleased(runId, planSha256, actor, signal, null),
+    );
   }
 
   async review(
@@ -1016,27 +1146,9 @@ export class IcarusService {
     actor: string,
     signal?: AbortSignal,
   ): Promise<RunRecord> {
-    return this.#leases.withLease(runId, async () => {
-      const run = this.#store.preflightReviewDecision(runId, diffSha256, actor, decision);
-      if (decision === "approve") {
-        try {
-          await this.#assertReviewWorktreeCurrent(run, diffSha256, actor, signal);
-          return this.#store.getRun(runId);
-        } catch (error) {
-          if (signal?.aborted) {
-            return this.#landSignalCancellation(runId);
-          }
-          throw error;
-        }
-      }
-      this.#store.decideReview(runId, diffSha256, actor, "reject");
-      return this.#guarded(
-        runId,
-        "rolling_back",
-        () => this.#performRollback(runId, signal),
-        signal,
-      );
-    });
+    return this.#leases.withLease(runId, () =>
+      this.#reviewUnleased(runId, decision, diffSha256, actor, signal, null),
+    );
   }
 
   async rollback(
@@ -1045,15 +1157,9 @@ export class IcarusService {
     actor: string,
     signal?: AbortSignal,
   ): Promise<RunRecord> {
-    return this.#leases.withLease(runId, async () => {
-      this.#store.approveRollback(runId, diffSha256, actor);
-      return this.#guarded(
-        runId,
-        "rolling_back",
-        () => this.#performRollback(runId, signal),
-        signal,
-      );
-    });
+    return this.#leases.withLease(runId, () =>
+      this.#rollbackUnleased(runId, diffSha256, actor, signal, null),
+    );
   }
 
   async restore(
@@ -1062,80 +1168,563 @@ export class IcarusService {
     actor: string,
     signal?: AbortSignal,
   ): Promise<RunRecord> {
-    return this.#leases.withLease(runId, async () => {
-      this.#store.approveRestore(runId, checkpointSha256, actor);
-      return this.#guarded(runId, "restoring", () => this.#performRestore(runId, signal), signal);
-    });
+    return this.#leases.withLease(runId, () =>
+      this.#restoreUnleased(runId, checkpointSha256, actor, signal, null),
+    );
   }
 
   async resume(runId: string, signal?: AbortSignal): Promise<RunRecord> {
-    return this.#leases.withLease(runId, async () => {
-      this.#store.recordResumeRequested(runId);
-      this.#store.markStartedOperationsInterrupted(runId);
-      let run = this.#store.getRun(runId);
-      if (run.state === "failed") {
-        run = this.#store.resumeFailed(runId);
-      }
-      switch (run.state) {
-        case "preparing":
-          return this.#guarded(runId, "preparing", () => this.#prepareRun(runId, signal), signal);
-        case "planned":
-          return this.#guarded(runId, "planned", () => this.#createPlan(runId, signal), signal);
-        case "running":
-          return this.#guarded(runId, "running", () => this.#execute(runId, signal), signal);
-        case "verifying":
-          return this.#guarded(
-            runId,
-            "verifying",
-            () =>
-              this.#store.sessionRepairReady(runId)
-                ? this.#runRepairSession(runId, signal, true)
-                : this.#verify(runId, signal),
-            signal,
-          );
-        case "rolling_back":
-          return this.#guarded(
-            runId,
-            "rolling_back",
-            () => this.#performRollback(runId, signal),
-            signal,
-          );
-        case "restoring":
-          return this.#guarded(
-            runId,
-            "restoring",
-            () => this.#performRestore(runId, signal),
-            signal,
-          );
-        case "cancelling":
-          return this.#guarded(
-            runId,
-            "cancelling",
-            () => this.#performCancellation(runId, signal),
-            signal,
-          );
-        default:
-          return run;
-      }
-    });
+    return this.#leases.withLease(runId, () => this.#resumeUnleased(runId, signal, null));
   }
 
   async cancel(runId: string, actor: string): Promise<RunRecord> {
-    return this.#leases.withLease(runId, async () => {
-      assertOperatorActor(actor);
-      this.#store.markStartedOperationsInterrupted(runId);
-      const run = this.#store.getRun(runId);
-      invariant(ACTIVE_STATES.has(run.state), "INVALID_STATE", "Run is already terminal");
-      invariant(
-        run.state !== "rolling_back" && run.state !== "restoring" && run.state !== "cancelling",
-        "RECOVERY_IN_PROGRESS",
-        "Finish or resume the active recovery step before cancellation",
+    return this.#leases.withLease(runId, () => this.#cancelUnleased(runId, actor, null));
+  }
+
+  async #approveEgressUnleased(
+    runId: string,
+    contextSha256: string,
+    actor: string,
+    signal: AbortSignal | undefined,
+    context: BrowserActionExecutionContext | null,
+  ): Promise<RunRecord> {
+    const run = this.#store.preflightEgressApproval(runId, contextSha256, actor);
+    const project = this.#store.getProject(run.projectId);
+    try {
+      await this.#runHostStage(
+        runId,
+        "egress.validate",
+        project.ceiling.commandTimeoutMs,
+        signal,
+        () => this.#loadContext(run),
       );
-      this.#store.transition(runId, "cancelling", "cancellation.requested", {
-        actor: sanitizeText(actor),
+    } catch (error) {
+      if (signal?.aborted) {
+        return this.#landSignalCancellation(runId, signal);
+      }
+      throw error;
+    }
+    this.#store.approveEgress(runId, contextSha256, actor, context?.actionId ?? null);
+    return this.#guarded(runId, "planned", () => this.#createPlan(runId, signal), signal);
+  }
+
+  async #approvePlanUnleased(
+    runId: string,
+    planSha256: string,
+    actor: string,
+    signal: AbortSignal | undefined,
+    context: BrowserActionExecutionContext | null,
+  ): Promise<RunRecord> {
+    const run = this.#store.preflightPlanApproval(runId, planSha256, actor);
+    const project = this.#store.getProject(run.projectId);
+    try {
+      await this.#runHostStage(
+        runId,
+        "approval.validate",
+        project.ceiling.commandTimeoutMs,
+        signal,
+        async (aggregateSignal) => {
+          await this.#loadContext(run);
+          await this.#assertRunSourceCurrent(run, aggregateSignal);
+        },
+      );
+    } catch (error) {
+      if (signal?.aborted) {
+        return this.#landSignalCancellation(runId, signal);
+      }
+      throw error;
+    }
+    this.#store.approvePlan(runId, planSha256, actor, context?.actionId ?? null);
+    return this.#guarded(runId, "running", () => this.#execute(runId, signal), signal);
+  }
+
+  async #reviewUnleased(
+    runId: string,
+    decision: "approve" | "reject",
+    diffSha256: string,
+    actor: string,
+    signal: AbortSignal | undefined,
+    context: BrowserActionExecutionContext | null,
+  ): Promise<RunRecord> {
+    const run = this.#store.preflightReviewDecision(runId, diffSha256, actor, decision);
+    if (decision === "approve") {
+      try {
+        await this.#assertReviewWorktreeCurrent(run, diffSha256, actor, signal);
+        return this.#store.getRun(runId);
+      } catch (error) {
+        if (signal?.aborted) {
+          return this.#landSignalCancellation(runId, signal);
+        }
+        throw error;
+      }
+    }
+    this.#store.decideReview(runId, diffSha256, actor, "reject", context?.actionId ?? null);
+    return this.#guarded(runId, "rolling_back", () => this.#performRollback(runId, signal), signal);
+  }
+
+  async #rollbackUnleased(
+    runId: string,
+    diffSha256: string,
+    actor: string,
+    signal: AbortSignal | undefined,
+    context: BrowserActionExecutionContext | null,
+  ): Promise<RunRecord> {
+    this.#store.approveRollback(runId, diffSha256, actor, context?.actionId ?? null);
+    return this.#guarded(runId, "rolling_back", () => this.#performRollback(runId, signal), signal);
+  }
+
+  async #restoreUnleased(
+    runId: string,
+    checkpointSha256: string,
+    actor: string,
+    signal: AbortSignal | undefined,
+    context: BrowserActionExecutionContext | null,
+  ): Promise<RunRecord> {
+    this.#store.approveRestore(runId, checkpointSha256, actor, context?.actionId ?? null);
+    return this.#guarded(runId, "restoring", () => this.#performRestore(runId, signal), signal);
+  }
+
+  async #resumeUnleased(
+    runId: string,
+    signal: AbortSignal | undefined,
+    context: BrowserActionExecutionContext | null,
+  ): Promise<RunRecord> {
+    let run: RunRecord;
+    if (context === null) {
+      this.#store.recordResumeRequested(runId);
+      this.#store.markStartedOperationsInterrupted(runId);
+      run = this.#store.getRun(runId);
+      if (run.state === "failed") {
+        run = this.#store.resumeFailed(runId);
+      }
+    } else {
+      invariant(
+        context.kind === "run.resume",
+        "INVALID_BROWSER_ACTION",
+        "Browser resume requires its admitted action context",
+      );
+      run = this.#store.beginBrowserResume(runId, context.actor, context.actionId);
+    }
+    switch (run.state) {
+      case "preparing":
+        return this.#guarded(runId, "preparing", () => this.#prepareRun(runId, signal), signal);
+      case "planned":
+        return this.#guarded(runId, "planned", () => this.#createPlan(runId, signal), signal);
+      case "running":
+        return this.#guarded(runId, "running", () => this.#execute(runId, signal), signal);
+      case "verifying":
+        return this.#guarded(
+          runId,
+          "verifying",
+          () =>
+            this.#store.sessionRepairReady(runId)
+              ? this.#runRepairSession(runId, signal, true)
+              : this.#verify(runId, signal),
+          signal,
+        );
+      case "rolling_back":
+        return this.#guarded(
+          runId,
+          "rolling_back",
+          () => this.#performRollback(runId, signal),
+          signal,
+        );
+      case "restoring":
+        return this.#guarded(runId, "restoring", () => this.#performRestore(runId, signal), signal);
+      case "cancelling":
+        return this.#guarded(
+          runId,
+          "cancelling",
+          () => this.#performCancellation(runId, signal),
+          signal,
+        );
+      default:
+        return run;
+    }
+  }
+
+  async #cancelUnleased(
+    runId: string,
+    actor: string,
+    context: BrowserActionExecutionContext | null,
+  ): Promise<RunRecord> {
+    assertOperatorActor(actor);
+    this.#store.markStartedOperationsInterrupted(runId);
+    const run = this.#store.getRun(runId);
+    invariant(ACTIVE_STATES.has(run.state), "INVALID_STATE", "Run is already terminal");
+    invariant(
+      run.state !== "rolling_back" && run.state !== "restoring" && run.state !== "cancelling",
+      "RECOVERY_IN_PROGRESS",
+      "Finish or resume the active recovery step before cancellation",
+    );
+    this.#store.transition(
+      runId,
+      "cancelling",
+      "cancellation.requested",
+      { actor: sanitizeText(actor) },
+      null,
+      context?.actionId ?? null,
+    );
+    return this.#guarded(runId, "cancelling", () => this.#performCancellation(runId));
+  }
+  #browserActionExecutionResult(actionId: string): BrowserActionExecutionResult {
+    const record = this.#store.getBrowserAction(actionId);
+    return {
+      action: browserActionReceipt(record),
+      run: this.#store.getRun(record.runId),
+    };
+  }
+
+  #executeInFlightBrowserCancellation(
+    record: ReturnType<IcarusStore["getBrowserAction"]>,
+    target: BrowserActionCancellationTarget | undefined,
+  ): BrowserActionExecutionResult {
+    invariant(
+      record.kind === "run.cancel" && record.activeActionId !== null,
+      "INVALID_BROWSER_ACTION",
+      "Only a parent-bound cancellation may bypass the parent run lease",
+    );
+    if (record.status === "settled") {
+      return this.#browserActionExecutionResult(record.actionId);
+    }
+    if (record.status === "admitted") {
+      if (target !== undefined && this.#matchesBrowserCancellationTarget(record, target)) {
+        return this.#browserActionExecutionResult(record.actionId);
+      }
+      this.#store.reconcileAdmittedBrowserAction(record.actionId);
+      return this.#browserActionExecutionResult(record.actionId);
+    }
+    if (target === undefined || !this.#matchesBrowserCancellationTarget(record, target)) {
+      this.#store.refusePreparedBrowserAction(record.actionId, "COORDINATOR_CHANGED");
+      return this.#browserActionExecutionResult(record.actionId);
+    }
+
+    let admitted: ReturnType<IcarusStore["getBrowserAction"]>;
+    try {
+      admitted = this.#store.admitInFlightBrowserActionCancellation(record.actionId);
+    } catch (error) {
+      const current = this.#store.getBrowserAction(record.actionId);
+      if (current.status !== "prepared") throw error;
+      const failure = asIcarusError(error, "COORDINATOR_CHANGED");
+      const errorCode = /^[A-Z0-9_]{2,128}$/.test(failure.code)
+        ? failure.code
+        : "COORDINATOR_CHANGED";
+      this.#store.refusePreparedBrowserAction(current.actionId, errorCode);
+      return this.#browserActionExecutionResult(current.actionId);
+    }
+    if (admitted.status === "settled") {
+      return this.#browserActionExecutionResult(admitted.actionId);
+    }
+    if (
+      !this.#matchesBrowserCancellationTarget(admitted, target) ||
+      !this.#matchesDurableBrowserCancellationParent(admitted, target)
+    ) {
+      this.#store.reconcileAdmittedBrowserAction(admitted.actionId, "COORDINATOR_CHANGED");
+      return this.#browserActionExecutionResult(admitted.actionId);
+    }
+    try {
+      target.abort({
+        code: "ICARUS_BROWSER_ACTION_CANCEL",
+        actionId: admitted.actionId,
+        actor: admitted.actor,
       });
-      return this.#guarded(runId, "cancelling", () => this.#performCancellation(runId));
-    });
+    } catch {
+      this.#store.reconcileAdmittedBrowserAction(admitted.actionId, "COORDINATOR_CHANGED");
+    }
+    return this.#browserActionExecutionResult(admitted.actionId);
+  }
+
+  #matchesBrowserCancellationTarget(
+    record: ReturnType<IcarusStore["getBrowserAction"]>,
+    target: BrowserActionCancellationTarget,
+  ): boolean {
+    if (
+      record.kind !== "run.cancel" ||
+      record.activeActionId === null ||
+      !target.binding.cancellable ||
+      target.binding.kind === "run.cancel" ||
+      target.binding.actionId !== record.activeActionId ||
+      target.binding.actionDigest !== record.activeActionDigest
+    ) {
+      return false;
+    }
+    try {
+      return target.isCurrent();
+    } catch {
+      return false;
+    }
+  }
+
+  #matchesDurableBrowserCancellationParent(
+    record: ReturnType<IcarusStore["getBrowserAction"]>,
+    target: BrowserActionCancellationTarget,
+  ): boolean {
+    if (
+      record.kind !== "run.cancel" ||
+      record.activeActionId === null ||
+      record.activeActionDigest === null
+    ) {
+      return false;
+    }
+    try {
+      const parent = this.#store.getBrowserActionForRun(record.runId, record.activeActionId);
+      return (
+        parent.status === "admitted" &&
+        parent.kind !== "run.cancel" &&
+        parent.kind === target.binding.kind &&
+        parent.actionDigest === record.activeActionDigest &&
+        parent.actor === record.actor
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async #dispatchFencedBrowserAction(
+    action: BrowserActionAdmittedRecord,
+    signal?: AbortSignal,
+  ): Promise<RunRecord> {
+    const context = this.#browserActionContexts.get(action.runId);
+    invariant(
+      context?.actionId === action.actionId &&
+        context.actionDigest === action.actionDigest &&
+        context.kind === action.kind &&
+        context.actor === action.actor,
+      "RUN_BUSY",
+      "Browser action execution context changed before dispatch",
+    );
+    switch (action.kind) {
+      case "egress.approve":
+        invariant(
+          action.subjectDigest !== null,
+          "INVALID_BROWSER_ACTION",
+          "Egress digest is absent",
+        );
+        return this.#approveEgressUnleased(
+          action.runId,
+          action.subjectDigest,
+          action.actor,
+          signal,
+          context,
+        );
+      case "plan.approve":
+        invariant(action.subjectDigest !== null, "INVALID_BROWSER_ACTION", "Plan digest is absent");
+        return this.#approvePlanUnleased(
+          action.runId,
+          action.subjectDigest,
+          action.actor,
+          signal,
+          context,
+        );
+      case "review.approve":
+        invariant(
+          action.subjectDigest !== null,
+          "INVALID_BROWSER_ACTION",
+          "Review digest is absent",
+        );
+        return this.#reviewUnleased(
+          action.runId,
+          "approve",
+          action.subjectDigest,
+          action.actor,
+          signal,
+          context,
+        );
+      case "review.reject":
+        invariant(
+          action.subjectDigest !== null,
+          "INVALID_BROWSER_ACTION",
+          "Review digest is absent",
+        );
+        return this.#reviewUnleased(
+          action.runId,
+          "reject",
+          action.subjectDigest,
+          action.actor,
+          signal,
+          context,
+        );
+      case "rollback.approve":
+        invariant(
+          action.subjectDigest !== null,
+          "INVALID_BROWSER_ACTION",
+          "Rollback digest is absent",
+        );
+        return this.#rollbackUnleased(
+          action.runId,
+          action.subjectDigest,
+          action.actor,
+          signal,
+          context,
+        );
+      case "restore.approve":
+        invariant(
+          action.subjectDigest !== null,
+          "INVALID_BROWSER_ACTION",
+          "Restore digest is absent",
+        );
+        return this.#restoreUnleased(
+          action.runId,
+          action.subjectDigest,
+          action.actor,
+          signal,
+          context,
+        );
+      case "run.resume":
+        return this.#resumeUnleased(action.runId, signal, context);
+      case "run.cancel":
+        invariant(
+          action.activeActionId === null,
+          "INVALID_BROWSER_ACTION",
+          "Parent-bound cancellation must use the coordinator carve-out",
+        );
+        return this.#cancelUnleased(action.runId, action.actor, context);
+    }
+  }
+
+  #browserActionIdForOperation(runId: string, kind: string): string | null {
+    const context = this.#browserActionContexts.get(runId);
+    if (
+      context === undefined ||
+      this.#store.getBrowserAction(context.actionId).status !== "admitted"
+    ) {
+      return null;
+    }
+    const allowed =
+      context.kind === "egress.approve"
+        ? kind === "egress.validate"
+        : context.kind === "plan.approve"
+          ? kind === "approval.validate"
+          : context.kind === "review.approve"
+            ? kind === "review.validate"
+            : context.kind === "review.reject" || context.kind === "rollback.approve"
+              ? kind === "checkpoint.rollback"
+              : context.kind === "restore.approve"
+                ? kind === "checkpoint.restore"
+                : context.kind === "run.resume"
+                  ? [
+                      "context.prepare",
+                      "context.load.plan",
+                      "provider.plan",
+                      "execution.prepare",
+                      "workspace.create",
+                      "edit.prepare",
+                      "provider.edit",
+                      "edit.materialize",
+                      "provider.revise",
+                      "session.tool.read.manifest",
+                      "session.tool.read.checks",
+                      "session.tool.exec.check",
+                      "session.tool.mutation.patchset",
+                      "session.reconcile",
+                      "session.control.report_done",
+                      "session.control.request_human_input",
+                      "verification.preflight",
+                      "sandbox.verify",
+                      "verification.postflight",
+                      "checkpoint.rollback",
+                      "checkpoint.restore",
+                      "cancellation.recovery",
+                    ].includes(kind)
+                  : false;
+    return allowed ? context.actionId : null;
+  }
+
+  #browserActionIdForEvent(runId: string, type: string): string | null {
+    const context = this.#browserActionContexts.get(runId);
+    if (
+      context === undefined ||
+      this.#store.getBrowserAction(context.actionId).status !== "admitted"
+    ) {
+      return null;
+    }
+    const allowed =
+      context.kind === "egress.approve"
+        ? ["egress.approved", "plan.created", "run.failed", "cancellation.completed"].includes(type)
+        : context.kind === "plan.approve"
+          ? [
+              "plan.approved",
+              "verification.completed",
+              "session.completed",
+              "session.awaiting_human",
+              "session.exhausted",
+              "run.failed",
+              "cancellation.completed",
+            ].includes(type)
+          : context.kind === "review.approve"
+            ? ["review.accepted", "run.failed", "cancellation.completed"].includes(type)
+            : context.kind === "review.reject"
+              ? ["review.rejected", "rollback.completed", "run.failed"].includes(type)
+              : context.kind === "rollback.approve"
+                ? ["rollback.approved", "rollback.completed", "run.failed"].includes(type)
+                : context.kind === "restore.approve"
+                  ? [
+                      "restore.approved",
+                      "verification.completed",
+                      "session.completed",
+                      "session.awaiting_human",
+                      "session.exhausted",
+                      "run.failed",
+                    ].includes(type)
+                  : context.kind === "run.resume"
+                    ? [
+                        "resume.requested",
+                        "run.resumed",
+                        "egress.requested",
+                        "plan.created",
+                        "verification.completed",
+                        "session.completed",
+                        "session.awaiting_human",
+                        "session.exhausted",
+                        "rollback.completed",
+                        "restore.completed",
+                        "cancellation.completed",
+                        "run.failed",
+                      ].includes(type)
+                    : context.kind === "run.cancel"
+                      ? ["cancellation.requested", "run.failed"].includes(type)
+                      : false;
+    return allowed ? context.actionId : null;
+  }
+
+  #browserCancellationReason(
+    runId: string,
+    signal: AbortSignal | undefined,
+  ): BrowserActionAbortReason | null {
+    const reason = signal?.reason;
+    if (
+      typeof reason !== "object" ||
+      reason === null ||
+      (reason as { readonly code?: unknown }).code !== "ICARUS_BROWSER_ACTION_CANCEL" ||
+      typeof (reason as { readonly actionId?: unknown }).actionId !== "string" ||
+      typeof (reason as { readonly actor?: unknown }).actor !== "string"
+    ) {
+      return null;
+    }
+    const candidate = reason as BrowserActionAbortReason;
+    const record = this.#store.getBrowserActionForRun(runId, candidate.actionId);
+    const context = this.#browserActionContexts.get(runId);
+    const parent =
+      record.activeActionId === null
+        ? null
+        : this.#store.getBrowserActionForRun(runId, record.activeActionId);
+    invariant(
+      record.status === "admitted" &&
+        record.kind === "run.cancel" &&
+        record.actor === candidate.actor &&
+        record.activeActionId !== null &&
+        record.activeActionDigest !== null &&
+        context?.actionId === record.activeActionId &&
+        context.actionDigest === record.activeActionDigest &&
+        parent?.status === "admitted" &&
+        parent.actionDigest === record.activeActionDigest &&
+        parent.actor === candidate.actor &&
+        parent.kind !== "run.cancel",
+      "COORDINATOR_CHANGED",
+      "Browser cancellation coordinator evidence changed",
+    );
+    assertOperatorActor(candidate.actor);
+    return candidate;
   }
 
   #assertCurrentContextPolicy(run: RunRecord): void {
@@ -1175,6 +1764,7 @@ export class IcarusService {
       0,
       preparationRuntime,
       "preparing",
+      this.#browserActionIdForOperation(runId, "context.prepare"),
     );
   }
 
@@ -1253,25 +1843,25 @@ export class IcarusService {
           "Context preparation exhausted its aggregate active-runtime reservation",
         );
       }
-      run = this.#store.completePreparation(
-        runId,
+      run = this.#store.finishPreparationOperation(
+        operation,
+        {
+          outcome: "succeeded",
+          activeRuntimeMs: timing.chargedRuntimeMs,
+          inputTokens: 0,
+          outputTokens: 0,
+          estimatedCostUsd: 0,
+          detail: {
+            baseCommit: run.baseCommit,
+            contextSha256: assembled.digest,
+            observedRuntimeMs: timing.observedRuntimeMs,
+            chargedRuntimeMs: timing.chargedRuntimeMs,
+          },
+        },
         assembled.manifest,
         contextArtifactPath,
         assembled.digest,
       );
-      this.#store.finishOperation(operation, {
-        outcome: "succeeded",
-        activeRuntimeMs: timing.chargedRuntimeMs,
-        inputTokens: 0,
-        outputTokens: 0,
-        estimatedCostUsd: 0,
-        detail: {
-          baseCommit: run.baseCommit,
-          contextSha256: run.contextSha256,
-          observedRuntimeMs: timing.observedRuntimeMs,
-          chargedRuntimeMs: timing.chargedRuntimeMs,
-        },
-      });
     } catch (error) {
       const failure = signal?.aborted
         ? new IcarusError("CANCELLED", "Operator cancelled context preparation")
@@ -1383,7 +1973,13 @@ export class IcarusService {
       plan,
       readableManifest,
     });
-    return this.#store.recordPlanAndAwaitApproval(runId, plan, digest, readableManifest);
+    return this.#store.recordPlanAndAwaitApproval(
+      runId,
+      plan,
+      digest,
+      readableManifest,
+      this.#browserActionIdForEvent(runId, "plan.created"),
+    );
   }
 
   async #execute(runId: string, signal?: AbortSignal): Promise<RunRecord> {
@@ -1852,9 +2448,21 @@ export class IcarusService {
     const repairable =
       verification.outcome === "failed" && this.#store.remainingIterationBudget(runId) > 0;
     if (!repairable) {
-      return this.#store.recordVerificationAndAwaitReview(runId, diff, verification);
+      return this.#store.recordVerificationAndAwaitReview(
+        runId,
+        diff,
+        verification,
+        "awaiting_review",
+        this.#browserActionIdForEvent(runId, "verification.completed"),
+      );
     }
-    this.#store.recordVerificationAndAwaitReview(runId, diff, verification, "verifying");
+    this.#store.recordVerificationAndAwaitReview(
+      runId,
+      diff,
+      verification,
+      "verifying",
+      this.#browserActionIdForEvent(runId, "verification.completed"),
+    );
     return this.#runRepairSession(runId, signal);
   }
 
@@ -1889,7 +2497,10 @@ export class IcarusService {
         run.usage.activeRuntimeMs + project.ceiling.commandTimeoutMs <=
           project.ceiling.maxActiveRuntimeMs;
       if (!hasRecoveryMargin) {
-        return this.#store.recordSessionAdmissionExhausted(runId);
+        return this.#store.recordSessionAdmissionExhausted(
+          runId,
+          this.#browserActionIdForEvent(runId, "session.exhausted"),
+        );
       }
       run = this.#store.beginSessionIteration(runId);
     } else {
@@ -2236,7 +2847,13 @@ export class IcarusService {
       "MISSING_VERIFICATION",
       "An exhausted session cannot land without rollback-capable verification evidence",
     );
-    return this.#store.recordSessionOutcome(runId, "exhausted", null, outcome.iterations);
+    return this.#store.recordSessionOutcome(
+      runId,
+      "exhausted",
+      null,
+      outcome.iterations,
+      this.#browserActionIdForEvent(runId, "session.exhausted"),
+    );
   }
 
   async #recoverUnsettledSessionPatch(runId: string, signal?: AbortSignal): Promise<void> {
@@ -2489,13 +3106,15 @@ export class IcarusService {
       "TOOL_BUDGET_EXCEEDED",
       `${call.name} requires one ordinary operation slot for recovery`,
     );
+    const operationKind = sessionToolOperationKind(call);
     const operation = this.#store.beginOperation(
       runId,
-      sessionToolOperationKind(call),
+      operationKind,
       0,
       0,
       Math.min(availableRuntime, requestedRuntime),
       "running",
+      this.#browserActionIdForOperation(runId, operationKind),
     );
     const operationSignal = boundedSignal(signal, operation.reservedRuntimeMs);
     const startedAt = performance.now();
@@ -2553,6 +3172,10 @@ export class IcarusService {
           settlement.outcome,
           settlement.text,
           settlement.iterations,
+          this.#browserActionIdForEvent(
+            runId,
+            settlement.outcome === "completed" ? "session.completed" : "session.awaiting_human",
+          ),
         );
       } else {
         this.#store.finishOperation(operation, finish);
@@ -2953,7 +3576,10 @@ export class IcarusService {
   async #performCancellation(runId: string, signal?: AbortSignal): Promise<RunRecord> {
     const run = this.#store.getRun(runId);
     invariant(run.state === "cancelling", "INVALID_STATE", "Run is not cancelling");
-    const operation = this.#store.beginCancellationRecoveryOperation(runId);
+    const operation = this.#store.beginCancellationRecoveryOperation(
+      runId,
+      this.#browserActionIdForOperation(runId, "cancellation.recovery"),
+    );
     const startedAt = performance.now();
     const recoverySignal = boundedSignal(signal, operation.reservedRuntimeMs);
     const assertRecoveryActive = (): void => {
@@ -3060,7 +3686,10 @@ export class IcarusService {
         chargedRuntimeMs: timing.chargedRuntimeMs,
       },
     });
-    return this.#store.finishCancellation(runId);
+    return this.#store.finishCancellation(
+      runId,
+      this.#browserActionIdForEvent(runId, "cancellation.completed"),
+    );
   }
 
   async #performRollback(runId: string, signal?: AbortSignal): Promise<RunRecord> {
@@ -3085,6 +3714,8 @@ export class IcarusService {
       0,
       0,
       recoveryRuntime,
+      undefined,
+      this.#browserActionIdForOperation(runId, "checkpoint.rollback"),
     );
     const startedAt = performance.now();
     const recoverySignal = boundedSignal(signal, recoveryRuntime - 1_000);
@@ -3166,6 +3797,8 @@ export class IcarusService {
       0,
       0,
       recoveryRuntime,
+      undefined,
+      this.#browserActionIdForOperation(runId, "checkpoint.restore"),
     );
     const startedAt = performance.now();
     const recoverySignal = boundedSignal(signal, recoveryRuntime - 1_000);
@@ -3268,7 +3901,15 @@ export class IcarusService {
       `No active runtime remains for ${kind}`,
     );
     const reservedRuntime = Math.min(remainingRuntime, maximumRuntimeMs);
-    const operation = this.#store.beginOperation(runId, kind, 0, 0, reservedRuntime);
+    const operation = this.#store.beginOperation(
+      runId,
+      kind,
+      0,
+      0,
+      reservedRuntime,
+      undefined,
+      this.#browserActionIdForOperation(runId, kind),
+    );
     const aggregateSignal = boundedSignal(signal, reservedRuntime);
     const startedAt = performance.now();
     let finished = false;
@@ -3381,6 +4022,8 @@ export class IcarusService {
       reservedCostUsd,
       reservedTokens,
       providerRuntime,
+      undefined,
+      this.#browserActionIdForOperation(runId, kind),
     );
     const effectiveTimeoutMs = Math.max(1, Math.min(request.timeoutMs, providerRuntime - 1_000));
     const providerSignal = boundedSignal(signal, effectiveTimeoutMs);
@@ -3569,7 +4212,8 @@ export class IcarusService {
     });
   }
 
-  async #landSignalCancellation(runId: string): Promise<RunRecord> {
+  async #landSignalCancellation(runId: string, signal?: AbortSignal): Promise<RunRecord> {
+    const browserCancellation = this.#browserCancellationReason(runId, signal);
     this.#store.markStartedOperationsInterrupted(runId);
     let current = this.#store.getRun(runId);
     if (
@@ -3586,21 +4230,32 @@ export class IcarusService {
       "RECOVERY_IN_PROGRESS",
       "An interrupted recovery step must be resumed fail-closed",
     );
-    this.#store.transition(runId, "cancelling", "cancellation.requested", {
-      actor: "operator-signal",
-    });
+    this.#store.transition(
+      runId,
+      "cancelling",
+      "cancellation.requested",
+      {
+        actor: browserCancellation?.actor ?? "operator-signal",
+      },
+      null,
+      browserCancellation?.actionId ?? null,
+    );
     try {
       return await this.#performCancellation(runId);
     } catch (error) {
       const failure = asIcarusError(error, "CANCELLATION_RECOVERY_FAILED");
       current = this.#store.getRun(runId);
       if (current.state === "cancelling") {
-        this.#store.failRun(runId, "cancelling", failure);
+        this.#store.failRun(
+          runId,
+          "cancelling",
+          failure,
+          this.#browserActionIdForEvent(runId, "run.failed"),
+        );
       }
       throw failure;
     }
   }
-
   async #guarded(
     runId: string,
     resumeState: RunState,
@@ -3618,7 +4273,7 @@ export class IcarusService {
         current.state !== "restoring" &&
         current.state !== "cancelling"
       ) {
-        return this.#landSignalCancellation(runId);
+        return this.#landSignalCancellation(runId, signal);
       }
       if (
         current.state !== "completed" &&
@@ -3637,7 +4292,12 @@ export class IcarusService {
           current.state === "cancelling"
             ? current.state
             : resumeState;
-        this.#store.failRun(runId, persistedResumeState, failure);
+        this.#store.failRun(
+          runId,
+          persistedResumeState,
+          failure,
+          this.#browserActionIdForEvent(runId, "run.failed"),
+        );
       }
       throw failure;
     }

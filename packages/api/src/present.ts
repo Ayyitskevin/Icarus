@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 
 import {
   type ApprovalRecord,
+  type BrowserActionDescriptor,
+  type BrowserActionAuthoritySnapshot,
+  type BrowserActionReceipt,
   type ChangeContextPacket,
   type ChangeRoomCard,
   type ChangeRoomEvidenceRef,
@@ -12,6 +15,7 @@ import {
   IcarusError,
   type ProjectRecord,
   type ProjectRepositoryStatus,
+  readableManifestDigest,
   type RepositoryRecord,
   type RunAnnotationRecord,
   type RunEventHistoryPage,
@@ -105,7 +109,8 @@ function approvalGate(run: RunRecord): WorkspaceGate | null {
     status: "awaiting_approval",
     label: labels[kind],
     ...(digest === null || digest === undefined || digest.length === 0 ? {} : { digest }),
-    reason: "Review the digest-bound evidence in the CLI; this browser slice cannot approve it.",
+    reason:
+      "Review the exact digest-bound evidence and available guarded actions before continuing.",
   };
 }
 
@@ -1006,9 +1011,105 @@ function presentPersistedDiff(project: ProjectRecord, run: RunRecord): Presented
   };
 }
 
+export interface BrowserActionRunPresentation {
+  readonly actions: readonly BrowserActionDescriptor[];
+  readonly recovery: BrowserActionReceipt | null;
+  readonly readableManifest: BrowserActionAuthoritySnapshot["readableManifest"];
+}
+
+const EMPTY_BROWSER_ACTION_PRESENTATION: BrowserActionRunPresentation = Object.freeze({
+  actions: Object.freeze([]),
+  recovery: null,
+  readableManifest: null,
+});
+
+function presentPlanAuthority(
+  project: ProjectRecord,
+  run: RunRecord,
+  readableManifest: BrowserActionAuthoritySnapshot["readableManifest"],
+): Record<string, unknown> | null {
+  if (run.plan === null || run.planSha256 === null) return null;
+  return {
+    planDigest: run.planSha256,
+    targets: run.plan.targets,
+    checkIds: run.plan.checkIds,
+    grants: run.plan.grants.map((grant) => ({
+      kind: grant.kind,
+      scope: grant.scope,
+      maxCalls: grant.maxCalls,
+    })),
+    iterationCeiling: run.plan.iterationCeiling,
+    readableManifest:
+      readableManifest === null
+        ? null
+        : {
+            digest: readableManifestDigest(readableManifest),
+            entries: readableManifest.entries.map((entry) => ({
+              path: entry.path,
+              sha256: entry.sha256,
+            })),
+          },
+    contextDigest: run.contextSha256,
+    baseCommit: run.baseCommit,
+    checks: project.checks.map((check) => ({
+      id: check.id,
+      name: check.name,
+      argv: check.argv,
+    })),
+    sandbox: {
+      image: project.sandbox.image,
+      cpus: project.sandbox.cpus,
+      memoryMb: project.sandbox.memoryMb,
+      pids: project.sandbox.pids,
+      tmpfsMb: project.sandbox.tmpfsMb,
+    },
+    provider: {
+      kind: run.provider.kind,
+      model: run.provider.model,
+      capabilities: {
+        contextSize: run.provider.capabilities.contextSize,
+        toolSupport: run.provider.capabilities.toolSupport,
+        visionSupport: run.provider.capabilities.visionSupport,
+        structuredOutputSupport: run.provider.capabilities.structuredOutputSupport,
+        streamingSupport: run.provider.capabilities.streamingSupport,
+        costClass: run.provider.capabilities.costClass,
+        latencyClass: run.provider.capabilities.latencyClass,
+        privacyClass: run.provider.capabilities.privacyClass,
+        reasoningQuality: run.provider.capabilities.reasoningQuality,
+        locality: run.provider.capabilities.locality,
+      },
+      locality: run.provider.capabilities.locality,
+      baseUrl: run.provider.baseUrl,
+      inputUsdPerMillionTokens: run.provider.inputUsdPerMillionTokens,
+      outputUsdPerMillionTokens: run.provider.outputUsdPerMillionTokens,
+    },
+    ceiling: {
+      maxToolCalls: project.ceiling.maxToolCalls,
+      maxActiveRuntimeMs: project.ceiling.maxActiveRuntimeMs,
+      maxContextBytes: project.ceiling.maxContextBytes,
+      maxOutputTokensPerCall: project.ceiling.maxOutputTokensPerCall,
+      maxTotalTokens: project.ceiling.maxTotalTokens,
+      maxCostUsd: project.ceiling.maxCostUsd,
+      maxFilesChanged: project.ceiling.maxFilesChanged,
+      maxFileBytes: project.ceiling.maxFileBytes,
+      maxDiffBytes: project.ceiling.maxDiffBytes,
+      maxCommandOutputBytes: project.ceiling.maxCommandOutputBytes,
+      maxRawCommandOutputBytes: project.ceiling.maxRawCommandOutputBytes,
+      providerTimeoutMs: project.ceiling.providerTimeoutMs,
+      commandTimeoutMs: project.ceiling.commandTimeoutMs,
+    },
+    execution: {
+      platform: "linux",
+      checksRequireSandbox: true,
+      consequence:
+        "Approval may create an Icarus-private cache/worktree, request provider edits, apply only approved targets, run registered sandbox checks, and stop for review. It never authorizes commit, push, merge, deploy, migration, or production access.",
+    },
+  };
+}
 export function presentRun(
   project: ProjectRecord,
   snapshot: RunPresentationSnapshot,
+  browserAuthority: BrowserActionRunPresentation = EMPTY_BROWSER_ACTION_PRESENTATION,
 ): Record<string, unknown> {
   const run: RunRecord = snapshot.run;
   const persistedDiff = presentPersistedDiff(project, run);
@@ -1076,10 +1177,6 @@ export function presentRun(
   if (run.lastError !== null) {
     warnings.push(`${run.lastError.code}: ${run.lastError.message}`);
   }
-  warnings.push(
-    "This workspace slice is review-only: approving plans or executing project commands remains unavailable in the browser.",
-  );
-
   type ActionPresentationState = {
     readonly status:
       | "proposed"
@@ -1146,6 +1243,9 @@ export function presentRun(
     state: run.state,
     resumeState: run.resumeState,
     gate,
+    browserActions: browserAuthority.actions,
+    browserActionRecovery: browserAuthority.recovery,
+    planAuthority: presentPlanAuthority(project, run, browserAuthority.readableManifest),
     provider: {
       kind: run.provider.kind,
       model: run.provider.model,

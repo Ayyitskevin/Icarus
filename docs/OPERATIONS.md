@@ -110,14 +110,13 @@ The first `SIGINT` or `SIGTERM` closes request admission, drains every HTTP
 handler registered before that boundary, waits for response settlement, and
 then closes residual sockets and SQLite. A second signal keeps the operating
 system's default hard-termination behavior as the manual escape hatch. Icarus
-does not automatically retry an interrupted POST. If a hard termination occurs
-during project registration, draft creation, or planning, restart, reload
-authoritative state, and inspect the resulting project/run before deciding
-whether to submit another action. Guarded approval/execution routes remain
-absent. Their local ADR 0029 ledger foundation refuses orphaned prepared rows
-under the Linux run lease, but admitted-row terminal reconciliation and the
-browser recovery projection are still required before those effects are
-enabled.
+never automatically retries an interrupted mutation POST. For a Packet 2
+guarded action, keep the original action ID and inspect its bounded receipt
+after restart. Linux startup acquires the run lease, marks any started operation
+interrupted, refuses prepared intent as `ACTION_NOT_ADMITTED`, and reconciles an
+admitted request only from durable terminal evidence. Missing or ambiguous
+evidence settles as `reconciliation_required`; it never replays the effect.
+A busy run remains untouched and is reported for later operator inspection.
 
 The browser golden path is:
 
@@ -138,8 +137,17 @@ The browser golden path is:
    involved/changed files, verification/check output, warnings, approvals, usage,
    failures, and timestamps. `unconfigured` and `not_run` are real outcomes,
    never aliases for completion or passing checks.
-6. Continue any digest approval, edit, sandbox check, review decision, rollback,
-   or restore through the Linux CLI. The browser intentionally has no such route.
+6. On Linux, Packet 2 presents only server-derived descriptors for egress
+   approval, plan approval, review accept/reject, rollback, restore, resume, and
+   cancellation. Read the displayed consequence, confirm the exact descriptor,
+   and submit it once. A disconnect is not cancellation and is not a reason to
+   repeat the POST; recover by the same action ID and receipt.
+7. These lifecycle actions stop before every commit, push, Git-ref, pull-request,
+   merge, and deployment effect. Non-Linux hosts show no guarded action buttons.
+   Fresh local API and compiled Chrome 149 acceptance passed on 2026-08-02.
+   Until Packet 2's exact candidate-head hosted CI and native macOS/Windows
+   acceptance record is published, use the guarded CLI as the release-supported
+   fallback.
 
 With `ICARUS_CHROMIUM_EXECUTABLE` set to an explicit local Chromium binary,
 `pnpm smoke:workspace:browser` drives this path through the compiled application
@@ -153,6 +161,13 @@ macOS 15 arm64 and Windows Server 2025 x64 used
 `Chrome/150.0.7871.187` with CDP `1.3` at the pinned Google Chrome paths. A
 Node HTTP client, resolver injection, hosts-file edit, review-only run, or
 mocked browser is not substitute evidence.
+
+The 2026-08-02 local Packet 2 run used `Chrome/149.0.7827.55` with CDP `1.3`
+and additionally proved complete immutable action confirmation, one protected
+POST per submission, stale `409 refused/STALE_ACTION` recovery without a
+provider effect, exact parent-bound cancellation, focus recovery, and bounded
+receipts through the compiled product. This is local candidate evidence, not
+exact-head hosted or native release acceptance.
 
 Treat the loopback server and launch URL as same-user local authority. The
 per-start bearer authenticates POST transport but is not a remote-service or
@@ -180,8 +195,9 @@ the independent worktree field still reports truthful cleanliness.
 The repository response intentionally contains no dirty filenames or counts,
 file content, repository/private runtime paths, or raw Git output. It is not
 stored in SQLite and appends no event. Treat it as advisory display state only;
-approval or execution must continue through the guarded CLI, which performs its
-own authoritative revalidation immediately before acting.
+approval or execution must pass either Packet 2's exact guarded browser-action
+boundary or the guarded CLI. Both perform their own authoritative revalidation
+immediately before acting.
 
 Repository inspection ignores system/global Git config, permits only local-file
 transport, disables lazy fetch, and fails closed when effective repository,

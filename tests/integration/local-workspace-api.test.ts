@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { createRequire } from "node:module";
@@ -12,12 +12,19 @@ import {
   type WorkspaceServerOptions,
 } from "../../packages/api/src/server.js";
 import {
+  BROWSER_ACTION_KINDS,
+  type BrowserActionDescriptor,
+  type BrowserActionDescriptorFields,
+  type BrowserActionIdentity,
+  type BrowserActionKind,
+  browserActionDescriptorDigest,
   createIcarusRuntime,
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
   IcarusError,
   type IcarusRuntime,
 } from "../../packages/core/src/index.js";
+import { IcarusStore } from "../../packages/core/src/store.js";
 import {
   createFixtureRepository,
   git,
@@ -462,6 +469,37 @@ describe("loopback local workspace API", () => {
       },
     });
     expect(planned.plan).toMatchObject({ target: "src/greeting.txt" });
+    expect(planned.browserActions).toEqual([]);
+    expect(planned.browserActionRecovery).toBeNull();
+    expect(planned.planAuthority).toMatchObject({
+      planDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+      targets: ["src/greeting.txt"],
+      checkIds: ["verify"],
+      grants: [],
+      iterationCeiling: 0,
+      readableManifest: null,
+      contextDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+      checks: [
+        {
+          id: "verify",
+          name: "Verify greeting",
+          argv: ["python", "checks/verify.py"],
+        },
+      ],
+      sandbox: { image: PYTHON_IMAGE },
+      provider: {
+        kind: "ollama",
+        model: "contract-model",
+        locality: "loopback",
+        baseUrl: provider.baseUrl,
+      },
+      ceiling: DEFAULT_CEILING,
+      execution: {
+        platform: "linux",
+        checksRequireSandbox: true,
+        consequence: expect.stringContaining("never authorizes commit, push, merge, deploy"),
+      },
+    });
     expect(planned.checks).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: "verify", outcome: "not_run" })]),
     );
@@ -2329,4 +2367,906 @@ describe("loopback local workspace API", () => {
     }
     expect(persistenceSnapshot(database)).toEqual(persistenceBeforeReviewOnlyMethods);
   });
+  test.runIf(process.platform === "linux")(
+    "routes every guarded action kind through one exact fixed-actor service identity",
+    async () => {
+      const fixture = await createFixtureRepository();
+      cleanups.push(fixture.cleanup);
+      const workspaceDist = path.join(fixture.root, "browser-action-route-matrix-dist");
+      await mkdir(workspaceDist);
+      await writeFile(
+        path.join(workspaceDist, "index.html"),
+        '<!doctype html><div id="root"></div>',
+      );
+
+      const runtime = await createIcarusRuntime(fixture.stateRoot);
+      const fixedActor = "api-route-matrix-operator";
+      const server = await startWorkspaceServer(
+        {
+          runtime,
+          stateRoot: fixture.stateRoot,
+          workspaceDist,
+          operatorActor: fixedActor,
+        },
+        0,
+      );
+      cleanups.push(async () => {
+        await server.close();
+        runtime.close();
+      });
+
+      const projectResponse = await postJson(`${server.url}/api/projects`, {
+        repository: { name: "browser-action-route-matrix", path: fixture.repository },
+        project: {
+          name: "browser-action-route-matrix-project",
+          baseRef: "main",
+          sandboxImage: PYTHON_IMAGE,
+          checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+        },
+      });
+      expect(projectResponse.status).toBe(201);
+      const projectId = String((await responseJson(projectResponse)).id);
+      const draftResponse = await postJson(`${server.url}/api/runs`, {
+        projectId,
+        task: "Prove the closed browser-action route matrix without domain execution.",
+        targets: ["src/greeting.txt"],
+        provider: { model: "contract-model", baseUrl: "http://127.0.0.1:11434" },
+      });
+      expect(draftResponse.status).toBe(201);
+      const runId = String((await responseJson(draftResponse)).id);
+
+      const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+      cleanups.push(async () => database.close());
+      const effectSnapshot = (): Record<string, readonly unknown[]> => ({
+        ...persistenceSnapshot(database),
+        browserActions: database
+          .prepare("SELECT * FROM browser_action_requests ORDER BY action_id")
+          .all(),
+      });
+      const effectsBefore = effectSnapshot();
+
+      const routeCases = [
+        ["egress.approve", "awaiting_egress_approval", "a".repeat(64)],
+        ["plan.approve", "awaiting_approval", "b".repeat(64)],
+        ["review.approve", "awaiting_review", "c".repeat(64)],
+        ["review.reject", "awaiting_review", "d".repeat(64)],
+        ["rollback.approve", "completed", "e".repeat(64)],
+        ["restore.approve", "rolled_back", "f".repeat(64)],
+        ["run.resume", "failed", null],
+        ["run.cancel", "preparing", null],
+      ] as const satisfies readonly (readonly [
+        BrowserActionKind,
+        BrowserActionDescriptorFields["expectedState"],
+        string | null,
+      ])[];
+      expect(routeCases.map(([kind]) => kind)).toEqual(BROWSER_ACTION_KINDS);
+
+      const serviceCalls: Array<{
+        readonly identity: BrowserActionIdentity;
+        readonly actor: string;
+        readonly hasSignal: boolean;
+        readonly hasInFlightCancellation: boolean;
+      }> = [];
+      const effectCounts = Object.fromEntries(
+        BROWSER_ACTION_KINDS.map((kind) => [kind, 0]),
+      ) as Record<BrowserActionKind, number>;
+      const originalExecute = runtime.service.executeFencedBrowserAction;
+      Object.defineProperty(runtime.service, "executeFencedBrowserAction", {
+        configurable: true,
+        value: async (
+          identity: Parameters<typeof originalExecute>[0],
+          actor: Parameters<typeof originalExecute>[1],
+          options: Parameters<typeof originalExecute>[2],
+        ) => {
+          serviceCalls.push({
+            identity,
+            actor,
+            hasSignal: options?.signal instanceof AbortSignal,
+            hasInFlightCancellation: options?.inFlightCancellation !== undefined,
+          });
+          effectCounts[identity.kind] += 1;
+          return {
+            action: {
+              actionId: identity.actionId,
+              kind: identity.kind,
+              status: "settled",
+              outcome: "succeeded",
+              errorCode: null,
+              updatedAt: "2026-07-20T12:00:00.000Z",
+            },
+            run: runtime.service.getRun(identity.runId),
+          };
+        },
+      });
+
+      try {
+        for (const [kind, expectedState, subjectDigest] of routeCases) {
+          const descriptor: BrowserActionDescriptorFields = {
+            version: 1,
+            kind,
+            runId,
+            expectedState,
+            eventRevision: 1,
+            subjectDigest,
+            activeActionId: null,
+            activeActionDigest: null,
+          };
+          const identity: BrowserActionIdentity = {
+            actionId: randomUUID(),
+            ...descriptor,
+            actionDigest: browserActionDescriptorDigest(descriptor),
+          };
+          const countsBefore = { ...effectCounts };
+          const response = await rawRequest(`${server.url}/api/runs/${runId}/actions`, {
+            method: "POST",
+            headers: {
+              ...workspaceMutationHeaders(server),
+              "x-icarus-action": kind,
+            },
+            body: JSON.stringify(identity),
+          });
+
+          expect(response.status).toBe(200);
+          expect(JSON.parse(response.body)).toMatchObject({
+            action: {
+              actionId: identity.actionId,
+              kind,
+              status: "settled",
+              outcome: "succeeded",
+              errorCode: null,
+            },
+            run: { id: runId },
+          });
+          expect(serviceCalls.at(-1)).toEqual({
+            identity,
+            actor: fixedActor,
+            hasSignal: true,
+            hasInFlightCancellation: false,
+          });
+          expect(effectCounts).toEqual({
+            ...countsBefore,
+            [kind]: countsBefore[kind] + 1,
+          });
+          expect(effectSnapshot()).toEqual(effectsBefore);
+        }
+      } finally {
+        Object.defineProperty(runtime.service, "executeFencedBrowserAction", {
+          configurable: true,
+          value: originalExecute,
+        });
+      }
+
+      expect(serviceCalls).toHaveLength(BROWSER_ACTION_KINDS.length);
+      expect(serviceCalls.map((call) => call.identity.kind)).toEqual(BROWSER_ACTION_KINDS);
+      expect(serviceCalls.every((call) => call.actor === fixedActor)).toBe(true);
+      expect(effectCounts).toEqual(
+        Object.fromEntries(BROWSER_ACTION_KINDS.map((kind) => [kind, 1])),
+      );
+      expect(effectSnapshot()).toEqual(effectsBefore);
+    },
+  );
+  test.runIf(process.platform === "linux")(
+    "guards browser actions with fixed server attribution, durable receipts, and stale no-ops",
+    async () => {
+      const fixture = await createFixtureRepository();
+      cleanups.push(fixture.cleanup);
+      const workspaceDist = path.join(fixture.root, "browser-action-workspace-dist");
+      await mkdir(workspaceDist);
+      await writeFile(
+        path.join(workspaceDist, "index.html"),
+        '<!doctype html><div id="root"></div>',
+      );
+
+      const runtime = await createIcarusRuntime(fixture.stateRoot);
+      let server = await startWorkspaceServer(
+        { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+        0,
+      );
+      cleanups.push(async () => {
+        await server.close();
+        runtime.close();
+      });
+
+      const projectResponse = await postJson(`${server.url}/api/projects`, {
+        repository: { name: "browser-action-fixture", path: fixture.repository },
+        project: {
+          name: "browser-action-project",
+          baseRef: "main",
+          sandboxImage: PYTHON_IMAGE,
+          checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+        },
+      });
+      expect(projectResponse.status).toBe(201);
+      const projectId = String((await responseJson(projectResponse)).id);
+      const draftResponse = await postJson(`${server.url}/api/runs`, {
+        projectId,
+        task: "Exercise one exact guarded cancellation.",
+        targets: ["src/greeting.txt"],
+        provider: { model: "contract-model", baseUrl: "http://127.0.0.1:11434" },
+      });
+      expect(draftResponse.status).toBe(201);
+      const runId = String((await responseJson(draftResponse)).id);
+
+      const actionRequest = (
+        descriptor: BrowserActionDescriptor,
+        actionId: string,
+      ): BrowserActionIdentity => ({
+        actionId,
+        version: descriptor.version,
+        kind: descriptor.kind,
+        runId: descriptor.runId,
+        expectedState: descriptor.expectedState,
+        eventRevision: descriptor.eventRevision,
+        subjectDigest: descriptor.subjectDigest,
+        activeActionId: descriptor.activeActionId,
+        activeActionDigest: descriptor.activeActionDigest,
+        actionDigest: descriptor.actionDigest,
+      });
+      const sendAction = (
+        target: StartedWorkspaceServer,
+        body: unknown,
+        actionHeader: string,
+        query = "",
+        pathRunId = runId,
+      ) =>
+        rawRequest(`${target.url}/api/runs/${pathRunId}/actions${query}`, {
+          method: "POST",
+          headers: {
+            ...workspaceMutationHeaders(target),
+            "x-icarus-action": actionHeader,
+          },
+          body: JSON.stringify(body),
+        });
+
+      const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+      cleanups.push(async () => database.close());
+      const actionRows = (): readonly unknown[] =>
+        database
+          .prepare(
+            "SELECT action_id, actor, status, outcome, error_code FROM browser_action_requests ORDER BY rowid",
+          )
+          .all();
+      const eventRows = (targetRunId = runId): readonly unknown[] =>
+        database
+          .prepare(
+            "SELECT sequence, type, payload_json FROM run_events WHERE run_id = ? ORDER BY sequence",
+          )
+          .all(targetRunId);
+
+      const hiddenRun = await responseJson(await fetch(`${server.url}/api/runs/${runId}`));
+      expect(hiddenRun).toMatchObject({
+        browserActions: [],
+        browserActionRecovery: null,
+        planAuthority: null,
+      });
+      expect(await responseJson(await fetch(`${server.url}/api/workspace`))).toMatchObject({
+        capabilities: { execution: { status: "unconfigured" } },
+      });
+
+      const hiddenDescriptor = runtime.service
+        .browserActionAuthority(runId)
+        .actions.find((action) => action.kind === "run.cancel");
+      if (hiddenDescriptor === undefined) throw new Error("Run cancel descriptor was absent");
+      const unavailableRequest = actionRequest(hiddenDescriptor, randomUUID());
+      const unavailableBaseline = { actions: actionRows(), events: eventRows() };
+      const unavailable = await sendAction(
+        server,
+        unavailableRequest,
+        String(unavailableRequest.kind),
+      );
+      expect(unavailable.status).toBe(422);
+      expect(unavailable.body).toContain("BROWSER_ACTION_UNCONFIGURED");
+      expect({ actions: actionRows(), events: eventRows() }).toEqual(unavailableBaseline);
+
+      await server.close();
+      const fixedActor = "api-fixed-operator";
+      server = await startWorkspaceServer(
+        {
+          runtime,
+          stateRoot: fixture.stateRoot,
+          workspaceDist,
+          operatorActor: fixedActor,
+          platform: "darwin",
+        },
+        0,
+      );
+      expect(await responseJson(await fetch(`${server.url}/api/workspace`))).toMatchObject({
+        capabilities: { execution: { status: "unsupported" } },
+      });
+      expect(await responseJson(await fetch(`${server.url}/api/runs/${runId}`))).toMatchObject({
+        browserActions: [],
+      });
+      const portableRefusal = await sendAction(
+        server,
+        actionRequest(hiddenDescriptor, randomUUID()),
+        "run.cancel",
+      );
+      expect(portableRefusal.status).toBe(422);
+      expect(portableRefusal.body).toContain("UNSUPPORTED_PLATFORM");
+      expect({ actions: actionRows(), events: eventRows() }).toEqual(unavailableBaseline);
+
+      await server.close();
+      server = await startWorkspaceServer(
+        {
+          runtime,
+          stateRoot: fixture.stateRoot,
+          workspaceDist,
+          operatorActor: fixedActor,
+        },
+        0,
+      );
+      expect(await responseJson(await fetch(`${server.url}/api/workspace`))).toMatchObject({
+        capabilities: { execution: { status: "available" } },
+      });
+
+      const visibleDescriptor = runtime.service
+        .browserActionAuthority(runId)
+        .actions.find((action) => action.kind === "run.cancel");
+      if (visibleDescriptor === undefined) throw new Error("Run cancel descriptor was absent");
+      const selected = await responseJson(await fetch(`${server.url}/api/runs/${runId}`));
+      expect(selected.browserActions).toContainEqual(visibleDescriptor);
+      expect(selected).toMatchObject({
+        browserActionRecovery: null,
+        planAuthority: null,
+      });
+      expect(JSON.stringify(selected)).not.toContain(fixedActor);
+      expect(Object.keys(visibleDescriptor).sort()).toEqual(
+        [
+          "version",
+          "kind",
+          "runId",
+          "expectedState",
+          "eventRevision",
+          "subjectDigest",
+          "activeActionId",
+          "activeActionDigest",
+          "actionDigest",
+          "label",
+          "consequence",
+        ].sort(),
+      );
+
+      const validActionId = randomUUID();
+      const validRequest = actionRequest(visibleDescriptor, validActionId);
+      const invalidBaseline = { actions: actionRows(), events: eventRows() };
+      const actionUrl = `${server.url}/api/runs/${runId}/actions`;
+      const actionHeaders: Readonly<Record<string, string>> = {
+        ...workspaceMutationHeaders(server),
+        "x-icarus-action": "run.cancel",
+      };
+      const authorization = String(actionHeaders.authorization);
+      const assertTransportRefusal = async (
+        responsePromise: ReturnType<typeof rawRequest>,
+        expectedStatus: number,
+        expectedCode: string,
+      ): Promise<void> => {
+        const refusal = await responsePromise;
+        expect(refusal.status).toBe(expectedStatus);
+        expect(refusal.body).toContain(expectedCode);
+        expect({ actions: actionRows(), events: eventRows() }).toEqual(invalidBaseline);
+      };
+      const requestBody = JSON.stringify(validRequest);
+
+      await assertTransportRefusal(
+        rawRequest(actionUrl, {
+          method: "POST",
+          headers: { ...actionHeaders, host: "" },
+          body: requestBody,
+        }),
+        422,
+        "INVALID_HOST",
+      );
+      await assertTransportRefusal(
+        rawRequest(actionUrl, {
+          method: "POST",
+          headers: { ...actionHeaders, host: "attacker.example" },
+          body: requestBody,
+        }),
+        422,
+        "INVALID_HOST",
+      );
+      const { origin: _missingOrigin, ...withoutOrigin } = actionHeaders;
+      await assertTransportRefusal(
+        rawRequest(actionUrl, { method: "POST", headers: withoutOrigin, body: requestBody }),
+        422,
+        "INVALID_ORIGIN",
+      );
+      await assertTransportRefusal(
+        rawRequest(actionUrl, {
+          method: "POST",
+          headers: { ...actionHeaders, origin: "https://attacker.example" },
+          body: requestBody,
+        }),
+        422,
+        "INVALID_ORIGIN",
+      );
+      const { authorization: _missingAuthorization, ...withoutAuthorization } = actionHeaders;
+      await assertTransportRefusal(
+        rawRequest(actionUrl, {
+          method: "POST",
+          headers: withoutAuthorization,
+          body: requestBody,
+        }),
+        401,
+        "ACTION_SESSION_REQUIRED",
+      );
+      await assertTransportRefusal(
+        rawRequest(actionUrl, {
+          method: "POST",
+          headers: { ...actionHeaders, authorization: `Bearer ${"A".repeat(43)}` },
+          body: requestBody,
+        }),
+        401,
+        "ACTION_SESSION_REQUIRED",
+      );
+      const { "x-icarus-action": _missingAction, ...withoutAction } = actionHeaders;
+      await assertTransportRefusal(
+        rawRequest(actionUrl, { method: "POST", headers: withoutAction, body: requestBody }),
+        422,
+        "INVALID_REQUEST",
+      );
+      await assertTransportRefusal(
+        rawRequest(actionUrl, {
+          method: "POST",
+          headers: { ...actionHeaders, "x-icarus-action": "plan.approve" },
+          body: requestBody,
+        }),
+        422,
+        "INVALID_REQUEST",
+      );
+      const { "content-type": _missingContentType, ...withoutContentType } = actionHeaders;
+      await assertTransportRefusal(
+        rawRequest(actionUrl, { method: "POST", headers: withoutContentType, body: requestBody }),
+        415,
+        "UNSUPPORTED_MEDIA_TYPE",
+      );
+      await assertTransportRefusal(
+        rawRequest(actionUrl, {
+          method: "POST",
+          headers: { ...actionHeaders, "content-type": "text/plain" },
+          body: requestBody,
+        }),
+        415,
+        "UNSUPPORTED_MEDIA_TYPE",
+      );
+
+      const rawActionHeaders = [
+        "Host",
+        new URL(server.url).host,
+        "Origin",
+        server.url,
+        "Authorization",
+        authorization,
+        "Content-Type",
+        "application/json",
+        "X-Icarus-Action",
+        "run.cancel",
+      ];
+      for (const [duplicateName, expectedStatus, expectedCode] of [
+        ["Host", 422, "INVALID_HOST"],
+        ["Origin", 422, "INVALID_ORIGIN"],
+        ["Authorization", 401, "ACTION_SESSION_REQUIRED"],
+        ["Content-Type", 415, "UNSUPPORTED_MEDIA_TYPE"],
+        ["X-Icarus-Action", 422, "INVALID_REQUEST"],
+      ] as const) {
+        const duplicatedHeaders = [...rawActionHeaders];
+        const valueIndex = duplicatedHeaders.findIndex(
+          (value) => value.toLowerCase() === duplicateName.toLowerCase(),
+        );
+        duplicatedHeaders.push(duplicateName, duplicatedHeaders[valueIndex + 1] ?? "");
+        await assertTransportRefusal(
+          rawRequest(actionUrl, {
+            method: "POST",
+            headers: duplicatedHeaders,
+            body: requestBody,
+          }),
+          expectedStatus,
+          expectedCode,
+        );
+      }
+
+      const duplicateMemberBody = requestBody.replace(
+        `"actionId":"${validActionId}"`,
+        `"actionId":"${validActionId}","actionId":"${validActionId}"`,
+      );
+      await assertTransportRefusal(
+        rawRequest(actionUrl, {
+          method: "POST",
+          headers: actionHeaders,
+          body: duplicateMemberBody,
+        }),
+        422,
+        "INVALID_JSON",
+      );
+      await assertTransportRefusal(
+        rawRequest(actionUrl, {
+          method: "POST",
+          headers: actionHeaders,
+          body: JSON.stringify({ ...validRequest, unexpected: "field" }),
+        }),
+        422,
+        "INVALID_REQUEST",
+      );
+      await assertTransportRefusal(
+        rawRequest(actionUrl, {
+          method: "POST",
+          headers: actionHeaders,
+          body: JSON.stringify({ ...validRequest, padding: "x".repeat(70 * 1024) }),
+        }),
+        413,
+        "REQUEST_TOO_LARGE",
+      );
+      await assertTransportRefusal(
+        rawRequest(`${actionUrl}?icarus-action-session=${authorization.slice(7)}`, {
+          method: "POST",
+          headers: actionHeaders,
+          body: requestBody,
+        }),
+        422,
+        "INVALID_REQUEST",
+      );
+      await assertTransportRefusal(
+        rawRequest(actionUrl, {
+          method: "POST",
+          headers: {
+            ...withoutAuthorization,
+            cookie: `icarus-action-session=${authorization.slice(7)}`,
+          },
+          body: requestBody,
+        }),
+        401,
+        "ACTION_SESSION_REQUIRED",
+      );
+      await assertTransportRefusal(
+        rawRequest(actionUrl, {
+          method: "POST",
+          headers: actionHeaders,
+          body: JSON.stringify({ ...validRequest, authorization }),
+        }),
+        422,
+        "INVALID_REQUEST",
+      );
+
+      const queried = await sendAction(server, validRequest, "run.cancel", "?exact=1");
+      expect(queried.status).toBe(422);
+      expect(queried.body).toContain("INVALID_REQUEST");
+      const mismatchedHeader = await sendAction(server, validRequest, "plan.approve");
+      expect(mismatchedHeader.status).toBe(422);
+      expect(mismatchedHeader.body).toContain("INVALID_REQUEST");
+      const workspaceHeader = await sendAction(server, validRequest, "workspace.mutate");
+      expect(workspaceHeader.status).toBe(422);
+      const clientActor = await sendAction(
+        server,
+        { ...validRequest, actor: "browser-supplied-actor" },
+        "run.cancel",
+      );
+      expect(clientActor.status).toBe(422);
+      expect(clientActor.body).toContain("INVALID_REQUEST");
+      expect({ actions: actionRows(), events: eventRows() }).toEqual(invalidBaseline);
+
+      const validResponse = await sendAction(server, validRequest, "run.cancel");
+      expect(validResponse.status).toBe(200);
+      const validPayload = JSON.parse(validResponse.body) as Record<string, unknown>;
+      expect(validPayload).toMatchObject({
+        action: {
+          actionId: validActionId,
+          kind: "run.cancel",
+          status: "settled",
+          outcome: "succeeded",
+          errorCode: null,
+        },
+        run: {
+          id: runId,
+          state: "cancelled",
+          browserActions: [],
+          browserActionRecovery: null,
+          planAuthority: null,
+        },
+      });
+      expect(validResponse.body).not.toContain(fixedActor);
+      expect(actionRows()).toEqual([
+        expect.objectContaining({
+          action_id: validActionId,
+          actor: fixedActor,
+          status: "settled",
+          outcome: "succeeded",
+          error_code: null,
+        }),
+      ]);
+
+      const cancellationEvent = eventRows().find(
+        (entry) => (entry as Record<string, unknown>).type === "cancellation.requested",
+      ) as Record<string, unknown> | undefined;
+      if (cancellationEvent === undefined) {
+        throw new Error("Cancellation request event was not persisted");
+      }
+      expect(JSON.parse(String(cancellationEvent.payload_json))).toMatchObject({
+        browserActionId: validActionId,
+        detail: { actor: fixedActor },
+      });
+
+      const afterValid = { actions: actionRows(), events: eventRows() };
+      const replay = await sendAction(server, validRequest, "run.cancel");
+      expect(replay.status).toBe(200);
+      expect(JSON.parse(replay.body)).toMatchObject({
+        action: {
+          actionId: validActionId,
+          status: "settled",
+          outcome: "succeeded",
+        },
+        run: { state: "cancelled" },
+      });
+      expect({ actions: actionRows(), events: eventRows() }).toEqual(afterValid);
+
+      const staleActionId = randomUUID();
+      const staleRequest = actionRequest(visibleDescriptor, staleActionId);
+      const staleResponse = await sendAction(server, staleRequest, "run.cancel");
+      expect(staleResponse.status).toBe(409);
+      const stalePayload = JSON.parse(staleResponse.body) as Record<string, unknown>;
+      expect(stalePayload).toMatchObject({
+        action: {
+          actionId: staleActionId,
+          kind: "run.cancel",
+          status: "settled",
+          outcome: "refused",
+          errorCode: "STALE_ACTION",
+        },
+        run: { id: runId, state: "cancelled", browserActions: [] },
+      });
+      expect(eventRows()).toEqual(afterValid.events);
+      expect(actionRows()).toEqual([
+        expect.objectContaining({
+          action_id: validActionId,
+          actor: fixedActor,
+          status: "settled",
+          outcome: "succeeded",
+        }),
+        expect.objectContaining({
+          action_id: staleActionId,
+          actor: fixedActor,
+          status: "settled",
+          outcome: "refused",
+          error_code: "STALE_ACTION",
+        }),
+      ]);
+      expect(staleResponse.body).not.toContain(fixedActor);
+
+      const afterStale = { actions: actionRows(), events: eventRows() };
+      const staleReplay = await sendAction(server, staleRequest, "run.cancel");
+      expect(staleReplay.status).toBe(409);
+      expect(JSON.parse(staleReplay.body)).toEqual(stalePayload);
+      expect({ actions: actionRows(), events: eventRows() }).toEqual(afterStale);
+      expect(Object.keys(stalePayload.action as Record<string, unknown>).sort()).toEqual(
+        ["actionId", "kind", "status", "outcome", "errorCode", "updatedAt"].sort(),
+      );
+      expect(staleReplay.body).not.toContain(fixedActor);
+
+      const validReceipt = await rawRequest(
+        `${server.url}/api/runs/${runId}/actions/${validActionId}`,
+        {},
+      );
+      expect(validReceipt.status).toBe(200);
+      const validReceiptPayload = JSON.parse(validReceipt.body) as Record<string, unknown>;
+      expect(Object.keys(validReceiptPayload).sort()).toEqual(
+        ["actionId", "kind", "status", "outcome", "errorCode", "updatedAt"].sort(),
+      );
+      expect(validReceiptPayload).toEqual(validPayload.action);
+      expect(validReceipt.body).not.toContain(fixedActor);
+
+      const staleReceipt = await rawRequest(
+        `${server.url}/api/runs/${runId}/actions/${staleActionId}`,
+        {},
+      );
+      expect(staleReceipt.status).toBe(200);
+      expect(JSON.parse(staleReceipt.body)).toEqual(stalePayload.action);
+      const receiptBaseline = { actions: actionRows(), events: eventRows() };
+      const queriedReceipt = await rawRequest(
+        `${server.url}/api/runs/${runId}/actions/${validActionId}?details=1`,
+        {},
+      );
+      expect(queriedReceipt.status).toBe(422);
+      const wrongRunReceipt = await rawRequest(
+        `${server.url}/api/runs/${randomUUID()}/actions/${validActionId}`,
+        {},
+      );
+      expect(wrongRunReceipt.status).toBe(404);
+      expect({ actions: actionRows(), events: eventRows() }).toEqual(receiptBaseline);
+
+      // Create a second preparing run, then use the production store API to
+      // establish one valid prepared refusal and one valid admitted boundary.
+      // The HTTP classifier is therefore exercised against records that satisfy
+      // the same cross-record invariants as production startup and recovery.
+      const busyDraftResponse = await postJson(`${server.url}/api/runs`, {
+        projectId,
+        task: "Exercise same-run HTTP classification over valid durable boundaries.",
+        targets: ["src/greeting.txt"],
+        provider: { model: "contract-model", baseUrl: "http://127.0.0.1:11434" },
+      });
+      expect(busyDraftResponse.status).toBe(201);
+      const busyRunId = String((await responseJson(busyDraftResponse)).id);
+      const busyDescriptor = runtime.service
+        .browserActionAuthority(busyRunId)
+        .actions.find((action) => action.kind === "run.cancel");
+      if (busyDescriptor === undefined) throw new Error("Busy run cancel descriptor was absent");
+
+      const settledRequest = actionRequest(busyDescriptor, randomUUID());
+      const busyRequest = actionRequest(busyDescriptor, randomUUID());
+      const boundaryStore = new IcarusStore(path.join(fixture.stateRoot, "icarus.sqlite3"));
+      try {
+        boundaryStore.prepareBrowserAction(settledRequest, fixedActor);
+        expect(
+          boundaryStore.refusePreparedBrowserAction(settledRequest.actionId, "ACTION_NOT_ADMITTED"),
+        ).toMatchObject({
+          actionId: settledRequest.actionId,
+          status: "settled",
+          outcome: "refused",
+          admissionEventSequence: null,
+          domainEventSequence: null,
+          domainOperationId: null,
+          errorCode: "ACTION_NOT_ADMITTED",
+        });
+
+        boundaryStore.prepareBrowserAction(busyRequest, fixedActor);
+        const admitted = boundaryStore.admitBrowserAction(busyRequest.actionId);
+        expect(admitted).toMatchObject({
+          actionId: busyRequest.actionId,
+          runId: busyRunId,
+          kind: "run.cancel",
+          actor: fixedActor,
+          status: "admitted",
+          outcome: null,
+          errorCode: null,
+        });
+        const admissionEvent = boundaryStore
+          .listEvents(busyRunId)
+          .find((event) => event.sequence === admitted.admissionEventSequence);
+        expect(admissionEvent).toMatchObject({
+          runId: busyRunId,
+          type: "browser.action.admitted",
+          payload: {
+            browserActionId: busyRequest.actionId,
+            kind: busyRequest.kind,
+            actionDigest: busyRequest.actionDigest,
+          },
+        });
+      } finally {
+        boundaryStore.close();
+      }
+
+      const originalExecute = runtime.service.executeFencedBrowserAction.bind(runtime.service);
+      let signalBusyStarted = (): void => undefined;
+      const busyStarted = new Promise<void>((resolve) => {
+        signalBusyStarted = resolve;
+      });
+      let releaseBusy = (): void => undefined;
+      const busyGate = new Promise<void>((resolve) => {
+        releaseBusy = resolve;
+      });
+      Object.defineProperty(runtime.service, "executeFencedBrowserAction", {
+        configurable: true,
+        value: async (
+          identity: Parameters<typeof originalExecute>[0],
+          actor: Parameters<typeof originalExecute>[1],
+          executionOptions: Parameters<typeof originalExecute>[2],
+        ) => {
+          if (identity.actionId !== busyRequest.actionId) {
+            return originalExecute(identity, actor, executionOptions);
+          }
+          signalBusyStarted();
+          await busyGate;
+          return originalExecute(identity, actor, executionOptions);
+        },
+      });
+
+      const busyResponsePromise = sendAction(server, busyRequest, "run.cancel", "", busyRunId);
+      let busyResponse: Awaited<ReturnType<typeof sendAction>> | undefined;
+      try {
+        await busyStarted;
+        const classifierBaseline = {
+          actions: actionRows(),
+          events: eventRows(busyRunId),
+        };
+
+        const settledWhileBusy = await sendAction(
+          server,
+          settledRequest,
+          "run.cancel",
+          "",
+          busyRunId,
+        );
+        expect(settledWhileBusy.status).toBe(200);
+        expect(JSON.parse(settledWhileBusy.body)).toMatchObject({
+          action: {
+            actionId: settledRequest.actionId,
+            kind: "run.cancel",
+            status: "settled",
+            outcome: "refused",
+            errorCode: "ACTION_NOT_ADMITTED",
+          },
+          run: {
+            id: busyRunId,
+            state: "preparing",
+            browserActionRecovery: {
+              actionId: busyRequest.actionId,
+              status: "admitted",
+            },
+          },
+        });
+        expect({
+          actions: actionRows(),
+          events: eventRows(busyRunId),
+        }).toEqual(classifierBaseline);
+
+        const conflictFields: BrowserActionDescriptorFields = {
+          version: busyDescriptor.version,
+          kind: busyDescriptor.kind,
+          runId: busyDescriptor.runId,
+          expectedState: busyDescriptor.expectedState,
+          eventRevision: busyDescriptor.eventRevision + 1,
+          subjectDigest: busyDescriptor.subjectDigest,
+          activeActionId: busyDescriptor.activeActionId,
+          activeActionDigest: busyDescriptor.activeActionDigest,
+        };
+        const conflictingReplay = await sendAction(
+          server,
+          {
+            actionId: settledRequest.actionId,
+            ...conflictFields,
+            actionDigest: browserActionDescriptorDigest(conflictFields),
+          },
+          "run.cancel",
+          "",
+          busyRunId,
+        );
+        expect(conflictingReplay.status).toBe(409);
+        expect(conflictingReplay.body).toContain("ACTION_ID_CONFLICT");
+        expect({
+          actions: actionRows(),
+          events: eventRows(busyRunId),
+        }).toEqual(classifierBaseline);
+
+        const duplicateLive = await sendAction(server, busyRequest, "run.cancel", "", busyRunId);
+        expect(duplicateLive.status).toBe(409);
+        expect(duplicateLive.body).toContain("RUN_BUSY");
+        expect(actionRows()).toEqual(classifierBaseline.actions);
+        expect(actionRows()).toContainEqual(
+          expect.objectContaining({
+            action_id: busyRequest.actionId,
+            status: "admitted",
+            outcome: null,
+          }),
+        );
+
+        const unrelatedRequest = actionRequest(busyDescriptor, randomUUID());
+        const unrelated = await sendAction(server, unrelatedRequest, "run.cancel", "", busyRunId);
+        expect(unrelated.status).toBe(409);
+        expect(unrelated.body).toContain("RUN_BUSY");
+        expect({
+          actions: actionRows(),
+          events: eventRows(busyRunId),
+        }).toEqual(classifierBaseline);
+
+        releaseBusy();
+        busyResponse = await busyResponsePromise;
+      } finally {
+        releaseBusy();
+        await busyResponsePromise.catch(() => undefined);
+        Object.defineProperty(runtime.service, "executeFencedBrowserAction", {
+          configurable: true,
+          value: originalExecute,
+        });
+      }
+
+      if (busyResponse === undefined) throw new Error("Busy action response was absent");
+      expect(busyResponse.status).toBe(200);
+      expect(JSON.parse(busyResponse.body)).toMatchObject({
+        action: {
+          actionId: busyRequest.actionId,
+          status: "settled",
+          outcome: "reconciliation_required",
+          errorCode: "ACTION_RECOVERY_REQUIRED",
+        },
+      });
+    },
+  );
 });

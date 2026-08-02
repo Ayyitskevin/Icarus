@@ -4,7 +4,9 @@ import path from "node:path";
 import { TextDecoder } from "node:util";
 
 import {
+  assertOperatorActor,
   assertRegistrationStateSeparation,
+  BROWSER_ACTION_KINDS,
   createProviderConfig,
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
@@ -13,8 +15,9 @@ import {
   parseProviderBaseUrl,
 } from "@icarus/core";
 
-import { ActionCoordinator } from "./action-coordinator.js";
+import { ActionCoordinator, BrowserActionCoordinator } from "./action-coordinator.js";
 import {
+  browserActionRequest,
   changeContextQuery,
   contextPreviewRequest,
   projectRequest,
@@ -26,6 +29,7 @@ import {
   workspaceRunPageQuery,
 } from "./contracts.js";
 import {
+  type BrowserActionRunPresentation,
   presentChangeContext,
   presentChangeRoom,
   presentChangeRoomPage,
@@ -55,11 +59,15 @@ const MAX_ERROR_MESSAGE_BYTES = 4 * 1024;
 const API_PREFIX = "/api/";
 const INTERNAL_ERROR_RESPONSE =
   '{"error":{"code":"INTERNAL_ERROR","message":"The local workspace request failed."}}\n';
+const RUN_ACTION_POST_PATTERN = /^\/api\/runs\/([^/]+)\/actions$/;
+const RUN_ACTION_RECEIPT_PATTERN = /^\/api\/runs\/([^/]+)\/actions\/([^/]+)$/;
 
 export interface WorkspaceServerOptions {
   readonly runtime: IcarusRuntime;
   readonly stateRoot: string;
   readonly workspaceDist: string;
+  readonly operatorActor?: string | null;
+  readonly platform?: NodeJS.Platform;
 }
 
 export interface StartedWorkspaceServer {
@@ -123,6 +131,8 @@ function errorStatus(error: IcarusError): number {
   if (
     error.code.includes("CONFLICT") ||
     error.code === "PROJECT_RUN_CONFLICT" ||
+    error.code === "STALE_ACTION" ||
+    error.code === "ACTION_ID_CONFLICT" ||
     error.code === "RUN_BUSY"
   ) {
     return 409;
@@ -264,10 +274,75 @@ function disconnectSignal(
   };
 }
 
-function presentRunById(options: WorkspaceServerOptions, runId: string): Record<string, unknown> {
-  const snapshot = options.runtime.service.presentationSnapshot(runId);
-  const project = options.runtime.service.getProject(snapshot.run.projectId);
-  return presentRun(project, snapshot);
+function workspacePlatform(options: WorkspaceServerOptions): NodeJS.Platform {
+  return options.platform ?? process.platform;
+}
+
+function guardedBrowserActionsAvailable(
+  options: WorkspaceServerOptions,
+  session: WorkspaceSession,
+): boolean {
+  return (
+    session.mode === "mutation-capable" &&
+    workspacePlatform(options) === "linux" &&
+    (options.operatorActor ?? null) !== null
+  );
+}
+
+function assertGuardedBrowserActionsAvailable(
+  options: WorkspaceServerOptions,
+  session: WorkspaceSession,
+  request: IncomingMessage,
+): string {
+  if (workspacePlatform(options) !== "linux") {
+    request.resume();
+    throw new IcarusError(
+      "UNSUPPORTED_PLATFORM",
+      "Guarded browser actions require the Linux run lease",
+    );
+  }
+  const actor = options.operatorActor ?? null;
+  if (!guardedBrowserActionsAvailable(options, session) || actor === null) {
+    request.resume();
+    throw new IcarusError(
+      "BROWSER_ACTION_UNCONFIGURED",
+      "Guarded browser actions require one fixed operator actor at startup",
+    );
+  }
+  return actor;
+}
+
+function presentRunById(
+  options: WorkspaceServerOptions,
+  session: WorkspaceSession,
+  coordinator: BrowserActionCoordinator,
+  runId: string,
+): Record<string, unknown> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const snapshot = options.runtime.service.presentationSnapshot(runId);
+    const authority = options.runtime.service.browserActionAuthority(
+      runId,
+      coordinator.activeBinding(runId),
+    );
+    const sameRun =
+      snapshot.run.id === authority.run.id &&
+      snapshot.run.state === authority.run.state &&
+      snapshot.run.resumeState === authority.run.resumeState &&
+      snapshot.run.updatedAt === authority.run.updatedAt &&
+      snapshot.run.contextSha256 === authority.run.contextSha256 &&
+      snapshot.run.planSha256 === authority.run.planSha256 &&
+      snapshot.run.verification?.diffSha256 === authority.run.verification?.diffSha256 &&
+      snapshot.eventCursor === authority.eventRevision;
+    if (!sameRun) continue;
+    const project = options.runtime.service.getProject(snapshot.run.projectId);
+    const browserAuthority: BrowserActionRunPresentation = {
+      actions: guardedBrowserActionsAvailable(options, session) ? authority.actions : [],
+      recovery: authority.recovery,
+      readableManifest: authority.readableManifest,
+    };
+    return presentRun(project, snapshot, browserAuthority);
+  }
+  throw new IcarusError("RUN_BUSY", "Run state changed while building the guarded action view");
 }
 
 function workspaceSnapshot(
@@ -275,6 +350,8 @@ function workspaceSnapshot(
   session: WorkspaceSession,
 ): Record<string, unknown> {
   const mutationAvailable = session.mode === "mutation-capable";
+  const platform = workspacePlatform(options);
+  const guardedActionsAvailable = guardedBrowserActionsAvailable(options, session);
   const reviewOnlyReason =
     "This stable-origin workspace is review-only. Relaunch without an explicit port to make bounded changes.";
   return {
@@ -297,10 +374,21 @@ function workspaceSnapshot(
           : `Planning is disabled. ${reviewOnlyReason}`,
       },
       execution: {
-        status: "unconfigured",
-        reason:
-          "Browser approval and command execution are intentionally unavailable in this review-only workspace slice.",
-        inheritedRuntimePlatform: process.platform === "linux" ? "linux_supported" : "unsupported",
+        status: guardedActionsAvailable
+          ? "available"
+          : !mutationAvailable
+            ? "review_only"
+            : platform === "linux"
+              ? "unconfigured"
+              : "unsupported",
+        reason: guardedActionsAvailable
+          ? "Guarded run actions use the Linux lease, durable action ledger, fixed startup attribution, and exact persisted descriptors."
+          : !mutationAvailable
+            ? `Guarded run actions are disabled. ${reviewOnlyReason}`
+            : platform !== "linux"
+              ? "Guarded run actions require the Linux run lease."
+              : "Set ICARUS_OPERATOR_ACTOR before startup to enable guarded run actions.",
+        inheritedRuntimePlatform: platform === "linux" ? "linux_supported" : "unsupported",
       },
     },
     projectPage: presentWorkspaceProjectPage(options.runtime.service.openWorkspaceProjectPage()),
@@ -311,6 +399,8 @@ function workspaceSnapshot(
 async function routeApi(
   options: WorkspaceServerOptions,
   session: WorkspaceSession,
+  browserCoordinator: BrowserActionCoordinator,
+  protectedAction: string | null,
   request: IncomingMessage,
   response: ServerResponse,
   pathname: string,
@@ -432,7 +522,58 @@ async function routeApi(
       targets: input.targets,
       provider,
     });
-    json(response, 201, presentRunById(options, run.id));
+    json(response, 201, presentRunById(options, session, browserCoordinator, run.id));
+    return true;
+  }
+  const runAction = RUN_ACTION_POST_PATTERN.exec(pathname);
+  const runActionReceipt = RUN_ACTION_RECEIPT_PATTERN.exec(pathname);
+  if (method === "GET" && runActionReceipt !== null) {
+    if (Array.from(searchParams.keys()).length !== 0) {
+      throw new IcarusError("INVALID_REQUEST", "Browser action receipt routes accept no query");
+    }
+    const runId = decodedRouteId(runActionReceipt[1] ?? "", "run id");
+    const actionId = decodedRouteId(runActionReceipt[2] ?? "", "action id");
+    json(response, 200, options.runtime.service.getBrowserActionReceipt(runId, actionId));
+    return true;
+  }
+  if (method === "POST" && runAction !== null) {
+    if (Array.from(searchParams.keys()).length !== 0) {
+      request.resume();
+      throw new IcarusError("INVALID_REQUEST", "Browser action routes accept no query");
+    }
+    const actor = assertGuardedBrowserActionsAvailable(options, session, request);
+    const pathRunId = decodedRouteId(runAction[1] ?? "", "run id");
+    const identity = browserActionRequest(await readJson(request));
+    if (identity.runId !== pathRunId || protectedAction !== identity.kind) {
+      throw new IcarusError(
+        "INVALID_REQUEST",
+        "Browser action path, body, and action header must match",
+      );
+    }
+
+    const settledReplay = options.runtime.service.settledBrowserActionReplay(identity);
+    const cancellationTarget = browserCoordinator.inFlightCancellation(identity);
+    const execution =
+      settledReplay ??
+      (identity.kind === "run.cancel" && identity.activeActionId !== null
+        ? await browserCoordinator.track(() =>
+            cancellationTarget === undefined
+              ? options.runtime.service.executeFencedBrowserAction(identity, actor)
+              : options.runtime.service.executeFencedBrowserAction(identity, actor, {
+                  inFlightCancellation: cancellationTarget,
+                }),
+          )
+        : await browserCoordinator.execute(identity, ({ signal }) =>
+            options.runtime.service.executeFencedBrowserAction(identity, actor, { signal }),
+          ));
+    const status =
+      execution.action.outcome === "refused" && execution.action.errorCode === "STALE_ACTION"
+        ? 409
+        : 200;
+    json(response, status, {
+      action: execution.action,
+      run: presentRunById(options, session, browserCoordinator, identity.runId),
+    });
     return true;
   }
   const runPlan = /^\/api\/runs\/([^/]+)\/plan$/.exec(pathname);
@@ -447,7 +588,7 @@ async function routeApi(
       throw new IcarusError("INVALID_REQUEST", "Plan request body must be an empty object");
     }
     await options.runtime.service.planDraftRun(runId);
-    json(response, 200, presentRunById(options, runId));
+    json(response, 200, presentRunById(options, session, browserCoordinator, runId));
     return true;
   }
   const runVerificationAttempts = /^\/api\/runs\/([^/]+)\/verification-attempts$/.exec(pathname);
@@ -502,7 +643,16 @@ async function routeApi(
     return true;
   }
   if (method === "GET" && runDetail !== null) {
-    json(response, 200, presentRunById(options, decodedRouteId(runDetail[1] ?? "", "run id")));
+    json(
+      response,
+      200,
+      presentRunById(
+        options,
+        session,
+        browserCoordinator,
+        decodedRouteId(runDetail[1] ?? "", "run id"),
+      ),
+    );
     return true;
   }
   return false;
@@ -557,21 +707,30 @@ async function serveWorkspace(
 async function handleWorkspaceRequest(
   options: WorkspaceServerOptions,
   session: WorkspaceSession,
+  browserCoordinator: BrowserActionCoordinator,
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
   try {
     session.assertExactHost(request);
     const url = new URL(request.url ?? "/", session.url);
+    let protectedAction: string | null = null;
     if (request.method === "GET" || request.method === "HEAD") {
       session.assertOptionalExactOrigin(request);
     } else {
-      session.assertProtectedMutation(request);
+      const guardedActionRoute =
+        request.method === "POST" && RUN_ACTION_POST_PATTERN.test(url.pathname);
+      protectedAction = session.assertProtectedMutation(
+        request,
+        guardedActionRoute ? BROWSER_ACTION_KINDS : undefined,
+      );
     }
     if (url.pathname.startsWith(API_PREFIX)) {
       const handled = await routeApi(
         options,
         session,
+        browserCoordinator,
+        protectedAction,
         request,
         response,
         url.pathname,
@@ -623,6 +782,7 @@ function workspaceRequestListener(
   options: WorkspaceServerOptions,
   session: WorkspaceSession,
   coordinator: ActionCoordinator,
+  browserCoordinator: BrowserActionCoordinator,
   shutdownResponses: Set<Promise<void>>,
 ): (request: IncomingMessage, response: ServerResponse) => void {
   return (request, response) => {
@@ -635,7 +795,9 @@ function workspaceRequestListener(
       // `track` registers synchronously before the async handler reaches its
       // first await. A request is therefore either in the fixed drain set or
       // rejected before it can read a body or call the service.
-      work = coordinator.track(() => handleWorkspaceRequest(options, session, request, response));
+      work = coordinator.track(() =>
+        handleWorkspaceRequest(options, session, browserCoordinator, request, response),
+      );
     } catch (error) {
       const safe = safeError(error);
       try {
@@ -670,6 +832,9 @@ export async function startWorkspaceServerWithBindingHooks(
   port: number,
   binding: WorkspaceServerBindingHooks,
 ): Promise<StartedWorkspaceServer> {
+  if (options.operatorActor !== undefined && options.operatorActor !== null) {
+    assertOperatorActor(options.operatorActor);
+  }
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
     throw new IcarusError("INVALID_PORT", "Workspace port is invalid");
   }
@@ -678,6 +843,7 @@ export async function startWorkspaceServerWithBindingHooks(
     mode === "review-only" ? "explicit-port" : null;
   const server = createServer();
   const coordinator = new ActionCoordinator();
+  const browserCoordinator = new BrowserActionCoordinator();
   const shutdownResponses = new Set<Promise<void>>();
   try {
     await binding.listen(server, port, REVIEW_ONLY_WORKSPACE_HOST);
@@ -697,6 +863,9 @@ export async function startWorkspaceServerWithBindingHooks(
   }
   let session: WorkspaceSession;
   try {
+    if (workspacePlatform(options) === "linux") {
+      await options.runtime.service.reconcileBrowserActionRequests();
+    }
     const originHostname =
       mode === "mutation-capable" ? binding.createMutationHostname() : REVIEW_ONLY_WORKSPACE_HOST;
     if (mode === "mutation-capable" && !isWorkspaceMutationHostname(originHostname)) {
@@ -705,7 +874,13 @@ export async function startWorkspaceServerWithBindingHooks(
     session = createBoundWorkspaceSession(mode, address.port, originHostname, reviewOnlyReason);
     server.on(
       "request",
-      workspaceRequestListener(options, session, coordinator, shutdownResponses),
+      workspaceRequestListener(
+        options,
+        session,
+        coordinator,
+        browserCoordinator,
+        shutdownResponses,
+      ),
     );
   } catch (error) {
     await closeListeningServer(server);
@@ -725,6 +900,7 @@ export async function startWorkspaceServerWithBindingHooks(
 
       // Close admission before any asynchronous shutdown step. Existing
       // handlers remain live and are never aborted by this first close.
+      const browserDrainPromise = browserCoordinator.drain();
       const drainPromise = coordinator.drain();
       const listenerClosePromise = new Promise<void>((resolve, reject) => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));
@@ -732,6 +908,7 @@ export async function startWorkspaceServerWithBindingHooks(
       server.closeIdleConnections();
 
       closePromise = (async () => {
+        await browserDrainPromise;
         const drain = await drainPromise;
         const failures: unknown[] = drain.failures.map((failure) => failure.error);
         while (shutdownResponses.size > 0) {

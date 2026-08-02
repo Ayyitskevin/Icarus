@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto";
 import {
+  type BigIntStats,
   closeSync,
   constants as fsConstants,
   fstatSync,
   lstatSync,
   openSync,
-  readSync,
   readdirSync,
+  readSync,
   realpathSync,
-  type BigIntStats,
 } from "node:fs";
 import path from "node:path";
 
@@ -19,20 +19,20 @@ import type { ChangeHandoffSourceSnapshot } from "./change-handoff.js";
 import { digestJson, sha256, stableJson } from "./digest.js";
 import { IcarusError } from "./errors.js";
 import {
+  applyExactReplacement,
   assertCheckProfiles,
-  assertSandboxProfile,
-  assertSunCeiling,
   assertReadableManifest,
   assertRepositoryRelativePath,
-  applyExactReplacement,
+  assertSandboxProfile,
+  assertSunCeiling,
   checkpointDigest,
+  MAX_READABLE_FILES,
   MAX_SESSION_ITERATIONS,
   parseEditProposal,
   parsePatchSet,
   parsePlanProposal,
   planApprovalDigest,
   readableManifestDigest,
-  MAX_READABLE_FILES,
   treeCheckpointDigest,
 } from "./policy.js";
 import { createProviderConfig } from "./provider.js";
@@ -108,6 +108,16 @@ const MAX_VERIFICATION_EVENT_JSON_BYTES = 32 * 1024 * 1024;
 const CANCELLATION_RECOVERY_OPERATION_KIND = "cancellation.recovery";
 const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
+const BROWSER_ACTION_KINDS: ReadonlySet<string> = new Set([
+  "egress.approve",
+  "plan.approve",
+  "review.approve",
+  "review.reject",
+  "rollback.approve",
+  "restore.approve",
+  "run.resume",
+  "run.cancel",
+]);
 const SESSION_ITERATION_OPERATION_KIND = "provider.revise";
 const SESSION_READ_MANIFEST_OPERATION_KIND = "session.tool.read.manifest";
 const SESSION_READ_CHECKS_OPERATION_KIND = "session.tool.read.checks";
@@ -188,6 +198,7 @@ const KNOWN_HANDOFF_EVENT_TYPES: ReadonlySet<string> = new Set([
 ]);
 const EVENT_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const SMALL_HANDOFF_EVENT_PAYLOAD_TYPES = [
+  "browser.action.admitted",
   "cancellation.completed",
   "cancellation.requested",
   "checkpoint.saved",
@@ -238,6 +249,28 @@ function exactRecord(value: unknown, keys: readonly string[]): Row {
     sourceInvalid();
   }
   return object;
+}
+
+interface BrowserActionAdmissionEvidence {
+  readonly kind: string;
+  readonly actionDigest: string;
+}
+
+function actionLinkedRecord(
+  value: unknown,
+  keys: readonly string[],
+  admittedBrowserActions: ReadonlyMap<string, BrowserActionAdmissionEvidence>,
+): Row {
+  const unshaped = row(value);
+  const actionIdPresent = Object.hasOwn(unshaped, "browserActionId");
+  const payload = exactRecord(unshaped, [...keys, ...(actionIdPresent ? ["browserActionId"] : [])]);
+  if (actionIdPresent) {
+    const actionId = text(payload.browserActionId, 64);
+    if (!UUID_PATTERN.test(actionId) || !admittedBrowserActions.has(actionId)) {
+      sourceInvalid();
+    }
+  }
+  return payload;
 }
 
 function text(value: unknown, maxBytes: number): string {
@@ -1173,6 +1206,7 @@ function readVerificationTransition(
   database: Database.Database,
   runId: string,
   sequence: number,
+  admittedBrowserActions: ReadonlyMap<string, BrowserActionAdmissionEvidence>,
 ): VerificationTransitionEvidence {
   const preflight = row(
     database
@@ -1208,6 +1242,7 @@ function readVerificationTransition(
           "(SELECT COUNT(*) FROM json_each(payload_json) WHERE key='diffSha256') AS diff_count, " +
           "(SELECT COUNT(*) FROM json_each(payload_json) WHERE key='diff') AS diff_body_count, " +
           "(SELECT COUNT(*) FROM json_each(payload_json) WHERE key='verification') AS verification_count, " +
+          "(SELECT COUNT(*) FROM json_each(payload_json) WHERE key='browserActionId') AS browser_action_id_count, " +
           "(SELECT COUNT(*) FROM json_each(payload_json,'$.verification')) AS nested_root_count, " +
           "(SELECT COUNT(*) FROM json_each(payload_json,'$.verification') WHERE key='outcome') AS nested_outcome_count, " +
           "(SELECT COUNT(*) FROM json_each(payload_json,'$.verification') WHERE key='diffSha256') AS nested_diff_count, " +
@@ -1221,6 +1256,7 @@ function readVerificationTransition(
           "json_type(payload_json,'$.diffSha256') AS diff_type, " +
           "json_type(payload_json,'$.diff') AS diff_body_type, " +
           "json_type(payload_json,'$.verification') AS verification_type, " +
+          "json_type(payload_json,'$.browserActionId') AS browser_action_id_type, " +
           "json_type(payload_json,'$.verification.outcome') AS nested_outcome_type, " +
           "json_type(payload_json,'$.verification.diffSha256') AS nested_diff_type, " +
           "json_type(payload_json,'$.verification.checkpointSha256') AS nested_checkpoint_type, " +
@@ -1234,14 +1270,17 @@ function readVerificationTransition(
           "json_extract(payload_json,'$.verification.diffSha256') AS nested_diff_value, " +
           "json_extract(payload_json,'$.verification.checkpointSha256') AS nested_checkpoint_value, " +
           "json_extract(payload_json,'$.diff') AS diff_body_value, " +
+          "json_extract(payload_json,'$.browserActionId') AS browser_action_id_value, " +
           "json_extract(payload_json,'$.verification') AS nested_verification_value " +
           "FROM run_events WHERE run_id=? AND sequence=? " +
           "AND type='verification.completed' AND json_type(payload_json,'$')='object'",
       )
       .get(runId, sequence),
   );
+  const browserActionIdCount = safeInteger(projected.browser_action_id_count);
   if (
-    safeInteger(projected.root_count) !== 6 ||
+    browserActionIdCount > 1 ||
+    safeInteger(projected.root_count) !== 6 + browserActionIdCount ||
     safeInteger(projected.from_count) !== 1 ||
     safeInteger(projected.to_count) !== 1 ||
     safeInteger(projected.outcome_count) !== 1 ||
@@ -1267,6 +1306,21 @@ function readVerificationTransition(
     projected.nested_changed_paths_type !== "array"
   ) {
     sourceInvalid();
+  }
+
+  if (browserActionIdCount === 0) {
+    if (projected.browser_action_id_type !== null || projected.browser_action_id_value !== null) {
+      sourceInvalid();
+    }
+  } else {
+    const browserActionId = text(projected.browser_action_id_value, 64);
+    if (
+      projected.browser_action_id_type !== "text" ||
+      !UUID_PATTERN.test(browserActionId) ||
+      !admittedBrowserActions.has(browserActionId)
+    ) {
+      sourceInvalid();
+    }
   }
 
   const from = text(projected.from_value, 32);
@@ -1467,6 +1521,7 @@ function readEventSummary(
   const operationTerminals: OperationTerminalEvidence[] = [];
   const operationIds = new Set<string>();
   const terminalOperationIds = new Set<string>();
+  const admittedBrowserActions = new Map<string, BrowserActionAdmissionEvidence>();
   const sessionDispositions: SessionDispositionEvidence[] = [];
   const intentEvidence: IntentEvidence[] = [];
   const safeTransitions: JsonValue[] = [];
@@ -1539,11 +1594,31 @@ function readEventSummary(
       sourceInvalid();
     }
 
+    if (type === "browser.action.admitted") {
+      const payload = exactRecord(boundedJson(object.bounded_payload, 65_536), [
+        "browserActionId",
+        "kind",
+        "actionDigest",
+      ]);
+      const browserActionId = text(payload.browserActionId, 64);
+      const kind = text(payload.kind, 32);
+      const actionDigest = digest(payload.actionDigest);
+      if (
+        !UUID_PATTERN.test(browserActionId) ||
+        !BROWSER_ACTION_KINDS.has(kind) ||
+        admittedBrowserActions.has(browserActionId)
+      ) {
+        sourceInvalid();
+      }
+      admittedBrowserActions.set(browserActionId, { kind, actionDigest });
+      return;
+    }
+
     if (type === "operation.started") {
       const unshaped = row(boundedJson(object.bounded_payload, 65_536));
       const emergency =
         Object.hasOwn(unshaped, "budgetClass") || Object.hasOwn(unshaped, "attempt");
-      const payload = exactRecord(
+      const payload = actionLinkedRecord(
         unshaped,
         emergency
           ? [
@@ -1556,6 +1631,7 @@ function readEventSummary(
               "attempt",
             ]
           : ["operationId", "kind", "reservedCostUsd", "reservedTokens", "reservedRuntimeMs"],
+        admittedBrowserActions,
       );
       const operationId = text(payload.operationId, 64);
       const kind = operationKind(payload.kind);
@@ -1666,14 +1742,18 @@ function readEventSummary(
       const unshaped = row(boundedJson(object.bounded_payload, 65_536));
       const kindPresent = Object.hasOwn(unshaped, "kind");
       const emergency = Object.hasOwn(unshaped, "budgetClass");
-      const payload = exactRecord(unshaped, [
-        "operationId",
-        ...(kindPresent ? ["kind"] : []),
-        "reservedCostUsd",
-        "reservedTokens",
-        "reservedRuntimeMs",
-        ...(emergency ? ["budgetClass"] : []),
-      ]);
+      const payload = actionLinkedRecord(
+        unshaped,
+        [
+          "operationId",
+          ...(kindPresent ? ["kind"] : []),
+          "reservedCostUsd",
+          "reservedTokens",
+          "reservedRuntimeMs",
+          ...(emergency ? ["budgetClass"] : []),
+        ],
+        admittedBrowserActions,
+      );
       const operationId = text(payload.operationId, 64);
       const kind =
         activeOperation === null
@@ -1885,14 +1965,11 @@ function readEventSummary(
       type === "rollback.approved" ||
       type === "restore.approved"
     ) {
-      const payload = exactRecord(boundedJson(object.bounded_payload, 65_536), [
-        "from",
-        "to",
-        "kind",
-        "digest",
-        "actor",
-        "decision",
-      ]);
+      const payload = actionLinkedRecord(
+        boundedJson(object.bounded_payload, 65_536),
+        ["from", "to", "kind", "digest", "actor", "decision"],
+        admittedBrowserActions,
+      );
       const from = text(payload.from, 32);
       const to = text(payload.to, 32);
       const kind = text(payload.kind, 16);
@@ -1962,12 +2039,11 @@ function readEventSummary(
     }
 
     if (type === "plan.created") {
-      const payload = exactRecord(boundedJson(object.bounded_payload, 65_536), [
-        "from",
-        "to",
-        "planSha256",
-        "readableFiles",
-      ]);
+      const payload = actionLinkedRecord(
+        boundedJson(object.bounded_payload, 65_536),
+        ["from", "to", "planSha256", "readableFiles"],
+        admittedBrowserActions,
+      );
       const from = text(payload.from, 32);
       const to = text(payload.to, 32);
       const planDigest = digest(payload.planSha256);
@@ -2006,7 +2082,11 @@ function readEventSummary(
       type === "restore.completed" ||
       type === "cancellation.completed"
     ) {
-      const payload = exactRecord(boundedJson(object.bounded_payload, 65_536), ["from", "to"]);
+      const payload = actionLinkedRecord(
+        boundedJson(object.bounded_payload, 65_536),
+        ["from", "to"],
+        admittedBrowserActions,
+      );
       const from = text(payload.from, 32);
       const to = text(payload.to, 32);
       const expected =
@@ -2099,9 +2179,14 @@ function readEventSummary(
       const unshaped = row(boundedJson(object.bounded_payload, 65_536));
       const operationIdPresent = Object.hasOwn(unshaped, "operationId");
       const admissionExhausted = type === "session.exhausted" && Object.hasOwn(unshaped, "reason");
+      const fromPresent = Object.hasOwn(unshaped, "from");
+      const toPresent = Object.hasOwn(unshaped, "to");
+      const actionIdPresent = Object.hasOwn(unshaped, "browserActionId");
+      if (fromPresent !== toPresent || fromPresent !== actionIdPresent) sourceInvalid();
       const expectedKeys = admissionExhausted
-        ? ["iterations", "reason"]
+        ? [...(fromPresent ? ["from", "to"] : []), "iterations", "reason"]
         : [
+            ...(fromPresent ? ["from", "to"] : []),
             "iterations",
             ...(operationIdPresent ? ["operationId"] : []),
             ...(type === "session.completed"
@@ -2110,7 +2195,7 @@ function readEventSummary(
                 ? ["question"]
                 : []),
           ];
-      const payload = exactRecord(unshaped, expectedKeys);
+      const payload = actionLinkedRecord(unshaped, expectedKeys, admittedBrowserActions);
       const iterations = safeInteger(payload.iterations);
       const operationId = operationIdPresent ? text(payload.operationId, 64) : null;
       if (
@@ -2175,6 +2260,12 @@ function readEventSummary(
         );
       }
       const from: RunState = admissionExhausted ? "verifying" : "running";
+      if (
+        fromPresent &&
+        (text(payload.from, 32) !== from || text(payload.to, 32) !== "awaiting_review")
+      ) {
+        sourceInvalid();
+      }
       const revisionSequence = type === "session.completed" ? activeIntentSequence : null;
       const diffSha256 =
         type === "session.completed" ? (activeVerification?.diffSha256 ?? null) : null;
@@ -2208,11 +2299,11 @@ function readEventSummary(
     }
 
     if (type === "cancellation.requested") {
-      const payload = exactRecord(boundedJson(object.bounded_payload, 65_536), [
-        "from",
-        "to",
-        "detail",
-      ]);
+      const payload = actionLinkedRecord(
+        boundedJson(object.bounded_payload, 65_536),
+        ["from", "to", "detail"],
+        admittedBrowserActions,
+      );
       const from = text(payload.from, 32);
       const to = text(payload.to, 32);
       const allowedFrom = new Set([
@@ -2241,13 +2332,11 @@ function readEventSummary(
     }
 
     if (type === "run.failed") {
-      const payload = exactRecord(boundedJson(object.bounded_payload, 65_536), [
-        "from",
-        "to",
-        "resumeState",
-        "code",
-        "message",
-      ]);
+      const payload = actionLinkedRecord(
+        boundedJson(object.bounded_payload, 65_536),
+        ["from", "to", "resumeState", "code", "message"],
+        admittedBrowserActions,
+      );
       const from = text(payload.from, 32);
       const to = text(payload.to, 32);
       const resumeState = text(payload.resumeState, 32);
@@ -2274,7 +2363,11 @@ function readEventSummary(
     }
 
     if (type === "run.resumed") {
-      const payload = exactRecord(boundedJson(object.bounded_payload, 65_536), ["from", "to"]);
+      const payload = actionLinkedRecord(
+        boundedJson(object.bounded_payload, 65_536),
+        ["from", "to"],
+        admittedBrowserActions,
+      );
       const from = text(payload.from, 32);
       const to = text(payload.to, 32);
       if (from !== "failed" || !RESUME_STATES.has(to as RunState) || activeOperation !== null) {
@@ -2288,7 +2381,12 @@ function readEventSummary(
     }
 
     if (type === "verification.completed") {
-      const transition = readVerificationTransition(database, runId, sequence);
+      const transition = readVerificationTransition(
+        database,
+        runId,
+        sequence,
+        admittedBrowserActions,
+      );
       const predecessor = operationTerminals.at(-1);
       if (
         activeCheckpointSha256 === null ||

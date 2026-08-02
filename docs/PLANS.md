@@ -445,8 +445,8 @@ succeeded at that exact head.
 
 The immediate forward sequence continues through Gate 1:
 
-1. complete the accepted ADR 0029 guarded browser-action routes and terminal
-   reconciliation on the merged repository-only ledger and shutdown foundation;
+1. record Packet 2's exact candidate-head hosted CI and native macOS/Windows
+   acceptance for ADR 0029's locally verified guarded lifecycle actions;
 2. complete ADR 0027's durable landing coordinator and digest-bound decision
    flow on the merged schema, records, deterministic candidate builder, and
    absent-only local `icarus/<run-id>` reference, then add bounded GitHub REST
@@ -458,16 +458,27 @@ The immediate forward sequence continues through Gate 1:
 
 ### Gate 1 implementation checkpoint
 
-ADR 0029 is accepted. The current worktree implements and cold-reviews its
-portable transport bootstrap: random per-start origin and bearer, universal
-POST authentication before body/service work, strict JSON, stable GET-only
-mode, synchronous fragment removal, tab-scoped session revocation, and
-truthful mutation/planning capability controls. PR #20 also implements the
-exact repository-only request ledger, prepared/admitted/settled transitions,
-process-local request drain, and lease-protected startup refusal of orphaned
-prepared rows. Guarded approval/execution routes, fixed-actor action/service
-propagation, admitted-row terminal reconciliation, bounded recovery
-presentation, and end-to-end signal evidence remain incomplete.
+ADR 0029 is accepted. Packet 2's current worktree extends the merged origin,
+authentication, request-ledger, and shutdown foundations with exact
+server-derived descriptors, readable authority context, bounded receipts, and
+one Linux service dispatcher for egress approval, plan approval, review
+accept/reject, rollback, restore, resume, and cancellation. Each ordinary
+action holds one kernel run lease from admission through settlement. The only
+lease-bypassing path is a parent-bound cancellation that must match the current
+coordinator generation, action ID, digest, kind, and execution context before
+it emits one structured abort signal. Startup marks started operations
+interrupted, refuses prepared rows, and terminally reconciles admitted rows
+without replay. Non-Linux authority contains no actions and execution fails
+before persistence.
+
+The Packet 2 actions reuse existing private-worktree/provider/sandbox effects.
+They add no commit, push, Git-ref, pull-request, merge, deployment, or imported
+source-checkout effect. Fresh local acceptance on 2026-08-02 covers same-ID
+admitted no-replay, exact and mismatched cancellation bindings, stale structured
+signals, bounded receipts, prepared/admitted restart reconciliation, all eight
+protected API mappings, and the compiled guarded-action workflow in
+`Chrome/149.0.7827.55`. Exact candidate-head hosted CI and native macOS/Windows
+acceptance are still required; Gate 1 remains incomplete.
 
 ADR 0027 and its normative v1 record companion are accepted after independent
 P0/P1 authority reviews. PR #20 implements the exact landing schema and
@@ -479,9 +490,10 @@ crash matrix, the provider gateway, remote branch, and pull request remain
 incomplete. No live state migration was run.
 
 The local server now closes mutation admission, drains registered handlers, and
-closes SQLite last. Before guarded browser actions ship, acceptance evidence
-must additionally cover signals at every action-admission and settlement
-boundary; documentation alone does not close this debt.
+closes SQLite last. Fresh handler, API, and real-browser suites prove action
+admission, stale confirmation, disconnect, shutdown, receipt, and settlement
+boundaries against the wired route. That local evidence does not silently
+satisfy the remaining exact-head hosted and native release record.
 
 ## Released Gate 0 baseline: ADR 0026 slice 2b production wiring
 

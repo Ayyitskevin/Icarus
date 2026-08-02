@@ -28,6 +28,8 @@ import {
   previewProjectContext,
   unwrapContextPreview,
 } from "./api.js";
+import { BrowserActionsPanel, PlanAuthorityDetails } from "./BrowserActionsPanel.js";
+import { ChangeRoomView } from "./ChangeRoomView.js";
 import type { HistoryDirection, HistoryRequest, HistorySession } from "./history-nav.js";
 import {
   acceptHistoryPage,
@@ -71,7 +73,6 @@ import {
 } from "./run-page-nav.js";
 import type { VerificationAttemptsPanelHandle } from "./VerificationAttemptsPanel.js";
 import { VerificationAttemptsPanel } from "./VerificationAttemptsPanel.js";
-import { ChangeRoomView } from "./ChangeRoomView.js";
 
 /** Splits the candidate-target textarea into unique, non-empty paths (ADR 0023). */
 function selectedTargets(value: string): string[] {
@@ -119,6 +120,7 @@ function newestRun(current: RunView | undefined, candidate: RunView): RunView {
 
 const EVIDENCE_LINKS = [
   ["run-summary", "Summary"],
+  ["run-browser-actions", "Guarded actions"],
   ["run-context", "Context"],
   ["run-plan", "Plan"],
   ["run-action", "Action & files"],
@@ -1102,6 +1104,7 @@ function CheckEvidence({ check }: { check: CheckEvidenceView }) {
 interface RunEvidenceProps {
   readonly run: RunView;
   readonly planningCapability: CapabilityView;
+  readonly actionSessionAvailable: boolean;
   readonly onRunChanged: (run: RunView) => Promise<void>;
   readonly onRefresh: (runId: string) => Promise<void>;
   readonly registerAuxiliaryCancellation: (cancel: (() => void) | null) => void;
@@ -1163,6 +1166,7 @@ export function ApprovalProvenance({
 function RunEvidence({
   run,
   planningCapability,
+  actionSessionAvailable,
   onRunChanged,
   onRefresh,
   registerAuxiliaryCancellation,
@@ -1650,6 +1654,13 @@ function RunEvidence({
         )}
       </section>
 
+      <BrowserActionsPanel
+        run={run}
+        actionSessionAvailable={actionSessionAvailable}
+        onRunChanged={onRunChanged}
+        onRefresh={onRefresh}
+      />
+
       {run.context === null ? (
         <section id="run-context" className="evidence-block" tabIndex={-1}>
           <h3>Context summary</h3>
@@ -1693,6 +1704,7 @@ function RunEvidence({
             </div>
           </div>
         )}
+        {run.planAuthority === null ? null : <PlanAuthorityDetails authority={run.planAuthority} />}
       </section>
 
       <section
@@ -3097,6 +3109,7 @@ export function App() {
                   key={selectedRun.id}
                   run={selectedRun}
                   planningCapability={planningCapability}
+                  actionSessionAvailable={actionSessionAvailable}
                   onRunChanged={mergeRun}
                   onRefresh={refreshRun}
                   registerAuxiliaryCancellation={registerAuxiliaryCancellation}

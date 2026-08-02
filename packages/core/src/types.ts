@@ -855,6 +855,12 @@ export interface OperationToken {
   readonly reservedCostUsd: number;
   readonly reservedTokens: number;
   readonly reservedRuntimeMs: number;
+  /**
+   * Present only when this operation is the durable domain anchor for one
+   * admitted ADR 0029 browser action. It is transport correlation, never
+   * operation authority.
+   */
+  readonly browserActionId: string | null;
 }
 
 export interface OperationFinish {
