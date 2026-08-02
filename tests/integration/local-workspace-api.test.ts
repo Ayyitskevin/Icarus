@@ -303,7 +303,7 @@ describe("loopback local workspace API", () => {
         mutation: { status: "available" },
         provider: { status: "unconfigured" },
         planning: { status: "available" },
-        execution: { status: "unconfigured" },
+        execution: { status: process.platform === "linux" ? "unconfigured" : "unsupported" },
       },
       projectPage: { before: 1, snapshot: 0, nextBefore: 1, hasMore: false, projects: [] },
       runPage: { before: 1, snapshot: 0, nextBefore: 1, hasMore: false, runs: [] },
