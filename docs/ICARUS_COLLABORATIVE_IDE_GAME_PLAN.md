@@ -5,7 +5,7 @@
 - Planning horizon: 12–18 months, reviewed at every exit gate
 - Governing direction:
   [ADR 0036](adr/0036-proof-carrying-software-factory-product-direction.md)
-- Current release state: exact `main`
+- Gate 0 release/evidence head:
   `802b91e6f6c9b392f56c9ee3660be818a0f74a62`; Gate 0 merged and released with
   successful exact-head Linux, macOS, and Windows evidence
 - Current Gate 1 portability state: ADR 0039 rejected after native run
@@ -333,15 +333,21 @@ binds exact `127.0.0.1`, uses a fresh 16-byte `.localhost` public-origin nonce
 with no Node/OS lookup or resolver injection, supports mutation only in tested
 Chromium-family browsers, and leaves explicit-port sessions bearer-free and
 review-only for Safari and every unverified browser. This is an architecture
-risk acceptance, not a Gate 1 release approval. Complete these remaining slices:
+risk acceptance, not a Gate 1 release approval. PR #20 subsequently merged the
+repository-only browser-action ledger and shutdown foundation plus the landing
+schema, records, deterministic candidate builder, and absent-only local-ref
+foundation. Complete these remaining slices:
 
-1. server-start browser action session, fixed actor, same-origin/CSRF boundary,
-   digest/revision-bound action request, and negative security matrix;
+1. guarded browser action routes using the existing server-start session and
+   ledger, with fixed-actor service propagation, digest/revision binding,
+   terminal reconciliation, recovery presentation, and the remaining negative
+   security matrix;
 2. browser parity for existing egress, plan, review, recovery, resume, and
    cancellation controls, including grants and ceilings;
-3. a separate durable landing ledger bound to an immutable completed run;
-4. deterministic candidate commit and absent-only private
-   `refs/heads/icarus/<run-id>` reference;
+3. durable landing persistence, service coordination, and a digest-bound
+   decision transaction on the existing landing schema and records;
+4. coordinator integration of the existing deterministic candidate builder and
+   absent-only private `refs/heads/icarus/<run-id>` reference;
 5. provider-specific, bounded GitHub REST object upload, absent-only reference
    creation, and draft-PR gateway without weakening the existing file-only
    `GitController`;
@@ -474,11 +480,11 @@ remains source-collaboration truth; Icarus preserves the proof and rationale.
 | Area | Current location | Planned change |
 | --- | --- | --- |
 | Domain policy and digests | `packages/core/src/types.ts`, `policy.ts`, `digests.ts` | typed landing, room, participant, task, write-set, and integration authority |
-| Durable state | `packages/core/src/store.ts`, `state-machine.ts` | separate landing and collaboration ledgers; append-only room events |
-| Orchestration | `packages/core/src/service.ts`, `session-loop.ts` | landing coordinator first; later room scheduler and child-run integration |
-| Git isolation | `packages/core/src/git.ts` | keep file-only controller; add narrow candidate-commit operations |
+| Durable state | `packages/core/src/store.ts`, `state-machine.ts`, `gate1-schema.ts`, `landing-records.ts`, `landing-state.ts` | complete landing persistence and coordination on the existing separate schema; later collaboration ledgers and append-only room events |
+| Orchestration | `packages/core/src/service.ts`, `session-loop.ts` | complete the landing coordinator; later room scheduler and child-run integration |
+| Git isolation | `packages/core/src/git.ts`, `landing-git.ts` | keep the file-only controller; integrate the existing deterministic candidate and absent-only local-ref operations |
 | Provider landing | new provider-specific package | bounded object-upload/create-ref/draft-PR gateway, receipt, idempotent reconciliation |
-| Browser boundary | `packages/api/src/server.ts`, `contracts.ts`, `present.ts` | candidate Chromium-resolved fresh-origin transport first; authenticated action routes and bounded projections after its native gate |
+| Browser boundary | `packages/api/src/server.ts`, `contracts.ts`, `present.ts` | complete authenticated action routes, terminal reconciliation, and bounded recovery projections on the accepted transport and ledger foundation |
 | Browser UI | `packages/workspace/src/api.ts`, `App.tsx` | authority/evidence panel first; mission-room pane after shared client |
 | Shared client | new `packages/client` | versioned contracts for browser and VS Code |
 | IDE | new `packages/vscode` | task, room, editor context, diff/check/recovery/landing surfaces |
@@ -516,7 +522,9 @@ native-fixture correction followed as exact `main`
 and both macOS and Windows jobs in native
 [run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
 succeeded there. Gate 0 is merged and released without Gate 1 runtime code;
-Packet 1 is now the forward work.
+at that point Packet 1 became the forward work. Its contracts and PR #20's
+repository-only foundations have since landed; the benchmark and remaining
+end-to-end Gate 1 runtime and coordination work remain open.
 
 ### Packet 1 — authority contracts and benchmark
 
@@ -578,7 +586,8 @@ request drain, and bounded transient controller stdin. Guarded action routes,
 fixed-actor descriptors, exact action/service propagation, admitted-row
 terminal reconciliation, bounded recovery presentation, and end-to-end signal
 evidence remain incomplete; therefore Packet 2 remains partial. No live
-migration, merge, deployment, or public release was authorized or performed.
+state migration, Git landing effect, deployment, or public release was
+authorized or performed.
 
 ### Packet 3 — durable local landing
 

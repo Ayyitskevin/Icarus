@@ -1,7 +1,8 @@
 # ADR 0036: Proof-carrying software factory product direction
 
-- Status: Accepted product direction — Gate 0 merged and released at exact
-  `main` `802b91e6f6c9b392f56c9ee3660be818a0f74a62`; Gate 1 is current
+- Status: Accepted product direction — Gate 0 release/evidence head
+  `802b91e6f6c9b392f56c9ee3660be818a0f74a62`; Gate 1 is current with PR #20's
+  repository-only local authority foundations merged
 - Date: 2026-07-30
 - Supersedes: the current product positioning and roadmap sequencing in
   [`FABLE_ICARUS_VISION.md`](../FABLE_ICARUS_VISION.md) sections 1, 11, and 13.
@@ -221,7 +222,9 @@ followed as exact `main` `802b91e6f6c9b392f56c9ee3660be818a0f74a62`. Linux
 and both jobs in native
 [run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
 succeeded at that exact head. Gate 0 is merged and released; forward
-implementation now begins with the Gate 1 contracts and benchmark.
+implementation began at that point with the Gate 1 contracts and benchmark.
+Those contracts and PR #20's repository-only foundations have since landed;
+remaining Gate 1 work is described below.
 
 Exit gate: zero known authority bypasses; remote canary data outside approved
 context/manifest never reaches a provider; malformed mutation scope changes no
@@ -237,6 +240,14 @@ reviewer.
 
 ADR 0029 browser approval authority and ADR 0027 Git landing authority are
 accepted. Complete their implementations:
+
+PR #20 (`79e6dc7`, implementation head `bba1591`) merged the repository-only
+browser-action ledger and shutdown settlement plus the landing schema, records,
+deterministic candidate builder, and absent-only local-reference foundations.
+The list below names the complete Gate 1 outcome; remaining work must integrate
+those foundations into guarded routes, terminal reconciliation and recovery,
+durable landing coordination, provider effects, receipts, and benchmark
+evidence.
 
 - server-start session token, same-origin/CSRF protection, digest-bound action
   forms, CLI parity, live activity, and explicit capability display;
