@@ -584,14 +584,67 @@ additional tool calls and runtime remain visible.
   kernel lease through `/usr/bin/flock` and `/proc`; execution also inherits
   the Docker sandbox requirements.
 
+## Gate 1 benchmark contract
+
+The current tree carries a populated, closed Gate 1 input manifest at
+`fixtures/evals/gate1/manifest.v1.json`. It contains exactly one
+TypeScript-library repair, one Python-CLI repair, and one dependency-free
+React/Node module repair fixture. The third case checks Node behavior and a
+JSX-to-module contract; it is not runnable-React-application evidence. Each case
+pins repository and commit identity, the exact task, prompt-revision labels and
+production planning/edit system-instruction hashes, the complete ordered
+registered-check IDs, names, and argv, exact expected changed paths, Git object
+format, raw task/source/approved-repair bytes, and deterministic local-candidate
+object identities.
+
+`pnpm benchmark:gate1`, also included by `pnpm eval`, validates that contract
+through the production Ollama adapter over deterministic loopback HTTP,
+production no-network sandboxes, and the real deterministic local-candidate and
+absent-only private-ref foundation. The ignored schema-v1
+`.local/gate1-benchmark-report.json` is a closed success/failure union. A success
+report binds the exact validated input-manifest digest and all three cases'
+observed task, source, provider-instruction, check, and candidate identities. A
+failure report preserves only the ordered completed-case prefix and labels its
+aggregate counters `partial_completed_cases_only`; it separately binds the
+failure stage, applicable next case, safe error code or `null`, and error-message
+digest. Its manifest digest is `null` only when the raw manifest bytes were
+unavailable. Neither variant can claim Gate 1 completion. For each completed case, the runner
+reopens the production runtime and replays a harness-only candidate journal into
+a new local controller before the absent-only-ref step. It does not execute
+same-tab browser reload or foreground-server process restart and does not prove
+durable landing coordination. The separate browser authority contract retains
+the current tab-scoped bearer across same-tab reload; a process restart rotates
+origin and bearer, requires the new launch URL, and may recover only durable
+work.
+
+This focused path has no credential, paid model, external network, remote
+mutation, or live migration authority. Every completed-case report record
+explicitly marks draft-PR and receipt effects as contract-only and not executed.
+The manifest's derivative-effect record is `contract-only-unassessed`, not an
+operator assessment of real repository automation. Gate 1 completion still
+requires a separate versioned,
+human-approved, credential-gated live-evidence profile bound to the offline
+manifest digest and its exact immutable case/task/check/source/expected-change/
+candidate pins. That profile must additionally pin the real provider/model and
+adapter version, pricing and budgets, and an operator-produced repository-
+automation assessment with disposition and raw assessment digest. It may
+authorize only named, separately approved Git object upload, absent-only remote-
+ref creation, draft-PR creation, and receipt effects. Gate 1 requires 3/3 passing
+checks, exact changed paths, exact candidate and live branch/commit/draft-PR/
+receipt identities, and unchanged source checkouts on the approved repositories.
+Mock or synthetic model, GitHub, automation, or receipt evidence cannot complete
+the gate.
+
 ## Current-slice exclusions and durable non-goals
 
 The current candidate has no public signup, billing, teams, browser-held
-provider keys, semantic retrieval, commits, pushes, deployments, application
-previews, remote API exposure, customer-data access, production access,
-distributed execution, accounts, telemetry, browser approval/execution, or
-arbitrary provider-native tool path. No roadmap statement implies that any of
-those capabilities exists now.
+provider keys, semantic retrieval, end-to-end landing, remote pushes,
+deployments, application previews, remote API exposure, customer-data access,
+production access, distributed execution, accounts, telemetry, browser
+approval/execution, or arbitrary provider-native tool path. Its tested local
+candidate-object and absent-only private-ref foundation does not widen those
+exclusions. No roadmap statement implies that any of those capabilities exists
+now.
 
 ADR 0036 deliberately moves semantic retrieval, browser/VS Code actions, gated
 Git landing, previews, deployment adapters, isolated database migrations,
@@ -644,6 +697,9 @@ exist in Milestone 1:
   fixture validation all pass in CI.
 - The evaluation report states unsupported scenarios rather than counting them
   as successes.
+- The populated Gate 1 contract fails closed on any changed raw-byte pin and
+  keeps synthetic local results distinct from the separately approved real 3/3
+  repository evidence required for release.
 - The workspace API rejects wrong/duplicated Host, Origin, authorization,
   content-type, or action headers; stable-origin POSTs; oversized, malformed,
   duplicate-member mutations; and remote planning endpoints without mutating

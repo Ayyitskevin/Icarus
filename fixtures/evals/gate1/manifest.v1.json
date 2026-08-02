@@ -1,0 +1,852 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "gate1-verified-change",
+  "benchmarkRevision": "gate1-three-repository-repair-v1",
+  "digestEncoding": "raw-bytes-sha256-lowercase-hex",
+  "resultSchemaVersion": 1,
+  "executionBoundary": {
+    "mode": "deterministic_fixture",
+    "manifestResultSeparation": "committed-input-generated-result",
+    "resultPath": ".local/gate1-benchmark-report.json",
+    "paidProviderCalls": 0,
+    "credentialReads": 0,
+    "externalNetworkRequests": 0,
+    "remoteMutations": 0,
+    "mockedEvidenceCompletesGate": false
+  },
+  "releaseGate": {
+    "requiredCaseCount": 3,
+    "requiredSuccessCount": 3,
+    "requiredStacks": ["typescript-library", "python-cli", "react-node"],
+    "objectFormat": "sha1",
+    "credentialGatedRealGitHubEvidenceRequired": true,
+    "successConditions": [
+      "registered_checks_pass",
+      "expected_changed_paths_exact",
+      "source_checkout_unchanged",
+      "same_tab_reload_and_process_restart_recovery",
+      "candidate_commit_and_absent_only_branch_exact",
+      "reviewable_real_draft_pull_request",
+      "matching_immutable_receipt",
+      "separately_approved_external_mutations"
+    ],
+    "failureConditions": [
+      "any_case_fails",
+      "check_set_partial_or_truncated",
+      "changed_paths_differ",
+      "source_checkout_changes",
+      "recovery_duplicates_or_loses_effect",
+      "candidate_or_branch_identity_differs",
+      "draft_pull_request_not_reviewable_or_not_real",
+      "receipt_missing_or_mismatched",
+      "mocked_or_synthetic_evidence_used_for_gate_claim",
+      "credential_or_unapproved_external_effect_observed"
+    ]
+  },
+  "cases": [
+    {
+      "id": "typescript-library-repair",
+      "stack": "typescript-library",
+      "repository": {
+        "fixturePath": "fixtures/evals/gate1/repos/typescript-library",
+        "githubOwner": "icarus-gate1-benchmark",
+        "githubRepository": "typescript-library",
+        "baseBranch": "main",
+        "sourceRevision": {
+          "objectFormat": "sha1",
+          "commitSha1": "6e476d2ee4a32dcba03cea84c464cf7450855d4c",
+          "treeSha1": "5bdf2232d8ebd215a1d2d805d85ebfb5986c07b0"
+        },
+        "files": [
+          {
+            "path": "README.md",
+            "sha256": "8d9713ffca14ac7a9e38a779348c22c50d8625809e82f4dd99255bfe4fe8388d"
+          },
+          {
+            "path": "package.json",
+            "sha256": "75dd390189aa19dacc2505454147660c059f21f5f7a4b673f0788c4989e50a4e"
+          },
+          {
+            "path": "src/clamp.ts",
+            "sha256": "b4fdf4b7757ad43d0ee7fe1615305bf4dad553e456ee1393c424453781f1bb0a"
+          },
+          {
+            "path": "tests/clamp.test.ts",
+            "sha256": "8d55d48ad5cd08603cbefc5ffb1fcb81df51f25e51203f523a5763430dd03f19"
+          }
+        ],
+        "treeSha256": "092dd7c7694f928e62877d7a1921e0d9602ec027e3584330312d63b108552ffa",
+        "derivativeEffects": {
+          "evidenceMode": "contract-only-unassessed",
+          "githubEvents": ["create", "pull_request.opened"],
+          "mayTrigger": ["actions", "webhooks", "bots", "notifications", "deployments"],
+          "liveAssessmentRequired": true,
+          "allowedDispositions": ["inert-repository", "operator-approved"],
+          "assessmentSha256": null,
+          "disclosureSha256": "38a9a43e6871fe23a1fbd7830d459917273ccaa29872278f8c571d196be01638"
+        }
+      },
+      "task": {
+        "path": "fixtures/evals/gate1/tasks/typescript-library.md",
+        "encoding": "raw-utf8",
+        "sha256": "ba2befb806f7deb664a249d1d8cefe317de5be378a3d6545d52fa309d6c85f49"
+      },
+      "prompt": {
+        "planRevision": "icarus-service-plan-v1",
+        "planInstructionsSha256": "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+        "editRevision": "icarus-service-edit-v1",
+        "editInstructionsSha256": "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+      },
+      "modelAdapter": {
+        "provider": "ollama",
+        "model": "icarus-gate1-fixture-model-v1",
+        "adapterVersion": "production-ollama-api-chat-v1",
+        "transport": "deterministic-loopback-http",
+        "inputUsdPerMillionTokens": 0,
+        "outputUsdPerMillionTokens": 0,
+        "expectedRequests": 2,
+        "paid": false,
+        "credentials": false
+      },
+      "selectedPaths": ["src/clamp.ts"],
+      "allowedChangedPaths": ["src/clamp.ts"],
+      "expectedChangedPaths": ["src/clamp.ts"],
+      "expectedChanges": [
+        {
+          "path": "src/clamp.ts",
+          "operation": "modify",
+          "expectedFixturePath": "fixtures/evals/gate1/expected/typescript-library/src/clamp.ts",
+          "baselineSha256": "b4fdf4b7757ad43d0ee7fe1615305bf4dad553e456ee1393c424453781f1bb0a",
+          "approvedSha256": "d502216f96fe899805899bff5d1469fd1007f2df1933753dcbc8e7fbe63951d4"
+        }
+      ],
+      "checks": [
+        {
+          "id": "typescript-tests",
+          "name": "TypeScript clamp tests",
+          "argv": ["node", "--test", "tests/clamp.test.ts"]
+        }
+      ],
+      "sandbox": {
+        "image": "node@sha256:d9f850096136edbc402debdd8729579a288aac64574ada0ff4db26b6ae58b0b2",
+        "cpus": 2,
+        "memoryMb": 4096,
+        "pids": 256,
+        "tmpfsMb": 1024
+      },
+      "budgets": {
+        "maxProviderCalls": 2,
+        "maxRemoteMutations": 0,
+        "maxToolCalls": 40,
+        "maxActiveRuntimeMs": 1200000,
+        "maxContextBytes": 196608,
+        "maxOutputTokensPerCall": 8192,
+        "maxTotalTokens": 100000,
+        "maxCostUsd": 0,
+        "maxFilesChanged": 1,
+        "maxFileBytes": 262144,
+        "maxDiffBytes": 262144,
+        "maxCommandOutputBytes": 262144,
+        "maxRawCommandOutputBytes": 8388608,
+        "providerTimeoutMs": 300000,
+        "commandTimeoutMs": 300000
+      },
+      "sourceImmutability": {
+        "required": true,
+        "contentSnapshot": "byte-exact-tree-and-git-metadata",
+        "gitFingerprintFields": ["head", "status", "refs", "config", "index", "worktrees"],
+        "gitDirectorySnapshot": "complete-types-modes-and-file-bytes",
+        "sourceWritesAllowed": 0
+      },
+      "restartRecovery": {
+        "sameProcessReload": "retains-current-session-authority",
+        "serverProcessRestart": "rotate-origin-and-token",
+        "durableRecovery": "fresh-launch-resumes-persisted-candidate",
+        "injectionPoint": "candidate-commit-prepared-before-local-ref",
+        "expectedLocalRefOutcome": "created",
+        "expectedLocalRefWrites": 1,
+        "expectedCredentialReads": 0,
+        "expectedExternalNetworkRequests": 0,
+        "expectedRemoteMutations": 0
+      },
+      "candidate": {
+        "objectFormat": "sha1",
+        "branchNamespace": "icarus/",
+        "headRefTemplate": "refs/heads/icarus/{runId}",
+        "absentOnly": true,
+        "forceAllowed": false,
+        "deleteAllowed": false,
+        "commitIdentity": {
+          "name": "Icarus Gate 1 Benchmark",
+          "email": "icarus-gate1@example.invalid"
+        },
+        "commitEpochSeconds": 1704067200,
+        "commitIso8601": "2024-01-01T00:00:00Z",
+        "commitMessage": "Icarus Gate 1 deterministic repair\n",
+        "baseCommitSha1": "6e476d2ee4a32dcba03cea84c464cf7450855d4c",
+        "baseTreeSha1": "5bdf2232d8ebd215a1d2d805d85ebfb5986c07b0",
+        "candidateTreeSha1": "952cd1740066d056938b4fdf9888376ace6b63e5",
+        "candidateCommitSha1": "b3626c47c17494760835ebbf279685759be84345",
+        "candidateCommitPayloadSha256": "6a65d72de71d86aedd068b7fd55bb36e0410e4fe252502283ac936bfdeb80459",
+        "candidateObjectManifestSha256": "97f9e0a8790a287b0e6373aa83c955e19baab7ae512e894211e072debf6e6125"
+      },
+      "draftPullRequestEvidence": {
+        "schemaVersion": 1,
+        "evidenceMode": "contract-only",
+        "provider": "github",
+        "owner": "icarus-gate1-benchmark",
+        "repository": "typescript-library",
+        "baseRef": "refs/heads/main",
+        "headRefTemplate": "refs/heads/icarus/{runId}",
+        "expectedBaseCommitSha1": "6e476d2ee4a32dcba03cea84c464cf7450855d4c",
+        "expectedCandidateCommitSha1": "b3626c47c17494760835ebbf279685759be84345",
+        "requiredState": "open",
+        "draft": true,
+        "maintainerCanModify": false,
+        "markerCount": 1,
+        "identityFields": [
+          "owner",
+          "repository",
+          "pullRequestNumber",
+          "reconstructedPullRequestUrl",
+          "draft",
+          "baseRef",
+          "headRef",
+          "candidateCommitSha1"
+        ],
+        "remoteMutationAllowed": false
+      },
+      "receiptEvidence": {
+        "schemaVersion": 1,
+        "contractVersion": "adr-0027-landing-receipt-v1",
+        "requiredFields": [
+          "version",
+          "landingId",
+          "runId",
+          "projectId",
+          "provider",
+          "owner",
+          "repository",
+          "baseRef",
+          "baseCommitSha1",
+          "headRef",
+          "candidateTreeSha1",
+          "candidateCommitSha1",
+          "pullRequestNumber",
+          "reconstructedPullRequestUrl",
+          "draft",
+          "landingSha256",
+          "profileSha256",
+          "planSha256",
+          "diffSha256",
+          "checkpointSha256",
+          "verificationSha256",
+          "reviewDecisionSha256",
+          "changedPathsSha256",
+          "localRefOutcome",
+          "remoteObjectOutcome",
+          "remoteRefOutcome",
+          "pullRequestOutcome",
+          "completedAt"
+        ],
+        "forbiddenFields": [
+          "credential",
+          "credentialRef",
+          "cachePath",
+          "worktreePath",
+          "sourcePath",
+          "commitMessage",
+          "pullRequestTitle",
+          "pullRequestBody",
+          "task",
+          "diff",
+          "checkpoint",
+          "providerOutput",
+          "responseHeaders",
+          "environment"
+        ],
+        "runtimeRequiredForGate": true,
+        "syntheticReceiptCompletesGate": false
+      },
+      "acceptance": {
+        "ciSuccessConditions": [
+          "fixture_contract_valid",
+          "source_revision_exact",
+          "baseline_check_failure_reproduced",
+          "deterministic_repair_completed",
+          "registered_checks_pass",
+          "expected_changed_paths_exact",
+          "source_checkout_unchanged",
+          "candidate_commit_exact",
+          "absent_only_local_ref_created_after_runtime_reopen",
+          "draft_pr_and_receipt_contracts_validated",
+          "zero_credentials_external_network_remote_mutations"
+        ],
+        "releaseSuccessConditions": [
+          "exact_model_prompt_and_budgets_recorded",
+          "task_to_reviewed_candidate_completed",
+          "registered_checks_pass",
+          "expected_changed_paths_exact",
+          "source_checkout_unchanged",
+          "same_tab_reload_and_process_restart_recovery",
+          "candidate_commit_and_branch_exact",
+          "reviewable_real_draft_pull_request",
+          "matching_immutable_receipt",
+          "separate_approval_for_each_external_mutation"
+        ],
+        "failureConditions": [
+          "manifest_or_fixture_digest_mismatch",
+          "baseline_not_reproduced",
+          "provider_or_prompt_identity_mismatch",
+          "registered_check_missing_failed_unavailable_cancelled_or_truncated",
+          "changed_paths_mismatch",
+          "source_checkout_or_git_metadata_changed",
+          "recovery_missing_or_duplicate_effect",
+          "candidate_or_branch_identity_mismatch",
+          "draft_pr_or_receipt_not_real_exact_and_reviewable",
+          "credential_external_network_or_remote_mutation_in_ci",
+          "mocked_evidence_used_for_gate_claim"
+        ]
+      }
+    },
+    {
+      "id": "python-cli-repair",
+      "stack": "python-cli",
+      "repository": {
+        "fixturePath": "fixtures/evals/gate1/repos/python-cli",
+        "githubOwner": "icarus-gate1-benchmark",
+        "githubRepository": "python-cli",
+        "baseBranch": "main",
+        "sourceRevision": {
+          "objectFormat": "sha1",
+          "commitSha1": "98c658ed18bc2d1415e751db28055ba8ef332e61",
+          "treeSha1": "998cb09b5bac2aadcfb40aa75c70c68cb014fc0c"
+        },
+        "files": [
+          {
+            "path": "README.md",
+            "sha256": "8ad3b60282a436e14df77317c2f07ec795d304a9f9727fb9c305fabafe92ef21"
+          },
+          {
+            "path": "src/word_count.py",
+            "sha256": "6cc494675064d19bcb9f994a1804f1b656bd967f5ac9a88e6fd84851908a1cb1"
+          },
+          {
+            "path": "tests/test_word_count.py",
+            "sha256": "5310f6b8c0f4746553d7c1c9c7bbd9d44bd12a5f0661e3cf96cc3f65d292f370"
+          }
+        ],
+        "treeSha256": "cd3a40a068438081d08bfdd0169b78766ea56b7cb9aec1988aba30d363bd5760",
+        "derivativeEffects": {
+          "evidenceMode": "contract-only-unassessed",
+          "githubEvents": ["create", "pull_request.opened"],
+          "mayTrigger": ["actions", "webhooks", "bots", "notifications", "deployments"],
+          "liveAssessmentRequired": true,
+          "allowedDispositions": ["inert-repository", "operator-approved"],
+          "assessmentSha256": null,
+          "disclosureSha256": "bd485a77420cc7a6a384420aa8b3405fc1e85efbaae7d54b54d5f77e862c245a"
+        }
+      },
+      "task": {
+        "path": "fixtures/evals/gate1/tasks/python-cli.md",
+        "encoding": "raw-utf8",
+        "sha256": "2c360f239a017080a2614edac41bcb8462f52bc280f2f766a53090bbb8a085dd"
+      },
+      "prompt": {
+        "planRevision": "icarus-service-plan-v1",
+        "planInstructionsSha256": "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+        "editRevision": "icarus-service-edit-v1",
+        "editInstructionsSha256": "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+      },
+      "modelAdapter": {
+        "provider": "ollama",
+        "model": "icarus-gate1-fixture-model-v1",
+        "adapterVersion": "production-ollama-api-chat-v1",
+        "transport": "deterministic-loopback-http",
+        "inputUsdPerMillionTokens": 0,
+        "outputUsdPerMillionTokens": 0,
+        "expectedRequests": 2,
+        "paid": false,
+        "credentials": false
+      },
+      "selectedPaths": ["src/word_count.py"],
+      "allowedChangedPaths": ["src/word_count.py"],
+      "expectedChangedPaths": ["src/word_count.py"],
+      "expectedChanges": [
+        {
+          "path": "src/word_count.py",
+          "operation": "modify",
+          "expectedFixturePath": "fixtures/evals/gate1/expected/python-cli/src/word_count.py",
+          "baselineSha256": "6cc494675064d19bcb9f994a1804f1b656bd967f5ac9a88e6fd84851908a1cb1",
+          "approvedSha256": "a0295ebcb502fe674639a74648e981d2242a68bf263dbd28ab162fa3d48530e9"
+        }
+      ],
+      "checks": [
+        {
+          "id": "python-tests",
+          "name": "Python word-count tests",
+          "argv": ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
+        }
+      ],
+      "sandbox": {
+        "image": "python:3.12-slim@sha256:c3d81d25b3154142b0b42eb1e61300024426268edeb5b5a26dd7ddf64d9daf28",
+        "cpus": 2,
+        "memoryMb": 4096,
+        "pids": 256,
+        "tmpfsMb": 1024
+      },
+      "budgets": {
+        "maxProviderCalls": 2,
+        "maxRemoteMutations": 0,
+        "maxToolCalls": 40,
+        "maxActiveRuntimeMs": 1200000,
+        "maxContextBytes": 196608,
+        "maxOutputTokensPerCall": 8192,
+        "maxTotalTokens": 100000,
+        "maxCostUsd": 0,
+        "maxFilesChanged": 1,
+        "maxFileBytes": 262144,
+        "maxDiffBytes": 262144,
+        "maxCommandOutputBytes": 262144,
+        "maxRawCommandOutputBytes": 8388608,
+        "providerTimeoutMs": 300000,
+        "commandTimeoutMs": 300000
+      },
+      "sourceImmutability": {
+        "required": true,
+        "contentSnapshot": "byte-exact-tree-and-git-metadata",
+        "gitFingerprintFields": ["head", "status", "refs", "config", "index", "worktrees"],
+        "gitDirectorySnapshot": "complete-types-modes-and-file-bytes",
+        "sourceWritesAllowed": 0
+      },
+      "restartRecovery": {
+        "sameProcessReload": "retains-current-session-authority",
+        "serverProcessRestart": "rotate-origin-and-token",
+        "durableRecovery": "fresh-launch-resumes-persisted-candidate",
+        "injectionPoint": "candidate-commit-prepared-before-local-ref",
+        "expectedLocalRefOutcome": "created",
+        "expectedLocalRefWrites": 1,
+        "expectedCredentialReads": 0,
+        "expectedExternalNetworkRequests": 0,
+        "expectedRemoteMutations": 0
+      },
+      "candidate": {
+        "objectFormat": "sha1",
+        "branchNamespace": "icarus/",
+        "headRefTemplate": "refs/heads/icarus/{runId}",
+        "absentOnly": true,
+        "forceAllowed": false,
+        "deleteAllowed": false,
+        "commitIdentity": {
+          "name": "Icarus Gate 1 Benchmark",
+          "email": "icarus-gate1@example.invalid"
+        },
+        "commitEpochSeconds": 1704067200,
+        "commitIso8601": "2024-01-01T00:00:00Z",
+        "commitMessage": "Icarus Gate 1 deterministic repair\n",
+        "baseCommitSha1": "98c658ed18bc2d1415e751db28055ba8ef332e61",
+        "baseTreeSha1": "998cb09b5bac2aadcfb40aa75c70c68cb014fc0c",
+        "candidateTreeSha1": "8be5734eba924ac2a65144d0cf5fd6de9f298ad8",
+        "candidateCommitSha1": "70a50ec5d7f3ee54a68112c1923da5ccd63e59cd",
+        "candidateCommitPayloadSha256": "75ed3a210c224e8c675df5a05c041948a2c7cb18ec2aff7a8b5d4f24c8e88a4a",
+        "candidateObjectManifestSha256": "9974870dfbdee9d607bd0445e52271b6015ede9dd557fcc14eaed11f04aced92"
+      },
+      "draftPullRequestEvidence": {
+        "schemaVersion": 1,
+        "evidenceMode": "contract-only",
+        "provider": "github",
+        "owner": "icarus-gate1-benchmark",
+        "repository": "python-cli",
+        "baseRef": "refs/heads/main",
+        "headRefTemplate": "refs/heads/icarus/{runId}",
+        "expectedBaseCommitSha1": "98c658ed18bc2d1415e751db28055ba8ef332e61",
+        "expectedCandidateCommitSha1": "70a50ec5d7f3ee54a68112c1923da5ccd63e59cd",
+        "requiredState": "open",
+        "draft": true,
+        "maintainerCanModify": false,
+        "markerCount": 1,
+        "identityFields": [
+          "owner",
+          "repository",
+          "pullRequestNumber",
+          "reconstructedPullRequestUrl",
+          "draft",
+          "baseRef",
+          "headRef",
+          "candidateCommitSha1"
+        ],
+        "remoteMutationAllowed": false
+      },
+      "receiptEvidence": {
+        "schemaVersion": 1,
+        "contractVersion": "adr-0027-landing-receipt-v1",
+        "requiredFields": [
+          "version",
+          "landingId",
+          "runId",
+          "projectId",
+          "provider",
+          "owner",
+          "repository",
+          "baseRef",
+          "baseCommitSha1",
+          "headRef",
+          "candidateTreeSha1",
+          "candidateCommitSha1",
+          "pullRequestNumber",
+          "reconstructedPullRequestUrl",
+          "draft",
+          "landingSha256",
+          "profileSha256",
+          "planSha256",
+          "diffSha256",
+          "checkpointSha256",
+          "verificationSha256",
+          "reviewDecisionSha256",
+          "changedPathsSha256",
+          "localRefOutcome",
+          "remoteObjectOutcome",
+          "remoteRefOutcome",
+          "pullRequestOutcome",
+          "completedAt"
+        ],
+        "forbiddenFields": [
+          "credential",
+          "credentialRef",
+          "cachePath",
+          "worktreePath",
+          "sourcePath",
+          "commitMessage",
+          "pullRequestTitle",
+          "pullRequestBody",
+          "task",
+          "diff",
+          "checkpoint",
+          "providerOutput",
+          "responseHeaders",
+          "environment"
+        ],
+        "runtimeRequiredForGate": true,
+        "syntheticReceiptCompletesGate": false
+      },
+      "acceptance": {
+        "ciSuccessConditions": [
+          "fixture_contract_valid",
+          "source_revision_exact",
+          "baseline_check_failure_reproduced",
+          "deterministic_repair_completed",
+          "registered_checks_pass",
+          "expected_changed_paths_exact",
+          "source_checkout_unchanged",
+          "candidate_commit_exact",
+          "absent_only_local_ref_created_after_runtime_reopen",
+          "draft_pr_and_receipt_contracts_validated",
+          "zero_credentials_external_network_remote_mutations"
+        ],
+        "releaseSuccessConditions": [
+          "exact_model_prompt_and_budgets_recorded",
+          "task_to_reviewed_candidate_completed",
+          "registered_checks_pass",
+          "expected_changed_paths_exact",
+          "source_checkout_unchanged",
+          "same_tab_reload_and_process_restart_recovery",
+          "candidate_commit_and_branch_exact",
+          "reviewable_real_draft_pull_request",
+          "matching_immutable_receipt",
+          "separate_approval_for_each_external_mutation"
+        ],
+        "failureConditions": [
+          "manifest_or_fixture_digest_mismatch",
+          "baseline_not_reproduced",
+          "provider_or_prompt_identity_mismatch",
+          "registered_check_missing_failed_unavailable_cancelled_or_truncated",
+          "changed_paths_mismatch",
+          "source_checkout_or_git_metadata_changed",
+          "recovery_missing_or_duplicate_effect",
+          "candidate_or_branch_identity_mismatch",
+          "draft_pr_or_receipt_not_real_exact_and_reviewable",
+          "credential_external_network_or_remote_mutation_in_ci",
+          "mocked_evidence_used_for_gate_claim"
+        ]
+      }
+    },
+    {
+      "id": "react-node-repair",
+      "stack": "react-node",
+      "repository": {
+        "fixturePath": "fixtures/evals/gate1/repos/react-node",
+        "githubOwner": "icarus-gate1-benchmark",
+        "githubRepository": "react-node",
+        "baseBranch": "main",
+        "sourceRevision": {
+          "objectFormat": "sha1",
+          "commitSha1": "ea3d322a093e6063deb0a0c1eae591533b094091",
+          "treeSha1": "8457fdcd9aff85b7c892b58b06c46cc71eb25236"
+        },
+        "files": [
+          {
+            "path": "README.md",
+            "sha256": "371bdefd423c6aa1bf24e6be08041ce9bc99cb024b19a07fae81bef2df5695d8"
+          },
+          {
+            "path": "checks/component-contract.mjs",
+            "sha256": "6b6c8b0fd731597de249d86f21f257af955db4b8aa872e250328e78dd5d93422"
+          },
+          {
+            "path": "package.json",
+            "sha256": "5bd00d0b6bf54b67fd777a0b257c0baa978288cb3702bbe994257d682ac40966"
+          },
+          {
+            "path": "src/StatusCard.jsx",
+            "sha256": "0f966641ec54fe19546e11940bbdfff5efc45df1eef0219b362979640d012a52"
+          },
+          {
+            "path": "src/status.mjs",
+            "sha256": "77a1bb62548efbecf2cb30c4f1cfd6ccda30f167ffabab79bfe2a9174ffe0d24"
+          },
+          {
+            "path": "tests/status.test.mjs",
+            "sha256": "b7543e6792d120074ff13b123b9e434454e92bebc08c192ca6485f69d2cc831f"
+          }
+        ],
+        "treeSha256": "7bec3904985493e7e345c9384560fd7afe38e234a63c3e220c4478053ada54f3",
+        "derivativeEffects": {
+          "evidenceMode": "contract-only-unassessed",
+          "githubEvents": ["create", "pull_request.opened"],
+          "mayTrigger": ["actions", "webhooks", "bots", "notifications", "deployments"],
+          "liveAssessmentRequired": true,
+          "allowedDispositions": ["inert-repository", "operator-approved"],
+          "assessmentSha256": null,
+          "disclosureSha256": "7c746f87be7cbc0cdfc1bd723dc42bbb117fdf0569c2edec800f9bed6e134359"
+        }
+      },
+      "task": {
+        "path": "fixtures/evals/gate1/tasks/react-node.md",
+        "encoding": "raw-utf8",
+        "sha256": "5bb629c2698307b771d932716ce1788e00ccb5700d4dc6fc41cfced24d527af0"
+      },
+      "prompt": {
+        "planRevision": "icarus-service-plan-v1",
+        "planInstructionsSha256": "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+        "editRevision": "icarus-service-edit-v1",
+        "editInstructionsSha256": "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+      },
+      "modelAdapter": {
+        "provider": "ollama",
+        "model": "icarus-gate1-fixture-model-v1",
+        "adapterVersion": "production-ollama-api-chat-v1",
+        "transport": "deterministic-loopback-http",
+        "inputUsdPerMillionTokens": 0,
+        "outputUsdPerMillionTokens": 0,
+        "expectedRequests": 2,
+        "paid": false,
+        "credentials": false
+      },
+      "selectedPaths": ["src/status.mjs"],
+      "allowedChangedPaths": ["src/status.mjs"],
+      "expectedChangedPaths": ["src/status.mjs"],
+      "expectedChanges": [
+        {
+          "path": "src/status.mjs",
+          "operation": "modify",
+          "expectedFixturePath": "fixtures/evals/gate1/expected/react-node/src/status.mjs",
+          "baselineSha256": "77a1bb62548efbecf2cb30c4f1cfd6ccda30f167ffabab79bfe2a9174ffe0d24",
+          "approvedSha256": "05bfe2a28c1b7001881e6257413cf749d81323816530b9c2a6d1a95cb8b34835"
+        }
+      ],
+      "checks": [
+        {
+          "id": "node-tests",
+          "name": "React/Node status tests",
+          "argv": ["node", "--test", "tests/status.test.mjs"]
+        },
+        {
+          "id": "component-contract",
+          "name": "React component contract",
+          "argv": ["node", "checks/component-contract.mjs"]
+        }
+      ],
+      "sandbox": {
+        "image": "node@sha256:d9f850096136edbc402debdd8729579a288aac64574ada0ff4db26b6ae58b0b2",
+        "cpus": 2,
+        "memoryMb": 4096,
+        "pids": 256,
+        "tmpfsMb": 1024
+      },
+      "budgets": {
+        "maxProviderCalls": 2,
+        "maxRemoteMutations": 0,
+        "maxToolCalls": 40,
+        "maxActiveRuntimeMs": 1200000,
+        "maxContextBytes": 196608,
+        "maxOutputTokensPerCall": 8192,
+        "maxTotalTokens": 100000,
+        "maxCostUsd": 0,
+        "maxFilesChanged": 1,
+        "maxFileBytes": 262144,
+        "maxDiffBytes": 262144,
+        "maxCommandOutputBytes": 262144,
+        "maxRawCommandOutputBytes": 8388608,
+        "providerTimeoutMs": 300000,
+        "commandTimeoutMs": 300000
+      },
+      "sourceImmutability": {
+        "required": true,
+        "contentSnapshot": "byte-exact-tree-and-git-metadata",
+        "gitFingerprintFields": ["head", "status", "refs", "config", "index", "worktrees"],
+        "gitDirectorySnapshot": "complete-types-modes-and-file-bytes",
+        "sourceWritesAllowed": 0
+      },
+      "restartRecovery": {
+        "sameProcessReload": "retains-current-session-authority",
+        "serverProcessRestart": "rotate-origin-and-token",
+        "durableRecovery": "fresh-launch-resumes-persisted-candidate",
+        "injectionPoint": "candidate-commit-prepared-before-local-ref",
+        "expectedLocalRefOutcome": "created",
+        "expectedLocalRefWrites": 1,
+        "expectedCredentialReads": 0,
+        "expectedExternalNetworkRequests": 0,
+        "expectedRemoteMutations": 0
+      },
+      "candidate": {
+        "objectFormat": "sha1",
+        "branchNamespace": "icarus/",
+        "headRefTemplate": "refs/heads/icarus/{runId}",
+        "absentOnly": true,
+        "forceAllowed": false,
+        "deleteAllowed": false,
+        "commitIdentity": {
+          "name": "Icarus Gate 1 Benchmark",
+          "email": "icarus-gate1@example.invalid"
+        },
+        "commitEpochSeconds": 1704067200,
+        "commitIso8601": "2024-01-01T00:00:00Z",
+        "commitMessage": "Icarus Gate 1 deterministic repair\n",
+        "baseCommitSha1": "ea3d322a093e6063deb0a0c1eae591533b094091",
+        "baseTreeSha1": "8457fdcd9aff85b7c892b58b06c46cc71eb25236",
+        "candidateTreeSha1": "a42232d61a6d640d507ce95b33a73fc7c73ba512",
+        "candidateCommitSha1": "6645f24cda9dfb339eb8803e6b452dbf23b7bbd2",
+        "candidateCommitPayloadSha256": "86612cc8c6cad52a877c7d8a6a268c93f54706436814dea4aac00d9603966829",
+        "candidateObjectManifestSha256": "edac9c68d20811c5c908bfdd6b9c2359a211ce3577d1c0bc3585d6ab3d499e88"
+      },
+      "draftPullRequestEvidence": {
+        "schemaVersion": 1,
+        "evidenceMode": "contract-only",
+        "provider": "github",
+        "owner": "icarus-gate1-benchmark",
+        "repository": "react-node",
+        "baseRef": "refs/heads/main",
+        "headRefTemplate": "refs/heads/icarus/{runId}",
+        "expectedBaseCommitSha1": "ea3d322a093e6063deb0a0c1eae591533b094091",
+        "expectedCandidateCommitSha1": "6645f24cda9dfb339eb8803e6b452dbf23b7bbd2",
+        "requiredState": "open",
+        "draft": true,
+        "maintainerCanModify": false,
+        "markerCount": 1,
+        "identityFields": [
+          "owner",
+          "repository",
+          "pullRequestNumber",
+          "reconstructedPullRequestUrl",
+          "draft",
+          "baseRef",
+          "headRef",
+          "candidateCommitSha1"
+        ],
+        "remoteMutationAllowed": false
+      },
+      "receiptEvidence": {
+        "schemaVersion": 1,
+        "contractVersion": "adr-0027-landing-receipt-v1",
+        "requiredFields": [
+          "version",
+          "landingId",
+          "runId",
+          "projectId",
+          "provider",
+          "owner",
+          "repository",
+          "baseRef",
+          "baseCommitSha1",
+          "headRef",
+          "candidateTreeSha1",
+          "candidateCommitSha1",
+          "pullRequestNumber",
+          "reconstructedPullRequestUrl",
+          "draft",
+          "landingSha256",
+          "profileSha256",
+          "planSha256",
+          "diffSha256",
+          "checkpointSha256",
+          "verificationSha256",
+          "reviewDecisionSha256",
+          "changedPathsSha256",
+          "localRefOutcome",
+          "remoteObjectOutcome",
+          "remoteRefOutcome",
+          "pullRequestOutcome",
+          "completedAt"
+        ],
+        "forbiddenFields": [
+          "credential",
+          "credentialRef",
+          "cachePath",
+          "worktreePath",
+          "sourcePath",
+          "commitMessage",
+          "pullRequestTitle",
+          "pullRequestBody",
+          "task",
+          "diff",
+          "checkpoint",
+          "providerOutput",
+          "responseHeaders",
+          "environment"
+        ],
+        "runtimeRequiredForGate": true,
+        "syntheticReceiptCompletesGate": false
+      },
+      "acceptance": {
+        "ciSuccessConditions": [
+          "fixture_contract_valid",
+          "source_revision_exact",
+          "baseline_check_failure_reproduced",
+          "deterministic_repair_completed",
+          "registered_checks_pass",
+          "expected_changed_paths_exact",
+          "source_checkout_unchanged",
+          "candidate_commit_exact",
+          "absent_only_local_ref_created_after_runtime_reopen",
+          "draft_pr_and_receipt_contracts_validated",
+          "zero_credentials_external_network_remote_mutations"
+        ],
+        "releaseSuccessConditions": [
+          "exact_model_prompt_and_budgets_recorded",
+          "task_to_reviewed_candidate_completed",
+          "registered_checks_pass",
+          "expected_changed_paths_exact",
+          "source_checkout_unchanged",
+          "same_tab_reload_and_process_restart_recovery",
+          "candidate_commit_and_branch_exact",
+          "reviewable_real_draft_pull_request",
+          "matching_immutable_receipt",
+          "separate_approval_for_each_external_mutation"
+        ],
+        "failureConditions": [
+          "manifest_or_fixture_digest_mismatch",
+          "baseline_not_reproduced",
+          "provider_or_prompt_identity_mismatch",
+          "registered_check_missing_failed_unavailable_cancelled_or_truncated",
+          "changed_paths_mismatch",
+          "source_checkout_or_git_metadata_changed",
+          "recovery_missing_or_duplicate_effect",
+          "candidate_or_branch_identity_mismatch",
+          "draft_pr_or_receipt_not_real_exact_and_reviewable",
+          "credential_external_network_or_remote_mutation_in_ci",
+          "mocked_evidence_used_for_gate_claim"
+        ]
+      }
+    }
+  ]
+}

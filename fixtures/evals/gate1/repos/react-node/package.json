@@ -1,0 +1,9 @@
+{
+  "name": "gate1-react-node-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/status.test.mjs",
+    "check:component": "node checks/component-contract.mjs"
+  }
+}

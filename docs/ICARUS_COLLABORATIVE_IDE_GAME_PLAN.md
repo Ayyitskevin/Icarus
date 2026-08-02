@@ -352,12 +352,16 @@ foundation. Complete these remaining slices:
    creation, and draft-PR gateway without weakening the existing file-only
    `GitController`;
 6. redacted metadata/digest-only evidence receipt; and
-7. a pinned three-repository benchmark.
+7. a separate versioned, human-approved, credential-gated live-evidence profile
+   bound to the offline manifest digest and immutable case pins; it must pin the
+   real provider/model, pricing and budgets, bind an operator assessment of each
+   repository's automation, authorize only named remote effects, and succeed 3/3.
 
 Success remains three of three TypeScript-library, Python-CLI, and React/Node
 repair tasks with passing registered checks, exact expected changed paths,
 reviewable draft pull requests, matching evidence receipts, restart recovery,
-and unchanged source checkouts.
+and unchanged source checkouts. Slice 1's dependency-free React/Node module
+fixture is not runnable-React-application evidence.
 
 ### G2 — context and agent quality
 
@@ -489,7 +493,7 @@ remains source-collaboration truth; Icarus preserves the proof and rationale.
 | Shared client | new `packages/client` | versioned contracts for browser and VS Code |
 | IDE | new `packages/vscode` | task, room, editor context, diff/check/recovery/landing surfaces |
 | Context | `packages/core/src/context.ts`, `tools.ts` | map v2, bounded exact search, symbols, per-source budgets and provenance |
-| Evaluation | `fixtures/evals`, `scripts/eval-fixtures.mjs` | Gate 1, Gate 2, Council, Crew, IDE, preview, and change-pack manifests |
+| Evaluation | `fixtures/evals`, `fixtures/evals/gate1/manifest.v1.json`, `scripts/eval-fixtures.mjs` | the populated Gate 1 input contract and closed schema-v1 local success/failure report first; later Gate 2, Council, Crew, IDE, preview, and change-pack manifests |
 | Documentation | ADRs 0027–0038, threat model, operations, PRD | one accepted authority/recovery contract before each external-effect class |
 
 ADR 0037 will define Mission Rooms, agent identities, membership, transcript
@@ -523,8 +527,9 @@ and both macOS and Windows jobs in native
 [run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
 succeeded there. Gate 0 is merged and released without Gate 1 runtime code;
 at that point Packet 1 became the forward work. Its contracts and PR #20's
-repository-only foundations have since landed; the benchmark and remaining
-end-to-end Gate 1 runtime and coordination work remain open.
+repository-only foundations have since landed; the separately approved real 3/3
+benchmark evidence and remaining end-to-end Gate 1 runtime and coordination
+work remain open.
 
 ### Packet 1 — authority contracts and benchmark
 
@@ -538,7 +543,8 @@ Working set:
 - `docs/ARCHITECTURE.md`;
 - `docs/OPERATIONS.md`;
 - `docs/EVALS.md`; and
-- a versioned Gate 1 benchmark manifest.
+- the populated versioned Gate 1 input manifest at
+  `fixtures/evals/gate1/manifest.v1.json`.
 
 Record the rejected numeric-origin experiment and define the accepted interim
 Chromium-family support boundary, exact `.localhost` nonce/socket split,
@@ -554,8 +560,39 @@ are accepted after independent P0/P1 reviews. ADR 0039 is rejected. ADR 0040's
 technical evidence is complete at
 `eb01b6406c12126c60add7ac83800f8eba8ffdc9`, and explicit human acceptance of
 its interim operator-controlled browser/resolver/proxy residual risk was
-recorded on 2026-07-31. The versioned Gate 1 benchmark manifest is still
-outstanding, so Packet 1 is not complete.
+recorded on 2026-07-31. The populated closed input contract is now present.
+`pnpm benchmark:gate1`, also integrated under `pnpm eval`, validates exactly one
+TypeScript-library, one Python-CLI, and one dependency-free React/Node module
+repair with raw task/source/approved-repair pins, prompt-revision labels,
+production planning/edit system-instruction hashes, registered-check vectors,
+and exact candidate-object pins. It generates the ignored schema-v1
+`.local/gate1-benchmark-report.json` as a closed success/failure union through
+deterministic loopback production-Ollama transport, no-network sandboxes, and the
+real local candidate plus absent-only-ref foundation. Success alone binds the
+validated manifest digest and all three case observations. Failure carries only
+the ordered completed-case prefix, `partial_completed_cases_only` counters, and
+the failure stage, applicable next case, safe code or `null`, and message digest;
+its manifest digest is `null` only when raw manifest bytes were unavailable.
+Packet 1's authority-and-benchmark contract deliverable is therefore present; no
+command-pass evidence is implied here.
+
+This does not complete Gate 1. Each completed-case report record marks draft-PR
+and receipt effects contract-only and not executed, and the manifest's
+derivative-effect declaration is `contract-only-unassessed`. For each completed
+case, the offline runner reopens the production runtime and replays a
+harness-only candidate journal into a new local controller; it does not execute
+browser reload or foreground-server restart and does not prove durable landing
+coordination.
+
+Guarded browser paths, durable landing coordination, the GitHub gateway and
+receipt runtime, and a separate versioned human-approved credential-gated
+live-evidence profile remain outstanding. That profile must bind the offline
+manifest digest and immutable case/task/check/source/expected-change/candidate
+pins; pin the real provider/model and adapter version, captured pricing and
+budgets, and an operator-produced repository-automation assessment/disposition/
+raw digest; authorize only named separately approved remote effects; and succeed
+3/3 against approved real repositories. Mock or synthetic model, GitHub,
+automation, or receipt evidence cannot close the gate.
 
 ### Packet 2 — browser authority without Git effects
 
@@ -613,11 +650,16 @@ partial.
 
 ### Packet 4 — GitHub draft-PR landing
 
-Add the allowlisted provider gateway, metadata-only receipt, remote
-reconciliation, and three-repository benchmark. No force-push, merge, branch
+Add the allowlisted provider gateway, metadata-only receipt, and remote
+reconciliation, then record a separately versioned, human-approved,
+credential-gated live-evidence profile bound to the offline manifest digest and
+immutable case pins. It must pin the real provider/model, pricing and budgets,
+bind an operator assessment and raw digest of repository-configured automation,
+and name only the separately approved object-upload, absent-only-ref, draft-PR,
+and receipt effects needed for 3/3 evidence. No force-push, merge, branch
 deletion, direct deployment endpoint, arbitrary URL, arbitrary Git arguments,
-or browser-held credentials. The landing decision must disclose and bind
-repository-configured automation triggered by branch and draft-PR events.
+or browser-held credentials. The default benchmark command remains
+credential-free and cannot perform this live acceptance.
 
 ### Packet 5 — context, IDE, then Council
 
