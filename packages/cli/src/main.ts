@@ -1,17 +1,20 @@
 #!/usr/bin/env node
 
+import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
-  assertRegistrationStateSeparation,
   assertExpectedChangeHandoffPreview,
+  assertRegistrationStateSeparation,
   BROWSER_ACTION_LEDGER_MIGRATION,
   buildChangeHandoffPreview,
   CHANGE_HANDOFF_FILENAME,
   CHANGE_HANDOFF_MAX_BYTES,
   CHANGE_HANDOFF_RESULT_FILENAME,
   CHANGE_HANDOFF_RESULT_MAX_BYTES,
+  type ChangeRoomAnnotationTarget,
   type CheckProfile,
   createChangeHandoffExportResult,
   createIcarusRuntime,
@@ -20,15 +23,16 @@ import {
   DEFAULT_SANDBOX_LIMITS,
   encodeChangeHandoffExportResult,
   type Gate1MigrationToken,
+  type GitHubLandingProfileV1,
   IcarusError,
-  type ChangeRoomAnnotationTarget,
   type IcarusRuntime,
   inspectChangeHandoffDocuments,
   LANDING_LEDGER_MIGRATION,
   migrateGate1Schema,
+  presentLandingStatusV1,
+  type RunRecord,
   readChangeHandoffSource,
   readSecureHandoffFile,
-  type RunRecord,
   verifyChangeHandoffDocuments,
   writeChangeHandoffFiles,
 } from "@icarus/core";
@@ -37,6 +41,12 @@ interface ParsedOptions {
   readonly positionals: readonly string[];
   readonly values: ReadonlyMap<string, readonly string[]>;
   readonly booleans: ReadonlySet<string>;
+}
+
+export interface CliMainOptions {
+  readonly args?: readonly string[];
+  readonly platform?: NodeJS.Platform;
+  readonly createRuntime?: typeof createIcarusRuntime;
 }
 
 function fail(code: string, message: string): never {
@@ -227,6 +237,67 @@ function registrationPathForPreflight(args: readonly string[]): string | undefin
   return required(options, "--path");
 }
 
+function assertLandingMutationPlatform(args: readonly string[], platform: NodeJS.Platform): void {
+  const [group, action] = args;
+  if (
+    group === "landing" &&
+    action !== undefined &&
+    action !== "profile-show" &&
+    action !== "status" &&
+    platform !== "linux"
+  ) {
+    fail("UNSUPPORTED_PLATFORM", "Git landing mutations require Linux");
+  }
+}
+
+function landingCredentialEnvironmentAllowlist(): readonly string[] {
+  const raw = process.env.ICARUS_GITHUB_TOKEN_ALLOWLIST;
+  if (raw === undefined || raw.length === 0) return [];
+  const names = raw.split(",");
+  if (names.some((name) => name.length === 0 || name !== name.trim())) {
+    fail(
+      "INVALID_DATABASE_CONFIGURATION",
+      "ICARUS_GITHUB_TOKEN_ALLOWLIST must be a comma-separated list without blank or padded names",
+    );
+  }
+  if (new Set(names).size !== names.length) {
+    fail("INVALID_DATABASE_CONFIGURATION", "ICARUS_GITHUB_TOKEN_ALLOWLIST contains duplicates");
+  }
+  return names;
+}
+
+function landingProfile(options: ParsedOptions): GitHubLandingProfileV1 {
+  const disposition = required(options, "--derivative-effects-disposition");
+  if (disposition !== "inert-repository" && disposition !== "operator-approved") {
+    fail(
+      "INVALID_ARGUMENT",
+      "--derivative-effects-disposition must be inert-repository or operator-approved",
+    );
+  }
+  return {
+    version: 1,
+    provider: "github",
+    owner: required(options, "--owner"),
+    repository: required(options, "--repository"),
+    baseBranch: required(options, "--base-branch"),
+    branchNamespace: "icarus/",
+    credentialRef: {
+      kind: "environment",
+      name: required(options, "--credential-env"),
+    },
+    expectedActor: required(options, "--expected-actor"),
+    commitIdentity: {
+      name: required(options, "--commit-name"),
+      email: required(options, "--commit-email"),
+    },
+    derivativeEffects: {
+      version: 1,
+      disposition,
+      evidenceSha256: required(options, "--derivative-effects-evidence-sha"),
+    },
+  };
+}
+
 function publicRun(run: RunRecord): Record<string, unknown> {
   return {
     id: run.id,
@@ -375,6 +446,12 @@ function usage(): never {
       "icarus run annotate RUN --card CARD|room --text TEXT --actor ACTOR",
       "icarus run annotations RUN",
       "icarus run cancel RUN --actor ACTOR",
+      "icarus landing profile-set --project NAME --owner OWNER --repository REPOSITORY --base-branch BRANCH --credential-env ENV_NAME --expected-actor ACTOR --commit-name NAME --commit-email EMAIL --derivative-effects-disposition inert-repository|operator-approved --derivative-effects-evidence-sha SHA",
+      "icarus landing profile-show --project NAME",
+      "icarus landing prepare RUN --commit-message TEXT --pr-title TEXT --pr-body-prefix TEXT",
+      "icarus landing status RUN",
+      "icarus landing decide RUN --landing-sha SHA --decision approve|reject --actor ACTOR",
+      "icarus landing resume RUN",
     ].join("\n"),
   );
 }
@@ -436,6 +513,76 @@ async function dispatch(
     const options = parseOptions(rest, []);
     noPositionals(options);
     print(runtime.service.listProjects());
+    return;
+  }
+  if (group === "landing" && action === "profile-set") {
+    const options = parseOptions(rest, [
+      "--project",
+      "--owner",
+      "--repository",
+      "--base-branch",
+      "--credential-env",
+      "--expected-actor",
+      "--commit-name",
+      "--commit-email",
+      "--derivative-effects-disposition",
+      "--derivative-effects-evidence-sha",
+    ]);
+    noPositionals(options);
+    print(
+      runtime.service.setLandingProfile(required(options, "--project"), landingProfile(options)),
+    );
+    return;
+  }
+  if (group === "landing" && action === "profile-show") {
+    const options = parseOptions(rest, ["--project"]);
+    noPositionals(options);
+    print(runtime.service.getLandingProfile(required(options, "--project")));
+    return;
+  }
+  if (group === "landing" && action === "prepare") {
+    const options = parseOptions(rest, ["--commit-message", "--pr-title", "--pr-body-prefix"]);
+    print(
+      presentLandingStatusV1(
+        await runtime.service.prepareLanding(
+          {
+            runId: oneRunId(options),
+            commitMessage: required(options, "--commit-message"),
+            pullRequestTitle: required(options, "--pr-title"),
+            pullRequestBodyPrefix: required(options, "--pr-body-prefix"),
+          },
+          signal,
+        ),
+      ),
+    );
+    return;
+  }
+  if (group === "landing" && action === "status") {
+    const options = parseOptions(rest, []);
+    print(presentLandingStatusV1(runtime.service.getLandingStatus(oneRunId(options))));
+    return;
+  }
+  if (group === "landing" && action === "decide") {
+    const options = parseOptions(rest, ["--landing-sha", "--decision", "--actor"]);
+    const decision = required(options, "--decision");
+    if (decision !== "approve" && decision !== "reject") {
+      fail("INVALID_DECISION", "--decision must be approve or reject");
+    }
+    print(
+      presentLandingStatusV1(
+        await runtime.service.decideLanding(
+          oneRunId(options),
+          required(options, "--landing-sha"),
+          required(options, "--actor"),
+          decision,
+        ),
+      ),
+    );
+    return;
+  }
+  if (group === "landing" && action === "resume") {
+    const options = parseOptions(rest, []);
+    print(presentLandingStatusV1(await runtime.service.resumeLanding(oneRunId(options), signal)));
     return;
   }
   if (group !== "run" || action === undefined) {
@@ -613,15 +760,16 @@ async function dispatch(
   usage();
 }
 
-async function main(): Promise<void> {
+export async function runCliMain(options: CliMainOptions = {}): Promise<void> {
   const controller = new AbortController();
   const abort = (): void => controller.abort(new Error("Operator interrupted Icarus"));
   process.once("SIGINT", abort);
   process.once("SIGTERM", abort);
   let runtime: IcarusRuntime | undefined;
   try {
-    const args = process.argv.slice(2);
+    const args = options.args ?? process.argv.slice(2);
     if (dispatchFileOnlyHandoff(args)) return;
+    assertLandingMutationPlatform(args, options.platform ?? process.platform);
     const root = stateRoot();
     if (dispatchReadOnlyRunHandoff(args, root)) return;
     const registrationPath = registrationPathForPreflight(args);
@@ -634,11 +782,12 @@ async function main(): Promise<void> {
       print({ migration: migrationApproval.gate1, status: "applied" });
       return;
     }
-    runtime = await createIcarusRuntime(root, {
+    runtime = await (options.createRuntime ?? createIcarusRuntime)(root, {
       allowApprovalIndexMigration: migrationApproval.approvalIndex,
       allowPatchSetMigration: migrationApproval.patchSet,
       allowReadableManifestMigration: migrationApproval.readableManifest,
       allowAnnotationMigration: migrationApproval.annotation,
+      landingCredentialEnvironmentNames: landingCredentialEnvironmentAllowlist(),
     });
     await dispatch(runtime, args, controller.signal);
   } catch (error) {
@@ -661,4 +810,14 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+function isDirectExecution(): boolean {
+  const entryPath = process.argv[1];
+  if (entryPath === undefined) return false;
+  try {
+    return realpathSync(entryPath) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectExecution()) await runCliMain();

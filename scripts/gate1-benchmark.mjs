@@ -913,11 +913,12 @@ async function runCase(benchmarkCase) {
     );
     let duplicateReplayCode = null;
     try {
-      await restartedController.createAbsentLocalRef({
+      const duplicateReplay = await restartedController.createAbsentLocalRef({
         cachePath: recoveredCachePath,
         runId: recovered.runId,
         candidateCommitSha1: recovered.candidateCommitSha1,
       });
+      duplicateReplayCode = duplicateReplay.outcome === "failed" ? duplicateReplay.errorCode : null;
     } catch (error) {
       duplicateReplayCode =
         typeof error === "object" && error !== null && "code" in error ? error.code : null;

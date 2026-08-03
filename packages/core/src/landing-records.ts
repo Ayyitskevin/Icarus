@@ -6,12 +6,15 @@ import { IcarusError } from "./errors.js";
 import {
   canAttachLandingHttpKind,
   canStartLandingOperation,
+  canTransitionLanding,
   isLandingHttpKindV1,
   isLandingOperationKindV1,
   isLandingResumeStateV1,
+  isLandingStateV1,
   type LandingHttpKindV1,
   type LandingOperationKindV1,
   type LandingResumeStateV1,
+  type LandingStateV1,
 } from "./landing-state.js";
 import { assertAllowedTarget } from "./policy.js";
 import type { CheckProfile, JsonValue, VerificationEvidence } from "./types.js";
@@ -612,6 +615,17 @@ function assertFullHeadRef(value: unknown, field: string): string {
   return decoded;
 }
 
+export function assertLandingCredentialEnvironmentName(
+  value: unknown,
+  field = "credentialEnvironmentName",
+): string {
+  const decoded = string(value, field);
+  if (!LANDING_CREDENTIAL_ENV_PATTERN.test(decoded)) {
+    invalid(`${field} violates the dedicated Icarus GitHub-token environment-name policy`);
+  }
+  return decoded;
+}
+
 export function decodeGitHubLandingProfileV1(value: unknown): GitHubLandingProfileV1 {
   const decoded = record(
     value,
@@ -655,10 +669,10 @@ export function decodeGitHubLandingProfileV1(value: unknown): GitHubLandingProfi
   }
   const credentialRef = record(decoded.credentialRef, ["kind", "name"], "profile.credentialRef");
   literal(credentialRef.kind, "environment", "profile.credentialRef.kind");
-  const credentialName = string(credentialRef.name, "profile.credentialRef.name");
-  if (!LANDING_CREDENTIAL_ENV_PATTERN.test(credentialName)) {
-    invalid("Profile credential reference violates the dedicated Icarus GitHub-token policy");
-  }
+  const credentialName = assertLandingCredentialEnvironmentName(
+    credentialRef.name,
+    "profile.credentialRef.name",
+  );
   const derivativeEffects = record(
     decoded.derivativeEffects,
     ["version", "disposition", "evidenceSha256"],
@@ -2334,4 +2348,1164 @@ export function canonicalGitHubPostBodyV1(
   const decoded = decodeGitHubPostBodyV1(kind, value);
   const body = canonicalLandingJson(decoded);
   return { value: decoded, body, sha256: sha256(body) };
+}
+
+export interface LandingDecisionV1 {
+  readonly id: string;
+  readonly landingId: string;
+  readonly landingSha256: string;
+  readonly actor: string;
+  readonly decision: "approve" | "reject";
+  readonly createdAt: string;
+}
+
+export function decodeLandingDecisionV1(value: unknown): LandingDecisionV1 {
+  const decoded = record(
+    value,
+    ["id", "landingId", "landingSha256", "actor", "decision", "createdAt"],
+    "landingDecision",
+  );
+  return {
+    id: assertUuid(decoded.id, "landingDecision.id"),
+    landingId: assertUuid(decoded.landingId, "landingDecision.landingId"),
+    landingSha256: assertSha256(decoded.landingSha256, "landingDecision.landingSha256"),
+    actor: assertActor(decoded.actor, "landingDecision.actor"),
+    decision: oneOf(decoded.decision, ["approve", "reject"] as const, "landingDecision.decision"),
+    createdAt: assertInstant(decoded.createdAt, "landingDecision.createdAt"),
+  };
+}
+
+export type LocalRefFactV1 =
+  | {
+      readonly schemaVersion: 1;
+      readonly state: "absent";
+      readonly objectSha1: null;
+      readonly symbolicTargetSha256: null;
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly state: "direct";
+      readonly objectSha1: string;
+      readonly symbolicTargetSha256: null;
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly state: "symbolic";
+      readonly objectSha1: null;
+      readonly symbolicTargetSha256: string;
+    };
+
+/**
+ * The accepted contract defines no legal nullability shape for its explanatory
+ * "invalid" local-ref state. Persisted v1 records therefore reject it rather
+ * than inventing an encoding.
+ */
+export function decodeLocalRefFactV1(value: unknown): LocalRefFactV1 {
+  const decoded = record(
+    value,
+    ["schemaVersion", "state", "objectSha1", "symbolicTargetSha256"],
+    "localRefFact",
+  );
+  const schemaVersion = literal(decoded.schemaVersion, 1, "localRefFact.schemaVersion");
+  const state = oneOf(
+    decoded.state,
+    ["absent", "direct", "symbolic"] as const,
+    "localRefFact.state",
+  );
+  switch (state) {
+    case "absent":
+      return {
+        schemaVersion,
+        state,
+        objectSha1: literal(decoded.objectSha1, null, "localRefFact.objectSha1"),
+        symbolicTargetSha256: literal(
+          decoded.symbolicTargetSha256,
+          null,
+          "localRefFact.symbolicTargetSha256",
+        ),
+      };
+    case "direct":
+      return {
+        schemaVersion,
+        state,
+        objectSha1: assertSha1(decoded.objectSha1, "localRefFact.objectSha1"),
+        symbolicTargetSha256: literal(
+          decoded.symbolicTargetSha256,
+          null,
+          "localRefFact.symbolicTargetSha256",
+        ),
+      };
+    case "symbolic":
+      return {
+        schemaVersion,
+        state,
+        objectSha1: literal(decoded.objectSha1, null, "localRefFact.objectSha1"),
+        symbolicTargetSha256: assertSha256(
+          decoded.symbolicTargetSha256,
+          "localRefFact.symbolicTargetSha256",
+        ),
+      };
+  }
+}
+
+export function decodeCanonicalLocalRefFactJsonV1(encoded: string): LocalRefFactV1 {
+  return decodeCanonicalLandingJson(encoded, decodeLocalRefFactV1);
+}
+
+export type LandingObservationFactNameV1 =
+  | "subject_operation"
+  | "local_ref"
+  | "actor"
+  | "base_ref"
+  | "head_ref"
+  | "pull_requests";
+
+export interface LandingOperationObservationFactV1 {
+  readonly fact: LandingObservationFactNameV1;
+  readonly requestId: string | null;
+  readonly resultSha256: string;
+}
+
+export interface LandingOperationObservationV1 {
+  readonly schemaVersion: 1;
+  readonly operationId: string;
+  readonly kind: LandingOperationKindV1;
+  readonly phase: "pre_effect" | "reconciliation";
+  readonly facts: readonly LandingOperationObservationFactV1[];
+}
+
+const OBSERVATION_FACT_NAMES = [
+  "subject_operation",
+  "local_ref",
+  "actor",
+  "base_ref",
+  "head_ref",
+  "pull_requests",
+] as const satisfies readonly LandingObservationFactNameV1[];
+
+function sameStringSequence(actual: readonly string[], expected: readonly string[]): boolean {
+  return (
+    actual.length === expected.length && actual.every((entry, index) => entry === expected[index])
+  );
+}
+
+function permittedObservationSequences(
+  kind: LandingOperationKindV1,
+): readonly (readonly LandingObservationFactNameV1[])[] {
+  switch (kind) {
+    case "candidate.prepare":
+      return [];
+    case "local_ref.create":
+      return [["local_ref"]];
+    case "github.preflight":
+      return [
+        ["actor", "base_ref", "head_ref"],
+        ["actor", "base_ref", "head_ref", "pull_requests"],
+      ];
+    case "github.objects.upload":
+      return [["actor"]];
+    case "github.ref.create":
+      return [["actor", "base_ref", "head_ref"]];
+    case "github.pull_request.create":
+      return [["actor", "base_ref", "head_ref", "pull_requests"]];
+    case "landing.reconcile":
+      return [
+        ["subject_operation"],
+        ["subject_operation", "local_ref"],
+        ["subject_operation", "actor", "base_ref", "head_ref"],
+        ["subject_operation", "actor", "base_ref", "head_ref", "pull_requests"],
+      ];
+  }
+}
+
+export function decodeLandingOperationObservationV1(value: unknown): LandingOperationObservationV1 {
+  const decoded = record(
+    value,
+    ["schemaVersion", "operationId", "kind", "phase", "facts"],
+    "operationObservation",
+  );
+  if (!isLandingOperationKindV1(decoded.kind)) {
+    invalid("Operation observation kind is unsupported");
+  }
+  const expectedPhase = decoded.kind === "landing.reconcile" ? "reconciliation" : "pre_effect";
+  const phase = literal(decoded.phase, expectedPhase, "operationObservation.phase");
+  const facts = array(decoded.facts, "operationObservation.facts").map((entry, index) => {
+    const field = `operationObservation.facts[${index}]`;
+    const factRecord = record(entry, ["fact", "requestId", "resultSha256"], field);
+    const fact = oneOf(factRecord.fact, OBSERVATION_FACT_NAMES, `${field}.fact`);
+    const localFact = fact === "subject_operation" || fact === "local_ref";
+    const requestId = localFact
+      ? literal(factRecord.requestId, null, `${field}.requestId`)
+      : assertUuid(factRecord.requestId, `${field}.requestId`);
+    return {
+      fact,
+      requestId,
+      resultSha256: assertSha256(factRecord.resultSha256, `${field}.resultSha256`),
+    };
+  });
+  const factNames = facts.map((entry) => entry.fact);
+  if (
+    !permittedObservationSequences(decoded.kind).some((expected) =>
+      sameStringSequence(factNames, expected),
+    )
+  ) {
+    invalid("Operation observation facts do not match the kind-specific grammar");
+  }
+  const requestIds = facts
+    .map((entry) => entry.requestId)
+    .filter((entry): entry is string => entry !== null);
+  if (new Set(requestIds).size !== requestIds.length) {
+    invalid("Operation observation contains a duplicate provider request");
+  }
+  return {
+    schemaVersion: literal(decoded.schemaVersion, 1, "operationObservation.schemaVersion"),
+    operationId: assertUuid(decoded.operationId, "operationObservation.operationId"),
+    kind: decoded.kind,
+    phase,
+    facts,
+  };
+}
+
+export function decodeCanonicalLandingOperationObservationJsonV1(
+  encoded: string,
+): LandingOperationObservationV1 {
+  return decodeCanonicalLandingJson(encoded, decodeLandingOperationObservationV1);
+}
+
+export interface CandidateReadyValueV1 {
+  readonly candidateTreeSha1: string;
+  readonly candidateCommitSha1: string;
+  readonly candidateCommitPayloadSha256: string;
+  readonly candidateObjectManifestSha256: string;
+  readonly candidateCredentialAuditSha256: string;
+  readonly diffByteEqual: true;
+}
+
+export interface LocalRefReadyValueV1 {
+  readonly headRef: string;
+  readonly candidateCommitSha1: string;
+  readonly localRefOutcome: "created" | "reconciled";
+  readonly updateRefExitCode: 0 | null;
+}
+
+export interface PreflightExactValueV1 {
+  readonly actor: string;
+  readonly baseSha1: string;
+  readonly headState: "absent" | "exact";
+  readonly pullRequestCount: 0 | null;
+}
+
+export interface ObjectsExactValueV1 {
+  readonly candidateObjectManifestSha256: string;
+  readonly remoteObjectOutcome: "created_or_exact";
+}
+
+export interface RemoteRefReadyValueV1 {
+  readonly baseSha1: string;
+  readonly headSha1: string;
+  readonly remoteRefOutcome: "created" | "reconciled";
+}
+
+export interface PullRequestProjectionV1 {
+  readonly type: "pull_request";
+  readonly number: number;
+  readonly state: "open";
+  readonly draft: true;
+  readonly owner: string;
+  readonly repository: string;
+  readonly headOwner: string;
+  readonly headRef: string;
+  readonly headSha1: string;
+  readonly baseRef: string;
+  readonly baseSha1: string;
+  readonly titleSha256: string;
+  readonly bodySha256: string;
+  readonly markerCount: 1;
+  readonly maintainerCanModify: false;
+}
+
+export interface DraftPrExactValueV1 extends PullRequestProjectionV1 {
+  readonly pullRequestOutcome: "created" | "reconciled";
+}
+
+export interface ReconcileValueV1 {
+  readonly subjectOperationId: string;
+  readonly nextState: LandingStateV1;
+  readonly remoteResidue: "none" | "branch" | "pull_request";
+  readonly stageValue:
+    | LocalRefReadyValueV1
+    | ObjectsExactValueV1
+    | RemoteRefReadyValueV1
+    | DraftPrExactValueV1
+    | null;
+}
+
+export interface ReconciliationRequiredValueV1 {
+  readonly subjectOperationId: string;
+  readonly remoteResidue: "none" | "branch" | "pull_request" | "ambiguous";
+}
+
+export interface LandingOperationEvidenceV1 {
+  readonly requestId: string | null;
+  readonly resultSha256: string;
+}
+
+export interface LandingOperationResultV1 {
+  readonly schemaVersion: 1;
+  readonly operationId: string;
+  readonly kind: LandingOperationKindV1;
+  readonly outcome: "completed" | "failed" | "interrupted" | "reconciliation_required";
+  readonly boundary:
+    | "candidate_ready"
+    | "local_ref_ready"
+    | "preflight_exact"
+    | "objects_exact"
+    | "remote_ref_ready"
+    | "draft_pr_exact"
+    | "subject_settled"
+    | "retry_stage_proven"
+    | "operation_failed"
+    | "operation_interrupted"
+    | "reconciliation_required";
+  readonly evidence: readonly LandingOperationEvidenceV1[];
+  readonly value:
+    | CandidateReadyValueV1
+    | LocalRefReadyValueV1
+    | PreflightExactValueV1
+    | ObjectsExactValueV1
+    | RemoteRefReadyValueV1
+    | DraftPrExactValueV1
+    | ReconcileValueV1
+    | ReconciliationRequiredValueV1
+    | null;
+  readonly errorCode: string | null;
+}
+
+const PULL_REQUEST_PROJECTION_KEYS = [
+  "type",
+  "number",
+  "state",
+  "draft",
+  "owner",
+  "repository",
+  "headOwner",
+  "headRef",
+  "headSha1",
+  "baseRef",
+  "baseSha1",
+  "titleSha256",
+  "bodySha256",
+  "markerCount",
+  "maintainerCanModify",
+] as const;
+
+function decodePullRequestProjectionFieldsV1(
+  decoded: JsonRecord,
+  field: string,
+): PullRequestProjectionV1 {
+  return {
+    type: literal(decoded.type, "pull_request", `${field}.type`),
+    number: safeInteger(decoded.number, `${field}.number`, 1, Number.MAX_SAFE_INTEGER),
+    state: literal(decoded.state, "open", `${field}.state`),
+    draft: literal(decoded.draft, true, `${field}.draft`),
+    owner: assertGitHubIdentityPart(decoded.owner, `${field}.owner`, true),
+    repository: assertGitHubIdentityPart(decoded.repository, `${field}.repository`, false),
+    headOwner: assertGitHubIdentityPart(decoded.headOwner, `${field}.headOwner`, true),
+    headRef: assertGitBranchName(decoded.headRef, `${field}.headRef`),
+    headSha1: assertSha1(decoded.headSha1, `${field}.headSha1`),
+    baseRef: assertGitBranchName(decoded.baseRef, `${field}.baseRef`),
+    baseSha1: assertSha1(decoded.baseSha1, `${field}.baseSha1`),
+    titleSha256: assertSha256(decoded.titleSha256, `${field}.titleSha256`),
+    bodySha256: assertSha256(decoded.bodySha256, `${field}.bodySha256`),
+    markerCount: literal(decoded.markerCount, 1, `${field}.markerCount`),
+    maintainerCanModify: literal(
+      decoded.maintainerCanModify,
+      false,
+      `${field}.maintainerCanModify`,
+    ),
+  };
+}
+
+export function decodePullRequestProjectionV1(value: unknown): PullRequestProjectionV1 {
+  const decoded = record(value, PULL_REQUEST_PROJECTION_KEYS, "pullRequestProjection");
+  return decodePullRequestProjectionFieldsV1(decoded, "pullRequestProjection");
+}
+
+function decodeCandidateReadyValueV1(value: unknown, field: string): CandidateReadyValueV1 {
+  const decoded = record(
+    value,
+    [
+      "candidateTreeSha1",
+      "candidateCommitSha1",
+      "candidateCommitPayloadSha256",
+      "candidateObjectManifestSha256",
+      "candidateCredentialAuditSha256",
+      "diffByteEqual",
+    ],
+    field,
+  );
+  return {
+    candidateTreeSha1: assertSha1(decoded.candidateTreeSha1, `${field}.candidateTreeSha1`),
+    candidateCommitSha1: assertSha1(decoded.candidateCommitSha1, `${field}.candidateCommitSha1`),
+    candidateCommitPayloadSha256: assertSha256(
+      decoded.candidateCommitPayloadSha256,
+      `${field}.candidateCommitPayloadSha256`,
+    ),
+    candidateObjectManifestSha256: assertSha256(
+      decoded.candidateObjectManifestSha256,
+      `${field}.candidateObjectManifestSha256`,
+    ),
+    candidateCredentialAuditSha256: assertSha256(
+      decoded.candidateCredentialAuditSha256,
+      `${field}.candidateCredentialAuditSha256`,
+    ),
+    diffByteEqual: literal(decoded.diffByteEqual, true, `${field}.diffByteEqual`),
+  };
+}
+
+function decodeLocalRefReadyValueV1(value: unknown, field: string): LocalRefReadyValueV1 {
+  const decoded = record(
+    value,
+    ["headRef", "candidateCommitSha1", "localRefOutcome", "updateRefExitCode"],
+    field,
+  );
+  const localRefOutcome = oneOf(
+    decoded.localRefOutcome,
+    ["created", "reconciled"] as const,
+    `${field}.localRefOutcome`,
+  );
+  const updateRefExitCode =
+    localRefOutcome === "created"
+      ? literal(decoded.updateRefExitCode, 0, `${field}.updateRefExitCode`)
+      : literal(decoded.updateRefExitCode, null, `${field}.updateRefExitCode`);
+  return {
+    headRef: assertFullHeadRef(decoded.headRef, `${field}.headRef`),
+    candidateCommitSha1: assertSha1(decoded.candidateCommitSha1, `${field}.candidateCommitSha1`),
+    localRefOutcome,
+    updateRefExitCode,
+  };
+}
+
+function decodePreflightExactValueV1(value: unknown, field: string): PreflightExactValueV1 {
+  const decoded = record(value, ["actor", "baseSha1", "headState", "pullRequestCount"], field);
+  return {
+    actor: assertGitHubIdentityPart(decoded.actor, `${field}.actor`, true),
+    baseSha1: assertSha1(decoded.baseSha1, `${field}.baseSha1`),
+    headState: oneOf(decoded.headState, ["absent", "exact"] as const, `${field}.headState`),
+    pullRequestCount:
+      decoded.pullRequestCount === null
+        ? null
+        : literal(decoded.pullRequestCount, 0, `${field}.pullRequestCount`),
+  };
+}
+
+function decodeObjectsExactValueV1(value: unknown, field: string): ObjectsExactValueV1 {
+  const decoded = record(value, ["candidateObjectManifestSha256", "remoteObjectOutcome"], field);
+  return {
+    candidateObjectManifestSha256: assertSha256(
+      decoded.candidateObjectManifestSha256,
+      `${field}.candidateObjectManifestSha256`,
+    ),
+    remoteObjectOutcome: literal(
+      decoded.remoteObjectOutcome,
+      "created_or_exact",
+      `${field}.remoteObjectOutcome`,
+    ),
+  };
+}
+
+function decodeRemoteRefReadyValueV1(value: unknown, field: string): RemoteRefReadyValueV1 {
+  const decoded = record(value, ["baseSha1", "headSha1", "remoteRefOutcome"], field);
+  return {
+    baseSha1: assertSha1(decoded.baseSha1, `${field}.baseSha1`),
+    headSha1: assertSha1(decoded.headSha1, `${field}.headSha1`),
+    remoteRefOutcome: oneOf(
+      decoded.remoteRefOutcome,
+      ["created", "reconciled"] as const,
+      `${field}.remoteRefOutcome`,
+    ),
+  };
+}
+
+function decodeDraftPrExactValueV1(value: unknown, field: string): DraftPrExactValueV1 {
+  const decoded = record(value, [...PULL_REQUEST_PROJECTION_KEYS, "pullRequestOutcome"], field);
+  return {
+    ...decodePullRequestProjectionFieldsV1(decoded, field),
+    pullRequestOutcome: oneOf(
+      decoded.pullRequestOutcome,
+      ["created", "reconciled"] as const,
+      `${field}.pullRequestOutcome`,
+    ),
+  };
+}
+
+function decodeLandingStateName(value: unknown, field: string): LandingStateV1 {
+  if (!isLandingStateV1(value)) invalid(`${field} is not a landing state`);
+  return value;
+}
+
+function decodeReconcileValueV1(
+  value: unknown,
+  field: string,
+  boundary: "subject_settled" | "retry_stage_proven",
+): ReconcileValueV1 {
+  const decoded = record(
+    value,
+    ["subjectOperationId", "nextState", "remoteResidue", "stageValue"],
+    field,
+  );
+  const subjectOperationId = assertUuid(decoded.subjectOperationId, `${field}.subjectOperationId`);
+  const nextState = decodeLandingStateName(decoded.nextState, `${field}.nextState`);
+  const remoteResidue = oneOf(
+    decoded.remoteResidue,
+    ["none", "branch", "pull_request"] as const,
+    `${field}.remoteResidue`,
+  );
+
+  if (boundary === "retry_stage_proven") {
+    literal(decoded.stageValue, null, `${field}.stageValue`);
+    if (
+      !(
+        nextState === "approved" ||
+        nextState === "local_ready" ||
+        nextState === "objects_ready" ||
+        nextState === "remote_ready"
+      )
+    ) {
+      invalid("Retry-stage reconciliation has an impossible next state");
+    }
+    const expectedResidue = nextState === "remote_ready" ? "branch" : "none";
+    if (remoteResidue !== expectedResidue) {
+      invalid("Retry-stage reconciliation has an inconsistent remote residue");
+    }
+    return { subjectOperationId, nextState, remoteResidue, stageValue: null };
+  }
+
+  if (decoded.stageValue === null) {
+    invalid("Settled-subject reconciliation requires a stage value");
+  }
+  switch (nextState) {
+    case "local_ready": {
+      const stageValue = decodeLocalRefReadyValueV1(decoded.stageValue, `${field}.stageValue`);
+      if (
+        stageValue.localRefOutcome !== "reconciled" ||
+        stageValue.updateRefExitCode !== null ||
+        remoteResidue !== "none"
+      ) {
+        invalid("Local-ref reconciliation stage evidence is inconsistent");
+      }
+      return { subjectOperationId, nextState, remoteResidue, stageValue };
+    }
+    case "objects_ready": {
+      const stageValue = decodeObjectsExactValueV1(decoded.stageValue, `${field}.stageValue`);
+      if (remoteResidue !== "none") {
+        invalid("Object reconciliation cannot claim mutable remote residue");
+      }
+      return { subjectOperationId, nextState, remoteResidue, stageValue };
+    }
+    case "remote_ready": {
+      const stageValue = decodeRemoteRefReadyValueV1(decoded.stageValue, `${field}.stageValue`);
+      if (stageValue.remoteRefOutcome !== "reconciled" || remoteResidue !== "branch") {
+        invalid("Remote-ref reconciliation stage evidence is inconsistent");
+      }
+      return { subjectOperationId, nextState, remoteResidue, stageValue };
+    }
+    case "landed": {
+      const stageValue = decodeDraftPrExactValueV1(decoded.stageValue, `${field}.stageValue`);
+      if (stageValue.pullRequestOutcome !== "reconciled" || remoteResidue !== "pull_request") {
+        invalid("Pull-request reconciliation stage evidence is inconsistent");
+      }
+      return { subjectOperationId, nextState, remoteResidue, stageValue };
+    }
+    default:
+      invalid("Settled-subject reconciliation has an impossible next state");
+  }
+}
+
+function decodeReconciliationRequiredValueV1(
+  value: unknown,
+  field: string,
+): ReconciliationRequiredValueV1 {
+  const decoded = record(value, ["subjectOperationId", "remoteResidue"], field);
+  return {
+    subjectOperationId: assertUuid(decoded.subjectOperationId, `${field}.subjectOperationId`),
+    remoteResidue: oneOf(
+      decoded.remoteResidue,
+      ["none", "branch", "pull_request", "ambiguous"] as const,
+      `${field}.remoteResidue`,
+    ),
+  };
+}
+
+function assertCompletedEvidenceShape(
+  kind: LandingOperationKindV1,
+  evidence: readonly LandingOperationEvidenceV1[],
+): void {
+  const requestIds = evidence.map((entry) => entry.requestId);
+  switch (kind) {
+    case "candidate.prepare":
+      if (evidence.length !== 0) invalid("Candidate result cannot carry effect evidence");
+      return;
+    case "local_ref.create":
+      if (evidence.length !== 1 || requestIds[0] !== null) {
+        invalid("Local-ref result must carry exactly one local fact");
+      }
+      return;
+    case "github.preflight":
+      if (
+        !(evidence.length === 3 || evidence.length === 4) ||
+        requestIds.some((entry) => entry === null)
+      ) {
+        invalid("Preflight result evidence does not match its request grammar");
+      }
+      return;
+    case "github.objects.upload":
+      if (evidence.length < 3 || requestIds.some((entry) => entry === null)) {
+        invalid("Object-upload result evidence is incomplete");
+      }
+      return;
+    case "github.ref.create":
+      if (evidence.length !== 6 || requestIds.some((entry) => entry === null)) {
+        invalid("Remote-ref result evidence does not match its request grammar");
+      }
+      return;
+    case "github.pull_request.create":
+      if (evidence.length !== 8 || requestIds.some((entry) => entry === null)) {
+        invalid("Pull-request result evidence does not match its request grammar");
+      }
+      return;
+    case "landing.reconcile":
+      if (
+        ![1, 2, 4, 5].includes(evidence.length) ||
+        requestIds[0] !== null ||
+        (evidence.length === 2 && requestIds[1] !== null) ||
+        (evidence.length > 2 && requestIds.slice(1).some((entry) => entry === null))
+      ) {
+        invalid("Reconciliation result evidence does not match a subject grammar");
+      }
+      return;
+  }
+}
+
+export function decodeLandingOperationResultV1(value: unknown): LandingOperationResultV1 {
+  const decoded = record(
+    value,
+    [
+      "schemaVersion",
+      "operationId",
+      "kind",
+      "outcome",
+      "boundary",
+      "evidence",
+      "value",
+      "errorCode",
+    ],
+    "operationResult",
+  );
+  if (!isLandingOperationKindV1(decoded.kind)) {
+    invalid("Operation result kind is unsupported");
+  }
+  const outcome = oneOf(
+    decoded.outcome,
+    ["completed", "failed", "interrupted", "reconciliation_required"] as const,
+    "operationResult.outcome",
+  );
+  const boundary = oneOf(
+    decoded.boundary,
+    [
+      "candidate_ready",
+      "local_ref_ready",
+      "preflight_exact",
+      "objects_exact",
+      "remote_ref_ready",
+      "draft_pr_exact",
+      "subject_settled",
+      "retry_stage_proven",
+      "operation_failed",
+      "operation_interrupted",
+      "reconciliation_required",
+    ] as const,
+    "operationResult.boundary",
+  );
+  const evidence = array(decoded.evidence, "operationResult.evidence").map((entry, index) => {
+    const field = `operationResult.evidence[${index}]`;
+    const evidenceRecord = record(entry, ["requestId", "resultSha256"], field);
+    return {
+      requestId: nullable(evidenceRecord.requestId, (requestId) =>
+        assertUuid(requestId, `${field}.requestId`),
+      ),
+      resultSha256: assertSha256(evidenceRecord.resultSha256, `${field}.resultSha256`),
+    };
+  });
+  const evidenceIdentities = evidence.map(
+    (entry) => `${entry.requestId ?? "local"}:${entry.resultSha256}`,
+  );
+  if (new Set(evidenceIdentities).size !== evidenceIdentities.length) {
+    invalid("Operation result contains duplicate evidence");
+  }
+  const errorCode =
+    outcome === "completed"
+      ? literal(decoded.errorCode, null, "operationResult.errorCode")
+      : assertSafeCode(decoded.errorCode, "operationResult.errorCode");
+
+  let resultValue: LandingOperationResultV1["value"];
+  if (outcome === "failed") {
+    literal(boundary, "operation_failed", "operationResult.boundary");
+    resultValue = literal(decoded.value, null, "operationResult.value");
+  } else if (outcome === "interrupted") {
+    literal(boundary, "operation_interrupted", "operationResult.boundary");
+    resultValue = literal(decoded.value, null, "operationResult.value");
+  } else if (outcome === "reconciliation_required") {
+    literal(boundary, "reconciliation_required", "operationResult.boundary");
+    if (decoded.kind === "candidate.prepare" || decoded.kind === "github.preflight") {
+      invalid("Retry-safe operation kinds cannot create a reconciliation subject");
+    }
+    resultValue = decodeReconciliationRequiredValueV1(decoded.value, "operationResult.value");
+  } else {
+    assertCompletedEvidenceShape(decoded.kind, evidence);
+    switch (decoded.kind) {
+      case "candidate.prepare":
+        literal(boundary, "candidate_ready", "operationResult.boundary");
+        resultValue = decodeCandidateReadyValueV1(decoded.value, "operationResult.value");
+        break;
+      case "local_ref.create":
+        literal(boundary, "local_ref_ready", "operationResult.boundary");
+        resultValue = decodeLocalRefReadyValueV1(decoded.value, "operationResult.value");
+        break;
+      case "github.preflight":
+        literal(boundary, "preflight_exact", "operationResult.boundary");
+        resultValue = decodePreflightExactValueV1(decoded.value, "operationResult.value");
+        break;
+      case "github.objects.upload":
+        literal(boundary, "objects_exact", "operationResult.boundary");
+        resultValue = decodeObjectsExactValueV1(decoded.value, "operationResult.value");
+        break;
+      case "github.ref.create":
+        literal(boundary, "remote_ref_ready", "operationResult.boundary");
+        resultValue = decodeRemoteRefReadyValueV1(decoded.value, "operationResult.value");
+        break;
+      case "github.pull_request.create":
+        literal(boundary, "draft_pr_exact", "operationResult.boundary");
+        resultValue = decodeDraftPrExactValueV1(decoded.value, "operationResult.value");
+        break;
+      case "landing.reconcile":
+        if (!(boundary === "subject_settled" || boundary === "retry_stage_proven")) {
+          invalid("Completed reconciliation has an unsupported boundary");
+        }
+        resultValue = decodeReconcileValueV1(decoded.value, "operationResult.value", boundary);
+        break;
+    }
+  }
+  return {
+    schemaVersion: literal(decoded.schemaVersion, 1, "operationResult.schemaVersion"),
+    operationId: assertUuid(decoded.operationId, "operationResult.operationId"),
+    kind: decoded.kind,
+    outcome,
+    boundary,
+    evidence,
+    value: resultValue,
+    errorCode,
+  };
+}
+
+export function decodeCanonicalLandingOperationResultJsonV1(
+  encoded: string,
+): LandingOperationResultV1 {
+  return decodeCanonicalLandingJson(encoded, decodeLandingOperationResultV1);
+}
+
+export const LANDING_EVENT_TYPES = [
+  "landing.attempt.started",
+  "landing.attempt.settled",
+  "landing.operation.started",
+  "landing.operation.settled",
+  "landing.github.request.admitted",
+  "landing.github.request.settled",
+  "landing.state.changed",
+  "landing.decision.recorded",
+] as const;
+
+export type LandingEventTypeV1 = (typeof LANDING_EVENT_TYPES)[number];
+
+export interface LandingAttemptStartedEventV1 {
+  readonly schemaVersion: 1;
+  readonly landingId: string;
+  readonly coordinatorAttempt: number;
+}
+
+export interface LandingAttemptSettledEventV1 {
+  readonly schemaVersion: 1;
+  readonly landingId: string;
+  readonly coordinatorAttempt: number;
+  readonly outcome: "completed" | "failed" | "interrupted";
+  readonly errorCode: string | null;
+}
+
+export interface LandingOperationStartedEventV1 {
+  readonly schemaVersion: 1;
+  readonly landingId: string;
+  readonly operationId: string;
+  readonly coordinatorAttempt: number;
+  readonly kind: LandingOperationKindV1;
+  readonly kindAttempt: number;
+  readonly requestSha256: string;
+}
+
+export interface LandingOperationSettledEventV1 {
+  readonly schemaVersion: 1;
+  readonly landingId: string;
+  readonly operationId: string;
+  readonly coordinatorAttempt: number;
+  readonly kind: LandingOperationKindV1;
+  readonly outcome: "completed" | "failed" | "interrupted" | "reconciliation_required";
+  readonly resultSha256: string;
+  readonly errorCode: string | null;
+}
+
+export interface LandingGitHubRequestAdmittedEventV1 {
+  readonly schemaVersion: 1;
+  readonly landingId: string;
+  readonly operationId: string;
+  readonly requestId: string;
+  readonly coordinatorAttempt: number;
+  readonly operationKind: LandingOperationKindV1;
+  readonly requestOrdinal: number;
+  readonly kind: LandingHttpKindV1;
+  readonly requestSha256: string;
+}
+
+export interface LandingGitHubRequestSettledEventV1 {
+  readonly schemaVersion: 1;
+  readonly landingId: string;
+  readonly operationId: string;
+  readonly requestId: string;
+  readonly coordinatorAttempt: number;
+  readonly operationKind: LandingOperationKindV1;
+  readonly requestOrdinal: number;
+  readonly kind: LandingHttpKindV1;
+  readonly outcome: "succeeded" | "failed" | "ambiguous";
+  readonly resultSha256: string;
+  readonly errorCode: string | null;
+}
+
+export interface LandingStateChangedEventV1 {
+  readonly schemaVersion: 1;
+  readonly landingId: string;
+  readonly from: LandingStateV1;
+  readonly to: LandingStateV1;
+  readonly version: number;
+  readonly operationId: string | null;
+}
+
+export interface LandingDecisionRecordedEventV1 {
+  readonly schemaVersion: 1;
+  readonly landingId: string;
+  readonly decisionId: string;
+  readonly landingSha256: string;
+  readonly decision: "approve" | "reject";
+  readonly actor: string;
+}
+
+export type LandingEventPayloadV1 =
+  | LandingAttemptStartedEventV1
+  | LandingAttemptSettledEventV1
+  | LandingOperationStartedEventV1
+  | LandingOperationSettledEventV1
+  | LandingGitHubRequestAdmittedEventV1
+  | LandingGitHubRequestSettledEventV1
+  | LandingStateChangedEventV1
+  | LandingDecisionRecordedEventV1;
+
+function decodeEventOperationKind(value: unknown, field: string): LandingOperationKindV1 {
+  if (!isLandingOperationKindV1(value)) invalid(`${field} is unsupported`);
+  return value;
+}
+
+function decodeEventHttpKind(value: unknown, field: string): LandingHttpKindV1 {
+  if (!isLandingHttpKindV1(value)) invalid(`${field} is unsupported`);
+  return value;
+}
+
+function decodeSettledErrorCode(
+  outcome: string,
+  completedOutcome: string,
+  value: unknown,
+  field: string,
+): string | null {
+  return outcome === completedOutcome ? literal(value, null, field) : assertSafeCode(value, field);
+}
+
+export function decodeLandingEventPayloadV1(type: unknown, value: unknown): LandingEventPayloadV1 {
+  if (typeof type !== "string" || !(LANDING_EVENT_TYPES as readonly string[]).includes(type)) {
+    invalid("Landing event type is unsupported");
+  }
+  const eventType = type as LandingEventTypeV1;
+  switch (eventType) {
+    case "landing.attempt.started": {
+      const decoded = record(
+        value,
+        ["schemaVersion", "landingId", "coordinatorAttempt"],
+        "landingEvent",
+      );
+      return {
+        schemaVersion: literal(decoded.schemaVersion, 1, "landingEvent.schemaVersion"),
+        landingId: assertUuid(decoded.landingId, "landingEvent.landingId"),
+        coordinatorAttempt: safeInteger(
+          decoded.coordinatorAttempt,
+          "landingEvent.coordinatorAttempt",
+          1,
+          8,
+        ),
+      };
+    }
+    case "landing.attempt.settled": {
+      const decoded = record(
+        value,
+        ["schemaVersion", "landingId", "coordinatorAttempt", "outcome", "errorCode"],
+        "landingEvent",
+      );
+      const outcome = oneOf(
+        decoded.outcome,
+        ["completed", "failed", "interrupted"] as const,
+        "landingEvent.outcome",
+      );
+      return {
+        schemaVersion: literal(decoded.schemaVersion, 1, "landingEvent.schemaVersion"),
+        landingId: assertUuid(decoded.landingId, "landingEvent.landingId"),
+        coordinatorAttempt: safeInteger(
+          decoded.coordinatorAttempt,
+          "landingEvent.coordinatorAttempt",
+          1,
+          8,
+        ),
+        outcome,
+        errorCode: decodeSettledErrorCode(
+          outcome,
+          "completed",
+          decoded.errorCode,
+          "landingEvent.errorCode",
+        ),
+      };
+    }
+    case "landing.operation.started": {
+      const decoded = record(
+        value,
+        [
+          "schemaVersion",
+          "landingId",
+          "operationId",
+          "coordinatorAttempt",
+          "kind",
+          "kindAttempt",
+          "requestSha256",
+        ],
+        "landingEvent",
+      );
+      return {
+        schemaVersion: literal(decoded.schemaVersion, 1, "landingEvent.schemaVersion"),
+        landingId: assertUuid(decoded.landingId, "landingEvent.landingId"),
+        operationId: assertUuid(decoded.operationId, "landingEvent.operationId"),
+        coordinatorAttempt: safeInteger(
+          decoded.coordinatorAttempt,
+          "landingEvent.coordinatorAttempt",
+          1,
+          8,
+        ),
+        kind: decodeEventOperationKind(decoded.kind, "landingEvent.kind"),
+        kindAttempt: safeInteger(decoded.kindAttempt, "landingEvent.kindAttempt", 1, 9),
+        requestSha256: assertSha256(decoded.requestSha256, "landingEvent.requestSha256"),
+      };
+    }
+    case "landing.operation.settled": {
+      const decoded = record(
+        value,
+        [
+          "schemaVersion",
+          "landingId",
+          "operationId",
+          "coordinatorAttempt",
+          "kind",
+          "outcome",
+          "resultSha256",
+          "errorCode",
+        ],
+        "landingEvent",
+      );
+      const outcome = oneOf(
+        decoded.outcome,
+        ["completed", "failed", "interrupted", "reconciliation_required"] as const,
+        "landingEvent.outcome",
+      );
+      return {
+        schemaVersion: literal(decoded.schemaVersion, 1, "landingEvent.schemaVersion"),
+        landingId: assertUuid(decoded.landingId, "landingEvent.landingId"),
+        operationId: assertUuid(decoded.operationId, "landingEvent.operationId"),
+        coordinatorAttempt: safeInteger(
+          decoded.coordinatorAttempt,
+          "landingEvent.coordinatorAttempt",
+          1,
+          8,
+        ),
+        kind: decodeEventOperationKind(decoded.kind, "landingEvent.kind"),
+        outcome,
+        resultSha256: assertSha256(decoded.resultSha256, "landingEvent.resultSha256"),
+        errorCode: decodeSettledErrorCode(
+          outcome,
+          "completed",
+          decoded.errorCode,
+          "landingEvent.errorCode",
+        ),
+      };
+    }
+    case "landing.github.request.admitted": {
+      const decoded = record(
+        value,
+        [
+          "schemaVersion",
+          "landingId",
+          "operationId",
+          "requestId",
+          "coordinatorAttempt",
+          "operationKind",
+          "requestOrdinal",
+          "kind",
+          "requestSha256",
+        ],
+        "landingEvent",
+      );
+      const operationKind = decodeEventOperationKind(
+        decoded.operationKind,
+        "landingEvent.operationKind",
+      );
+      const kind = decodeEventHttpKind(decoded.kind, "landingEvent.kind");
+      if (!canAttachLandingHttpKind(operationKind, kind)) {
+        invalid("Landing request event kind cannot attach to its operation");
+      }
+      return {
+        schemaVersion: literal(decoded.schemaVersion, 1, "landingEvent.schemaVersion"),
+        landingId: assertUuid(decoded.landingId, "landingEvent.landingId"),
+        operationId: assertUuid(decoded.operationId, "landingEvent.operationId"),
+        requestId: assertUuid(decoded.requestId, "landingEvent.requestId"),
+        coordinatorAttempt: safeInteger(
+          decoded.coordinatorAttempt,
+          "landingEvent.coordinatorAttempt",
+          1,
+          8,
+        ),
+        operationKind,
+        requestOrdinal: safeInteger(
+          decoded.requestOrdinal,
+          "landingEvent.requestOrdinal",
+          1,
+          Number.MAX_SAFE_INTEGER,
+        ),
+        kind,
+        requestSha256: assertSha256(decoded.requestSha256, "landingEvent.requestSha256"),
+      };
+    }
+    case "landing.github.request.settled": {
+      const decoded = record(
+        value,
+        [
+          "schemaVersion",
+          "landingId",
+          "operationId",
+          "requestId",
+          "coordinatorAttempt",
+          "operationKind",
+          "requestOrdinal",
+          "kind",
+          "outcome",
+          "resultSha256",
+          "errorCode",
+        ],
+        "landingEvent",
+      );
+      const operationKind = decodeEventOperationKind(
+        decoded.operationKind,
+        "landingEvent.operationKind",
+      );
+      const kind = decodeEventHttpKind(decoded.kind, "landingEvent.kind");
+      if (!canAttachLandingHttpKind(operationKind, kind)) {
+        invalid("Landing request event kind cannot attach to its operation");
+      }
+      const outcome = oneOf(
+        decoded.outcome,
+        ["succeeded", "failed", "ambiguous"] as const,
+        "landingEvent.outcome",
+      );
+      return {
+        schemaVersion: literal(decoded.schemaVersion, 1, "landingEvent.schemaVersion"),
+        landingId: assertUuid(decoded.landingId, "landingEvent.landingId"),
+        operationId: assertUuid(decoded.operationId, "landingEvent.operationId"),
+        requestId: assertUuid(decoded.requestId, "landingEvent.requestId"),
+        coordinatorAttempt: safeInteger(
+          decoded.coordinatorAttempt,
+          "landingEvent.coordinatorAttempt",
+          1,
+          8,
+        ),
+        operationKind,
+        requestOrdinal: safeInteger(
+          decoded.requestOrdinal,
+          "landingEvent.requestOrdinal",
+          1,
+          Number.MAX_SAFE_INTEGER,
+        ),
+        kind,
+        outcome,
+        resultSha256: assertSha256(decoded.resultSha256, "landingEvent.resultSha256"),
+        errorCode: decodeSettledErrorCode(
+          outcome,
+          "succeeded",
+          decoded.errorCode,
+          "landingEvent.errorCode",
+        ),
+      };
+    }
+    case "landing.state.changed": {
+      const decoded = record(
+        value,
+        ["schemaVersion", "landingId", "from", "to", "version", "operationId"],
+        "landingEvent",
+      );
+      const from = decodeLandingStateName(decoded.from, "landingEvent.from");
+      const to = decodeLandingStateName(decoded.to, "landingEvent.to");
+      if (from === to || !canTransitionLanding(from, to)) {
+        invalid("Landing state event does not encode one legal non-self transition");
+      }
+      return {
+        schemaVersion: literal(decoded.schemaVersion, 1, "landingEvent.schemaVersion"),
+        landingId: assertUuid(decoded.landingId, "landingEvent.landingId"),
+        from,
+        to,
+        version: safeInteger(decoded.version, "landingEvent.version", 1, Number.MAX_SAFE_INTEGER),
+        operationId: nullable(decoded.operationId, (operationId) =>
+          assertUuid(operationId, "landingEvent.operationId"),
+        ),
+      };
+    }
+    case "landing.decision.recorded": {
+      const decoded = record(
+        value,
+        ["schemaVersion", "landingId", "decisionId", "landingSha256", "decision", "actor"],
+        "landingEvent",
+      );
+      return {
+        schemaVersion: literal(decoded.schemaVersion, 1, "landingEvent.schemaVersion"),
+        landingId: assertUuid(decoded.landingId, "landingEvent.landingId"),
+        decisionId: assertUuid(decoded.decisionId, "landingEvent.decisionId"),
+        landingSha256: assertSha256(decoded.landingSha256, "landingEvent.landingSha256"),
+        decision: oneOf(decoded.decision, ["approve", "reject"] as const, "landingEvent.decision"),
+        actor: assertActor(decoded.actor, "landingEvent.actor"),
+      };
+    }
+  }
+}
+
+export function decodeCanonicalLandingEventPayloadJsonV1(
+  type: unknown,
+  encoded: string,
+): LandingEventPayloadV1 {
+  return decodeCanonicalLandingJson(encoded, (value) => decodeLandingEventPayloadV1(type, value));
 }

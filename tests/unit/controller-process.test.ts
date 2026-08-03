@@ -123,6 +123,140 @@ describe("controller process bounded stdin", () => {
     expectNoInputInResult(result, stdinBytes);
   });
 
+  test("delivers exact two-phase stdin only after the exact readiness prefix", async () => {
+    const initialStdin = Buffer.from(`prepare ${SECRET_MARKER}\n`, "utf8");
+    const finalStdin = Buffer.from(`commit ${SECRET_MARKER}\n`, "utf8");
+    const initialDigest = createHash("sha256").update(initialStdin).digest("hex");
+    const finalDigest = createHash("sha256").update(finalStdin).digest("hex");
+    const readyText = `prepared:${initialDigest}\n`;
+    let continuationCalls = 0;
+
+    const result = await runNode(
+      `
+        const { createHash } = require("node:crypto");
+        let prepared = false;
+        let pending = Buffer.alloc(0);
+        process.stdin.on("data", (chunk) => {
+          pending = Buffer.concat([pending, chunk]);
+          if (prepared) return;
+          const newline = pending.indexOf(0x0a);
+          if (newline === -1) return;
+          const first = pending.subarray(0, newline + 1);
+          pending = pending.subarray(newline + 1);
+          prepared = true;
+          process.stdout.write(
+            "prepared:" + createHash("sha256").update(first).digest("hex") + "\\n",
+          );
+        });
+        process.stdin.on("end", () => {
+          process.stdout.write(
+            "commit:" + createHash("sha256").update(pending).digest("hex") + "\\n",
+          );
+        });
+      `,
+      {
+        stdinBytes: initialStdin,
+        maxStdinBytes: initialStdin.byteLength + finalStdin.byteLength,
+        stdinContinuation: {
+          readyStdoutBytes: Buffer.from(readyText, "utf8"),
+          nextStdinBytes: (signal) => {
+            continuationCalls += 1;
+            expect(signal.aborted).toBe(false);
+            return finalStdin;
+          },
+        },
+      },
+    );
+
+    expect(continuationCalls).toBe(1);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${readyText}commit:${finalDigest}\n`);
+    expect(result.stderr).toBe("");
+    expectNoInputInResult(result, Buffer.concat([initialStdin, finalStdin]));
+  });
+
+  test("does not invoke a continuation after stderr precedes exact readiness", async () => {
+    const initialStdin = Buffer.from(`prepare ${SECRET_MARKER}\n`, "utf8");
+    let continuationCalls = 0;
+    const result = await runNode(
+      `
+        process.stdin.once("data", () => {
+          process.stderr.write("not clean\\n", () => {
+            setTimeout(() => process.stdout.write("prepared: ok\\n"), 25);
+          });
+        });
+      `,
+      {
+        stdinBytes: initialStdin,
+        maxStdinBytes: 128,
+        stdinContinuation: {
+          readyStdoutBytes: Buffer.from("prepared: ok\n", "utf8"),
+          nextStdinBytes: () => {
+            continuationCalls += 1;
+            return Buffer.from("commit\n", "utf8");
+          },
+        },
+      },
+    );
+
+    expect(continuationCalls).toBe(0);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("prepared: ok\n");
+    expect(result.stderr).toBe("not clean\n");
+    expectNoInputInResult(result, initialStdin);
+  });
+
+  test("never writes the final phase when cancellation races a resolving continuation", async () => {
+    const controller = new AbortController();
+    let continuationSignal: AbortSignal | undefined;
+    let markContinuationStarted: (() => void) | undefined;
+    const continuationStarted = new Promise<void>((resolve) => {
+      markContinuationStarted = resolve;
+    });
+    const startedAt = performance.now();
+    const action = runNode(
+      `
+        let prepared = false;
+        process.on("SIGTERM", () => undefined);
+        process.stdin.on("data", (chunk) => {
+          if (!prepared) {
+            prepared = true;
+            process.stdout.write("prepared: ok\\n");
+            return;
+          }
+          process.stdout.write("FINAL_PHASE_OBSERVED:" + chunk.toString("hex"));
+        });
+        setInterval(() => undefined, 1_000);
+      `,
+      {
+        stdinBytes: Buffer.from("prepare\n", "utf8"),
+        maxStdinBytes: 128,
+        signal: controller.signal,
+        stdinContinuation: {
+          readyStdoutBytes: Buffer.from("prepared: ok\n", "utf8"),
+          nextStdinBytes: (signal) => {
+            continuationSignal = signal;
+            markContinuationStarted?.();
+            queueMicrotask(() => {
+              queueMicrotask(() => controller.abort());
+            });
+            return Buffer.from("commit\n", "utf8");
+          },
+        },
+      },
+    );
+
+    await continuationStarted;
+    const result = await action;
+
+    expect(performance.now() - startedAt).toBeLessThan(5_000);
+    expect(continuationSignal?.aborted).toBe(true);
+    expect(result.cancelled).toBe(true);
+    expect(result.timedOut).toBe(false);
+    expect(result.stdout).toBe("prepared: ok\n");
+    expect(result.stdout).not.toContain("FINAL_PHASE_OBSERVED");
+  });
+
   test("refuses oversized input before attempting to spawn", async () => {
     const stdinBytes = Buffer.from(SECRET_MARKER, "utf8");
     const error = await captureRejection(

@@ -1,7 +1,7 @@
 # Icarus collaborative IDE game plan
 
 - Status: Product and execution plan; Gate 0 released, Gate 1 active
-- Date: 2026-07-31
+- Date: 2026-07-31; last updated 2026-08-02
 - Planning horizon: 12–18 months, reviewed at every exit gate
 - Governing direction:
   [ADR 0036](adr/0036-proof-carrying-software-factory-product-direction.md)
@@ -14,7 +14,8 @@
   `eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI `30618041483` and
   native real-Chrome run `30618043377`; explicit human acceptance of the
   interim operator-controlled browser/resolver/proxy residual risk was recorded
-  on 2026-07-31; remaining Gate 1 runtime slices are incomplete
+  on 2026-07-31; Packet 3 durable local landing is complete, while Packet 4's
+  GitHub/receipt/live-evidence work and Gate 1 completion remain open
 
 This plan turns the product direction in ADR 0036 into a dependency-ordered
 build program. It incorporates the requested Buzz-style experience where
@@ -336,7 +337,8 @@ review-only for Safari and every unverified browser. This is an architecture
 risk acceptance, not a Gate 1 release approval. PR #20 subsequently merged the
 repository-only browser-action ledger and shutdown foundation plus the landing
 schema, records, deterministic candidate builder, and absent-only local-ref
-foundation. PR #22 completes items 1–2 below; items 3–7 remain:
+foundation. PR #22 completes items 1–2 below; Packet 3 completes items 3–4
+locally; items 5–7 remain:
 
 1. guarded browser action routes using the existing server-start session and
    ledger, with fixed-actor service propagation, digest/revision binding,
@@ -484,12 +486,12 @@ remains source-collaboration truth; Icarus preserves the proof and rationale.
 | Area | Current location | Planned change |
 | --- | --- | --- |
 | Domain policy and digests | `packages/core/src/types.ts`, `policy.ts`, `digests.ts` | typed landing, room, participant, task, write-set, and integration authority |
-| Durable state | `packages/core/src/store.ts`, `state-machine.ts`, `gate1-schema.ts`, `landing-records.ts`, `landing-state.ts` | complete landing persistence and coordination on the existing separate schema; later collaboration ledgers and append-only room events |
-| Orchestration | `packages/core/src/service.ts`, `session-loop.ts` | complete the landing coordinator; later room scheduler and child-run integration |
-| Git isolation | `packages/core/src/git.ts`, `landing-git.ts` | keep the file-only controller; integrate the existing deterministic candidate and absent-only local-ref operations |
+| Durable state | `packages/core/src/store.ts`, `state-machine.ts`, `gate1-schema.ts`, `landing-records.ts`, `landing-state.ts`, `landing-ledger.ts` | Packet 3 local landing persistence and coordination complete; later collaboration ledgers and append-only room events |
+| Orchestration | `packages/core/src/service.ts`, `session-loop.ts` | Packet 3 local landing coordinator complete; later room scheduler and child-run integration |
+| Git isolation | `packages/core/src/git.ts`, `landing-git.ts` | Packet 3 deterministic candidate and absent-only private-ref integration complete; retain the file-only boundary when adding Packet 4 |
 | Provider landing | new provider-specific package | bounded object-upload/create-ref/draft-PR gateway, receipt, idempotent reconciliation |
-| Browser boundary | `packages/api/src/server.ts`, `contracts.ts`, `present.ts` | complete authenticated action routes, terminal reconciliation, and bounded recovery projections on the accepted transport and ledger foundation |
-| Browser UI | `packages/workspace/src/api.ts`, `App.tsx` | authority/evidence panel first; mission-room pane after shared client |
+| Browser boundary | `packages/api/src/server.ts`, `contracts.ts`, `present.ts` | Packet 2 action routes and Packet 3 bounded landing projection complete; shared client remains later work |
+| Browser UI | `packages/workspace/src/api.ts`, `App.tsx`, `LandingPanel.tsx` | Packet 3 landing authority/evidence presentation complete; mission-room pane follows the shared client |
 | Shared client | new `packages/client` | versioned contracts for browser and VS Code |
 | IDE | new `packages/vscode` | task, room, editor context, diff/check/recovery/landing surfaces |
 | Context | `packages/core/src/context.ts`, `tools.ts` | map v2, bounded exact search, symbols, per-source budgets and provenance |
@@ -584,9 +586,10 @@ harness-only candidate journal into a new local controller; it does not execute
 browser reload or foreground-server restart and does not prove durable landing
 coordination.
 
-Durable landing coordination, the landing/GitHub receipt runtime, and a separate
-versioned human-approved credential-gated live-evidence profile remain
-outstanding. That profile must bind the offline
+Packet 3's separate acceptance matrix now supplies durable local landing
+coordination through `local_ready`. Packet 4's GitHub gateway/remote receipt
+runtime and a separate versioned human-approved credential-gated live-evidence
+profile remain outstanding. That profile must bind the offline
 manifest digest and immutable case/task/check/source/expected-change/candidate
 pins; pin the real provider/model and adapter version, captured pricing and
 budgets, and an operator-produced repository-automation assessment/disposition/
@@ -629,27 +632,32 @@ presentation, and signal/browser acceptance without changing Git behavior.
 No live state migration, Git landing effect, deployment, or Gate 1 release was
 authorized or performed.
 
-### Packet 3 — durable local landing
+### Packet 3 — durable local landing (completed locally 2026-08-02)
 
 Working set:
 
-- new landing domain/store/service modules;
+- landing domain/store/service modules over the existing SQLite schema;
 - narrow private-cache Git methods;
-- CLI/browser presentation; and
-- unit, integration, security, and crash-recovery tests.
+- shared CLI/API/browser presentation; and
+- unit, integration, security, and real-process crash-recovery tests.
 
 Success means a reviewed, passing run can prepare an exact candidate commit,
 receive a digest-bound landing decision, and create one local private branch
 without touching the source checkout or any network.
 
-Checkpoint: the local foundation now includes the exact repository-only schema,
-closed landing records/state tables, canonical digest and GitHub wire-record
-validators, deterministic SHA-1 candidate construction in a private cache, and
-an absent-only local `icarus/` ref update with hostile-config and no-network
-tests. Durable landing persistence/service coordination, the digest-bound
-decision transaction, CLI/browser presentation, interruption reconciliation,
-and the full crash matrix remain incomplete; therefore Packet 3 remains
-partial.
+Checkpoint: complete. The durable ledger binds immutable run/profile evidence,
+a canonical landing digest, one-shot decision, ten-minute active attempts, an
+eight-attempt ceiling, operation intent/observation/settlement, and explicit
+resume. Candidate replay is deterministic; private-ref creation uses an
+absent-only compare-and-swap and reconciles an exact direct ref only from this
+landing's durable prior-absence and intent. CLI, API, and browser expose the same
+bounded authority/evidence projection, while non-Linux mutation refuses before
+effects. Real child-process termination covers candidate construction, approval,
+local-ref ambiguity, cold reopen, explicit resume, cross-process
+landing/rollback exclusion, and exhausted-attempt truth. Packet 3 performs no
+credential lookup, network request, GitHub mutation, live-state migration,
+source-checkout mutation, merge, or deployment; those boundaries remain with
+Packet 4 and the Gate 1 exit gate.
 
 ### Packet 4 — GitHub draft-PR landing
 

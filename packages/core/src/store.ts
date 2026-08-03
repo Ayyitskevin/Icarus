@@ -39,6 +39,27 @@ import { digestJson, sha256 } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
 import { assertGate1SchemasForStartup, createGate1Schemas } from "./gate1-schema.js";
 import {
+  type CandidateSettlementInputV1,
+  type CreateLandingInputV1,
+  type LandingEligibilityV1,
+  LandingLedger,
+  type LandingOperationAdmissionV1,
+  type LandingProfileRecordV1,
+  type LandingResumeAdmissionV1,
+  type LandingRunProjectionSnapshotV1,
+  type LandingStatusV1,
+  type LocalRefReconciliationSettlementInputV1,
+  type LocalRefSettlementInputV1,
+} from "./landing-ledger.js";
+import {
+  assertSha1,
+  buildVerificationDigestV1,
+  decodeReviewDecisionDigestV1,
+  digestLandingRecord,
+  type GitHubLandingProfileV1,
+  type LocalRefFactV1,
+} from "./landing-records.js";
+import {
   assertCheckProfiles,
   assertOperatorActor,
   assertReadableManifest,
@@ -1440,6 +1461,7 @@ export class IcarusStore {
   readonly #database: Database.Database;
   readonly #now: () => string;
   readonly #id: () => string;
+  readonly #landingLedger: LandingLedger;
 
   constructor(
     databasePath: string,
@@ -1514,10 +1536,110 @@ export class IcarusStore {
     }
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#id = options.id ?? randomUUID;
+    this.#landingLedger = new LandingLedger({
+      database: this.#database,
+      now: this.#now,
+      id: this.#id,
+      eligibilitySource: (runId) => this.#landingEligibility(runId),
+      evidenceSource: (runId) => this.#landingEvidence(runId),
+    });
   }
 
   close(): void {
     this.#database.close();
+  }
+
+  setLandingProfile(
+    projectId: string,
+    profile: GitHubLandingProfileV1,
+    allowedCredentialEnvironmentNames: ReadonlySet<string>,
+  ): LandingProfileRecordV1 {
+    return this.#landingLedger.setProfile(projectId, profile, allowedCredentialEnvironmentNames);
+  }
+
+  getLandingProfile(projectId: string): LandingProfileRecordV1 | null {
+    return this.#landingLedger.getProfile(projectId);
+  }
+
+  getLandingEligibility(runId: string): LandingEligibilityV1 {
+    const transaction = this.#database.transaction(() => this.#landingEligibility(runId));
+    return transaction();
+  }
+
+  getLandingEvidence(runId: string): LandingEligibilityV1 {
+    const transaction = this.#database.transaction(() => this.#landingEvidence(runId));
+    return transaction();
+  }
+
+  createLanding(
+    input: CreateLandingInputV1,
+    allowedCredentialEnvironmentNames: ReadonlySet<string>,
+  ): LandingStatusV1 {
+    return this.#landingLedger.create(input, allowedCredentialEnvironmentNames);
+  }
+
+  startCandidatePreparation(landingId: string): LandingOperationAdmissionV1 {
+    return this.#landingLedger.startCandidate(landingId);
+  }
+
+  settleLandingCandidate(landingId: string, input: CandidateSettlementInputV1): LandingStatusV1 {
+    return this.#landingLedger.settleCandidate(landingId, input);
+  }
+
+  settleLandingCandidateFailure(
+    landingId: string,
+    errorCode: string,
+    outcome: "failed" | "interrupted",
+  ): LandingStatusV1 {
+    return this.#landingLedger.settleCandidateFailure(landingId, errorCode, outcome);
+  }
+
+  recordLandingDecision(
+    landingId: string,
+    landingSha256: string,
+    actor: string,
+    decision: "approve" | "reject",
+  ): LandingStatusV1 {
+    return this.#landingLedger.recordDecision(landingId, landingSha256, actor, decision);
+  }
+
+  admitLandingResume(landingId: string): LandingResumeAdmissionV1 {
+    return this.#landingLedger.admitResume(landingId);
+  }
+
+  startLocalRefCreation(landingId: string): LandingOperationAdmissionV1 {
+    return this.#landingLedger.startLocalRef(landingId);
+  }
+
+  recordLocalRefObservation(
+    landingId: string,
+    operationId: string,
+    fact: LocalRefFactV1,
+  ): LandingStatusV1 {
+    return this.#landingLedger.recordLocalRefObservation(landingId, operationId, fact);
+  }
+
+  settleLocalRefCreation(landingId: string, input: LocalRefSettlementInputV1): LandingStatusV1 {
+    return this.#landingLedger.settleLocalRef(landingId, input);
+  }
+
+  settleLocalRefReconciliation(
+    landingId: string,
+    input: LocalRefReconciliationSettlementInputV1,
+  ): LandingStatusV1 {
+    return this.#landingLedger.settleLocalRefReconciliation(landingId, input);
+  }
+
+  getLandingStatus(landingId: string): LandingStatusV1 {
+    return this.#landingLedger.getStatus(landingId);
+  }
+
+  getLandingStatusForRun(runId: string): LandingStatusV1 | null {
+    return this.#landingLedger.getStatusForRun(runId);
+  }
+
+  getRunLandingProjection(runId: string): LandingRunProjectionSnapshotV1 {
+    return this.#landingLedger.getRunProjection(runId);
   }
 
   getBrowserAction(actionId: string): BrowserActionRecord {
@@ -2798,15 +2920,14 @@ export class IcarusStore {
     actor: string,
     browserActionId: string | null = null,
   ): RunRecord {
-    const current = this.getRun(runId);
-    invariant(
-      current.state === "awaiting_review" || current.state === "completed",
-      "INVALID_STATE",
-      "Run cannot be rolled back from its current state",
-    );
-    return this.#approveAndTransition(
-      runId,
-      {
+    const transaction = this.#database.transaction(() => {
+      const current = this.getRun(runId);
+      invariant(
+        current.state === "awaiting_review" || current.state === "completed",
+        "INVALID_STATE",
+        "Run cannot be rolled back from its current state",
+      );
+      const approval: ApprovalTransition = {
         kind: "rollback",
         digest,
         actor,
@@ -2815,10 +2936,19 @@ export class IcarusStore {
         to: "rolling_back",
         expectedDigest: (run) => run.verification?.diffSha256 ?? null,
         eventType: "rollback.approved",
-      },
-      undefined,
-      browserActionId,
-    );
+      };
+      this.#landingLedger.assertRollbackAllowedAndAbandon(runId);
+      this.#approveAndTransitionInTransaction(runId, approval, browserActionId);
+    });
+    try {
+      transaction.immediate();
+    } catch (error) {
+      if (isSqliteBusy(error)) {
+        throw new IcarusError("RUN_BUSY", "Another process is updating run or landing state");
+      }
+      throw error;
+    }
+    return this.getRun(runId);
   }
 
   approveRestore(
@@ -5100,6 +5230,7 @@ export class IcarusStore {
           ),
         )
         .slice(-RUN_PRESENTATION_ACTION_EVENT_LIMIT);
+      const landingSnapshot = this.#landingLedger.getRunProjection(runId);
       return {
         run,
         approvals,
@@ -5108,6 +5239,8 @@ export class IcarusStore {
         eventCursor,
         eventCount,
         actionEvents,
+        landing: landingSnapshot.landing,
+        landingRevision: landingSnapshot.landingRevision,
       };
     });
     return transaction();
@@ -6661,6 +6794,172 @@ export class IcarusStore {
       this.#settleBrowserActionTerminalEvent(runId, browserActionId, type, sequence, eventRecord);
     }
     return sequence;
+  }
+
+  #landingEvidence(runId: string): LandingEligibilityV1 {
+    const current = this.getRun(runId);
+    invariant(
+      current.state === "completed",
+      "LANDING_NOT_ELIGIBLE",
+      "Only a completed run can create or execute a landing",
+    );
+    invariant(
+      current.plan !== null &&
+        current.planSha256 !== null &&
+        current.patchSet !== null &&
+        current.cachePath !== null &&
+        current.diff !== null &&
+        current.verification !== null,
+      "LANDING_NOT_ELIGIBLE",
+      "Completed run is missing immutable landing source records",
+    );
+    const project = this.getProject(current.projectId);
+    const readableManifest = this.readableManifest(runId);
+    invariant(
+      planApprovalDigest({
+        task: current.task,
+        baseCommit: current.baseCommit,
+        contextSha256: current.contextSha256,
+        targets: current.context.targets,
+        provider: current.provider,
+        checks: project.checks,
+        sandbox: project.sandbox,
+        ceiling: project.ceiling,
+        plan: current.plan,
+        readableManifest,
+      }) === current.planSha256,
+      "LANDING_NOT_ELIGIBLE",
+      "Landing plan digest no longer matches its full approval authority",
+    );
+    const baseCommitSha1 = assertSha1(current.baseCommit, "run.baseCommit");
+    const reviewedDiff = current.diff;
+    const diffSha256 = sha256(reviewedDiff);
+    invariant(
+      reviewedDiff.length > 0 && diffSha256 === current.verification.diffSha256,
+      "LANDING_NOT_ELIGIBLE",
+      "Landing diff does not match passing verification",
+    );
+    const checkpoint = this.getCheckpoint(runId);
+    const checkpointFiles = this.listCheckpointFiles(runId);
+    invariant(
+      checkpointFiles.length > 0 &&
+        treeCheckpointDigest({
+          runId,
+          baseCommit: baseCommitSha1,
+          files: checkpointFiles,
+        }) === checkpoint.checkpointSha256 &&
+        checkpoint.checkpointSha256 === current.verification.checkpointSha256,
+      "LANDING_NOT_ELIGIBLE",
+      "Landing checkpoint does not match its immutable path records",
+    );
+    const patchPaths = [...current.patchSet.edits.map((edit) => edit.path)].sort();
+    const changedPaths = [...current.verification.changedPaths];
+    invariant(
+      patchPaths.length === changedPaths.length &&
+        patchPaths.every((entry, index) => entry === changedPaths[index]) &&
+        checkpointFiles.length === changedPaths.length &&
+        checkpointFiles.every((file, index) => file.path === changedPaths[index]),
+      "LANDING_NOT_ELIGIBLE",
+      "Patch set, verification, and checkpoint paths are not exactly equal",
+    );
+    const registeredChecks = current.plan.checkIds.map((checkId) => {
+      const check = project.checks.find((candidate) => candidate.id === checkId);
+      invariant(
+        check !== undefined,
+        "LANDING_NOT_ELIGIBLE",
+        "Landing plan references an unregistered check",
+      );
+      return check;
+    });
+    const verification = buildVerificationDigestV1({
+      runId,
+      verification: current.verification,
+      registeredChecks,
+    });
+    invariant(
+      verification.diffSha256 === diffSha256 &&
+        verification.checkpointSha256 === checkpoint.checkpointSha256 &&
+        verification.changedPaths.length === changedPaths.length &&
+        verification.changedPaths.every((entry, index) => entry === changedPaths[index]),
+      "LANDING_NOT_ELIGIBLE",
+      "Landing verification digest is not correlated to the current run",
+    );
+    const verificationSha256 = digestLandingRecord(verification);
+    const changedPathsRecord = { schemaVersion: 1 as const, paths: changedPaths };
+    const changedPathsSha256 = digestLandingRecord(changedPathsRecord);
+    const reviewRows = this.#database
+      .prepare(
+        "SELECT id, run_id, kind, digest, actor, decision, created_at FROM approvals " +
+          "WHERE run_id = ? AND kind = 'review' AND decision = 'approve' AND digest = ? " +
+          "ORDER BY created_at, id",
+      )
+      .all(runId, diffSha256) as unknown[];
+    invariant(
+      reviewRows.length === 1 && reviewRows[0] !== undefined,
+      "LANDING_NOT_ELIGIBLE",
+      "Landing requires exactly one approval for the current reviewed diff",
+    );
+    const reviewRow = row(reviewRows[0], "landing review approval");
+    const reviewDecision = decodeReviewDecisionDigestV1({
+      schemaVersion: 1,
+      id: text(reviewRow.id, "approvals.id"),
+      runId: text(reviewRow.run_id, "approvals.run_id"),
+      kind: text(reviewRow.kind, "approvals.kind"),
+      digest: text(reviewRow.digest, "approvals.digest"),
+      actor: text(reviewRow.actor, "approvals.actor"),
+      decision: text(reviewRow.decision, "approvals.decision"),
+      createdAt: text(reviewRow.created_at, "approvals.created_at"),
+    });
+    invariant(
+      reviewDecision.runId === runId && reviewDecision.digest === diffSha256,
+      "LANDING_NOT_ELIGIBLE",
+      "Landing review approval is not bound to this run and diff",
+    );
+    const activeOrInterrupted = this.#database
+      .prepare(
+        "SELECT id FROM operations WHERE run_id = ? " +
+          "AND status IN ('started', 'interrupted') LIMIT 1",
+      )
+      .get(runId);
+    invariant(
+      activeOrInterrupted === undefined,
+      "LANDING_NOT_ELIGIBLE",
+      "Landing cannot start with an active or unresolved ordinary operation",
+    );
+    const profileRecord = this.#landingLedger.getProfile(project.id);
+    invariant(
+      profileRecord !== null,
+      "LANDING_NOT_ELIGIBLE",
+      "Project does not have a durable landing profile",
+    );
+    return {
+      runId,
+      projectId: project.id,
+      profile: profileRecord.profile,
+      profileSha256: profileRecord.profileSha256,
+      cachePath: current.cachePath,
+      baseCommitSha1,
+      planSha256: current.planSha256,
+      reviewedDiff,
+      diffSha256,
+      checkpointSha256: checkpoint.checkpointSha256,
+      checkpointFiles: checkpointFiles.map((file) => ({ ...file })),
+      verificationSha256,
+      reviewDecisionId: reviewDecision.id,
+      reviewDecisionSha256: digestLandingRecord(reviewDecision),
+      changedPaths,
+      changedPathsSha256,
+    };
+  }
+
+  #landingEligibility(runId: string): LandingEligibilityV1 {
+    const evidence = this.#landingEvidence(runId);
+    invariant(
+      this.#database.prepare("SELECT 1 FROM landings WHERE run_id = ?").get(runId) === undefined,
+      "LANDING_ALREADY_EXISTS",
+      "Run already has a durable landing",
+    );
+    return evidence;
   }
 
   #hasApproval(

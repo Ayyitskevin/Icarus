@@ -47,6 +47,7 @@ import {
   liveEventAnnouncement,
   snapshotIncludesObservedRevision,
 } from "./live-poll.js";
+import { LandingPanel } from "./LandingPanel.js";
 import type {
   ProjectPageDirection,
   ProjectPageRequest,
@@ -112,14 +113,46 @@ function runEventCursor(run: RunView): number {
   );
 }
 
-function newestRun(current: RunView | undefined, candidate: RunView): RunView {
-  return current !== undefined && runEventCursor(current) > runEventCursor(candidate)
-    ? current
-    : candidate;
+export function newestRun(current: RunView | undefined, candidate: RunView): RunView {
+  if (current === undefined || current.id !== candidate.id) return candidate;
+
+  const currentEventRevision = runEventCursor(current);
+  const candidateEventRevision = runEventCursor(candidate);
+  const currentLandingRevision = current.landingRevision;
+  const candidateLandingRevision = candidate.landingRevision;
+
+  if (
+    currentEventRevision === candidateEventRevision &&
+    currentLandingRevision === candidateLandingRevision
+  ) {
+    return current;
+  }
+
+  if (
+    candidateEventRevision >= currentEventRevision &&
+    candidateLandingRevision >= currentLandingRevision
+  ) {
+    return candidate;
+  }
+  if (
+    currentEventRevision >= candidateEventRevision &&
+    currentLandingRevision >= candidateLandingRevision
+  ) {
+    return current;
+  }
+
+  const eventSource = candidateEventRevision > currentEventRevision ? candidate : current;
+  const landingSource = candidateLandingRevision > currentLandingRevision ? candidate : current;
+  return {
+    ...eventSource,
+    landing: landingSource.landing,
+    landingRevision: landingSource.landingRevision,
+  };
 }
 
 const EVIDENCE_LINKS = [
   ["run-summary", "Summary"],
+  ["run-landing", "Landing"],
   ["run-browser-actions", "Guarded actions"],
   ["run-context", "Context"],
   ["run-plan", "Plan"],
@@ -1186,6 +1219,7 @@ function RunEvidence({
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyRetryRequest, setHistoryRetryRequest] = useState<HistoryRequest | null>(null);
   const cursorRef = useRef(runEventCursor(run));
+  const landingRevisionRef = useRef(run.landingRevision);
   const cursorRunIdRef = useRef(run.id);
   const liveRequestRef = useRef<AbortController | null>(null);
   const liveFailureCountRef = useRef(0);
@@ -1248,9 +1282,11 @@ function RunEvidence({
     if (cursorRunIdRef.current !== run.id) {
       cursorRunIdRef.current = run.id;
       cursorRef.current = runEventCursor(run);
+      landingRevisionRef.current = run.landingRevision;
       return;
     }
     cursorRef.current = Math.max(cursorRef.current, runEventCursor(run));
+    landingRevisionRef.current = Math.max(landingRevisionRef.current, run.landingRevision);
   }, [run]);
 
   useEffect(() => {
@@ -1280,7 +1316,9 @@ function RunEvidence({
       const controller = new AbortController();
       request = controller;
       liveRequestRef.current = controller;
-      let cursor = cursorRef.current;
+      const startingEventRevision = cursorRef.current;
+      const startingLandingRevision = landingRevisionRef.current;
+      let cursor = startingEventRevision;
       let observedEvents = 0;
       let latestLabel: string | null = null;
       let observedRevision = cursor;
@@ -1306,19 +1344,46 @@ function RunEvidence({
         } while (hasMore && !disposed);
 
         if (disposed || historyOpenRef.current) return;
-        if (observedEvents > 0 || drainCapped) {
-          const nextRun = await getRun(run.id, controller.signal);
-          if (!snapshotIncludesObservedRevision(runEventCursor(nextRun), observedRevision)) {
-            throw new Error("The run evidence snapshot is older than its event cursor.");
-          }
-          if (disposed || historyOpenRef.current) return;
+        const nextRun = await getRun(run.id, controller.signal);
+        const nextEventRevision = runEventCursor(nextRun);
+        if (!snapshotIncludesObservedRevision(nextEventRevision, observedRevision)) {
+          throw new Error("The run evidence snapshot is older than its event cursor.");
+        }
+        if (
+          !Number.isSafeInteger(nextRun.landingRevision) ||
+          nextRun.landingRevision < startingLandingRevision
+        ) {
+          throw new Error("The persisted landing revision moved backwards.");
+        }
+        if (disposed || historyOpenRef.current) return;
+
+        const eventChanged =
+          observedEvents > 0 || drainCapped || nextEventRevision > startingEventRevision;
+        const landingChanged = nextRun.landingRevision > startingLandingRevision;
+        if (eventChanged || landingChanged) {
           await onRunChanged(nextRun);
-          cursorRef.current = Math.max(cursorRef.current, runEventCursor(nextRun));
+          cursorRef.current = Math.max(cursorRef.current, nextEventRevision);
+          landingRevisionRef.current = Math.max(
+            landingRevisionRef.current,
+            nextRun.landingRevision,
+          );
+          const eventAnnouncement =
+            observedEvents > 0 || drainCapped
+              ? liveEventAnnouncement(observedEvents, drainCapped, latestLabel ?? "run activity")
+              : `Persisted run evidence advanced to event revision ${nextEventRevision}.`;
           setLiveAnnouncement(
-            liveEventAnnouncement(observedEvents, drainCapped, latestLabel ?? "run activity"),
+            eventChanged
+              ? landingChanged
+                ? `${eventAnnouncement} Landing evidence advanced to revision ${nextRun.landingRevision}.`
+                : eventAnnouncement
+              : `Persisted landing evidence advanced to revision ${nextRun.landingRevision}.`,
           );
         } else {
-          cursorRef.current = cursor;
+          cursorRef.current = Math.max(cursorRef.current, cursor);
+          landingRevisionRef.current = Math.max(
+            landingRevisionRef.current,
+            startingLandingRevision,
+          );
           if (!hasSynced) setLiveAnnouncement("Persisted run evidence is current.");
         }
         hasSynced = true;
@@ -1653,6 +1718,8 @@ function RunEvidence({
           </section>
         )}
       </section>
+
+      <LandingPanel landing={run.landing} landingRevision={run.landingRevision} />
 
       <BrowserActionsPanel
         run={run}

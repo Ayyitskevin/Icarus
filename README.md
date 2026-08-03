@@ -38,10 +38,16 @@ that later roadmap features already exist.
 > exposed a timing-only acceptance-harness defect; the timing-harness
 > correction at
 > `3683087066efb65255f05b2493fd31051c3ad7c6` passed hosted run `30761189188`
-> and native macOS/Windows run `30761192370`. Durable landing coordination, the
-> landing/GitHub receipt runtime, credential-gated live-evidence profile, and
-> Gate 1 completion remain incomplete. No live-state migration, landing/GitHub,
-> deployment, or public-release authority was authorized by this acceptance.
+> and native macOS/Windows run `30761192370`. Packet 3 now completes the
+> durable, no-network local landing slice through `local_ready`: it snapshots one
+> exact completed run, binds one landing decision to the canonical digest,
+> deterministically builds the reviewed candidate in the private cache, and
+> creates or reconciles the exact private `refs/heads/icarus/<run-id>` ref only
+> under durable prior-absence and intent evidence. Packet 4's GitHub gateway,
+> remote landing/PR receipts, credential-gated live-evidence profile, live-state
+> migration, deployment, and Gate 1 completion remain incomplete. No GitHub or
+> other external landing, migration, deployment, or public-release authority was
+> authorized by this local acceptance.
 
 ## Current scope
 
@@ -92,6 +98,13 @@ actions.
 The workspace reports mutation and planning capability from both the server
 mode and the tab's live session; stable or revoked sessions become visibly
 review-only and disable the corresponding controls.
+
+The Packet 3 landing mutation path is Linux-only. CLI
+`landing prepare/status/decide/resume` commands and the API/browser use the same
+bounded landing projection, including the exact authority digest, candidate and
+private-ref identities, decision, effects, disposition, warnings, evidence, and
+revision. Non-Linux mutation refuses before persistence, Git, credential, or
+network effects; the browser presentation itself grants no landing authority.
 
 The second Milestone 3 slice adds project-scoped, nonpersistent repository
 observation with independent

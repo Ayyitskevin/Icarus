@@ -114,9 +114,20 @@ native run `30760619650`, then rebase-merged as
 `ba38856a0e0e63d1045500185b2158a0859469d1`.
 After a timing-only smoke-harness correction, implementation head
 `3683087066efb65255f05b2493fd31051c3ad7c6` passed hosted run `30761189188` and
-native run `30761192370`. This closes only Packet 2; Gate 1, durable landing, and
-live evidence remain incomplete, while GitHub, deployment, and migration effects
-remain unauthorized.
+native run `30761192370`. That exact-head evidence closes Packet 2. Packet 3
+adds a separate Linux-only local landing coordinator over the existing SQLite
+landing ledger. Preparation snapshots immutable completed-run evidence and
+deterministically constructs the candidate in the private cache; a one-shot
+decision binds the reconstructed landing digest; explicit resume creates or
+reconciles only the absent private `refs/heads/icarus/<run-id>` ref. Each
+coordinator attempt is bounded to ten minutes of active runtime and the ledger
+admits at most eight explicit attempts. The shared run lease serializes landing
+against rollback, cold startup is inert until explicit resume, and interruption
+recovery is derived from durable intent and observation rather than blind
+replay. CLI, API, and browser presentation share one bounded projection. The
+source checkout remains unchanged and this slice performs no credential lookup,
+network request, GitHub effect, migration, merge, or deployment. Packet 4 and
+Gate 1 remain incomplete.
 
 The API presenter allowlists product evidence instead of returning `RunRecord`
 or history rows. It omits raw context/source blobs and private cache, worktree,
@@ -149,7 +160,9 @@ Docker daemon.
 
 Authoritative control state lives in one SQLite database under `ICARUS_HOME`
 (default: the platform-local state directory). The database stores projects,
-runs, append-only events, check evidence, provider usage, and checkpoints. It
+runs, append-only events, check evidence, provider usage, checkpoints,
+browser-action authority, and the landing profiles, decisions, attempts,
+operations, observations, results, and events needed through `local_ready`. It
 does not store credentials or environment snapshots.
 
 Session authority adds no second persistence model. The approved `plan_json`

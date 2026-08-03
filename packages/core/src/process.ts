@@ -6,6 +6,16 @@ import { sanitizeText } from "./redaction.js";
 
 export const MAX_CONTROLLER_STDIN_BYTES = 8 * 1024 * 1024;
 
+export interface ControllerProcessStdinContinuation {
+  /** Exact stdout prefix that proves the child is ready for the second input phase. */
+  readonly readyStdoutBytes: Uint8Array;
+  /**
+   * Produce the bounded final input phase. The signal aborts when the child
+   * exits, times out, is cancelled, or otherwise cannot accept the response.
+   */
+  readonly nextStdinBytes: (signal: AbortSignal) => Uint8Array | Promise<Uint8Array>;
+}
+
 export interface ControllerProcessOptions {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
@@ -16,6 +26,7 @@ export interface ControllerProcessOptions {
   readonly knownSecrets?: readonly string[];
   readonly stdinBytes?: Uint8Array;
   readonly maxStdinBytes?: number;
+  readonly stdinContinuation?: ControllerProcessStdinContinuation;
 }
 
 export interface ControllerProcessResult {
@@ -47,9 +58,15 @@ function terminateProcess(pid: number | undefined, signal: NodeJS.Signals): void
   }
 }
 
-function validateStdin(options: ControllerProcessOptions): void {
+function validateStdin(options: ControllerProcessOptions): number | null {
   if (options.stdinBytes === undefined) {
-    return;
+    if (options.stdinContinuation !== undefined) {
+      throw new IcarusError(
+        "INVALID_PROCESS_STDIN_CONTINUATION",
+        "Controller process stdin continuation requires initial stdin bytes",
+      );
+    }
+    return null;
   }
 
   const maximumBytes = options.maxStdinBytes ?? MAX_CONTROLLER_STDIN_BYTES;
@@ -74,9 +91,28 @@ function validateStdin(options: ControllerProcessOptions): void {
       },
     );
   }
+  const readyBytes = options.stdinContinuation?.readyStdoutBytes;
+  if (
+    readyBytes !== undefined &&
+    (!(readyBytes instanceof Uint8Array) ||
+      readyBytes.byteLength === 0 ||
+      readyBytes.byteLength > options.maxOutputBytes ||
+      readyBytes.byteLength > options.maxRawOutputBytes)
+  ) {
+    throw new IcarusError(
+      "INVALID_PROCESS_STDIN_CONTINUATION",
+      "Controller process stdin continuation readiness marker is invalid",
+    );
+  }
+  return maximumBytes;
 }
 
-function writeStdin(stream: Writable, bytes: Uint8Array, onFailure: () => void): Promise<boolean> {
+function writeStdin(
+  stream: Writable,
+  bytes: Uint8Array,
+  endStream: boolean,
+  onFailure: () => void,
+): Promise<boolean> {
   const payload = Buffer.from(bytes);
 
   return new Promise<boolean>((resolve) => {
@@ -105,16 +141,21 @@ function writeStdin(stream: Writable, bytes: Uint8Array, onFailure: () => void):
     stream.on("error", onError);
     stream.once("close", onClose);
     try {
-      // The completion callback fires only after the bounded payload has been
-      // flushed or the stream has failed, so a full pipe applies backpressure
-      // without creating an unbounded controller-side queue.
-      stream.end(payload, (error?: Error | null) => {
+      const onWrite = (error?: Error | null): void => {
         if (error !== undefined && error !== null) {
           fail();
           return;
         }
         settle(true);
-      });
+      };
+      // The completion callback fires only after the bounded payload has been
+      // flushed or the stream has failed, so a full pipe applies backpressure
+      // without creating an unbounded controller-side queue.
+      if (endStream) {
+        stream.end(payload, onWrite);
+      } else {
+        stream.write(payload, onWrite);
+      }
     } catch {
       fail();
     }
@@ -126,7 +167,7 @@ export async function runControllerProcess(
   args: readonly string[],
   options: ControllerProcessOptions,
 ): Promise<ControllerProcessResult> {
-  validateStdin(options);
+  const stdinLimit = validateStdin(options);
   if (options.signal?.aborted) {
     throw new IcarusError("CANCELLED", "Operation was cancelled before process start");
   }
@@ -139,6 +180,48 @@ export async function runControllerProcess(
     detached: true,
     stdio: [options.stdinBytes === undefined ? "ignore" : "pipe", "pipe", "pipe"] as const,
   });
+
+  const continuation = options.stdinContinuation;
+  const readyStdoutBytes =
+    continuation === undefined ? undefined : Buffer.from(continuation.readyStdoutBytes);
+  const continuationAbort = new AbortController();
+  type ReadinessOutcome = "ready" | "blocked" | "closed" | "invalid";
+  type ReadinessState =
+    | "pending"
+    | "ready"
+    | "writing"
+    | "complete"
+    | "blocked"
+    | "closed"
+    | "invalid";
+  let readinessState: ReadinessState = continuation === undefined ? "complete" : "pending";
+  let readinessOffset = 0;
+  let readinessSettled = false;
+  let resolveReadiness: ((outcome: ReadinessOutcome) => void) | undefined;
+  const readiness =
+    continuation === undefined
+      ? undefined
+      : new Promise<ReadinessOutcome>((resolve) => {
+          resolveReadiness = resolve;
+        });
+  const settleReadiness = (outcome: ReadinessOutcome): void => {
+    if (readinessSettled) return;
+    readinessSettled = true;
+    resolveReadiness?.(outcome);
+  };
+  const invalidateReadiness = (): void => {
+    if (readinessState !== "pending" && readinessState !== "ready") return;
+    readinessState = "invalid";
+    settleReadiness("invalid");
+    continuationAbort.abort();
+    terminateProcess(child.pid, "SIGKILL");
+  };
+  const blockReadiness = (): void => {
+    if (readinessState !== "pending" && readinessState !== "ready") return;
+    readinessState = "blocked";
+    settleReadiness("blocked");
+    continuationAbort.abort();
+  };
 
   let retainedBytes = 0;
   let rawBytes = 0;
@@ -172,9 +255,35 @@ export async function runControllerProcess(
 
   stdout.on("data", (chunk: Buffer) => {
     capture(chunk, stdoutChunks);
+    if (readyStdoutBytes === undefined) return;
+    if (rawLimitExceeded || truncated) {
+      invalidateReadiness();
+      return;
+    }
+    if (readinessState === "ready") {
+      invalidateReadiness();
+      return;
+    }
+    if (readinessState !== "pending") return;
+    const remaining = readyStdoutBytes.byteLength - readinessOffset;
+    if (
+      chunk.byteLength > remaining ||
+      !chunk.equals(readyStdoutBytes.subarray(readinessOffset, readinessOffset + chunk.byteLength))
+    ) {
+      invalidateReadiness();
+      return;
+    }
+    readinessOffset += chunk.byteLength;
+    if (readinessOffset === readyStdoutBytes.byteLength) {
+      readinessState = "ready";
+      settleReadiness("ready");
+    }
   });
   stderr.on("data", (chunk: Buffer) => {
     capture(chunk, stderrChunks);
+    if (readinessState === "pending" || readinessState === "ready") {
+      blockReadiness();
+    }
   });
 
   let escalation: NodeJS.Timeout | undefined;
@@ -186,6 +295,7 @@ export async function runControllerProcess(
     }
     terminationStarted = true;
     terminationCause = cause;
+    continuationAbort.abort();
     terminateProcess(child.pid, "SIGTERM");
     escalation = setTimeout(() => terminateProcess(child.pid, "SIGKILL"), 1_000);
     escalation.unref();
@@ -199,29 +309,120 @@ export async function runControllerProcess(
   const timeout = setTimeout(() => requestTermination("timeout"), options.timeoutMs);
   timeout.unref();
 
+  const closeContinuation = (): void => {
+    continuationAbort.abort();
+    if (readinessState === "pending" || readinessState === "ready") {
+      readinessState = "closed";
+      settleReadiness("closed");
+    }
+  };
   const processResult = new Promise<{
     exitCode: number | null;
     signal: NodeJS.Signals | null;
   }>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", (exitCode, signal) => resolve({ exitCode, signal }));
+    child.once("error", (error) => {
+      closeContinuation();
+      reject(error);
+    });
+    child.once("close", (exitCode, signal) => {
+      closeContinuation();
+      resolve({ exitCode, signal });
+    });
   });
-  const stdinDelivery =
-    options.stdinBytes === undefined
-      ? undefined
-      : writeStdin(child.stdin as Writable, options.stdinBytes, () => {
-          if (!terminationStarted && !rawLimitExceeded) {
-            terminateProcess(child.pid, "SIGKILL");
-          }
-        });
+
+  let stdinFailure: IcarusError | null = null;
+  const terminateForStdinFailure = (): void => {
+    if (!terminationStarted && !rawLimitExceeded) {
+      terminateProcess(child.pid, "SIGKILL");
+    }
+  };
+  const deliverStdin = async (): Promise<boolean> => {
+    if (options.stdinBytes === undefined) return true;
+    const stream = child.stdin as Writable;
+    const closeBlockedStdin = async (): Promise<true> => {
+      await writeStdin(stream, new Uint8Array(), true, () => undefined);
+      return true;
+    };
+    const initialDelivered = await writeStdin(
+      stream,
+      options.stdinBytes,
+      continuation === undefined,
+      terminateForStdinFailure,
+    );
+    if (!initialDelivered || continuation === undefined || readiness === undefined) {
+      return initialDelivered;
+    }
+
+    const readinessOutcome = await readiness;
+    if (readinessOutcome === "closed") return true;
+    if (readinessOutcome === "blocked") return closeBlockedStdin();
+    if (readinessOutcome === "invalid") return false;
+
+    type NextStdinOutcome =
+      | { readonly kind: "bytes"; readonly bytes: Uint8Array }
+      | { readonly kind: "error" }
+      | { readonly kind: "aborted" };
+    const produced = Promise.resolve()
+      .then(() => continuation.nextStdinBytes(continuationAbort.signal))
+      .then<NextStdinOutcome, NextStdinOutcome>(
+        (bytes) => ({ kind: "bytes", bytes }),
+        () => ({ kind: "error" }),
+      );
+    let onContinuationAbort: (() => void) | undefined;
+    const aborted = new Promise<NextStdinOutcome>((resolve) => {
+      onContinuationAbort = () => resolve({ kind: "aborted" });
+      if (continuationAbort.signal.aborted) {
+        onContinuationAbort();
+      } else {
+        continuationAbort.signal.addEventListener("abort", onContinuationAbort, { once: true });
+      }
+    });
+    const next = await Promise.race([produced, aborted]);
+    if (onContinuationAbort !== undefined) {
+      continuationAbort.signal.removeEventListener("abort", onContinuationAbort);
+    }
+    if (next.kind === "aborted") {
+      return readinessState === "blocked" ? closeBlockedStdin() : readinessState !== "invalid";
+    }
+    if (next.kind === "error" || !(next.bytes instanceof Uint8Array)) {
+      stdinFailure = new IcarusError(
+        "PROCESS_STDIN_CONTINUATION_FAILED",
+        "Controller process stdin continuation failed",
+      );
+      terminateForStdinFailure();
+      return false;
+    }
+    if (readinessState !== "ready") {
+      return readinessState === "blocked" ? closeBlockedStdin() : readinessState !== "invalid";
+    }
+    const totalBytes = options.stdinBytes.byteLength + next.bytes.byteLength;
+    if (stdinLimit === null || totalBytes > stdinLimit) {
+      stdinFailure = new IcarusError(
+        "PROCESS_STDIN_TOO_LARGE",
+        "Controller process stdin exceeds its byte ceiling",
+        { actualBytes: totalBytes, maximumBytes: stdinLimit ?? 0 },
+      );
+      terminateForStdinFailure();
+      return false;
+    }
+    if (continuationAbort.signal.aborted) {
+      return true;
+    }
+    readinessState = "writing";
+    const finalDelivered = await writeStdin(stream, next.bytes, true, terminateForStdinFailure);
+    if (finalDelivered) readinessState = "complete";
+    return finalDelivered;
+  };
 
   try {
-    const result = await processResult;
-    const stdinDelivered = (await stdinDelivery) ?? true;
+    const [result, stdinDelivered] = await Promise.all([processResult, deliverStdin()]);
     if (!stdinDelivered && terminationCause === null && !rawLimitExceeded) {
-      throw new IcarusError(
-        "PROCESS_STDIN_FAILED",
-        "Controller process did not accept its bounded stdin",
+      throw (
+        stdinFailure ??
+        new IcarusError(
+          "PROCESS_STDIN_FAILED",
+          "Controller process did not accept its bounded stdin",
+        )
       );
     }
     const knownSecrets = options.knownSecrets ?? [];
@@ -240,6 +441,7 @@ export async function runControllerProcess(
       cancelled: terminationCause === "cancelled",
     };
   } finally {
+    continuationAbort.abort();
     clearTimeout(timeout);
     if (escalation !== undefined) {
       clearTimeout(escalation);

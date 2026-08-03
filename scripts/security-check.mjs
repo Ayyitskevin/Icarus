@@ -364,7 +364,7 @@ const readOnlyHandoffCliSource =
   handoffReadOnlyDispatchStart >= 0 && handoffUsageStart > handoffReadOnlyDispatchStart
     ? cliSource.slice(handoffReadOnlyDispatchStart, handoffUsageStart)
     : "";
-const cliMainStart = cliSource.indexOf("async function main(): Promise<void>");
+const cliMainStart = cliSource.indexOf("export async function runCliMain(");
 const cliMainSource = cliMainStart >= 0 ? cliSource.slice(cliMainStart) : "";
 const handoffSerializerStart = changeHandoffSource.indexOf(
   "export function buildChangeHandoffPreview(",
@@ -491,8 +491,10 @@ const assertions = {
       'migrateGate1Schema(path.join(root, "icarus.sqlite3"), migrationApproval.gate1)',
     ) &&
     cliSource.indexOf("if (migrationApproval.gate1 !== null)") <
-      cliSource.indexOf("runtime = await createIcarusRuntime(root") &&
-    cliSource.includes("return;\n    }\n    runtime = await createIcarusRuntime") &&
+      cliSource.indexOf("runtime = await (options.createRuntime ?? createIcarusRuntime)(root") &&
+    cliSource.includes(
+      "return;\n    }\n    runtime = await (options.createRuntime ?? createIcarusRuntime)(root",
+    ) &&
     gate1SchemaSource.includes(
       'export const BROWSER_ACTION_LEDGER_MIGRATION = "browser-action-ledger-v1"',
     ) &&
@@ -627,9 +629,18 @@ const assertions = {
   landingGitUsesOnlyPrivateFixedLocalPlumbing:
     landingGitSource.includes('"write-tree"') &&
     landingGitSource.includes('["hash-object", "-t", "commit", "-w", "--stdin"]') &&
-    landingGitSource.includes('"update-ref"') &&
-    landingGitSource.includes('"--no-deref"') &&
+    landingGitSource.includes('["update-ref", "--stdin"]') &&
+    landingGitSource.includes('"option no-deref"') &&
+    landingGitSource.includes('"start"') &&
+    landingGitSource.includes('"prepare"') &&
+    landingGitSource.includes("const preparedOutput = Buffer.from") &&
+    landingGitSource.includes("const commitInput = Buffer.from") &&
+    landingGitSource.includes("const abortInput = Buffer.from") &&
+    landingGitSource.includes("readyStdoutBytes: preparedOutput") &&
+    landingGitSource.includes("return commitInput") &&
+    landingGitSource.includes("return abortInput") &&
     landingGitSource.includes("ZERO_SHA1") &&
+    landingGitSource.includes('["symbolic-ref", "--quiet", "--no-recurse", headRef]') &&
     landingGitSource.includes('["show-ref", "--verify", "--quiet", "--", headRef]') &&
     !landingGitSource.includes('"--exists"') &&
     landingGitSource.includes('"LANDING_LOCAL_REF_CONFLICT"') &&
@@ -1421,7 +1432,8 @@ const assertions = {
     cliMainSource.indexOf("if (dispatchReadOnlyRunHandoff(args, root)) return;") >= 0 &&
     cliMainSource.indexOf("const registrationPath = registrationPathForPreflight(args)") >= 0 &&
     cliMainSource.indexOf("const migrationApproval = schemaMigrationApproval()") >= 0 &&
-    cliMainSource.indexOf("runtime = await createIcarusRuntime(root") >= 0 &&
+    cliMainSource.indexOf("runtime = await (options.createRuntime ?? createIcarusRuntime)(root") >=
+      0 &&
     cliMainSource.indexOf("if (dispatchFileOnlyHandoff(args)) return;") <
       cliMainSource.indexOf("const root = stateRoot();") &&
     cliMainSource.indexOf("const root = stateRoot();") <
@@ -1431,7 +1443,7 @@ const assertions = {
     cliMainSource.indexOf("if (dispatchReadOnlyRunHandoff(args, root)) return;") <
       cliMainSource.indexOf("const migrationApproval = schemaMigrationApproval()") &&
     cliMainSource.indexOf("if (dispatchReadOnlyRunHandoff(args, root)) return;") <
-      cliMainSource.indexOf("runtime = await createIcarusRuntime(root"),
+      cliMainSource.indexOf("runtime = await (options.createRuntime ?? createIcarusRuntime)(root"),
   changeHandoffFileOnlyCommandsAreStateIndependent:
     fileOnlyHandoffCliSource.includes("path.basename(absoluteInput) !== CHANGE_HANDOFF_FILENAME") &&
     fileOnlyHandoffCliSource.includes(

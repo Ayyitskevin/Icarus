@@ -1,3 +1,5 @@
+import type { LandingResumeStateV1, LandingStateV1 } from "./landing-state.js";
+
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 export const CONTEXT_AUDIT_POLICY_VERSION = "tracked-tree-secret-audit-v2";
@@ -838,6 +840,29 @@ export interface RunHistory {
   readonly events: readonly EventRecord[];
 }
 
+export interface RunLandingPresentation {
+  readonly landingId: string;
+  readonly state: LandingStateV1;
+  readonly resumeState: LandingResumeStateV1 | null;
+  readonly version: number;
+  readonly landingSha256: string | null;
+  readonly candidateCommitSha1: string | null;
+  readonly pullRequestTitle: string;
+  readonly pullRequestBody: string | null;
+  readonly derivativeEffects: {
+    readonly version: 1;
+    readonly disposition: "inert-repository" | "operator-approved";
+    readonly evidenceSha256: string;
+  };
+  readonly decision: {
+    readonly actor: string;
+    readonly decision: "approve" | "reject";
+    readonly createdAt: string;
+  } | null;
+  readonly errorCode: string | null;
+  readonly updatedAt: string;
+}
+
 export interface RunPresentationSnapshot {
   readonly run: RunRecord;
   readonly approvals: readonly ApprovalRecord[];
@@ -846,6 +871,8 @@ export interface RunPresentationSnapshot {
   readonly eventCursor: number;
   readonly eventCount: number;
   readonly actionEvents: readonly EventSummaryRecord[];
+  readonly landing: RunLandingPresentation | null;
+  readonly landingRevision: number;
 }
 
 export interface OperationToken {

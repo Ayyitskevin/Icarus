@@ -13,6 +13,14 @@
   action transport)
 - Normative record contract:
   [Git landing v1 record contract](0027-git-landing-v1-record-contract.md)
+- Implementation checkpoint (2026-08-02): Packet 3 implements and tests the
+  durable local path through `local_ready`, including bounded attempts,
+  digest-bound decision, deterministic candidate construction, absent-only
+  private-ref creation/reconciliation, shared presentation, and explicit crash
+  recovery. The GitHub gateway, remote receipts, credential-gated live evidence,
+  and any existing/live database migration remain Packet 4 or operator-gated
+  work; this checkpoint does not complete Gate 1.
+
 - Supersedes: only the unaccepted landing-state proposal in
   [`FABLE_ICARUS_VISION.md`](../FABLE_ICARUS_VISION.md), specifically its
   proposed `completed -> landing -> landed` run transitions, ordinary
