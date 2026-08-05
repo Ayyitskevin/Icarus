@@ -916,9 +916,67 @@ export type PersistedDiffReviewView =
       readonly digestProvenance: "recorded_only";
     };
 
+export type LandingStateView =
+  | "preparing_candidate"
+  | "awaiting_approval"
+  | "approved"
+  | "creating_local_ref"
+  | "local_ready"
+  | "uploading_objects"
+  | "objects_ready"
+  | "creating_remote_ref"
+  | "remote_ready"
+  | "opening_draft_pr"
+  | "landed"
+  | "reconciliation_required"
+  | "rejected"
+  | "abandoned"
+  | "failed";
+
+export type LandingResumeStateView =
+  | "preparing_candidate"
+  | "approved"
+  | "local_ready"
+  | "objects_ready"
+  | "remote_ready";
+
+export interface LandingView {
+  readonly landingId: string;
+  readonly state: LandingStateView;
+  readonly resumeState: LandingResumeStateView | null;
+  readonly version: number;
+  readonly landingSha256: string | null;
+  readonly candidateCommitSha1: string | null;
+  readonly pullRequestTitle: string;
+  readonly pullRequestBody: string | null;
+  readonly decision: {
+    readonly actor: string;
+    readonly decision: "approve" | "reject";
+    readonly createdAt: string;
+  } | null;
+  readonly errorCode: string | null;
+  readonly updatedAt: string;
+  readonly directIcarusEffects: readonly [
+    "local_ref.create",
+    "github.objects.upload",
+    "github.ref.create",
+    "github.draft_pull_request.create",
+  ];
+  readonly derivativeEffectDisclosure: {
+    readonly version: 1;
+    readonly githubEvents: readonly ["create", "pull_request.opened"];
+    readonly mayTrigger: readonly ["actions", "webhooks", "bots", "notifications", "deployments"];
+    readonly disposition: "inert-repository" | "operator-approved";
+    readonly evidenceSha256: string;
+  };
+  readonly effectWarning: string;
+}
+
 export interface RunView {
   readonly id: string;
   readonly eventCursor: number;
+  readonly landingRevision: number;
+  readonly landing: LandingView | null;
   readonly timelineTotal: number;
   readonly timelineTruncated: boolean;
   readonly phase: RunPhase;
@@ -1216,6 +1274,8 @@ const ACTION_RUN_KEYS = [
   "files",
   "gate",
   "id",
+  "landing",
+  "landingRevision",
   "lastError",
   "outputs",
   "phase",
@@ -1237,6 +1297,124 @@ const ACTION_RUN_KEYS = [
   "verification",
   "warnings",
 ];
+
+const ACTION_LANDING_KEYS = [
+  "candidateCommitSha1",
+  "decision",
+  "derivativeEffectDisclosure",
+  "directIcarusEffects",
+  "effectWarning",
+  "errorCode",
+  "landingId",
+  "landingSha256",
+  "pullRequestBody",
+  "pullRequestTitle",
+  "resumeState",
+  "state",
+  "updatedAt",
+  "version",
+];
+const ACTION_LANDING_DECISION_KEYS = ["actor", "createdAt", "decision"];
+const ACTION_LANDING_DISCLOSURE_KEYS = [
+  "disposition",
+  "evidenceSha256",
+  "githubEvents",
+  "mayTrigger",
+  "version",
+];
+const ACTION_LANDING_STATES = [
+  "preparing_candidate",
+  "awaiting_approval",
+  "approved",
+  "creating_local_ref",
+  "local_ready",
+  "uploading_objects",
+  "objects_ready",
+  "creating_remote_ref",
+  "remote_ready",
+  "opening_draft_pr",
+  "landed",
+  "reconciliation_required",
+  "rejected",
+  "abandoned",
+  "failed",
+] as const;
+const ACTION_LANDING_RESUME_STATES = [
+  "preparing_candidate",
+  "approved",
+  "local_ready",
+  "objects_ready",
+  "remote_ready",
+] as const;
+const ACTION_LANDING_DIRECT_EFFECTS = [
+  "local_ref.create",
+  "github.objects.upload",
+  "github.ref.create",
+  "github.draft_pull_request.create",
+] as const;
+const ACTION_LANDING_GITHUB_EVENTS = ["create", "pull_request.opened"] as const;
+const ACTION_LANDING_MAY_TRIGGER = [
+  "actions",
+  "webhooks",
+  "bots",
+  "notifications",
+  "deployments",
+] as const;
+const ACTION_LANDING_EFFECT_WARNING =
+  "Landing approval authorizes Icarus to create one private local ref, upload immutable GitHub objects, create one absent-only GitHub branch, and open one draft pull request. GitHub create and pull_request.opened events may trigger repository-configured Actions, webhooks, bots, notifications, or deployments. Icarus does not suppress those derivative effects or gain authority to invoke their endpoints directly.";
+
+function responseMatchesExactTuple(value: unknown, expected: readonly string[]): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length === expected.length &&
+    value.every((entry, index) => entry === expected[index])
+  );
+}
+
+export function isExactLandingView(value: unknown): boolean {
+  if (value === null) return true;
+  const landing = responseRecord(value);
+  const decision = responseRecord(landing?.decision);
+  const disclosure = responseRecord(landing?.derivativeEffectDisclosure);
+  return (
+    landing !== null &&
+    responseHasExactKeys(landing, ACTION_LANDING_KEYS) &&
+    typeof landing.landingId === "string" &&
+    (ACTION_LANDING_STATES as readonly unknown[]).includes(landing.state) &&
+    (landing.resumeState === null ||
+      (ACTION_LANDING_RESUME_STATES as readonly unknown[]).includes(landing.resumeState)) &&
+    typeof landing.version === "number" &&
+    Number.isSafeInteger(landing.version) &&
+    landing.version >= 0 &&
+    (landing.landingSha256 === null ||
+      (typeof landing.landingSha256 === "string" &&
+        /^[a-f0-9]{64}$/u.test(landing.landingSha256))) &&
+    (landing.candidateCommitSha1 === null ||
+      (typeof landing.candidateCommitSha1 === "string" &&
+        /^[a-f0-9]{40}$/u.test(landing.candidateCommitSha1))) &&
+    typeof landing.pullRequestTitle === "string" &&
+    (landing.pullRequestBody === null || typeof landing.pullRequestBody === "string") &&
+    (landing.decision === null ||
+      (decision !== null &&
+        responseHasExactKeys(decision, ACTION_LANDING_DECISION_KEYS) &&
+        typeof decision.actor === "string" &&
+        (decision.decision === "approve" || decision.decision === "reject") &&
+        typeof decision.createdAt === "string")) &&
+    (landing.errorCode === null || typeof landing.errorCode === "string") &&
+    typeof landing.updatedAt === "string" &&
+    responseMatchesExactTuple(landing.directIcarusEffects, ACTION_LANDING_DIRECT_EFFECTS) &&
+    disclosure !== null &&
+    responseHasExactKeys(disclosure, ACTION_LANDING_DISCLOSURE_KEYS) &&
+    disclosure.version === 1 &&
+    responseMatchesExactTuple(disclosure.githubEvents, ACTION_LANDING_GITHUB_EVENTS) &&
+    responseMatchesExactTuple(disclosure.mayTrigger, ACTION_LANDING_MAY_TRIGGER) &&
+    (disclosure.disposition === "inert-repository" ||
+      disclosure.disposition === "operator-approved") &&
+    typeof disclosure.evidenceSha256 === "string" &&
+    /^[a-f0-9]{64}$/u.test(disclosure.evidenceSha256) &&
+    landing.effectWarning === ACTION_LANDING_EFFECT_WARNING
+  );
+}
 
 function responseRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -1279,6 +1457,12 @@ function isExactStaleActionExecution(
     typeof run.updatedAt === "string" &&
     typeof run.eventCursor === "number" &&
     Number.isSafeInteger(run.eventCursor) &&
+    run.eventCursor >= 0 &&
+    typeof run.landingRevision === "number" &&
+    Number.isSafeInteger(run.landingRevision) &&
+    run.landingRevision >= 0 &&
+    isExactLandingView(run.landing) &&
+    (run.landing === null ? run.landingRevision === 0 : run.landingRevision > 0) &&
     Array.isArray(run.browserActions) &&
     "browserActionRecovery" in run &&
     "planAuthority" in run &&

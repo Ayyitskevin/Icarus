@@ -1,4 +1,5 @@
-import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { lstat, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { TextDecoder } from "node:util";
 
@@ -18,6 +19,7 @@ import { assertAllowedTarget, MAX_CHANGED_FILES } from "./policy.js";
 import {
   type ControllerProcessOptions,
   type ControllerProcessResult,
+  type ControllerProcessStdinContinuation,
   MAX_CONTROLLER_STDIN_BYTES,
   runControllerProcess,
 } from "./process.js";
@@ -77,18 +79,88 @@ export interface LandingCandidateResult {
   readonly diffByteEqual: true;
 }
 
+export interface LandingBaseInspectionInput {
+  readonly cachePath: string;
+  readonly runId: string;
+  readonly baseCommitSha1: string;
+}
+
+export interface LandingBaseInspectionResult {
+  readonly objectFormat: "sha1";
+  readonly baseCommitSha1: string;
+  readonly baseTreeSha1: string;
+}
+
+export interface LandingLocalRefObservationInput {
+  readonly cachePath: string;
+  readonly runId: string;
+}
+
 export interface LandingLocalRefInput {
   readonly cachePath: string;
   readonly runId: string;
   readonly candidateCommitSha1: string;
 }
 
-export interface LandingLocalRefResult {
-  readonly headRef: string;
-  readonly candidateCommitSha1: string;
-  readonly localRefOutcome: "created";
-  readonly updateRefExitCode: 0;
-}
+export type LandingLocalRefFact =
+  | {
+      readonly state: "absent";
+      readonly objectSha1: null;
+      readonly symbolicTargetSha256: null;
+    }
+  | {
+      readonly state: "direct";
+      readonly objectSha1: string;
+      readonly symbolicTargetSha256: null;
+    }
+  | {
+      readonly state: "symbolic";
+      readonly objectSha1: null;
+      readonly symbolicTargetSha256: string;
+    };
+
+export type LandingLocalRefObservation =
+  | {
+      readonly outcome: "definitive";
+      readonly headRef: string;
+      readonly fact: LandingLocalRefFact;
+    }
+  | {
+      readonly outcome: "conflict";
+      readonly headRef: string;
+      readonly errorCode: "LANDING_LOCAL_REF_CONFLICT";
+    }
+  | {
+      readonly outcome: "ambiguous";
+      readonly headRef: string;
+      readonly errorCode: "LANDING_LOCAL_REF_OBSERVATION_AMBIGUOUS";
+    };
+
+export type LandingLocalRefUpdateResult =
+  | {
+      readonly outcome: "succeeded";
+      readonly headRef: string;
+      readonly candidateCommitSha1: string;
+      readonly localRefOutcome: "created";
+      readonly updateRefExitCode: 0;
+    }
+  | {
+      readonly outcome: "failed";
+      readonly headRef: string;
+      readonly candidateCommitSha1: string;
+      readonly errorCode: "LANDING_LOCAL_REF_CONFLICT";
+    }
+  | {
+      readonly outcome: "ambiguous";
+      readonly headRef: string;
+      readonly candidateCommitSha1: string;
+      readonly errorCode: "LANDING_LOCAL_REF_OUTCOME_AMBIGUOUS";
+    };
+
+export type LandingLocalRefResult = Extract<
+  LandingLocalRefUpdateResult,
+  { readonly outcome: "succeeded" }
+>;
 
 function nullDevice(): string {
   return process.platform === "win32" ? "NUL" : "/dev/null";
@@ -287,6 +359,8 @@ export class LandingGitController {
       "-c",
       "core.fsmonitor=false",
       "-c",
+      "core.logAllRefUpdates=false",
+      "-c",
       `core.hooksPath=${nullDevice()}`,
       "-c",
       `core.attributesFile=${nullDevice()}`,
@@ -343,6 +417,7 @@ export class LandingGitController {
     options: {
       readonly signal?: AbortSignal | undefined;
       readonly stdinBytes?: Uint8Array | undefined;
+      readonly stdinContinuation?: ControllerProcessStdinContinuation | undefined;
       readonly maxOutputBytes?: number | undefined;
       readonly indexPath?: string | undefined;
     } = {},
@@ -357,6 +432,9 @@ export class LandingGitController {
       ...(options.stdinBytes === undefined
         ? {}
         : { stdinBytes: options.stdinBytes, maxStdinBytes: MAX_CONTROLLER_STDIN_BYTES }),
+      ...(options.stdinContinuation === undefined
+        ? {}
+        : { stdinContinuation: options.stdinContinuation }),
     };
     try {
       return await runControllerProcess(
@@ -571,14 +649,58 @@ export class LandingGitController {
     );
   }
 
-  async #assertBase(
+  async #removeInterruptedCandidateIndexes(runId: string): Promise<string> {
+    const prefix = `.icarus-landing-index-${runId}-`;
+    let entries: Dirent[];
+    try {
+      entries = await readdir(this.#controlHome, { withFileTypes: true });
+    } catch {
+      throw new IcarusError(
+        "LANDING_CACHE_INVALID",
+        "Interrupted landing indexes could not be inspected",
+      );
+    }
+    for (const entry of entries) {
+      if (!entry.name.startsWith(prefix)) continue;
+      const temporaryRoot = path.join(this.#controlHome, entry.name);
+      const metadata = await lstat(temporaryRoot).catch(() => null);
+      const canonicalPath = await realpath(temporaryRoot).catch(() => null);
+      const currentUid = process.getuid?.();
+      invariant(
+        entry.isDirectory() &&
+          !entry.isSymbolicLink() &&
+          metadata?.isDirectory() === true &&
+          !metadata.isSymbolicLink() &&
+          currentUid !== undefined &&
+          metadata.uid === currentUid &&
+          (metadata.mode & 0o022) === 0 &&
+          canonicalPath === temporaryRoot,
+        "LANDING_CACHE_INVALID",
+        "Interrupted landing index is unsafe",
+      );
+      try {
+        await rm(temporaryRoot, { recursive: true, force: false });
+      } catch {
+        throw new IcarusError(
+          "LANDING_CACHE_INVALID",
+          "Interrupted landing index could not be removed",
+        );
+      }
+      invariant(
+        (await lstat(temporaryRoot).catch(() => null)) === null,
+        "LANDING_CACHE_INVALID",
+        "Interrupted landing index removal was not observable",
+      );
+    }
+    return prefix;
+  }
+
+  async #inspectBaseTree(
     cachePath: string,
     baseCommitSha1: string,
-    baseTreeSha1: string,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<string> {
     assertSha1(baseCommitSha1, "baseCommitSha1");
-    assertSha1(baseTreeSha1, "baseTreeSha1");
     invariant(
       (await this.#line(
         cachePath,
@@ -599,13 +721,43 @@ export class LandingGitController {
       "LANDING_BASE_INVALID",
       "Private Git cache does not contain the exact base commit",
     );
+    const baseTreeSha1 = await this.#line(
+      cachePath,
+      "inspect_base_tree",
+      ["rev-parse", "--verify", `${baseCommitSha1}^{tree}`],
+      signal,
+    );
     invariant(
-      (await this.#line(
-        cachePath,
-        "inspect_base_tree",
-        ["rev-parse", "--verify", `${baseCommitSha1}^{tree}`],
-        signal,
-      )) === baseTreeSha1,
+      SHA1_PATTERN.test(baseTreeSha1),
+      "LANDING_GIT_OUTPUT_INVALID",
+      "Git returned a malformed base-tree identity",
+    );
+    return baseTreeSha1;
+  }
+
+  async inspectBase(
+    input: LandingBaseInspectionInput,
+    signal?: AbortSignal,
+  ): Promise<LandingBaseInspectionResult> {
+    const identity = await this.#validateCache(input.cachePath, input.runId, signal);
+    const baseTreeSha1 = await this.#inspectBaseTree(input.cachePath, input.baseCommitSha1, signal);
+    await this.#revalidateCache(identity);
+    return {
+      objectFormat: "sha1",
+      baseCommitSha1: input.baseCommitSha1,
+      baseTreeSha1,
+    };
+  }
+
+  async #assertBase(
+    cachePath: string,
+    baseCommitSha1: string,
+    baseTreeSha1: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    assertSha1(baseTreeSha1, "baseTreeSha1");
+    invariant(
+      (await this.#inspectBaseTree(cachePath, baseCommitSha1, signal)) === baseTreeSha1,
       "LANDING_BASE_INVALID",
       "Landing base tree does not match the exact base commit",
     );
@@ -633,6 +785,7 @@ export class LandingGitController {
     signal?: AbortSignal,
   ): Promise<LandingCandidateResult> {
     const identity = await this.#validateCache(input.cachePath, input.runId, signal);
+    const temporaryPrefix = await this.#removeInterruptedCandidateIndexes(input.runId);
     await this.#assertBase(input.cachePath, input.baseCommitSha1, input.baseTreeSha1, signal);
     const checkpointFiles = normalizeCheckpointFiles(input.checkpointFiles);
     invariant(
@@ -649,7 +802,7 @@ export class LandingGitController {
       "Landing commit message is not already canonical",
     );
 
-    const temporaryRoot = await mkdtemp(path.join(this.#controlHome, ".icarus-landing-index-"));
+    const temporaryRoot = await mkdtemp(path.join(this.#controlHome, temporaryPrefix));
     const indexPath = path.join(temporaryRoot, "index");
     try {
       await this.#run(input.cachePath, "read_base_tree", ["read-tree", input.baseCommitSha1], {
@@ -864,7 +1017,7 @@ export class LandingGitController {
     } finally {
       invariant(
         path.dirname(temporaryRoot) === this.#controlHome &&
-          path.basename(temporaryRoot).startsWith(".icarus-landing-index-"),
+          path.basename(temporaryRoot).startsWith(temporaryPrefix),
         "LANDING_CACHE_INVALID",
         "Temporary landing index path escaped its controller root",
       );
@@ -905,73 +1058,237 @@ export class LandingGitController {
     return output.slice(0, -1);
   }
 
-  async #readLocalRef(
+  #ambiguousLocalRefObservation(headRef: string): LandingLocalRefObservation {
+    return {
+      outcome: "ambiguous",
+      headRef,
+      errorCode: "LANDING_LOCAL_REF_OBSERVATION_AMBIGUOUS",
+    };
+  }
+
+  #boundedProcessResult(
+    result: ControllerProcessResult,
+    acceptedExitCodes: readonly number[],
+  ): boolean {
+    return (
+      result.exitCode !== null &&
+      acceptedExitCodes.includes(result.exitCode) &&
+      result.signal === null &&
+      !result.cancelled &&
+      !result.timedOut &&
+      !result.rawLimitExceeded &&
+      !result.truncated
+    );
+  }
+
+  #decodeMachineLine(bytes: Uint8Array): string | null {
+    let output: string;
+    try {
+      output = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      return null;
+    }
+    if (!output.endsWith("\n") || output.indexOf("\n") !== output.length - 1) {
+      return null;
+    }
+    return output.slice(0, -1);
+  }
+
+  async #tryLocalRefCommand(
+    cachePath: string,
+    operation: string,
+    command: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<ControllerProcessResult | null> {
+    try {
+      return await this.#execute(cachePath, operation, command, { signal });
+    } catch {
+      return null;
+    }
+  }
+
+  async #assertLocalRefPath(cachePath: string, runId: string): Promise<string> {
+    const heads = path.join(cachePath, "refs", "heads");
+    const currentUid = process.getuid?.();
+    const headsMetadata = await lstat(heads).catch(() => null);
+    invariant(
+      headsMetadata === null ||
+        (headsMetadata.isDirectory() &&
+          !headsMetadata.isSymbolicLink() &&
+          currentUid !== undefined &&
+          headsMetadata.uid === currentUid &&
+          (await realpath(heads)) === heads),
+      "LANDING_LOCAL_REF_CONFLICT",
+      "Landing local-ref parent namespace is unsafe or conflicting",
+    );
+    const namespace = path.join(heads, "icarus");
+    const namespaceMetadata = await lstat(namespace).catch(() => null);
+    invariant(
+      namespaceMetadata === null ||
+        (namespaceMetadata.isDirectory() &&
+          !namespaceMetadata.isSymbolicLink() &&
+          currentUid !== undefined &&
+          namespaceMetadata.uid === currentUid &&
+          (await realpath(namespace)) === namespace),
+      "LANDING_LOCAL_REF_CONFLICT",
+      "Landing local-ref namespace is unsafe or conflicting",
+    );
+    const namedRefPath = path.join(namespace, runId);
+    const namedRefMetadata = await lstat(namedRefPath).catch(() => null);
+    invariant(
+      namedRefMetadata === null ||
+        (namedRefMetadata.isFile() &&
+          !namedRefMetadata.isSymbolicLink() &&
+          currentUid !== undefined &&
+          namedRefMetadata.uid === currentUid &&
+          (await realpath(namedRefPath)) === namedRefPath),
+      "LANDING_LOCAL_REF_CONFLICT",
+      "Landing local ref path is unsafe or conflicting",
+    );
+    return `refs/heads/icarus/${runId}`;
+  }
+
+  async #observeLocalRefSnapshot(
     cachePath: string,
     headRef: string,
     signal?: AbortSignal,
-  ): Promise<
-    | { readonly kind: "absent" }
-    | { readonly kind: "direct"; readonly sha1: string }
-    | { readonly kind: "symbolic" }
-  > {
-    const symbolic = await this.#run(
+  ): Promise<LandingLocalRefObservation> {
+    const symbolic = await this.#tryLocalRefCommand(
       cachePath,
       "inspect_local_symbolic_ref",
       ["symbolic-ref", "--quiet", "--no-recurse", headRef],
-      { signal, acceptedExitCodes: [0, 1] },
+      signal,
     );
-    if (symbolic.exitCode === 0) return { kind: "symbolic" };
-    invariant(
-      symbolic.stdoutBytes.byteLength === 0,
-      "LANDING_GIT_OUTPUT_INVALID",
-      "Git symbolic-ref absence output is malformed",
-    );
-    const existence = await this.#run(
+    if (
+      symbolic === null ||
+      !this.#boundedProcessResult(symbolic, [0, 1]) ||
+      symbolic.stderrBytes.byteLength !== 0
+    ) {
+      return this.#ambiguousLocalRefObservation(headRef);
+    }
+    if (symbolic.exitCode === 0) {
+      const target = this.#decodeMachineLine(symbolic.stdoutBytes);
+      if (target === null || target.length === 0) {
+        return this.#ambiguousLocalRefObservation(headRef);
+      }
+      return {
+        outcome: "definitive",
+        headRef,
+        fact: {
+          state: "symbolic",
+          objectSha1: null,
+          symbolicTargetSha256: sha256(Buffer.from(target, "utf8")),
+        },
+      };
+    }
+    if (symbolic.stdoutBytes.byteLength !== 0) {
+      return this.#ambiguousLocalRefObservation(headRef);
+    }
+
+    const existence = await this.#tryLocalRefCommand(
       cachePath,
       "inspect_local_direct_ref_existence",
       ["show-ref", "--verify", "--quiet", "--", headRef],
-      { signal, acceptedExitCodes: [0, 1] },
+      signal,
     );
-    invariant(
-      existence.stdoutBytes.byteLength === 0 && existence.stderrBytes.byteLength === 0,
-      "LANDING_GIT_OUTPUT_INVALID",
-      "Git direct-ref existence output is malformed",
-    );
-    if (existence.exitCode === 1) {
-      return { kind: "absent" };
+    if (
+      existence === null ||
+      !this.#boundedProcessResult(existence, [0, 1]) ||
+      existence.stdoutBytes.byteLength !== 0 ||
+      existence.stderrBytes.byteLength !== 0
+    ) {
+      return this.#ambiguousLocalRefObservation(headRef);
     }
-    const direct = await this.#run(
+    if (existence.exitCode === 1) {
+      return {
+        outcome: "definitive",
+        headRef,
+        fact: { state: "absent", objectSha1: null, symbolicTargetSha256: null },
+      };
+    }
+
+    const direct = await this.#tryLocalRefCommand(
       cachePath,
       "inspect_local_direct_ref",
       ["show-ref", "--verify", "--hash", "--", headRef],
-      { signal },
+      signal,
     );
-    const output = new TextDecoder("utf-8", { fatal: true }).decode(direct.stdoutBytes);
-    invariant(
-      output.endsWith("\n") &&
-        SHA1_PATTERN.test(output.slice(0, -1)) &&
-        output.indexOf("\n") === output.length - 1,
-      "LANDING_GIT_OUTPUT_INVALID",
-      "Git direct-ref output is malformed",
+    if (
+      direct === null ||
+      !this.#boundedProcessResult(direct, [0]) ||
+      direct.stderrBytes.byteLength !== 0
+    ) {
+      return this.#ambiguousLocalRefObservation(headRef);
+    }
+
+    const objectSha1 = this.#decodeMachineLine(direct.stdoutBytes);
+    if (objectSha1 === null || !SHA1_PATTERN.test(objectSha1)) {
+      return this.#ambiguousLocalRefObservation(headRef);
+    }
+    const objectTypeResult = await this.#tryLocalRefCommand(
+      cachePath,
+      "inspect_local_ref_target",
+      ["cat-file", "-t", objectSha1],
+      signal,
     );
-    const sha1 = output.slice(0, -1);
-    invariant(
-      (await this.#line(
-        cachePath,
-        "inspect_local_ref_target",
-        ["cat-file", "-t", sha1],
-        signal,
-      )) === "commit",
-      "LANDING_LOCAL_REF_CONFLICT",
-      "Existing landing ref does not name one commit",
-    );
-    return { kind: "direct", sha1 };
+    if (
+      objectTypeResult === null ||
+      !this.#boundedProcessResult(objectTypeResult, [0]) ||
+      objectTypeResult.stderrBytes.byteLength !== 0
+    ) {
+      return this.#ambiguousLocalRefObservation(headRef);
+    }
+    const objectType = this.#decodeMachineLine(objectTypeResult.stdoutBytes);
+    if (objectType === null) {
+      return this.#ambiguousLocalRefObservation(headRef);
+    }
+    if (objectType !== "commit") {
+      return {
+        outcome: "conflict",
+        headRef,
+        errorCode: "LANDING_LOCAL_REF_CONFLICT",
+      };
+    }
+    return {
+      outcome: "definitive",
+      headRef,
+      fact: { state: "direct", objectSha1, symbolicTargetSha256: null },
+    };
+  }
+
+  async observeLocalRef(
+    input: LandingLocalRefObservationInput,
+    signal?: AbortSignal,
+  ): Promise<LandingLocalRefObservation> {
+    const identity = await this.#validateCache(input.cachePath, input.runId, signal);
+    const headRef = await this.#assertLocalRefPath(input.cachePath, input.runId);
+    const first = await this.#observeLocalRefSnapshot(input.cachePath, headRef, signal);
+    if (first.outcome !== "definitive") {
+      return first;
+    }
+    const second = await this.#observeLocalRefSnapshot(input.cachePath, headRef, signal);
+    if (second.outcome !== "definitive") {
+      return second.outcome === "conflict" ? this.#ambiguousLocalRefObservation(headRef) : second;
+    }
+    if (
+      first.fact.state !== second.fact.state ||
+      first.fact.objectSha1 !== second.fact.objectSha1 ||
+      first.fact.symbolicTargetSha256 !== second.fact.symbolicTargetSha256
+    ) {
+      return this.#ambiguousLocalRefObservation(headRef);
+    }
+    try {
+      await this.#revalidateCache(identity);
+    } catch {
+      return this.#ambiguousLocalRefObservation(headRef);
+    }
+    return first;
   }
 
   async createAbsentLocalRef(
     input: LandingLocalRefInput,
     signal?: AbortSignal,
-  ): Promise<LandingLocalRefResult> {
+  ): Promise<LandingLocalRefUpdateResult> {
     const identity = await this.#validateCache(input.cachePath, input.runId, signal);
     assertSha1(input.candidateCommitSha1, "candidateCommitSha1");
     invariant(
@@ -984,61 +1301,125 @@ export class LandingGitController {
       "LANDING_LOCAL_REF_CONFLICT",
       "Landing candidate does not name one local commit",
     );
-    const headRef = `refs/heads/icarus/${input.runId}`;
-    const namespace = path.join(input.cachePath, "refs", "heads", "icarus");
-    const namespaceMetadata = await lstat(namespace).catch(() => null);
-    invariant(
-      namespaceMetadata === null ||
-        (namespaceMetadata.isDirectory() &&
-          !namespaceMetadata.isSymbolicLink() &&
-          (await realpath(namespace)) === namespace),
-      "LANDING_LOCAL_REF_CONFLICT",
-      "Landing local-ref namespace is unsafe or conflicting",
-    );
-    const namedRefMetadata = await lstat(path.join(namespace, input.runId)).catch(() => null);
-    invariant(
-      namedRefMetadata === null || !namedRefMetadata.isSymbolicLink(),
-      "LANDING_LOCAL_REF_CONFLICT",
-      "Landing local ref is a filesystem symbolic link",
-    );
-    invariant(
-      (await this.#readLocalRef(input.cachePath, headRef, signal)).kind === "absent",
-      "LANDING_LOCAL_REF_CONFLICT",
-      "Landing local ref already exists or is symbolic",
-    );
-
-    const update = await this.#execute(
-      input.cachePath,
-      "create_local_ref",
-      ["update-ref", "--no-deref", headRef, input.candidateCommitSha1, ZERO_SHA1],
-      { signal },
-    );
-    if (
-      update.cancelled ||
-      update.timedOut ||
-      update.rawLimitExceeded ||
-      update.truncated ||
-      update.exitCode !== 0
-    ) {
-      throw new IcarusError(
-        update.cancelled ? "CANCELLED" : "LANDING_LOCAL_REF_CONFLICT",
-        update.cancelled
-          ? "Landing Git operation was cancelled"
-          : "Landing local ref could not be created absent-only",
-      );
-    }
-    const observed = await this.#readLocalRef(input.cachePath, headRef, signal);
-    invariant(
-      observed.kind === "direct" && observed.sha1 === input.candidateCommitSha1,
-      "LANDING_LOCAL_REF_CONFLICT",
-      "Landing local ref post-read does not match the candidate commit",
-    );
-    await this.#revalidateCache(identity);
-    return {
+    const headRef = await this.#assertLocalRefPath(input.cachePath, input.runId);
+    const ambiguous = (): LandingLocalRefUpdateResult => ({
+      outcome: "ambiguous",
       headRef,
       candidateCommitSha1: input.candidateCommitSha1,
-      localRefOutcome: "created",
-      updateRefExitCode: 0,
+      errorCode: "LANDING_LOCAL_REF_OUTCOME_AMBIGUOUS",
+    });
+    const conflict = (): LandingLocalRefUpdateResult => ({
+      outcome: "failed",
+      headRef,
+      candidateCommitSha1: input.candidateCommitSha1,
+      errorCode: "LANDING_LOCAL_REF_CONFLICT",
+    });
+
+    const transactionInput = Buffer.from(
+      [
+        "start",
+        "option no-deref",
+        ["update", headRef, input.candidateCommitSha1, ZERO_SHA1].join(" "),
+        "prepare",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const preparedOutput = Buffer.from("start: ok\nprepare: ok\n", "utf8");
+    const commitInput = Buffer.from("commit\n", "utf8");
+    const abortInput = Buffer.from("abort\n", "utf8");
+    const expectedCommitOutput = Buffer.concat([
+      preparedOutput,
+      Buffer.from("commit: ok\n", "utf8"),
+    ]);
+    const expectedAbortOutput = Buffer.concat([preparedOutput, Buffer.from("abort: ok\n", "utf8")]);
+    type TransactionDecision = "not_reached" | "commit" | "abort_conflict" | "abort_ambiguous";
+    const transaction: { decision: TransactionDecision } = { decision: "not_reached" };
+    const stdinContinuation: ControllerProcessStdinContinuation = {
+      readyStdoutBytes: preparedOutput,
+      nextStdinBytes: async (continuationSignal) => {
+        const symbolicGuard = await this.#tryLocalRefCommand(
+          input.cachePath,
+          "guard_prepared_local_symbolic_ref",
+          ["symbolic-ref", "--quiet", "--no-recurse", headRef],
+          continuationSignal,
+        );
+        if (
+          symbolicGuard === null ||
+          !this.#boundedProcessResult(symbolicGuard, [0, 1]) ||
+          symbolicGuard.stderrBytes.byteLength !== 0
+        ) {
+          transaction.decision = "abort_ambiguous";
+          return abortInput;
+        }
+        if (symbolicGuard.exitCode === 0) {
+          const target = this.#decodeMachineLine(symbolicGuard.stdoutBytes);
+          transaction.decision =
+            target === null || target.length === 0 ? "abort_ambiguous" : "abort_conflict";
+          return abortInput;
+        }
+        if (symbolicGuard.stdoutBytes.byteLength !== 0) {
+          transaction.decision = "abort_ambiguous";
+          return abortInput;
+        }
+        try {
+          await this.#revalidateCache(identity);
+        } catch {
+          transaction.decision = "abort_ambiguous";
+          return abortInput;
+        }
+        transaction.decision = "commit";
+        return commitInput;
+      },
     };
+
+    let update: ControllerProcessResult;
+    try {
+      update = await this.#execute(input.cachePath, "create_local_ref", ["update-ref", "--stdin"], {
+        signal,
+        stdinBytes: transactionInput,
+        stdinContinuation,
+      });
+    } catch {
+      return ambiguous();
+    }
+    try {
+      await this.#revalidateCache(identity);
+    } catch {
+      return ambiguous();
+    }
+
+    const bounded =
+      update.exitCode !== null && this.#boundedProcessResult(update, [update.exitCode]);
+    const cleanStderr = update.stderrBytes.byteLength === 0;
+    if (transaction.decision === "commit") {
+      if (
+        bounded &&
+        update.exitCode === 0 &&
+        cleanStderr &&
+        Buffer.from(update.stdoutBytes).equals(expectedCommitOutput)
+      ) {
+        return {
+          outcome: "succeeded",
+          headRef,
+          candidateCommitSha1: input.candidateCommitSha1,
+          localRefOutcome: "created",
+          updateRefExitCode: 0,
+        };
+      }
+      return ambiguous();
+    }
+    if (transaction.decision === "abort_conflict") {
+      return bounded &&
+        update.exitCode === 0 &&
+        cleanStderr &&
+        Buffer.from(update.stdoutBytes).equals(expectedAbortOutput)
+        ? conflict()
+        : ambiguous();
+    }
+    if (transaction.decision === "abort_ambiguous") {
+      return ambiguous();
+    }
+    return bounded && update.exitCode !== 0 ? conflict() : ambiguous();
   }
 }

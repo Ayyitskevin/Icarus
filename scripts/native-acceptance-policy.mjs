@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const WORKFLOW_PATH = path.join(".github", "workflows", "native-acceptance.yml");
 const MAX_WORKFLOW_BYTES = 32 * 1024;
-const EXPECTED_WORKFLOW_SHA256 = "ccf034113e087d943e0419607f6e0a8abd42374b7ae6646df9a2f0adf165e541";
+const EXPECTED_WORKFLOW_SHA256 = "23fbacda443ce00f916d77699c7cbb527479f925ff59e0308662e719e48726a5";
 const EXPECTED_NODE_VERSION = "22.23.0";
 const EXPECTED_PNPM_VERSION = "9.15.4";
 
@@ -23,7 +23,7 @@ const EXPECTED_RUN_COMMANDS = Object.freeze([
   "pnpm format:check",
   "pnpm lint",
   "pnpm typecheck",
-  "pnpm exec vitest run tests/native tests/provider tests/unit/api-response.test.ts tests/unit/context-preview.test.ts tests/unit/policy.test.ts tests/unit/state-machine.test.ts tests/unit/store.test.ts tests/unit/verification-provenance.test.ts tests/unit/workspace-history-nav.test.ts tests/unit/workspace-live-poll.test.ts tests/unit/workspace-presenter.test.ts tests/unit/workspace-project-page-nav.test.ts tests/unit/workspace-run-page-nav.test.ts tests/unit/workspace-verification-attempts.test.ts --reporter=dot",
+  "pnpm exec vitest run tests/native tests/provider tests/unit/api-response.test.ts tests/unit/context-preview.test.ts tests/unit/landing-presentation.test.ts tests/unit/landing-records.test.ts tests/unit/landing-store.test.ts tests/unit/policy.test.ts tests/unit/state-machine.test.ts tests/unit/store.test.ts tests/unit/verification-provenance.test.ts tests/unit/workspace-history-nav.test.ts tests/unit/workspace-landing-panel.test.ts tests/unit/workspace-live-poll.test.ts tests/unit/workspace-presenter.test.ts tests/unit/workspace-project-page-nav.test.ts tests/unit/workspace-run-page-nav.test.ts tests/unit/workspace-verification-attempts.test.ts --reporter=dot",
   'pnpm exec vitest run tests/unit/service-draft.test.ts --testNamePattern="on (darwin|win32)" --reporter=dot',
   'pnpm exec vitest run tests/integration/local-workspace-api.test.ts --testNamePattern="persists project, context preview, draft, plan, and evidence without touching source" --reporter=dot',
   "node scripts/security-check.mjs",

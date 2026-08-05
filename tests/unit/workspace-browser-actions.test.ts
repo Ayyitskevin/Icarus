@@ -1,10 +1,12 @@
 import { createRequire } from "node:module";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { LANDING_EFFECT_WARNING } from "../../packages/api/src/present.js";
 import { ACTION_SESSION_STORAGE_KEY } from "../../packages/workspace/src/action-session.js";
 import type {
   BrowserActionDescriptorView,
   BrowserActionReceiptView,
+  LandingView,
   PersistedDiffReviewView,
   PlanAuthorityView,
   RunView,
@@ -171,10 +173,42 @@ function settledReceipt(): BrowserActionReceiptView {
   };
 }
 
+function landingView(): LandingView {
+  return {
+    landingId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    state: "awaiting_approval",
+    resumeState: null,
+    version: 1,
+    landingSha256: "a".repeat(64),
+    candidateCommitSha1: "b".repeat(40),
+    pullRequestTitle: "Exact title",
+    pullRequestBody: "Exact complete body",
+    decision: null,
+    errorCode: null,
+    updatedAt: "2026-08-02T12:00:00.000Z",
+    directIcarusEffects: [
+      "local_ref.create",
+      "github.objects.upload",
+      "github.ref.create",
+      "github.draft_pull_request.create",
+    ],
+    derivativeEffectDisclosure: {
+      version: 1,
+      githubEvents: ["create", "pull_request.opened"],
+      mayTrigger: ["actions", "webhooks", "bots", "notifications", "deployments"],
+      disposition: "inert-repository",
+      evidenceSha256: "c".repeat(64),
+    },
+    effectWarning: LANDING_EFFECT_WARNING,
+  };
+}
+
 function executionRun(receipt: BrowserActionReceiptView = settledReceipt()): RunView {
   return {
     id: RUN_ID,
     eventCursor: 18,
+    landingRevision: 0,
+    landing: null,
     timelineTotal: 0,
     timelineTruncated: false,
     phase: "cancelled",
@@ -549,6 +583,41 @@ describe("workspace guarded browser actions", () => {
       false,
     );
     expect(browserActionExecutionMatchesRequest({ action: receipt, run }, request)).toBe(true);
+    const runWithLanding = { ...run, landingRevision: 3, landing: landingView() };
+    expect(
+      browserActionExecutionMatchesRequest({ action: receipt, run: runWithLanding }, request),
+    ).toBe(true);
+    expect(
+      browserActionExecutionMatchesRequest(
+        {
+          action: receipt,
+          run: {
+            ...runWithLanding,
+            landing: {
+              ...landingView(),
+              state: "preparing_candidate",
+              version: 0,
+              landingSha256: null,
+              candidateCommitSha1: null,
+              pullRequestBody: null,
+            },
+          },
+        },
+        request,
+      ),
+    ).toBe(true);
+    expect(
+      browserActionExecutionMatchesRequest(
+        {
+          action: receipt,
+          run: {
+            ...runWithLanding,
+            landing: { ...landingView(), credentialEnv: "MUST_NOT_BE_ACCEPTED" },
+          },
+        },
+        request,
+      ),
+    ).toBe(false);
     expect(
       browserActionExecutionMatchesRequest(
         { action: receipt, run: { ...run, id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" } },
@@ -736,6 +805,38 @@ describe("workspace guarded browser actions", () => {
 
     await expect(executeBrowserAction(request)).resolves.toEqual(execution);
     expect(validFetch).toHaveBeenCalledTimes(1);
+
+    const landingExecution = {
+      action: staleReceipt,
+      run: {
+        ...executionRun(staleReceipt),
+        landingRevision: 3,
+        landing: landingView(),
+      },
+    };
+    const landingFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify(landingExecution), { status: 409 }));
+    vi.stubGlobal("fetch", landingFetch);
+    await expect(executeBrowserAction(request)).resolves.toEqual(landingExecution);
+
+    const malformedLandingFetch = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          action: staleReceipt,
+          run: {
+            ...landingExecution.run,
+            landing: { ...landingView(), credentialEnv: "MUST_NOT_BE_ACCEPTED" },
+          },
+        }),
+        { status: 409 },
+      ),
+    );
+    vi.stubGlobal("fetch", malformedLandingFetch);
+    await expect(executeBrowserAction(request)).rejects.toMatchObject({
+      code: "API_ERROR",
+      status: 409,
+    });
 
     const malformedFetch = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ action: staleReceipt, run: { id: RUN_ID } }), {

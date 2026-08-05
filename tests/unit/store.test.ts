@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { sha256 } from "../../packages/core/src/digest.js";
 import { IcarusError } from "../../packages/core/src/errors.js";
+import {
+  digestLandingRecord,
+  type GitHubLandingProfileV1,
+} from "../../packages/core/src/landing-records.js";
 import { planApprovalDigest, treeCheckpointDigest } from "../../packages/core/src/policy.js";
 import { createProviderConfig } from "../../packages/core/src/provider.js";
 import {
@@ -162,6 +166,47 @@ function approvePreparedRun(store: IcarusStore): void {
 }
 
 describe("SQLite run persistence", () => {
+  it("persists only explicitly credential-allowlisted landing profiles", () => {
+    const fixture = createUnitStore();
+    cleanupRoots.push(fixture.root);
+    const { projectId } = seedUnitProject(fixture.store);
+    const profile: GitHubLandingProfileV1 = {
+      version: 1,
+      provider: "github",
+      owner: "icarus-test",
+      repository: "profile-store",
+      baseBranch: "main",
+      branchNamespace: "icarus/",
+      credentialRef: { kind: "environment", name: "ICARUS_GITHUB_TOKEN_UNIT" },
+      expectedActor: "unit-actor",
+      commitIdentity: { name: "Icarus Unit", email: "icarus@example.test" },
+      derivativeEffects: {
+        version: 1,
+        disposition: "inert-repository",
+        evidenceSha256: sha256("inert unit repository"),
+      },
+    };
+
+    expectIcarusCode(
+      () => fixture.store.setLandingProfile(projectId, profile, new Set()),
+      "LANDING_CREDENTIAL_NOT_ALLOWED",
+    );
+    expect(fixture.store.getLandingProfile(projectId)).toBeNull();
+
+    const stored = fixture.store.setLandingProfile(
+      projectId,
+      profile,
+      new Set(["ICARUS_GITHUB_TOKEN_UNIT"]),
+    );
+    expect(stored).toMatchObject({
+      projectId,
+      profile,
+      profileSha256: digestLandingRecord(profile),
+    });
+    expect(fixture.store.getLandingProfile(projectId)).toEqual(stored);
+    fixture.store.close();
+  });
+
   it("atomically lands remote preparation at the egress gate", () => {
     const fixture = createUnitStore();
     cleanupRoots.push(fixture.root);

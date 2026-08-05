@@ -316,10 +316,14 @@ native macOS/Windows run `30760619650`, then rebase-merged as
 timing-only harness defect; corrected Packet 2 implementation head
 `3683087066efb65255f05b2493fd31051c3ad7c6`, published on `main`, passed hosted
 run `30761189188` plus native run `30761192370` and completed Packet 2 release
-acceptance. These guarded lifecycle actions
-stop before every commit, push, ref, pull-request, merge, and deployment effect.
-Durable landing coordination, the landing/GitHub receipt runtime, credential-
-gated live evidence, and Gate 1 completion remain incomplete.
+acceptance. These guarded lifecycle actions stop before every commit, push, ref,
+pull-request, merge, and deployment effect. Packet 3 now completes durable local
+landing through `local_ready`: the existing SQLite ledger, ten-minute/eight-
+attempt coordinator, digest-bound decision, deterministic candidate, absent-only
+private ref, shared CLI/browser projection, and explicit crash recovery operate
+without network or source-checkout mutation. Packet 4's GitHub gateway, remote
+landing/PR receipt runtime, credential-gated live evidence, live-state
+migration, and Gate 1 completion remain incomplete.
 
 Slice 1 adds the populated closed input contract at
 `fixtures/evals/gate1/manifest.v1.json`, the focused `pnpm benchmark:gate1`

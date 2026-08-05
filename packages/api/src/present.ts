@@ -15,6 +15,7 @@ import {
   IcarusError,
   type ProjectRecord,
   type ProjectRepositoryStatus,
+  presentLandingApprovalV1,
   readableManifestDigest,
   type RepositoryRecord,
   type RunAnnotationRecord,
@@ -26,6 +27,13 @@ import {
   type RunVerificationAttemptsSnapshot,
   type WorkspaceProjectPage,
   type WorkspaceRunPage,
+} from "@icarus/core";
+
+export {
+  LANDING_DERIVATIVE_GITHUB_EVENTS,
+  LANDING_DERIVATIVE_MAY_TRIGGER,
+  LANDING_DIRECT_ICARUS_EFFECTS,
+  LANDING_EFFECT_WARNING,
 } from "@icarus/core";
 
 export type WorkspaceRunPhase =
@@ -1301,6 +1309,8 @@ export function presentRun(
     outputs,
     usage: run.usage,
     lastError: run.lastError,
+    landingRevision: snapshot.landingRevision,
+    landing: snapshot.landing === null ? null : presentLandingApprovalV1(snapshot.landing),
     warnings,
     approvals: approvals(snapshot.approvals),
     approvalCoverage: {

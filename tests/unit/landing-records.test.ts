@@ -4,6 +4,7 @@ import { IcarusError } from "../../packages/core/src/errors.js";
 import {
   assertGitBranchName,
   assertLandingCredentialEnvironmentAllowed,
+  assertLandingCredentialEnvironmentName,
   assertLandingDigestTextBindingsV1,
   buildUnsignedCommitPayloadV1,
   buildVerificationDigestV1,
@@ -21,13 +22,23 @@ import {
   DIRECT_ICARUS_EFFECTS,
   decodeCandidateCredentialAuditV1,
   decodeCandidateObjectManifestV1,
+  decodeCanonicalLandingEventPayloadJsonV1,
   decodeCanonicalLandingJson,
+  decodeCanonicalLandingOperationObservationJsonV1,
+  decodeCanonicalLandingOperationResultJsonV1,
+  decodeCanonicalLocalRefFactJsonV1,
   decodeChangedPathsDigestV1,
   decodeGitHubLandingProfileV1,
   decodeGitHubPostBodyV1,
+  decodeLandingDecisionV1,
   decodeLandingDigestV1,
+  decodeLandingEventPayloadV1,
   decodeLandingHttpRequestV1,
+  decodeLandingOperationObservationV1,
   decodeLandingOperationRequestV1,
+  decodeLandingOperationResultV1,
+  decodeLocalRefFactV1,
+  decodePullRequestProjectionV1,
   decodeReviewDecisionDigestV1,
   decodeVerificationDigestV1,
   digestLandingRecord,
@@ -145,6 +156,39 @@ function expectIcarusCode(action: () => unknown, code = "LANDING_RECORD_INVALID"
   }
 }
 
+type MutableJson =
+  | null
+  | boolean
+  | number
+  | string
+  | MutableJson[]
+  | { [key: string]: MutableJson };
+
+function mutateEveryLeaf(
+  value: MutableJson,
+  path = "$",
+): readonly { readonly path: string; readonly value: MutableJson }[] {
+  if (value === null) return [{ path, value: "mutated-null" }];
+  if (typeof value === "boolean") return [{ path, value: !value }];
+  if (typeof value === "number") return [{ path, value: value + 1 }];
+  if (typeof value === "string") return [{ path, value: `${value}#` }];
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) =>
+      mutateEveryLeaf(entry, `${path}[${index}]`).map((mutation) => {
+        const changed = [...value];
+        changed[index] = mutation.value;
+        return { path: mutation.path, value: changed };
+      }),
+    );
+  }
+  return Object.entries(value).flatMap(([key, entry]) =>
+    mutateEveryLeaf(entry, `${path}.${key}`).map((mutation) => ({
+      path: mutation.path,
+      value: { ...value, [key]: mutation.value },
+    })),
+  );
+}
+
 describe("landing v1 canonical records", () => {
   it("serializes ASCII-sorted exact JSON and hashes those exact bytes", () => {
     const value = { z: 1, A: 2, nested: [null, true, "é"] };
@@ -244,6 +288,10 @@ describe("landing v1 canonical records", () => {
 
   it("canonicalizes bounded approved text and rejects controls or marker injection", () => {
     expect(canonicalizeCommitMessage("Cafe\u0301\r\nbody")).toBe("Café\nbody\n");
+    expect(canonicalizeCommitMessage("one\rtwo\r\nthree\n")).toBe("one\ntwo\nthree\n");
+    expect(canonicalizeCommitMessage("message")).toBe("message\n");
+    expect(canonicalizeCommitMessage("message\n")).toBe("message\n");
+    expect(canonicalizeCommitMessage("message\n\n")).toBe("message\n\n");
     expect(canonicalizePullRequestTitle("Cafe\u0301")).toBe("Café");
     expect(canonicalizePullRequestBodyPrefix("one\r\ntwo")).toBe("one\ntwo");
 
@@ -274,6 +322,21 @@ describe("landing v1 canonical records", () => {
     expect(gitObjectSha1("blob", Buffer.from("hello\n"))).toBe(
       "ce013625030ba8dba906f756967f9e9ca394464a",
     );
+    expect(gitObjectSha1("blob", Buffer.from(""))).toBe("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
+    expect(gitObjectSha1("blob", Buffer.from("\n"))).toBe(
+      "8b137891791fe96927ad78e64b0aad7bded08bdc",
+    );
+    expect(sha256(payload)).toBe(
+      "622563e7a2a3a90837657c9b1e3a8fea847415a2c3d21009b1305dda22382ead",
+    );
+    expect(gitObjectSha1("commit", payload)).toBe("314f0aa20d5d793e0a6e5352a182a6d216c17558");
+  });
+
+  it("pins the complete landing timestamp domain to exact UTC seconds", () => {
+    expect(commitEpochToGitInstant(0)).toBe("1970-01-01T00:00:00Z");
+    expect(commitEpochToGitInstant(253_402_300_799)).toBe("9999-12-31T23:59:59Z");
+    expectIcarusCode(() => commitEpochToGitInstant(-1));
+    expectIcarusCode(() => commitEpochToGitInstant(253_402_300_800));
   });
 
   it("strictly binds changed paths, review approval, and verification evidence", () => {
@@ -445,6 +508,23 @@ describe("landing v1 canonical records", () => {
         profile: { ...PROFILE, repository: "other" },
       }),
     );
+  });
+
+  it("changes the approval digest for every authority leaf without admitting token values", () => {
+    const baseline = digestLandingRecord(LANDING);
+    const mutations = mutateEveryLeaf(LANDING as unknown as MutableJson);
+
+    expect(mutations.length).toBeGreaterThan(50);
+    for (const key of Object.keys(LANDING)) {
+      expect(mutations.some((mutation) => mutation.path.startsWith(`$.${key}`))).toBe(true);
+    }
+    for (const mutation of mutations) {
+      expect(digestLandingRecord(mutation.value), mutation.path).not.toBe(baseline);
+    }
+
+    const tokenValueSentinel = "PACKET3_CREDENTIAL_VALUE_SENTINEL_DO_NOT_PERSIST";
+    expect(canonicalLandingJson(LANDING)).not.toContain(tokenValueSentinel);
+    expect(canonicalLandingJson(PROFILE)).not.toContain(tokenValueSentinel);
   });
 
   it("binds approved text and renders the exact deterministic draft-PR body", () => {
@@ -648,6 +728,375 @@ describe("landing v1 canonical records", () => {
       decodeGitHubPostBodyV1("github.pull_request.post", {
         ...pullRequest,
         maintainer_can_modify: true,
+      }),
+    );
+  });
+});
+
+describe("landing v1 durable ledger records", () => {
+  const landingSha256 = digestLandingRecord(LANDING);
+
+  it("validates standalone credential environment names and durable decisions", () => {
+    expect(assertLandingCredentialEnvironmentName("ICARUS_GITHUB_TOKEN_TEST")).toBe(
+      "ICARUS_GITHUB_TOKEN_TEST",
+    );
+    for (const name of [
+      "GITHUB_TOKEN",
+      "ICARUS_GITHUB_TOKEN_",
+      "ICARUS_GITHUB_TOKEN_lowercase",
+      "ICARUS_GITHUB_TOKEN_TRAILING_",
+    ]) {
+      expectIcarusCode(() => assertLandingCredentialEnvironmentName(name));
+    }
+
+    const decision = {
+      id: REVIEW_ID,
+      landingId: LANDING_ID,
+      landingSha256,
+      actor: "operator",
+      decision: "approve",
+      createdAt: "2026-08-02T12:00:00.000Z",
+    };
+    expect(decodeLandingDecisionV1(decision)).toEqual(decision);
+    expectIcarusCode(() => decodeLandingDecisionV1({ ...decision, unknown: true }));
+    expectIcarusCode(() => decodeLandingDecisionV1({ ...decision, actor: "bad\nactor" }));
+    expectIcarusCode(() =>
+      decodeLandingDecisionV1({ ...decision, landingSha256: landingSha256.toUpperCase() }),
+    );
+  });
+
+  it("closes every representable local-ref fact and rejects the undefined invalid shape", () => {
+    const absent = {
+      schemaVersion: 1,
+      state: "absent",
+      objectSha1: null,
+      symbolicTargetSha256: null,
+    };
+    const direct = {
+      schemaVersion: 1,
+      state: "direct",
+      objectSha1: CANDIDATE_COMMIT,
+      symbolicTargetSha256: null,
+    };
+    const symbolic = {
+      schemaVersion: 1,
+      state: "symbolic",
+      objectSha1: null,
+      symbolicTargetSha256: sha256("refs/heads/main"),
+    };
+
+    expect(decodeLocalRefFactV1(absent)).toEqual(absent);
+    expect(decodeLocalRefFactV1(direct)).toEqual(direct);
+    expect(decodeLocalRefFactV1(symbolic)).toEqual(symbolic);
+    expect(decodeCanonicalLocalRefFactJsonV1(canonicalLandingJson(direct))).toEqual(direct);
+
+    const noncanonical = JSON.stringify(direct);
+    expect(noncanonical).not.toBe(canonicalLandingJson(direct));
+    expectIcarusCode(() => decodeCanonicalLocalRefFactJsonV1(noncanonical));
+    expectIcarusCode(() =>
+      decodeLocalRefFactV1({
+        schemaVersion: 1,
+        state: "invalid",
+        objectSha1: null,
+        symbolicTargetSha256: null,
+      }),
+    );
+    expectIcarusCode(() =>
+      decodeLocalRefFactV1({ ...direct, symbolicTargetSha256: sha256("target") }),
+    );
+    expectIcarusCode(() => decodeLocalRefFactV1({ ...absent, extra: null }));
+  });
+
+  it("enforces observation phase, fact order, cardinality, IDs, and canonical bytes", () => {
+    const localObservation = {
+      schemaVersion: 1,
+      operationId: OPERATION_ID,
+      kind: "local_ref.create",
+      phase: "pre_effect",
+      facts: [
+        {
+          fact: "local_ref",
+          requestId: null,
+          resultSha256: sha256("local-ref-fact"),
+        },
+      ],
+    };
+    expect(decodeLandingOperationObservationV1(localObservation)).toEqual(localObservation);
+    expect(
+      decodeCanonicalLandingOperationObservationJsonV1(canonicalLandingJson(localObservation)),
+    ).toEqual(localObservation);
+
+    const preflightObservation = {
+      schemaVersion: 1,
+      operationId: OPERATION_ID,
+      kind: "github.preflight",
+      phase: "pre_effect",
+      facts: [
+        { fact: "actor", requestId: REQUEST_ID, resultSha256: sha256("actor") },
+        { fact: "base_ref", requestId: REVIEW_ID, resultSha256: sha256("base") },
+        { fact: "head_ref", requestId: RUN_ID, resultSha256: sha256("head") },
+      ],
+    };
+    expect(decodeLandingOperationObservationV1(preflightObservation)).toEqual(preflightObservation);
+    expectIcarusCode(() =>
+      decodeLandingOperationObservationV1({
+        ...preflightObservation,
+        facts: [...preflightObservation.facts].reverse(),
+      }),
+    );
+    expectIcarusCode(() =>
+      decodeLandingOperationObservationV1({
+        ...preflightObservation,
+        facts: preflightObservation.facts.map((fact, index) =>
+          index === 0 ? { ...fact, requestId: null } : fact,
+        ),
+      }),
+    );
+    expectIcarusCode(() =>
+      decodeLandingOperationObservationV1({
+        ...localObservation,
+        kind: "landing.reconcile",
+      }),
+    );
+    expectIcarusCode(() =>
+      decodeLandingOperationObservationV1({
+        ...localObservation,
+        kind: "candidate.prepare",
+        facts: [],
+      }),
+    );
+  });
+
+  it("strictly maps operation outcomes, boundaries, evidence, and stage values", () => {
+    const candidateResult = {
+      schemaVersion: 1,
+      operationId: OPERATION_ID,
+      kind: "candidate.prepare",
+      outcome: "completed",
+      boundary: "candidate_ready",
+      evidence: [],
+      value: {
+        candidateTreeSha1: CANDIDATE_TREE,
+        candidateCommitSha1: CANDIDATE_COMMIT,
+        candidateCommitPayloadSha256: LANDING.candidateCommitPayloadSha256,
+        candidateObjectManifestSha256: LANDING.candidateObjectManifestSha256,
+        candidateCredentialAuditSha256: LANDING.candidateCredentialAuditSha256,
+        diffByteEqual: true,
+      },
+      errorCode: null,
+    };
+    expect(decodeLandingOperationResultV1(candidateResult)).toEqual(candidateResult);
+    expect(
+      decodeCanonicalLandingOperationResultJsonV1(canonicalLandingJson(candidateResult)),
+    ).toEqual(candidateResult);
+    expectIcarusCode(() =>
+      decodeLandingOperationResultV1({
+        ...candidateResult,
+        boundary: "local_ref_ready",
+      }),
+    );
+    expectIcarusCode(() =>
+      decodeLandingOperationResultV1({
+        ...candidateResult,
+        evidence: [{ requestId: null, resultSha256: sha256("unexpected") }],
+      }),
+    );
+
+    const localResult = {
+      schemaVersion: 1,
+      operationId: OPERATION_ID,
+      kind: "local_ref.create",
+      outcome: "completed",
+      boundary: "local_ref_ready",
+      evidence: [{ requestId: null, resultSha256: sha256("local-ref-fact") }],
+      value: {
+        headRef: LANDING.headRef,
+        candidateCommitSha1: CANDIDATE_COMMIT,
+        localRefOutcome: "created",
+        updateRefExitCode: 0,
+      },
+      errorCode: null,
+    };
+    expect(decodeLandingOperationResultV1(localResult)).toEqual(localResult);
+    expectIcarusCode(() =>
+      decodeLandingOperationResultV1({
+        ...localResult,
+        value: {
+          ...localResult.value,
+          localRefOutcome: "reconciled",
+          updateRefExitCode: 0,
+        },
+      }),
+    );
+
+    const failedResult = {
+      ...localResult,
+      outcome: "failed",
+      boundary: "operation_failed",
+      evidence: [],
+      value: null,
+      errorCode: "LOCAL_REF_CONFLICT",
+    };
+    expect(decodeLandingOperationResultV1(failedResult)).toEqual(failedResult);
+    expectIcarusCode(() => decodeLandingOperationResultV1({ ...failedResult, errorCode: null }));
+    expectIcarusCode(() =>
+      decodeLandingOperationResultV1({
+        ...failedResult,
+        kind: "candidate.prepare",
+        outcome: "reconciliation_required",
+        boundary: "reconciliation_required",
+        value: { subjectOperationId: OPERATION_ID, remoteResidue: "none" },
+      }),
+    );
+
+    const retryResult = {
+      schemaVersion: 1,
+      operationId: OPERATION_ID,
+      kind: "landing.reconcile",
+      outcome: "completed",
+      boundary: "retry_stage_proven",
+      evidence: [{ requestId: null, resultSha256: sha256("subject") }],
+      value: {
+        subjectOperationId: REVIEW_ID,
+        nextState: "approved",
+        remoteResidue: "none",
+        stageValue: null,
+      },
+      errorCode: null,
+    };
+    expect(decodeLandingOperationResultV1(retryResult)).toEqual(retryResult);
+    expectIcarusCode(() =>
+      decodeLandingOperationResultV1({
+        ...retryResult,
+        boundary: "subject_settled",
+      }),
+    );
+    expectIcarusCode(() =>
+      decodeLandingOperationResultV1({
+        ...retryResult,
+        value: { ...retryResult.value, nextState: "landed" },
+      }),
+    );
+
+    const pullRequestProjection = {
+      type: "pull_request",
+      number: 17,
+      state: "open",
+      draft: true,
+      owner: "octocat",
+      repository: "icarus-target",
+      headOwner: "octocat",
+      headRef: `icarus/${RUN_ID}`,
+      headSha1: CANDIDATE_COMMIT,
+      baseRef: "main",
+      baseSha1: BASE_COMMIT,
+      titleSha256: LANDING.pullRequestTitleSha256,
+      bodySha256: sha256("final-body"),
+      markerCount: 1,
+      maintainerCanModify: false,
+    };
+    expect(decodePullRequestProjectionV1(pullRequestProjection)).toEqual(pullRequestProjection);
+    expectIcarusCode(() =>
+      decodePullRequestProjectionV1({ ...pullRequestProjection, markerCount: 2 }),
+    );
+    expectIcarusCode(() => decodePullRequestProjectionV1({ ...pullRequestProjection, number: 0 }));
+  });
+
+  it("decodes only the closed event payload for the separately supplied type", () => {
+    const attemptStarted = {
+      schemaVersion: 1,
+      landingId: LANDING_ID,
+      coordinatorAttempt: 1,
+    };
+    expect(decodeLandingEventPayloadV1("landing.attempt.started", attemptStarted)).toEqual(
+      attemptStarted,
+    );
+    expect(
+      decodeCanonicalLandingEventPayloadJsonV1(
+        "landing.attempt.started",
+        canonicalLandingJson(attemptStarted),
+      ),
+    ).toEqual(attemptStarted);
+
+    const stateChanged = {
+      schemaVersion: 1,
+      landingId: LANDING_ID,
+      from: "awaiting_approval",
+      to: "approved",
+      version: 2,
+      operationId: null,
+    };
+    expect(decodeLandingEventPayloadV1("landing.state.changed", stateChanged)).toEqual(
+      stateChanged,
+    );
+    expectIcarusCode(() =>
+      decodeLandingEventPayloadV1("landing.state.changed", {
+        ...stateChanged,
+        to: "local_ready",
+      }),
+    );
+    expectIcarusCode(() =>
+      decodeLandingEventPayloadV1("landing.state.changed", {
+        ...stateChanged,
+        to: stateChanged.from,
+      }),
+    );
+
+    const requestAdmitted = {
+      schemaVersion: 1,
+      landingId: LANDING_ID,
+      operationId: OPERATION_ID,
+      requestId: REQUEST_ID,
+      coordinatorAttempt: 2,
+      operationKind: "github.preflight",
+      requestOrdinal: 1,
+      kind: "github.actor.get",
+      requestSha256: sha256("request"),
+    };
+    expect(decodeLandingEventPayloadV1("landing.github.request.admitted", requestAdmitted)).toEqual(
+      requestAdmitted,
+    );
+    expectIcarusCode(() =>
+      decodeLandingEventPayloadV1("landing.github.request.admitted", {
+        ...requestAdmitted,
+        operationKind: "candidate.prepare",
+      }),
+    );
+
+    const operationSettled = {
+      schemaVersion: 1,
+      landingId: LANDING_ID,
+      operationId: OPERATION_ID,
+      coordinatorAttempt: 1,
+      kind: "candidate.prepare",
+      outcome: "completed",
+      resultSha256: sha256("candidate-result"),
+      errorCode: null,
+    };
+    expect(decodeLandingEventPayloadV1("landing.operation.settled", operationSettled)).toEqual(
+      operationSettled,
+    );
+    expectIcarusCode(() =>
+      decodeLandingEventPayloadV1("landing.operation.settled", {
+        ...operationSettled,
+        outcome: "failed",
+      }),
+    );
+    expectIcarusCode(() =>
+      decodeLandingEventPayloadV1("landing.attempt.started", {
+        ...attemptStarted,
+        extra: true,
+      }),
+    );
+    expectIcarusCode(() => decodeLandingEventPayloadV1("landing.unknown", attemptStarted));
+    expectIcarusCode(() =>
+      decodeLandingEventPayloadV1("landing.decision.recorded", {
+        schemaVersion: 1,
+        landingId: LANDING_ID,
+        decisionId: REVIEW_ID,
+        landingSha256,
+        decision: "approve",
+        actor: "bad\ractor",
       }),
     );
   });

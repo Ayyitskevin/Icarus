@@ -8,6 +8,10 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 
 import {
+  LANDING_DERIVATIVE_GITHUB_EVENTS,
+  LANDING_DERIVATIVE_MAY_TRIGGER,
+  LANDING_DIRECT_ICARUS_EFFECTS,
+  LANDING_EFFECT_WARNING,
   presentRun,
   presentRunEventHistoryPage,
   presentRunEventPage,
@@ -87,6 +91,8 @@ function presentationSnapshot(history: RunHistory): RunPresentationSnapshot {
     events: presentationEvents,
     eventCursor: events.at(-1)?.sequence ?? 0,
     eventCount: events.length,
+    landing: null,
+    landingRevision: 0,
     actionEvents: presentationEvents.filter((event) => actionEventTypes.has(event.type)).slice(-2),
   };
 }
@@ -458,6 +464,85 @@ describe("workspace run presentation", () => {
     expect(serialized).not.toContain("cachePath");
     expect(serialized).not.toContain("worktreePath");
     expect(serialized).not.toContain("c2VjcmV0");
+    const privateLandingSentinel = "LANDING_CREDENTIAL_ENV_MUST_NOT_LEAK";
+    const pullRequestTitle = "Exact <script>alert('title')</script>";
+    const pullRequestBody =
+      "Approved prefix\n\nEvidence line <img src=x onerror=alert(1)>\n\n<!-- marker -->";
+    const landingPresentation = presentRun(project, {
+      ...presentationSnapshot({ run, approvals: [], events: [] }),
+      landingRevision: 7,
+      landing: {
+        landingId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        state: "awaiting_approval",
+        resumeState: null,
+        version: 1,
+        landingSha256: "d".repeat(64),
+        candidateCommitSha1: "c".repeat(40),
+        pullRequestTitle,
+        pullRequestBody,
+        derivativeEffects: {
+          version: 1,
+          disposition: "inert-repository",
+          evidenceSha256: "e".repeat(64),
+        },
+        decision: {
+          actor: "operator",
+          decision: "approve",
+          createdAt: "2026-08-02T12:01:00.000Z",
+        },
+        errorCode: null,
+        updatedAt: "2026-08-02T12:02:00.000Z",
+        credentialEnv: privateLandingSentinel,
+      },
+    } as unknown as RunPresentationSnapshot);
+    expect(landingPresentation.landingRevision).toBe(7);
+    expect(landingPresentation.landing).toEqual({
+      landingId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      state: "awaiting_approval",
+      resumeState: null,
+      version: 1,
+      landingSha256: "d".repeat(64),
+      candidateCommitSha1: "c".repeat(40),
+      pullRequestTitle,
+      pullRequestBody,
+      decision: {
+        actor: "operator",
+        decision: "approve",
+        createdAt: "2026-08-02T12:01:00.000Z",
+      },
+      errorCode: null,
+      updatedAt: "2026-08-02T12:02:00.000Z",
+      directIcarusEffects: LANDING_DIRECT_ICARUS_EFFECTS,
+      derivativeEffectDisclosure: {
+        version: 1,
+        githubEvents: LANDING_DERIVATIVE_GITHUB_EVENTS,
+        mayTrigger: LANDING_DERIVATIVE_MAY_TRIGGER,
+        disposition: "inert-repository",
+        evidenceSha256: "e".repeat(64),
+      },
+      effectWarning: LANDING_EFFECT_WARNING,
+    });
+    expect(Object.keys(landingPresentation.landing as Record<string, unknown>).sort()).toEqual(
+      [
+        "candidateCommitSha1",
+        "decision",
+        "derivativeEffectDisclosure",
+        "directIcarusEffects",
+        "effectWarning",
+        "errorCode",
+        "landingId",
+        "landingSha256",
+        "pullRequestBody",
+        "pullRequestTitle",
+        "resumeState",
+        "state",
+        "updatedAt",
+        "version",
+      ].sort(),
+    );
+    expect(JSON.stringify(landingPresentation)).not.toContain(privateLandingSentinel);
+    expect(JSON.stringify(landingPresentation)).not.toContain("credentialEnv");
+
     expect(serialized).not.toContain("/private/state");
 
     const greetingEdit: FileEdit = {

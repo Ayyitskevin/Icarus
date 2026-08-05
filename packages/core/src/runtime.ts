@@ -5,6 +5,7 @@ import path from "node:path";
 import { ArtifactStore } from "./artifacts.js";
 import { invariant } from "./errors.js";
 import { GitController } from "./git.js";
+import { LandingGitController } from "./landing-git.js";
 import { DockerSandboxRunner } from "./sandbox.js";
 import { type GatewayFactory, IcarusService } from "./service.js";
 import { IcarusStore } from "./store.js";
@@ -229,6 +230,7 @@ export async function createIcarusRuntime(
     readonly allowPatchSetMigration?: boolean;
     readonly allowReadableManifestMigration?: boolean;
     readonly allowAnnotationMigration?: boolean;
+    readonly landingCredentialEnvironmentNames?: readonly string[];
   } = {},
 ): Promise<IcarusRuntime> {
   const root = await prepareStateRoot(stateRoot, process.platform);
@@ -245,12 +247,15 @@ export async function createIcarusRuntime(
   });
   const artifacts = new ArtifactStore(root);
   const git = new GitController(controllerHome, runsRoot);
+  const landingGit = new LandingGitController(controllerHome, runsRoot);
   const checks = new DockerSandboxRunner(root, git, options.dockerBinary ?? "docker");
   const service = new IcarusService({
     stateRoot: root,
     store,
     artifacts,
     git,
+    landingGit,
+    landingCredentialEnvironmentNames: options.landingCredentialEnvironmentNames ?? [],
     checks,
     ...(options.gatewayFactory === undefined ? {} : { gatewayFactory: options.gatewayFactory }),
   });

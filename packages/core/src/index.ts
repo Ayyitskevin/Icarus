@@ -112,6 +112,28 @@ export {
   LANDING_LEDGER_SCHEMA,
   migrateGate1Schema,
 } from "./gate1-schema.js";
+export type {
+  LandingProfileRecordV1,
+  LandingRunProjectionSnapshotV1,
+  LandingRunProjectionV1,
+  LandingStatusV1,
+} from "./landing-ledger.js";
+export {
+  LANDING_DERIVATIVE_GITHUB_EVENTS,
+  LANDING_DERIVATIVE_MAY_TRIGGER,
+  LANDING_DIRECT_ICARUS_EFFECTS,
+  LANDING_EFFECT_WARNING,
+  type LandingApprovalPresentationV1,
+  type LandingStatusPresentationV1,
+  presentLandingApprovalV1,
+  presentLandingStatusV1,
+} from "./landing-presentation.js";
+export type {
+  GitHubLandingProfileV1,
+  LandingDecisionV1,
+  LandingDigestV1,
+  LocalRefFactV1,
+} from "./landing-records.js";
 export {
   assertOperatorActor,
   checkpointDigest,
@@ -140,7 +162,9 @@ export {
   type BrowserActionExecutionOptions,
   type BrowserActionExecutionResult,
   IcarusService,
+  type LandingGitService,
   type PlanRunInput,
+  type PrepareLandingInput,
 } from "./service.js";
 export {
   MAX_TOOL_CALLS_PER_ITERATION,
@@ -217,6 +241,7 @@ export type {
   RunEventHistoryPage,
   RunEventPage,
   RunHistory,
+  RunLandingPresentation,
   RunPresentationSnapshot,
   RunRecord,
   RunState,

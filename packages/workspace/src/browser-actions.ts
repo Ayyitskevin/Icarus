@@ -1,5 +1,6 @@
 import {
   ApiError,
+  isExactLandingView,
   type BrowserActionDescriptorView,
   type BrowserActionExecutionView,
   type BrowserActionReceiptView,
@@ -209,6 +210,8 @@ const RUN_KEYS = [
   "files",
   "gate",
   "id",
+  "landing",
+  "landingRevision",
   "lastError",
   "outputs",
   "phase",
@@ -346,6 +349,9 @@ function isRunView(value: unknown, runId: string): value is BrowserActionExecuti
   return (
     run.id === runId &&
     isNonNegativeInteger(run.eventCursor) &&
+    isNonNegativeInteger(run.landingRevision) &&
+    isExactLandingView(run.landing) &&
+    (run.landing === null ? run.landingRevision === 0 : run.landingRevision > 0) &&
     isNonNegativeInteger(run.timelineTotal) &&
     typeof run.timelineTruncated === "boolean" &&
     typeof run.phase === "string" &&

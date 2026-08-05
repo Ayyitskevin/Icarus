@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
-import type { RunEventPageView } from "../../packages/workspace/src/api.js";
+import { newestRun } from "../../packages/workspace/src/App.js";
+import type { RunEventPageView, RunView } from "../../packages/workspace/src/api.js";
 import {
   advanceEventPoll,
   eventPollDelayMs,
@@ -25,6 +26,17 @@ function page(revision: number, start: number, end: number, hasMore: boolean): R
       timestamp: "2026-07-20T12:00:00.000Z",
     })),
   };
+}
+
+function runSnapshot(eventCursor: number, landingRevision: number, marker: string): RunView {
+  return {
+    id: RUN_ID,
+    eventCursor,
+    landingRevision,
+    landing: landingRevision === 0 ? null : { landingId: `landing-${marker}` },
+    task: `task-${marker}`,
+    timeline: [],
+  } as unknown as RunView;
 }
 
 describe("workspace live-event polling", () => {
@@ -113,5 +125,29 @@ describe("workspace live-event polling", () => {
       "1 new persisted event directly paged. Last directly paged: event 65.",
     );
     expect(uncappedAnnouncement).not.toContain("latest");
+  });
+  test("accepts a landing-only refresh at an unchanged run-event revision", () => {
+    const current = runSnapshot(40, 7, "current");
+    const landingOnly = runSnapshot(40, 8, "landing-only");
+
+    expect(newestRun(current, landingOnly)).toBe(landingOnly);
+    expect(newestRun(landingOnly, current)).toBe(landingOnly);
+    expect(newestRun(landingOnly, runSnapshot(40, 8, "duplicate"))).toBe(landingOnly);
+  });
+
+  test("merges incomparable event and landing revisions without losing either domain", () => {
+    const higherEvent = runSnapshot(41, 7, "event");
+    const higherLanding = runSnapshot(40, 8, "landing");
+
+    for (const [current, candidate] of [
+      [higherEvent, higherLanding],
+      [higherLanding, higherEvent],
+    ] as const) {
+      const merged = newestRun(current, candidate);
+      expect(merged.eventCursor).toBe(41);
+      expect(merged.task).toBe("task-event");
+      expect(merged.landingRevision).toBe(8);
+      expect(merged.landing?.landingId).toBe("landing-landing");
+    }
   });
 });
