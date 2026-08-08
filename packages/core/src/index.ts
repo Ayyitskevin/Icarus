@@ -112,6 +112,36 @@ export {
   LANDING_LEDGER_SCHEMA,
   migrateGate1Schema,
 } from "./gate1-schema.js";
+export {
+  assertNoLiveGitHubTransport,
+  type ExecuteGitHubLandingRequestV1,
+  GITHUB_LANDING_REQUEST_TIMEOUT_MS,
+  GITHUB_LANDING_RESPONSE_MAX_BYTES,
+  GITHUB_LANDING_USER_AGENT,
+  type GitHubGatewayExchangeV1,
+  type GitHubGatewaySettledExchangeV1,
+  type GitHubLandingAdmittedRequestClaimerV1,
+  type GitHubLandingCredentialResolverV1,
+  GitHubLandingGatewayV1,
+  type GitHubLandingMaterialReaderV1,
+  type GitHubLandingMaterialV1,
+  type GitHubLandingTransport,
+  type GitHubLandingTransportFailure,
+  type GitHubLandingTransportOutcome,
+  type GitHubLandingTransportRequest,
+  type GitHubLandingTransportResponse,
+} from "./github-landing-gateway.js";
+export {
+  type GitHubPreflightCompleteHistoryV1,
+  type GitHubPreflightFactV1,
+  type GitHubPreflightHistoryExchangeV1,
+  type GitHubPreflightHistoryInputV1,
+  type GitHubPreflightHistoryProjectionV1,
+  type GitHubPreflightNextHistoryV1,
+  type GitHubPreflightNextRequestV1,
+  type GitHubPreflightRequestSubjectV1,
+  validateGitHubPreflightHttpHistoryV1,
+} from "./landing-http-history.js";
 export type {
   LandingProfileRecordV1,
   LandingRunProjectionSnapshotV1,
@@ -128,25 +158,6 @@ export {
   presentLandingApprovalV1,
   presentLandingStatusV1,
 } from "./landing-presentation.js";
-export {
-  assertNoLiveGitHubTransport,
-  GITHUB_LANDING_REQUEST_TIMEOUT_MS,
-  GITHUB_LANDING_RESPONSE_MAX_BYTES,
-  GITHUB_LANDING_USER_AGENT,
-  GitHubLandingGatewayV1,
-  type ExecuteGitHubLandingRequestV1,
-  type GitHubGatewayExchangeV1,
-  type GitHubGatewaySettledExchangeV1,
-  type GitHubLandingAdmittedRequestClaimerV1,
-  type GitHubLandingCredentialResolverV1,
-  type GitHubLandingMaterialReaderV1,
-  type GitHubLandingMaterialV1,
-  type GitHubLandingTransport,
-  type GitHubLandingTransportFailure,
-  type GitHubLandingTransportOutcome,
-  type GitHubLandingTransportRequest,
-  type GitHubLandingTransportResponse,
-} from "./github-landing-gateway.js";
 export type {
   ActorProjectionV1,
   GitHubLandingProfileV1,
