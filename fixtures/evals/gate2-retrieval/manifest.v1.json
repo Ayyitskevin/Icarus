@@ -1,0 +1,327 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "gate2-retrieval",
+  "corpusRevision": "benchmark-first-r0-v1",
+  "digestEncoding": "raw-bytes-sha256-lowercase-hex",
+  "locationEncoding": "one_based_line_utf8_byte_columns",
+  "resultOrigin": "retrieved_source",
+  "repository": {
+    "root": "repository",
+    "maxReadableFileBytes": 256,
+    "maxExcerptBytes": 64,
+    "maxResultsPerQuery": 3,
+    "files": [
+      {
+        "path": ".gitignore",
+        "byteLength": 9,
+        "sha256": "d7d71a7189cf7613e575fb302af37136a07230acd26f439cf191251c0f0def0b",
+        "mediaType": "utf8_text",
+        "disposition": "searchable",
+        "omissionReason": null
+      },
+      {
+        "path": "README.md",
+        "byteLength": 110,
+        "sha256": "1a1c0c6dbcd0028e06d3bba0b66a54ad64030a71d2b79258a069a7cb844e4d0d",
+        "mediaType": "utf8_text",
+        "disposition": "searchable",
+        "omissionReason": null
+      },
+      {
+        "path": "assets/render-status.bin",
+        "byteLength": 36,
+        "sha256": "faae177f66d6c50eef47711da0f04d6529aeaa34b90c3600003204ff99ce9669",
+        "mediaType": "binary",
+        "disposition": "omitted",
+        "omissionReason": "binary"
+      },
+      {
+        "path": "docs/render-status.md",
+        "byteLength": 69,
+        "sha256": "2620a99fd4e6daf4b81ce3dd1d157ccea693ab7b7600657e067272c2bd6b6d25",
+        "mediaType": "utf8_text",
+        "disposition": "searchable",
+        "omissionReason": null
+      },
+      {
+        "path": "generated/render-status.generated.txt",
+        "byteLength": 582,
+        "sha256": "23e742c36aaf5125912423138ccfc24b527b0523225a8c4b064556cf7da108a0",
+        "mediaType": "utf8_text",
+        "disposition": "omitted",
+        "omissionReason": "oversize"
+      },
+      {
+        "path": "ignored/draft-render-status.ts",
+        "byteLength": 74,
+        "sha256": "d52f0710f3355b12ddb4b6b7fd800a22c4c9f283331ff66b62a55755febb77f8",
+        "mediaType": "utf8_text",
+        "disposition": "omitted",
+        "omissionReason": "ignore_rule"
+      },
+      {
+        "path": "private/render-status.credentials.txt",
+        "byteLength": 122,
+        "sha256": "1011788bf015fb9cc6b675a01dad90d2dfe3cf4a56c21fc530869e1eef4c5c64",
+        "mediaType": "utf8_text",
+        "disposition": "omitted",
+        "omissionReason": "secret_policy"
+      },
+      {
+        "path": "src/a/render-status.ts",
+        "byteLength": 61,
+        "sha256": "a9b9c1c5af0409a84426e37bc90b659f7232916ffa80d04d107e6875acb2af46",
+        "mediaType": "utf8_text",
+        "disposition": "searchable",
+        "omissionReason": null
+      },
+      {
+        "path": "src/b/render-status.ts",
+        "byteLength": 63,
+        "sha256": "6a3c2830974da6c38635380016b97742cf183275fad7fa225b3f909d46823698",
+        "mediaType": "utf8_text",
+        "disposition": "searchable",
+        "omissionReason": null
+      },
+      {
+        "path": "src/models/user-record.ts",
+        "byteLength": 87,
+        "sha256": "9050f351136f7a8b25fe5321a59e3772ec6c5a98d33fdb2acfcca2b0d48dce03",
+        "mediaType": "utf8_text",
+        "disposition": "searchable",
+        "omissionReason": null
+      },
+      {
+        "path": "src/services/user-consumer.ts",
+        "byteLength": 83,
+        "sha256": "637f817a25929967a3d00343756f26aa30e2f1fb8c1d31a0ac69ce197aac4592",
+        "mediaType": "utf8_text",
+        "disposition": "searchable",
+        "omissionReason": null
+      },
+      {
+        "path": "src/services/user-service.ts",
+        "byteLength": 215,
+        "sha256": "f3ab55d82b24a27868add999dbd0d10b228732c6ec30977ccd630ee07014edf1",
+        "mediaType": "utf8_text",
+        "disposition": "searchable",
+        "omissionReason": null
+      },
+      {
+        "path": "src/unicode-location.ts",
+        "byteLength": 35,
+        "sha256": "5a7057332b7f7e1c5753701059940948607729b108e5377c7ddb8a1fa6f47b0d",
+        "mediaType": "utf8_text",
+        "disposition": "searchable",
+        "omissionReason": null
+      },
+      {
+        "path": "src//byte-tie.ts",
+        "byteLength": 38,
+        "sha256": "18982f0f213f09414f2774aad6cd2d467beeff54b02ae797a68743c47356a23e",
+        "mediaType": "utf8_text",
+        "disposition": "searchable",
+        "omissionReason": null
+      },
+      {
+        "path": "src/𐀀/byte-tie.ts",
+        "byteLength": 40,
+        "sha256": "e724f77ed9b3c66525d43b5714338119b37a8661b496063bacfc39a996ced6de",
+        "mediaType": "utf8_text",
+        "disposition": "searchable",
+        "omissionReason": null
+      }
+    ]
+  },
+  "ranking": {
+    "scoreOrder": "descending_integer",
+    "tieBreak": ["path_utf8_bytes_ascending", "line_ascending", "column_ascending"]
+  },
+  "queries": [
+    {
+      "id": "exact-file",
+      "kind": "file",
+      "query": "src/services/user-service.ts",
+      "limit": 1,
+      "totalRawMatchingFiles": 1,
+      "totalEligibleMatches": 1,
+      "expectedResults": [
+        {
+          "rank": 1,
+          "score": 1000,
+          "path": "src/services/user-service.ts",
+          "matchKind": "path",
+          "origin": "retrieved_source",
+          "symbol": null,
+          "location": null,
+          "matchedText": "src/services/user-service.ts"
+        }
+      ],
+      "expectedOmissions": []
+    },
+    {
+      "id": "exact-symbol",
+      "kind": "symbol",
+      "query": "findUser",
+      "limit": 3,
+      "totalRawMatchingFiles": 2,
+      "totalEligibleMatches": 1,
+      "expectedResults": [
+        {
+          "rank": 1,
+          "score": 1000,
+          "path": "src/services/user-service.ts",
+          "matchKind": "symbol",
+          "origin": "retrieved_source",
+          "symbol": {
+            "name": "findUser",
+            "kind": "function",
+            "isDefinition": true
+          },
+          "location": {
+            "line": 5,
+            "column": 17,
+            "endLine": 5,
+            "endColumnExclusive": 25
+          },
+          "matchedText": "findUser"
+        }
+      ],
+      "expectedOmissions": [
+        {
+          "path": "src/services/user-consumer.ts",
+          "reason": "not_symbol_definition"
+        }
+      ]
+    },
+    {
+      "id": "stable-tie-and-bound",
+      "kind": "text",
+      "query": "renderStatus",
+      "limit": 2,
+      "totalRawMatchingFiles": 7,
+      "totalEligibleMatches": 3,
+      "expectedResults": [
+        {
+          "rank": 1,
+          "score": 800,
+          "path": "src/a/render-status.ts",
+          "matchKind": "text",
+          "origin": "retrieved_source",
+          "symbol": null,
+          "location": {
+            "line": 1,
+            "column": 17,
+            "endLine": 1,
+            "endColumnExclusive": 29
+          },
+          "matchedText": "renderStatus"
+        },
+        {
+          "rank": 2,
+          "score": 800,
+          "path": "src/b/render-status.ts",
+          "matchKind": "text",
+          "origin": "retrieved_source",
+          "symbol": null,
+          "location": {
+            "line": 1,
+            "column": 17,
+            "endLine": 1,
+            "endColumnExclusive": 29
+          },
+          "matchedText": "renderStatus"
+        }
+      ],
+      "expectedOmissions": [
+        {
+          "path": "assets/render-status.bin",
+          "reason": "binary"
+        },
+        {
+          "path": "docs/render-status.md",
+          "reason": "result_limit"
+        },
+        {
+          "path": "generated/render-status.generated.txt",
+          "reason": "oversize"
+        },
+        {
+          "path": "ignored/draft-render-status.ts",
+          "reason": "ignore_rule"
+        },
+        {
+          "path": "private/render-status.credentials.txt",
+          "reason": "secret_policy"
+        }
+      ]
+    },
+    {
+      "id": "utf8-byte-column",
+      "kind": "text",
+      "query": "byteColumn",
+      "limit": 1,
+      "totalRawMatchingFiles": 1,
+      "totalEligibleMatches": 1,
+      "expectedResults": [
+        {
+          "rank": 1,
+          "score": 800,
+          "path": "src/unicode-location.ts",
+          "matchKind": "text",
+          "origin": "retrieved_source",
+          "symbol": null,
+          "location": {
+            "line": 1,
+            "column": 17,
+            "endLine": 1,
+            "endColumnExclusive": 27
+          },
+          "matchedText": "byteColumn"
+        }
+      ],
+      "expectedOmissions": []
+    },
+    {
+      "id": "utf8-byte-order-tie",
+      "kind": "text",
+      "query": "byteTie",
+      "limit": 2,
+      "totalRawMatchingFiles": 2,
+      "totalEligibleMatches": 2,
+      "expectedResults": [
+        {
+          "rank": 1,
+          "score": 800,
+          "path": "src//byte-tie.ts",
+          "matchKind": "text",
+          "origin": "retrieved_source",
+          "symbol": null,
+          "location": {
+            "line": 1,
+            "column": 14,
+            "endLine": 1,
+            "endColumnExclusive": 21
+          },
+          "matchedText": "byteTie"
+        },
+        {
+          "rank": 2,
+          "score": 800,
+          "path": "src/𐀀/byte-tie.ts",
+          "matchKind": "text",
+          "origin": "retrieved_source",
+          "symbol": null,
+          "location": {
+            "line": 1,
+            "column": 14,
+            "endLine": 1,
+            "endColumnExclusive": 21
+          },
+          "matchedText": "byteTie"
+        }
+      ],
+      "expectedOmissions": []
+    }
+  ]
+}
