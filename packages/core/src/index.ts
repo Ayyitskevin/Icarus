@@ -143,6 +143,10 @@ export {
   validateGitHubPreflightHttpHistoryV1,
 } from "./landing-http-history.js";
 export type {
+  LandingGitHubAdmittedRequestClaimV1,
+  LandingGitHubPreflightRequestAdmissionV1,
+  LandingGitHubPreflightSettlementInputV1,
+  LandingOperationAdmissionV1,
   LandingProfileRecordV1,
   LandingRunProjectionSnapshotV1,
   LandingRunProjectionV1,

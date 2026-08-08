@@ -10,7 +10,11 @@ import type Database from "better-sqlite3";
 
 import { sha256 } from "./digest.js";
 import { IcarusError } from "./errors.js";
-import { validatePersistedGitHubPreflightOperationV1 } from "./landing-preflight-persistence.js";
+import { validateGitHubPreflightHttpHistoryV1 } from "./landing-http-history.js";
+import {
+  type PersistedGitHubPreflightEvidenceV1,
+  validatePersistedGitHubPreflightOperationV1,
+} from "./landing-preflight-persistence.js";
 import {
   assertGitInstant,
   assertInstant,
@@ -48,6 +52,8 @@ import {
   type LandingDecisionV1,
   type LandingDigestV1,
   type LandingEventPayloadV1,
+  type LandingHttpRequestV1,
+  type LandingHttpResultV1,
   type LandingOperationObservationV1,
   type LandingOperationRequestV1,
   type LandingOperationResultV1,
@@ -120,6 +126,43 @@ function expectRow(value: unknown, field: string): Row {
     invalid(field + " row is missing");
   }
   return value as Row;
+}
+
+function exactDataRecord(value: unknown, keys: readonly string[], field: string): JsonRecord {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    invalid(`${field} must be an object`);
+  }
+  let prototype: object | null;
+  let ownKeys: (string | symbol)[];
+  try {
+    prototype = Object.getPrototypeOf(value);
+    ownKeys = Reflect.ownKeys(value);
+  } catch {
+    return invalid(`${field} cannot expose a stable own-key set`);
+  }
+  if (prototype !== Object.prototype && prototype !== null) {
+    invalid(`${field} must be a plain object`);
+  }
+  const actual: string[] = [];
+  for (const key of ownKeys) {
+    if (typeof key !== "string") invalid(`${field} cannot contain symbol members`);
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+    } catch {
+      return invalid(`${field} cannot expose stable own-property descriptors`);
+    }
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+      invalid(`${field} members must be enumerable own data properties`);
+    }
+    actual.push(key);
+  }
+  actual.sort();
+  const expected = [...keys].sort();
+  if (actual.length !== expected.length || !actual.every((key, index) => key === expected[index])) {
+    invalid(`${field} does not have the exact expected members`);
+  }
+  return value as JsonRecord;
 }
 
 function text(value: unknown, field: string): string {
@@ -337,6 +380,33 @@ export interface LandingResumeAdmissionV1 {
 export interface LandingOperationAdmissionV1 {
   readonly status: LandingStatusV1;
   readonly operationId: string;
+}
+
+export interface LandingGitHubPreflightRequestAdmissionV1 {
+  readonly status: LandingStatusV1;
+  readonly request: LandingHttpRequestV1 & {
+    readonly operationKind: "github.preflight";
+    readonly method: "GET";
+  };
+  readonly requestSha256: string;
+}
+
+export interface LandingGitHubAdmittedRequestClaimV1 {
+  readonly request: LandingHttpRequestV1 & {
+    readonly operationKind: "github.preflight";
+    readonly method: "GET";
+  };
+  readonly landingSha256: string;
+}
+
+export interface LandingGitHubPreflightSettlementInputV1 {
+  readonly request: LandingHttpRequestV1 & {
+    readonly operationKind: "github.preflight";
+    readonly method: "GET";
+  };
+  readonly requestSha256: string;
+  readonly result: LandingHttpResultV1;
+  readonly resultSha256: string;
 }
 
 export interface LocalRefSettlementInputV1 {
@@ -2611,7 +2681,7 @@ export class LandingLedger {
 
   #startOperation(
     status: LandingStatusV1,
-    kind: "candidate.prepare" | "local_ref.create" | "landing.reconcile",
+    kind: "candidate.prepare" | "local_ref.create" | "github.preflight" | "landing.reconcile",
     input: LandingOperationRequestV1["input"],
   ): string {
     const attempt = this.#startedAttempt(status);
@@ -3335,6 +3405,583 @@ export class LandingLedger {
 
   #localReconciliationSubject(status: LandingStatusV1): LandingOperationRecordV1 {
     return localReconciliationSubject(status);
+  }
+
+  startGitHubPreflight(
+    expectedRunId: string,
+    landingId: string,
+    replayOperationId: string | null,
+  ): LandingOperationAdmissionV1 {
+    const canonicalRunId = assertUuid(expectedRunId, "runId");
+    const canonicalLandingId = assertUuid(landingId, "landingId");
+    const canonicalReplayOperationId =
+      replayOperationId === null ? null : assertUuid(replayOperationId, "replayOperationId");
+    const transaction = this.#database.transaction((): LandingOperationAdmissionV1 => {
+      const status = this.#mutableStatus(canonicalLandingId);
+      if (status.landing.runId !== canonicalRunId) {
+        throw new IcarusError(
+          "RUN_LEASE_MISMATCH",
+          "GitHub preflight belongs to another run lease",
+        );
+      }
+      if (
+        status.landing.state !== "local_ready" ||
+        status.decision?.decision !== "approve" ||
+        status.landing.landingSha256 === null
+      ) {
+        throw new IcarusError(
+          "INVALID_LANDING_STATE",
+          "Landing is not locally ready for GitHub preflight",
+        );
+      }
+      this.#assertImmutableEvidence(status);
+      const attempt = this.#startedAttempt(status);
+      const owned = status.operations.filter(
+        (operation) => operation.coordinatorAttempt === attempt.ordinal,
+      );
+      if (
+        owned.length === 1 &&
+        owned[0]?.kind === "github.preflight" &&
+        owned[0].status === "started" &&
+        owned[0].id === canonicalReplayOperationId
+      ) {
+        return { status, operationId: owned[0].id };
+      }
+      if (owned.length !== 0) {
+        throw new IcarusError(
+          "LANDING_COORDINATOR_TAKEOVER_REQUIRED",
+          "The active landing attempt belongs to an earlier coordinator lease",
+        );
+      }
+      if (canonicalReplayOperationId !== null) {
+        throw new IcarusError(
+          "LANDING_NOT_ADMITTED",
+          "The registered GitHub preflight operation is no longer active",
+        );
+      }
+      const authority = reconstructLandingDigest(status);
+      if (authority === null || authority.sha256 !== status.landing.landingSha256) {
+        invalid("Local-ready landing has no exact immutable GitHub authority");
+      }
+      const operationId = this.#startOperation(status, "github.preflight", {
+        landingSha256: authority.sha256,
+        profileSha256: authority.record.profileSha256,
+        baseRef: authority.record.baseRef,
+        expectedRemoteBaseSha1: authority.record.expectedRemoteBaseSha1,
+        headRef: authority.record.headRef,
+        candidateCommitSha1: authority.record.candidateCommitSha1,
+        includePullRequestAbsence: false,
+      });
+      return { status: this.#loadStatus(canonicalLandingId), operationId };
+    });
+    return runImmediate(transaction);
+  }
+
+  #preflightEvidence(
+    status: LandingStatusV1,
+    operation: LandingOperationRecordV1,
+  ): PersistedGitHubPreflightEvidenceV1 {
+    if (operation.kind !== "github.preflight") {
+      invalid("GitHub preflight evidence requires a preflight operation");
+    }
+    const authority = reconstructLandingDigest(status);
+    if (authority === null || authority.sha256 !== status.landing.landingSha256) {
+      invalid("GitHub preflight has no exact immutable landing authority");
+    }
+    const rawOperationRow = this.#database
+      .prepare("SELECT * FROM landing_operations WHERE id = ? AND landing_id = ?")
+      .get(operation.id, operation.landingId);
+    if (rawOperationRow === undefined) invalid("GitHub preflight operation source row is missing");
+    const httpRows = this.#preflightHttpRows(operation);
+    const rawEventRows = this.#database
+      .prepare("SELECT * FROM landing_events WHERE landing_id = ? ORDER BY sequence LIMIT ?")
+      .all(operation.landingId, LANDING_LOADER_MAX_EVENTS) as unknown[];
+    if (rawEventRows.length !== status.events.length) {
+      invalid("GitHub preflight event query is incomplete");
+    }
+    const operationEvents: unknown[] = [];
+    const requestEvents: unknown[] = [];
+    for (const [index, event] of status.events.entries()) {
+      const rawEvent = rawEventRows[index];
+      if (rawEvent === undefined) invalid("GitHub preflight event source row disappeared");
+      if (
+        (event.type === "landing.operation.started" ||
+          event.type === "landing.operation.settled") &&
+        (event.payload as { readonly operationId: string }).operationId === operation.id
+      ) {
+        operationEvents.push(rawEvent);
+      } else if (
+        (event.type === "landing.github.request.admitted" ||
+          event.type === "landing.github.request.settled") &&
+        (event.payload as { readonly operationId: string }).operationId === operation.id
+      ) {
+        requestEvents.push(rawEvent);
+      }
+    }
+    return validatePersistedGitHubPreflightOperationV1({
+      landing: authority.record,
+      landingSha256: authority.sha256,
+      operationStartState: operation.request.expectedState,
+      operationStartVersion: operation.request.expectedVersion,
+      operationRow: rawOperationRow,
+      // The current loader admits exactly one operation per attempt, so this
+      // local-ready preflight owns request ordinals beginning at one.
+      previousRequestOrdinal: 0,
+      httpRows,
+      requestEvents,
+      operationEvents,
+    });
+  }
+
+  admitNextGitHubPreflightRequest(
+    expectedRunId: string,
+    landingId: string,
+    operationId: string,
+  ): LandingGitHubPreflightRequestAdmissionV1 {
+    const canonicalRunId = assertUuid(expectedRunId, "runId");
+    const canonicalLandingId = assertUuid(landingId, "landingId");
+    const canonicalOperationId = assertUuid(operationId, "operationId");
+    const transaction = this.#database.transaction((): LandingGitHubPreflightRequestAdmissionV1 => {
+      const status = this.#mutableStatus(canonicalLandingId);
+      if (status.landing.runId !== canonicalRunId) {
+        throw new IcarusError(
+          "RUN_LEASE_MISMATCH",
+          "GitHub preflight admission belongs to another run lease",
+        );
+      }
+      if (status.landing.state !== "local_ready") {
+        throw new IcarusError(
+          "INVALID_LANDING_STATE",
+          "Landing is not locally ready for GitHub preflight admission",
+        );
+      }
+      this.#assertImmutableEvidence(status);
+      const operation = this.#startedOperation(status, "github.preflight");
+      const attempt = this.#startedAttempt(status);
+      if (
+        operation.id !== canonicalOperationId ||
+        operation.coordinatorAttempt !== attempt.ordinal
+      ) {
+        throw new IcarusError(
+          "LANDING_NOT_ADMITTED",
+          "GitHub preflight operation does not own the active attempt",
+        );
+      }
+      const evidence = this.#preflightEvidence(status, operation);
+      if (evidence.status === "admitted") {
+        if (evidence.request.method !== "GET") {
+          invalid("Admitted GitHub preflight request is not a GET");
+        }
+        return {
+          status,
+          request: evidence.request as LandingGitHubPreflightRequestAdmissionV1["request"],
+          requestSha256: evidence.requestSha256,
+        };
+      }
+      if (evidence.status !== "next_request") {
+        throw new IcarusError(
+          "LANDING_NOT_ADMITTED",
+          "GitHub preflight has no next request to admit",
+        );
+      }
+      const request = decodeLandingHttpRequestV1({
+        ...evidence.nextRequest,
+        requestId: this.#identifier(),
+      });
+      if (request.operationKind !== "github.preflight" || request.method !== "GET") {
+        invalid("Derived GitHub preflight request crosses its fixed request grammar");
+      }
+      const requestJson = canonicalLandingJson(request);
+      const requestSha256 = sha256(requestJson);
+      const admittedAt = this.#timestamp();
+      this.#database
+        .prepare(
+          "INSERT INTO landing_http_requests " +
+            "(id, landing_id, operation_id, coordinator_attempt, operation_kind, " +
+            "request_ordinal, kind, method, request_sha256, request_json, status, outcome, " +
+            "http_status, result_sha256, result_json, error_code, admitted_at, settled_at) " +
+            "VALUES (?, ?, ?, ?, 'github.preflight', ?, ?, 'GET', ?, ?, 'admitted', " +
+            "NULL, NULL, NULL, NULL, NULL, ?, NULL)",
+        )
+        .run(
+          request.requestId,
+          request.landingId,
+          request.operationId,
+          request.coordinatorAttempt,
+          request.requestOrdinal,
+          request.kind,
+          requestSha256,
+          requestJson,
+          admittedAt,
+        );
+      this.#appendEvent(canonicalLandingId, "landing.github.request.admitted", {
+        schemaVersion: 1,
+        landingId: canonicalLandingId,
+        operationId: operation.id,
+        requestId: request.requestId,
+        coordinatorAttempt: operation.coordinatorAttempt,
+        operationKind: "github.preflight",
+        requestOrdinal: request.requestOrdinal,
+        kind: request.kind,
+        requestSha256,
+      });
+      return {
+        status: this.#loadStatus(canonicalLandingId),
+        request: request as LandingGitHubPreflightRequestAdmissionV1["request"],
+        requestSha256,
+      };
+    });
+    return runImmediate(transaction);
+  }
+
+  claimAdmittedGitHubPreflightRequest(
+    expectedRunId: string,
+    requestId: string,
+  ): LandingGitHubAdmittedRequestClaimV1 {
+    const canonicalRunId = assertUuid(expectedRunId, "runId");
+    const canonicalRequestId = assertUuid(requestId, "requestId");
+    const transaction = this.#database.transaction((): LandingGitHubAdmittedRequestClaimV1 => {
+      const identityPreflight = this.#database
+        .prepare(
+          "SELECT typeof(landing_id) AS landing_id_type, " +
+            "CASE WHEN typeof(landing_id) = 'text' THEN octet_length(landing_id) " +
+            "ELSE NULL END AS landing_id_bytes " +
+            "FROM landing_http_requests WHERE id = ?",
+        )
+        .get(canonicalRequestId);
+      if (identityPreflight === undefined) {
+        throw new IcarusError(
+          "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
+          "Admitted GitHub request is unavailable",
+        );
+      }
+      const identityShape = expectRow(identityPreflight, "landing HTTP request identity preflight");
+      if (text(identityShape.landing_id_type, "landing_http_requests.landing_id type") !== "text") {
+        invalid("landing_http_requests.landing_id is not bounded text");
+      }
+      integer(
+        identityShape.landing_id_bytes,
+        "landing_http_requests.landing_id bytes",
+        0,
+        LANDING_LOADER_ID_MAX_BYTES,
+      );
+      const identity = this.#database
+        .prepare(
+          "SELECT landing_id FROM landing_http_requests WHERE id = ? " +
+            "AND typeof(landing_id) = 'text' AND octet_length(landing_id) <= ?",
+        )
+        .get(canonicalRequestId, LANDING_LOADER_ID_MAX_BYTES);
+      if (identity === undefined) {
+        invalid("Bounded GitHub request identity disappeared during claim");
+      }
+      const landingId = assertUuid(
+        expectRow(identity, "landing HTTP request identity").landing_id,
+        "landing_http_requests.landing_id",
+      );
+      const status = this.#mutableStatus(landingId);
+      if (status.landing.runId !== canonicalRunId) {
+        throw new IcarusError("RUN_LEASE_MISMATCH", "GitHub request belongs to another run lease");
+      }
+      this.#assertImmutableEvidence(status);
+      const operation = this.#startedOperation(status, "github.preflight");
+      const attempt = this.#startedAttempt(status);
+      if (operation.coordinatorAttempt !== attempt.ordinal) {
+        invalid("Admitted GitHub preflight request crosses its active attempt");
+      }
+      const evidence = this.#preflightEvidence(status, operation);
+      if (
+        evidence.status !== "admitted" ||
+        evidence.request.requestId !== canonicalRequestId ||
+        evidence.request.method !== "GET" ||
+        status.landing.landingSha256 === null
+      ) {
+        throw new IcarusError(
+          "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
+          "Admitted GitHub request is unavailable",
+        );
+      }
+      return {
+        request: evidence.request as LandingGitHubAdmittedRequestClaimV1["request"],
+        landingSha256: status.landing.landingSha256,
+      };
+    });
+    return runImmediate(transaction);
+  }
+
+  #writePreflightOperationSettlement(
+    operation: LandingOperationRecordV1,
+    resultInput: LandingOperationResultV1,
+    observationInput: LandingOperationObservationV1 | null,
+    finishedAt: string,
+  ): void {
+    const result = decodeLandingOperationResultV1(resultInput);
+    const observation =
+      observationInput === null ? null : decodeLandingOperationObservationV1(observationInput);
+    if (
+      operation.kind !== "github.preflight" ||
+      result.operationId !== operation.id ||
+      result.kind !== "github.preflight" ||
+      (result.outcome === "completed") !== (observation !== null) ||
+      (observation !== null &&
+        (observation.operationId !== operation.id || observation.kind !== "github.preflight"))
+    ) {
+      invalid("GitHub preflight settlement does not bind its active operation");
+    }
+    if (finishedAt < operation.startedAt) {
+      invalid("GitHub preflight operation settlement precedes its admission");
+    }
+    const rowStatus =
+      result.outcome === "completed"
+        ? "completed"
+        : result.outcome === "failed"
+          ? "failed"
+          : "interrupted";
+    const observationJson = observation === null ? null : canonicalLandingJson(observation);
+    const observationSha256 = observationJson === null ? null : sha256(observationJson);
+    const resultJson = canonicalLandingJson(result);
+    const resultSha256 = sha256(resultJson);
+    const update = this.#database
+      .prepare(
+        "UPDATE landing_operations SET status = ?, observation_sha256 = ?, " +
+          "observation_json = ?, result_sha256 = ?, result_json = ?, error_code = ?, " +
+          "finished_at = ? WHERE id = ? AND landing_id = ? AND coordinator_attempt = ? " +
+          "AND kind = 'github.preflight' AND kind_attempt = ? AND request_sha256 = ? " +
+          "AND request_json = ? AND status = 'started' AND observation_sha256 IS NULL " +
+          "AND observation_json IS NULL AND result_sha256 IS NULL AND result_json IS NULL " +
+          "AND error_code IS NULL AND finished_at IS NULL",
+      )
+      .run(
+        rowStatus,
+        observationSha256,
+        observationJson,
+        resultSha256,
+        resultJson,
+        result.errorCode,
+        finishedAt,
+        operation.id,
+        operation.landingId,
+        operation.coordinatorAttempt,
+        operation.kindAttempt,
+        operation.requestSha256,
+        canonicalLandingJson(operation.request),
+      );
+    if (update.changes !== 1) {
+      throw new IcarusError("LANDING_CONFLICT", "GitHub preflight operation changed concurrently");
+    }
+    this.#appendEvent(operation.landingId, "landing.operation.settled", {
+      schemaVersion: 1,
+      landingId: operation.landingId,
+      operationId: operation.id,
+      coordinatorAttempt: operation.coordinatorAttempt,
+      kind: "github.preflight",
+      outcome: result.outcome,
+      resultSha256,
+      errorCode: result.errorCode,
+    });
+  }
+
+  settleGitHubPreflightRequest(
+    expectedRunId: string,
+    landingId: string,
+    operationId: string,
+    input: LandingGitHubPreflightSettlementInputV1,
+  ): LandingStatusV1 {
+    const canonicalRunId = assertUuid(expectedRunId, "runId");
+    const canonicalLandingId = assertUuid(landingId, "landingId");
+    const canonicalOperationId = assertUuid(operationId, "operationId");
+    const rawInput = exactDataRecord(
+      input,
+      ["request", "requestSha256", "result", "resultSha256"],
+      "githubPreflightSettlement",
+    );
+    const request = decodeLandingHttpRequestV1(rawInput.request);
+    const requestSha256 = assertSha256(
+      rawInput.requestSha256,
+      "githubPreflightSettlement.requestSha256",
+    );
+    const result = decodeLandingHttpResultV1(rawInput.result);
+    const resultSha256 = assertSha256(
+      rawInput.resultSha256,
+      "githubPreflightSettlement.resultSha256",
+    );
+    if (
+      request.operationKind !== "github.preflight" ||
+      request.method !== "GET" ||
+      request.landingId !== canonicalLandingId ||
+      request.operationId !== canonicalOperationId ||
+      requestSha256 !== digestLandingRecord(request) ||
+      result.requestId !== request.requestId ||
+      result.kind !== request.kind ||
+      resultSha256 !== digestLandingRecord(result)
+    ) {
+      invalid("GitHub preflight settlement changed its admitted request or result digest");
+    }
+    const requestJson = canonicalLandingJson(request);
+    const resultJson = canonicalLandingJson(result);
+    const transaction = this.#database.transaction((): LandingStatusV1 => {
+      const status = this.#mutableStatus(canonicalLandingId);
+      if (status.landing.runId !== canonicalRunId) {
+        throw new IcarusError(
+          "RUN_LEASE_MISMATCH",
+          "GitHub preflight settlement belongs to another run lease",
+        );
+      }
+      const rowValue = this.#database
+        .prepare("SELECT * FROM landing_http_requests WHERE id = ? AND landing_id = ?")
+        .get(request.requestId, canonicalLandingId);
+      if (rowValue === undefined) {
+        throw new IcarusError(
+          "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
+          "Admitted GitHub request is unavailable",
+        );
+      }
+      const row = expectRow(rowValue, "landing HTTP request");
+      if (
+        text(row.request_json, "landing_http_requests.request_json") !== requestJson ||
+        assertSha256(row.request_sha256, "landing_http_requests.request_sha256") !== requestSha256
+      ) {
+        throw new IcarusError("LANDING_CONFLICT", "GitHub request admission changed");
+      }
+      if (row.status === "settled") {
+        if (
+          text(row.result_json, "landing_http_requests.result_json") !== resultJson ||
+          assertSha256(row.result_sha256, "landing_http_requests.result_sha256") !== resultSha256
+        ) {
+          throw new IcarusError("LANDING_CONFLICT", "GitHub request settled differently");
+        }
+        return status;
+      }
+      if (row.status !== "admitted") {
+        invalid("GitHub preflight request has an unsupported durable status");
+      }
+      const operation = this.#startedOperation(status, "github.preflight");
+      const attempt = this.#startedAttempt(status);
+      if (
+        operation.id !== canonicalOperationId ||
+        operation.coordinatorAttempt !== attempt.ordinal
+      ) {
+        throw new IcarusError(
+          "LANDING_NOT_ADMITTED",
+          "GitHub preflight settlement does not own the active attempt",
+        );
+      }
+      const evidence = this.#preflightEvidence(status, operation);
+      if (
+        evidence.status !== "admitted" ||
+        evidence.request.requestId !== request.requestId ||
+        evidence.requestSha256 !== requestSha256
+      ) {
+        throw new IcarusError(
+          "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
+          "Admitted GitHub request is unavailable",
+        );
+      }
+      const settledAt = this.#timestamp();
+      const admittedAt = assertInstant(row.admitted_at, "landing_http_requests.admitted_at");
+      if (settledAt < admittedAt) {
+        invalid("GitHub request settlement precedes its admission");
+      }
+      const update = this.#database
+        .prepare(
+          "UPDATE landing_http_requests SET status = 'settled', outcome = ?, http_status = ?, " +
+            "result_sha256 = ?, result_json = ?, error_code = ?, settled_at = ? " +
+            "WHERE id = ? AND landing_id = ? AND operation_id = ? AND coordinator_attempt = ? " +
+            "AND operation_kind = 'github.preflight' AND request_ordinal = ? AND kind = ? " +
+            "AND method = 'GET' AND request_sha256 = ? AND request_json = ? " +
+            "AND status = 'admitted' AND outcome IS NULL AND http_status IS NULL " +
+            "AND result_sha256 IS NULL AND result_json IS NULL AND error_code IS NULL " +
+            "AND settled_at IS NULL",
+        )
+        .run(
+          result.outcome,
+          result.httpStatus,
+          resultSha256,
+          resultJson,
+          result.errorCode,
+          settledAt,
+          request.requestId,
+          request.landingId,
+          request.operationId,
+          request.coordinatorAttempt,
+          request.requestOrdinal,
+          request.kind,
+          requestSha256,
+          requestJson,
+        );
+      if (update.changes !== 1) {
+        throw new IcarusError("LANDING_CONFLICT", "GitHub request admission changed concurrently");
+      }
+      this.#appendEvent(canonicalLandingId, "landing.github.request.settled", {
+        schemaVersion: 1,
+        landingId: canonicalLandingId,
+        operationId: operation.id,
+        requestId: request.requestId,
+        coordinatorAttempt: operation.coordinatorAttempt,
+        operationKind: "github.preflight",
+        requestOrdinal: request.requestOrdinal,
+        kind: request.kind,
+        outcome: result.outcome,
+        resultSha256,
+        errorCode: result.errorCode,
+      });
+
+      const settledPrefix = evidence.exchanges.slice(0, -1).map((exchange) => {
+        if (exchange.status !== "settled") {
+          return invalid("GitHub preflight contains a non-tail admitted request");
+        }
+        return {
+          request: exchange.request,
+          requestSha256: exchange.requestSha256,
+          result: exchange.result,
+          resultSha256: exchange.resultSha256,
+        };
+      });
+      const currentExchange = { request, requestSha256, result, resultSha256 };
+      if (result.outcome === "succeeded") {
+        const authority = reconstructLandingDigest(status);
+        if (authority === null || authority.sha256 !== status.landing.landingSha256) {
+          invalid("GitHub preflight settlement lost immutable landing authority");
+        }
+        const history = validateGitHubPreflightHttpHistoryV1({
+          landing: authority.record,
+          landingSha256: authority.sha256,
+          operation: operation.request,
+          operationRequestSha256: operation.requestSha256,
+          previousRequestOrdinal: 0,
+          exchanges: [...settledPrefix, currentExchange],
+        });
+        if (history.status === "complete") {
+          this.#writePreflightOperationSettlement(
+            operation,
+            history.operationResult,
+            history.observation,
+            settledAt,
+          );
+        }
+      } else {
+        const operationOutcome = result.outcome === "failed" ? "failed" : "interrupted";
+        const operationResult = decodeLandingOperationResultV1({
+          schemaVersion: 1,
+          operationId: operation.id,
+          kind: "github.preflight",
+          outcome: operationOutcome,
+          boundary: operationOutcome === "failed" ? "operation_failed" : "operation_interrupted",
+          evidence: [...settledPrefix, currentExchange].map((exchange) => ({
+            requestId: exchange.request.requestId,
+            resultSha256: exchange.resultSha256,
+          })),
+          value: null,
+          errorCode: result.errorCode,
+        });
+        this.#writePreflightOperationSettlement(operation, operationResult, null, settledAt);
+        this.#settleAttempt(attempt, operationOutcome, result.errorCode);
+        if (operationOutcome === "failed") {
+          this.#transition(status.landing, "failed", "local_ready", result.errorCode, operation.id);
+        }
+      }
+      return this.#loadStatus(canonicalLandingId);
+    });
+    return runImmediate(transaction);
   }
 
   #startReconciliation(status: LandingStatusV1): string {
