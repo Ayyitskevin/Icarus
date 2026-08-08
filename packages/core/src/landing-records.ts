@@ -2731,6 +2731,221 @@ export function decodePullRequestProjectionV1(value: unknown): PullRequestProjec
   return decodePullRequestProjectionFieldsV1(decoded, "pullRequestProjection");
 }
 
+export interface ActorProjectionV1 {
+  readonly type: "actor";
+  readonly login: string;
+}
+
+export interface RefProjectionV1 {
+  readonly type: "ref";
+  readonly state: "absent" | "direct";
+  readonly ref: string;
+  readonly sha1: string | null;
+}
+
+export interface ObjectProjectionV1 {
+  readonly type: "object";
+  readonly objectKind: "blob" | "tree" | "commit" | "ref";
+  readonly sha1: string;
+}
+
+export interface PullRequestListProjectionV1 {
+  readonly type: "pull_request_list";
+  readonly complete: boolean;
+  readonly count: number;
+  readonly objects: readonly PullRequestProjectionV1[];
+}
+
+export type LandingHttpProjectionV1 =
+  | ActorProjectionV1
+  | RefProjectionV1
+  | ObjectProjectionV1
+  | PullRequestProjectionV1
+  | PullRequestListProjectionV1;
+
+export interface LandingHttpResultV1 {
+  readonly schemaVersion: 1;
+  readonly requestId: string;
+  readonly kind: LandingHttpKindV1;
+  readonly outcome: "succeeded" | "failed" | "ambiguous";
+  readonly httpStatus: number | null;
+  readonly projection: LandingHttpProjectionV1 | null;
+  readonly errorCode: string | null;
+}
+
+function decodeActorProjectionV1(value: unknown): ActorProjectionV1 {
+  const decoded = record(value, ["type", "login"], "httpResult.projection");
+  return {
+    type: literal(decoded.type, "actor", "httpResult.projection.type"),
+    login: assertGitHubIdentityPart(decoded.login, "httpResult.projection.login", true),
+  };
+}
+
+function decodeRefProjectionV1(value: unknown): RefProjectionV1 {
+  const decoded = record(value, ["type", "state", "ref", "sha1"], "httpResult.projection");
+  const state = oneOf(decoded.state, ["absent", "direct"] as const, "httpResult.projection.state");
+  const sha1 = nullable(decoded.sha1, (entry) => assertSha1(entry, "httpResult.projection.sha1"));
+  if ((state === "absent" && sha1 !== null) || (state === "direct" && sha1 === null)) {
+    invalid("HTTP ref projection state and object identity disagree");
+  }
+  return {
+    type: literal(decoded.type, "ref", "httpResult.projection.type"),
+    state,
+    ref: assertFullHeadRef(decoded.ref, "httpResult.projection.ref"),
+    sha1,
+  };
+}
+
+function decodeObjectProjectionV1(value: unknown): ObjectProjectionV1 {
+  const decoded = record(value, ["type", "objectKind", "sha1"], "httpResult.projection");
+  return {
+    type: literal(decoded.type, "object", "httpResult.projection.type"),
+    objectKind: oneOf(
+      decoded.objectKind,
+      ["blob", "tree", "commit", "ref"] as const,
+      "httpResult.projection.objectKind",
+    ),
+    sha1: assertSha1(decoded.sha1, "httpResult.projection.sha1"),
+  };
+}
+
+function decodePullRequestListProjectionV1(value: unknown): PullRequestListProjectionV1 {
+  const decoded = record(value, ["type", "complete", "count", "objects"], "httpResult.projection");
+  const objects = array(decoded.objects, "httpResult.projection.objects").map((entry) =>
+    decodePullRequestProjectionV1(entry),
+  );
+  const count = safeInteger(
+    decoded.count,
+    "httpResult.projection.count",
+    0,
+    Number.MAX_SAFE_INTEGER,
+  );
+  if (count !== objects.length) {
+    invalid("HTTP pull-request list count does not match its objects");
+  }
+  for (let index = 0; index < objects.length; index += 1) {
+    if (index > 0 && (objects[index - 1]?.number ?? 0) >= (objects[index]?.number ?? 0)) {
+      invalid("HTTP pull-request list objects are not sorted by unique number");
+    }
+  }
+  if (typeof decoded.complete !== "boolean") {
+    invalid("httpResult.projection.complete must be boolean");
+  }
+  if (decoded.complete && count >= 100) {
+    invalid("Complete HTTP pull-request list must contain fewer than 100 objects");
+  }
+  return {
+    type: literal(decoded.type, "pull_request_list", "httpResult.projection.type"),
+    complete: decoded.complete,
+    count,
+    objects,
+  };
+}
+
+function decodeHttpProjectionV1(kind: LandingHttpKindV1, value: unknown): LandingHttpProjectionV1 {
+  switch (kind) {
+    case "github.actor.get":
+      return decodeActorProjectionV1(value);
+    case "github.base_ref.get":
+    case "github.head_ref.get":
+      return decodeRefProjectionV1(value);
+    case "github.pull_requests.get":
+      return decodePullRequestListProjectionV1(value);
+    case "github.blob.post": {
+      const projection = decodeObjectProjectionV1(value);
+      return projection.objectKind === "blob"
+        ? projection
+        : invalid("HTTP blob result has the wrong object kind");
+    }
+    case "github.tree.post": {
+      const projection = decodeObjectProjectionV1(value);
+      return projection.objectKind === "tree"
+        ? projection
+        : invalid("HTTP tree result has the wrong object kind");
+    }
+    case "github.commit.post": {
+      const projection = decodeObjectProjectionV1(value);
+      return projection.objectKind === "commit"
+        ? projection
+        : invalid("HTTP commit result has the wrong object kind");
+    }
+    case "github.ref.post": {
+      const projection = decodeObjectProjectionV1(value);
+      return projection.objectKind === "ref"
+        ? projection
+        : invalid("HTTP ref result has the wrong object kind");
+    }
+    case "github.pull_request.post":
+      return decodePullRequestProjectionV1(value);
+  }
+}
+
+export function decodeLandingHttpResultV1(value: unknown): LandingHttpResultV1 {
+  const decoded = record(
+    value,
+    ["schemaVersion", "requestId", "kind", "outcome", "httpStatus", "projection", "errorCode"],
+    "httpResult",
+  );
+  if (!isLandingHttpKindV1(decoded.kind)) {
+    invalid("HTTP result kind is unsupported");
+  }
+  const kind = decoded.kind;
+  const outcome = oneOf(
+    decoded.outcome,
+    ["succeeded", "failed", "ambiguous"] as const,
+    "httpResult.outcome",
+  );
+  const httpStatus = nullable(decoded.httpStatus, (entry) =>
+    safeInteger(entry, "httpResult.httpStatus", 100, 599),
+  );
+  const errorCode = nullable(decoded.errorCode, (entry) =>
+    assertSafeCode(entry, "httpResult.errorCode"),
+  );
+  const projection =
+    decoded.projection === null ? null : decodeHttpProjectionV1(kind, decoded.projection);
+
+  if (outcome === "succeeded") {
+    if (projection === null || errorCode !== null || httpStatus === null) {
+      invalid("Succeeded HTTP result has incomplete evidence");
+    }
+    const semanticHeadAbsence =
+      kind === "github.head_ref.get" &&
+      httpStatus === 404 &&
+      projection.type === "ref" &&
+      projection.state === "absent";
+    if (!(semanticHeadAbsence || (httpStatus >= 200 && httpStatus < 300))) {
+      invalid("Succeeded HTTP result has an invalid status");
+    }
+    if (
+      (kind === "github.base_ref.get" &&
+        (projection.type !== "ref" || projection.state !== "direct")) ||
+      (kind === "github.head_ref.get" &&
+        (projection.type !== "ref" ||
+          (httpStatus === 404 ? projection.state !== "absent" : projection.state !== "direct")))
+    ) {
+      invalid("Succeeded HTTP ref result has an invalid state");
+    }
+  } else if (
+    projection !== null ||
+    errorCode === null ||
+    (outcome === "ambiguous" &&
+      (httpStatus !== null || errorCode !== "GITHUB_OUTCOME_AMBIGUOUS")) ||
+    (outcome === "failed" && errorCode === "GITHUB_OUTCOME_AMBIGUOUS")
+  ) {
+    invalid("Non-success HTTP result has invalid evidence");
+  }
+
+  return {
+    schemaVersion: literal(decoded.schemaVersion, 1, "httpResult.schemaVersion"),
+    requestId: assertUuid(decoded.requestId, "httpResult.requestId"),
+    kind,
+    outcome,
+    httpStatus,
+    projection,
+    errorCode,
+  };
+}
+
 function decodeCandidateReadyValueV1(value: unknown, field: string): CandidateReadyValueV1 {
   const decoded = record(
     value,

@@ -1,7 +1,7 @@
 # Icarus collaborative IDE game plan
 
 - Status: Product and execution plan; Gate 0 released, Gate 1 active
-- Date: 2026-07-31; last updated 2026-08-02
+- Date: 2026-07-31; last updated 2026-08-08
 - Planning horizon: 12–18 months, reviewed at every exit gate
 - Governing direction:
   [ADR 0036](adr/0036-proof-carrying-software-factory-product-direction.md)
@@ -14,8 +14,10 @@
   `eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI `30618041483` and
   native real-Chrome run `30618043377`; explicit human acceptance of the
   interim operator-controlled browser/resolver/proxy residual risk was recorded
-  on 2026-07-31; Packet 3 durable local landing is complete, while Packet 4's
-  GitHub/receipt/live-evidence work and Gate 1 completion remain open
+  on 2026-07-31; Packet 3 durable local landing is complete; Packet 4's
+  fake-only admitted-request GitHub gateway and exact HTTP result projection are
+  implemented locally, while remote ledger/reconciliation, receipt,
+  live-evidence work, and Gate 1 completion remain open
 
 This plan turns the product direction in ADR 0036 into a dependency-ordered
 build program. It incorporates the requested Buzz-style experience where
@@ -671,6 +673,18 @@ and receipt effects needed for 3/3 evidence. No force-push, merge, branch
 deletion, direct deployment endpoint, arbitrary URL, arbitrary Git arguments,
 or browser-held credentials. The default benchmark command remains
 credential-free and cannot perform this live acceptance.
+
+Checkpoint (2026-08-08): the first fake-only dependency is implemented. An
+operation-scoped gateway accepts only an atomically claimed durable request ID,
+reconstructs fixed GitHub routes and canonical POST bodies from immutable
+landing/profile/manifest/text material, pins and actor-verifies one in-memory
+credential, projects bounded strict JSON responses, and preserves ambiguity for
+possibly delivered mutations. Exact head-ref absence additionally requires a
+same-operation exact base proof. There is deliberately no fetch transport,
+ambient environment lookup, automatic retry, ledger settlement adapter, remote
+state transition, or receipt. The remaining receipt/404 repository-identity and
+rate-limit policy choices are recorded in
+[`OWNER_DECISION_PACKET_GATE1_PACKET4.md`](OWNER_DECISION_PACKET_GATE1_PACKET4.md).
 
 ### Packet 5 — context, IDE, then Council
 

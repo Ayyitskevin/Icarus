@@ -129,6 +129,18 @@ source checkout remains unchanged and this slice performs no credential lookup,
 network request, GitHub effect, migration, merge, or deployment. Packet 4 and
 Gate 1 remain incomplete.
 
+The first Packet 4 dependency is a fake-only GitHub gateway boundary. A caller
+supplies only a durable admitted request ID; an injected atomic claimer and
+immutable-material reader bind it to the owning landing digest. The gateway
+derives the fixed origin, API version, route, query, headers, redirect refusal,
+timeout, and canonical body. One credential is resolved only for the first
+actor request, pinned to that operation in memory, and explicitly discarded
+when the coordinator closes the gateway. Strict bounded responses become exact
+HTTP result projections; mutation responses that cannot prove non-delivery stay
+ambiguous for the fixed post-read suffix. There is no production transport,
+environment resolver, ledger settlement adapter, remote transition, or receipt
+in this dependency, so Packet 4 and Gate 1 remain incomplete.
+
 The API presenter allowlists product evidence instead of returning `RunRecord`
 or history rows. It omits raw context/source blobs and private cache, worktree,
 and artifact paths; explicit diff/check output remains bounded and redacted.

@@ -43,9 +43,14 @@ that later roadmap features already exist.
 > exact completed run, binds one landing decision to the canonical digest,
 > deterministically builds the reviewed candidate in the private cache, and
 > creates or reconciles the exact private `refs/heads/icarus/<run-id>` ref only
-> under durable prior-absence and intent evidence. Packet 4's GitHub gateway,
-> remote landing/PR receipts, credential-gated live-evidence profile, live-state
-> migration, deployment, and Gate 1 completion remain incomplete. No GitHub or
+> under durable prior-absence and intent evidence. Packet 4 now includes a
+> deterministic fake-only GitHub gateway seam: it claims an admitted request ID,
+> rebuilds fixed routes and POST bodies from immutable digest-bound material,
+> pins one actor-proved operation credential in memory, and returns exact bounded
+> result projections without exposing a live transport. Remote coordinator/ledger
+> integration, reconciliation, the exact receipt record, credential-gated live
+> evidence, live-state migration, deployment, and Gate 1 completion remain
+> incomplete. No GitHub or
 > other external landing, migration, deployment, or public-release authority was
 > authorized by this local acceptance.
 

@@ -128,12 +128,40 @@ export {
   presentLandingApprovalV1,
   presentLandingStatusV1,
 } from "./landing-presentation.js";
+export {
+  assertNoLiveGitHubTransport,
+  GITHUB_LANDING_REQUEST_TIMEOUT_MS,
+  GITHUB_LANDING_RESPONSE_MAX_BYTES,
+  GITHUB_LANDING_USER_AGENT,
+  GitHubLandingGatewayV1,
+  type ExecuteGitHubLandingRequestV1,
+  type GitHubGatewayExchangeV1,
+  type GitHubGatewaySettledExchangeV1,
+  type GitHubLandingAdmittedRequestClaimerV1,
+  type GitHubLandingCredentialResolverV1,
+  type GitHubLandingMaterialReaderV1,
+  type GitHubLandingMaterialV1,
+  type GitHubLandingTransport,
+  type GitHubLandingTransportFailure,
+  type GitHubLandingTransportOutcome,
+  type GitHubLandingTransportRequest,
+  type GitHubLandingTransportResponse,
+} from "./github-landing-gateway.js";
 export type {
+  ActorProjectionV1,
   GitHubLandingProfileV1,
   LandingDecisionV1,
   LandingDigestV1,
+  LandingHttpProjectionV1,
+  LandingHttpRequestV1,
+  LandingHttpResultV1,
   LocalRefFactV1,
+  ObjectProjectionV1,
+  PullRequestListProjectionV1,
+  PullRequestProjectionV1,
+  RefProjectionV1,
 } from "./landing-records.js";
+export { decodeLandingHttpResultV1 } from "./landing-records.js";
 export {
   assertOperatorActor,
   checkpointDigest,

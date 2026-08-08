@@ -34,6 +34,7 @@ import {
   decodeLandingDigestV1,
   decodeLandingEventPayloadV1,
   decodeLandingHttpRequestV1,
+  decodeLandingHttpResultV1,
   decodeLandingOperationObservationV1,
   decodeLandingOperationRequestV1,
   decodeLandingOperationResultV1,
@@ -728,6 +729,103 @@ describe("landing v1 canonical records", () => {
       decodeGitHubPostBodyV1("github.pull_request.post", {
         ...pullRequest,
         maintainer_can_modify: true,
+      }),
+    );
+  });
+
+  it("closes HTTPS result projections and their success, failure, and ambiguity shapes", () => {
+    const actorSuccess = {
+      schemaVersion: 1,
+      requestId: REQUEST_ID,
+      kind: "github.actor.get",
+      outcome: "succeeded",
+      httpStatus: 200,
+      projection: { type: "actor", login: "octocat" },
+      errorCode: null,
+    };
+    expect(decodeLandingHttpResultV1(actorSuccess)).toEqual(actorSuccess);
+
+    const headAbsent = {
+      ...actorSuccess,
+      kind: "github.head_ref.get",
+      httpStatus: 404,
+      projection: { type: "ref", state: "absent", ref: LANDING.headRef, sha1: null },
+    };
+    expect(decodeLandingHttpResultV1(headAbsent)).toEqual(headAbsent);
+
+    const failed = {
+      ...actorSuccess,
+      outcome: "failed",
+      httpStatus: 403,
+      projection: null,
+      errorCode: "GITHUB_PERMISSION_DENIED",
+    };
+    expect(decodeLandingHttpResultV1(failed)).toEqual(failed);
+
+    const ambiguous = {
+      ...failed,
+      outcome: "ambiguous",
+      httpStatus: null,
+      errorCode: "GITHUB_OUTCOME_AMBIGUOUS",
+    };
+    expect(decodeLandingHttpResultV1(ambiguous)).toEqual(ambiguous);
+
+    expectIcarusCode(() => decodeLandingHttpResultV1({ ...actorSuccess, httpStatus: 404 }));
+    expectIcarusCode(() =>
+      decodeLandingHttpResultV1({
+        ...headAbsent,
+        projection: { ...headAbsent.projection, sha1: BASE_COMMIT },
+      }),
+    );
+    expectIcarusCode(() =>
+      decodeLandingHttpResultV1({ ...failed, projection: actorSuccess.projection }),
+    );
+    expectIcarusCode(() => decodeLandingHttpResultV1({ ...ambiguous, httpStatus: 504 }));
+    expectIcarusCode(() =>
+      decodeLandingHttpResultV1({ ...ambiguous, errorCode: "GITHUB_REQUEST_TIMEOUT" }),
+    );
+    expectIcarusCode(() =>
+      decodeLandingHttpResultV1({ ...failed, errorCode: "GITHUB_OUTCOME_AMBIGUOUS" }),
+    );
+    expectIcarusCode(() => decodeLandingHttpResultV1({ ...headAbsent, httpStatus: 200 }));
+    expectIcarusCode(() =>
+      decodeLandingHttpResultV1({
+        ...headAbsent,
+        kind: "github.base_ref.get",
+        httpStatus: 200,
+      }),
+    );
+
+    const pullRequest = {
+      type: "pull_request",
+      number: 1,
+      state: "open",
+      draft: true,
+      owner: "octocat",
+      repository: "icarus-target",
+      headOwner: "octocat",
+      headRef: `icarus/${RUN_ID}`,
+      headSha1: CANDIDATE_COMMIT,
+      baseRef: "main",
+      baseSha1: BASE_COMMIT,
+      titleSha256: LANDING.pullRequestTitleSha256,
+      bodySha256: sha256("final-body"),
+      markerCount: 1,
+      maintainerCanModify: false,
+    };
+    expectIcarusCode(() =>
+      decodeLandingHttpResultV1({
+        ...actorSuccess,
+        kind: "github.pull_requests.get",
+        projection: {
+          type: "pull_request_list",
+          complete: true,
+          count: 100,
+          objects: Array.from({ length: 100 }, (_, index) => ({
+            ...pullRequest,
+            number: index + 1,
+          })),
+        },
       }),
     );
   });
