@@ -1,4 +1,5 @@
 import type { GithubHttpMethod } from "./http.js";
+import { invariant } from "./errors.js";
 import { assertOwner, assertRepository } from "./identifiers.js";
 
 /**
@@ -112,10 +113,17 @@ export function buildOperationUrl(
   query: Readonly<Record<string, string>> = {},
 ): URL {
   const descriptor = GITHUB_OPERATIONS[kind];
+  // Absent coordinates for a repository-scoped kind must throw, never silently
+  // build a different URL with the prefix dropped.
+  invariant(
+    descriptor.repositoryScoped === (coordinates !== null),
+    "GITHUB_PROTOCOL_ERROR",
+    "Repository coordinates must be present for exactly the repository-scoped operations",
+  );
   const prefix =
-    descriptor.repositoryScoped && coordinates !== null
-      ? ["repos", assertOwner(coordinates.owner), assertRepository(coordinates.repository)]
-      : [];
+    coordinates === null
+      ? []
+      : ["repos", assertOwner(coordinates.owner), assertRepository(coordinates.repository)];
   const segments = [...prefix, ...descriptor.segments, ...trailingSegments].map((segment) =>
     encodeURIComponent(segment),
   );
