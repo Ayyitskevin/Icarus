@@ -68,6 +68,20 @@ const packageRuntimeSources = await collectSources(
   "packages",
   (name) => name.endsWith(".ts") || name.endsWith(".tsx"),
 );
+const githubGatewaySources = await collectSources("packages/github-gateway/src", (name) =>
+  name.endsWith(".ts"),
+);
+const githubGatewayOperationsSource = await readFile(
+  "packages/github-gateway/src/operations.ts",
+  "utf8",
+);
+const githubGatewayOriginSource = await readFile("packages/github-gateway/src/origin.ts", "utf8");
+const githubGatewayIdentifiersSource = await readFile(
+  "packages/github-gateway/src/identifiers.ts",
+  "utf8",
+);
+const githubGatewayHttpSource = await readFile("packages/github-gateway/src/http.ts", "utf8");
+const githubGatewayGatewaySource = await readFile("packages/github-gateway/src/gateway.ts", "utf8");
 const providerSource = await readFile("packages/core/src/providers.ts", "utf8");
 const policySource = await readFile("packages/core/src/policy.ts", "utf8");
 const serviceSource = await readFile("packages/core/src/service.ts", "utf8");
@@ -448,6 +462,17 @@ const expectedHandoffOmissions = [
 ];
 const expectedHandoffIntegrityStatement =
   "Digests prove byte binding and recorded local evidence integrity only. They do not establish fresh authorization, semantic correctness, evidence truth, disclosure permission, or permission to execute/land code.";
+
+function executableSource(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((line) => {
+      const trimmed = line.trimStart();
+      return !trimmed.startsWith("//") && !trimmed.startsWith("*");
+    })
+    .join("\n");
+}
 
 const assertions = {
   controllerNeverUsesShell:
@@ -2033,6 +2058,79 @@ const assertions = {
     /assertLiteral\(\s*evidence\.syntheticReceiptCompletesGate,\s*false,/.test(
       gate1BenchmarkContractSource,
     ),
+  githubGatewayExposesOnlyTheAuthorizedOperations:
+    githubGatewayOperationsSource.includes('| "create_blob"') &&
+    githubGatewayOperationsSource.includes('| "create_tree"') &&
+    githubGatewayOperationsSource.includes('| "create_commit"') &&
+    githubGatewayOperationsSource.includes('| "create_absent_ref"') &&
+    githubGatewayOperationsSource.includes('| "create_draft_pull_request"') &&
+    githubGatewayOperationsSource.includes('| "read_reference"') &&
+    githubGatewayOperationsSource.includes('| "read_pull_requests"') &&
+    githubGatewayOperationsSource.includes('| "read_actor"') &&
+    githubGatewayOperationsSource.includes("Object.freeze({"),
+  githubGatewayMatchesTheAcceptedLandingRecordContract:
+    // The gateway cannot import @icarus/core without inverting the dependency
+    // direction, so the wire-format constants it duplicates are pinned here and
+    // asserted equal to core's in tests/unit/github-gateway-record-contract.test.ts.
+    githubGatewayGatewaySource.includes('const GITHUB_API_VERSION = "2026-03-10"') &&
+    landingRecordsSource.includes('export const GITHUB_API_VERSION = "2026-03-10"') &&
+    githubGatewayIdentifiersSource.includes("MAX_COMMIT_MESSAGE_BYTES = 4 * 1024") &&
+    githubGatewayIdentifiersSource.includes("MAX_PULL_REQUEST_TITLE_BYTES = 256") &&
+    githubGatewayIdentifiersSource.includes("MAX_PULL_REQUEST_BODY_BYTES = 40 * 1024") &&
+    // Identities are lowercase-only, exactly as core validates them.
+    githubGatewayIdentifiersSource.includes(
+      "const OWNER_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/",
+    ) &&
+    githubGatewayIdentifiersSource.includes("const REPOSITORY_PATTERN = /^[a-z0-9._-]{1,100}$/"),
+  githubGatewayReconciliationFailsClosedOnAmbiguity:
+    githubGatewayGatewaySource.includes("const PULL_REQUEST_PAGE_SIZE = 100") &&
+    githubGatewayGatewaySource.includes('page: "1"') &&
+    githubGatewayGatewaySource.includes('"GITHUB_RECONCILIATION_AMBIGUOUS"') &&
+    githubGatewayGatewaySource.includes('"GITHUB_ACTOR_MISMATCH"') &&
+    githubGatewayHttpSource.includes('"GITHUB_OUTCOME_AMBIGUOUS"') &&
+    githubGatewayHttpSource.includes("readonly mutating: boolean"),
+  githubGatewayCannotExpressUpdateForceMergeOrDelete: githubGatewaySources
+    .map(executableSource)
+    .every(
+      (source) =>
+        !/["'`](?:PUT|PATCH|DELETE)["'`]/.test(source) &&
+        !/\bforce\b/i.test(source) &&
+        !/\/merges?\b|["'`]merge["'`]|merge_method/.test(source) &&
+        !/\bdeployments?\b|workflow|dispatches/i.test(source),
+    ),
+  githubGatewayPinsItsOriginAndRefusesRedirects:
+    githubGatewayOriginSource.includes('export const GITHUB_API_HOST = "api.github.com"') &&
+    githubGatewayOriginSource.includes('"GITHUB_ORIGIN_DENIED"') &&
+    githubGatewaySources.some((source) => source.includes('redirect: "manual"')) &&
+    githubGatewaySources.some((source) => source.includes('"GITHUB_REDIRECT_DENIED"')) &&
+    // The base URL must be the origin root. A `//`-prefixed path would make the
+    // built request path a scheme-relative reference and move the credentialed
+    // request to another authority.
+    githubGatewayOriginSource.includes('url.pathname === "/"') &&
+    // Second, independent layer: whatever the path builder produced, a URL that
+    // left the pinned origin is never dispatched.
+    githubGatewayGatewaySource.includes("url.origin === this.#baseUrl.origin"),
+  githubGatewayScansDecodedBlobContentForItsOwnCredential:
+    githubGatewayGatewaySource.includes(
+      'Buffer.from(contentBase64, "base64").includes(this.#token, 0, "utf8")',
+    ) && githubGatewayHttpSource.includes("/^[A-Za-z][A-Za-z0-9]{0,31}$/.test(name)"),
+  githubGatewayCreatesOnlyIcarusNamespacedRefsAndDraftPullRequests:
+    githubGatewaySources.some((source) =>
+      source.includes('export const ICARUS_REF_NAMESPACE = "refs/heads/icarus/"'),
+    ) &&
+    // The only lowercase `draft:` in the gateway is the creation request body,
+    // and it must be the literal `true`, so a draft cannot be made optional,
+    // parameterized, or flipped. The observed state a reconciliation read
+    // reports is spelled `isDraft` and is deliberately not pinned here.
+    /draft: true/.test(githubGatewayGatewaySource) &&
+    !/draft:(?!\s*true)/.test(executableSource(githubGatewayGatewaySource)) &&
+    githubGatewayGatewaySource.includes('"GITHUB_DRAFT_NOT_HONORED"') &&
+    githubGatewayGatewaySource.includes('"GITHUB_REF_EXISTS"'),
+  githubGatewayKeepsCredentialsAndUpstreamBytesOutOfEvidence:
+    githubGatewayGatewaySource.includes("readonly #token: string") &&
+    githubGatewayGatewaySource.includes('"GITHUB_SECRET_DETECTED"') &&
+    githubGatewayGatewaySource.includes("responseSha256: response.bodySha256") &&
+    !/details:[^;]*\bbody\b/.test(githubGatewayGatewaySource),
   noFocusedOrSkippedGateTests: testSources.every(
     (source) => !/\.(?:only|skip|todo)(?:\s*\(|\.)/.test(source),
   ),
