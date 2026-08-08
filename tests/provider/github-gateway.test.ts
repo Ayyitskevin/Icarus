@@ -128,14 +128,14 @@ describe("GithubGateway HTTP contract", () => {
     expect(parseProviderRequestBody(request)).toEqual({ ref, sha: commitSha });
   });
 
-  it("surfaces an existing reference as GITHUB_REF_EXISTS without mutating it", async () => {
+  it("reports a refused reference creation without claiming why", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 422, { message: "Reference already exists" });
     });
 
     const error = await expectCode(
       gatewayFor(server).createAbsentRef(coordinates, ref, commitSha),
-      "GITHUB_REF_EXISTS",
+      "GITHUB_REF_CREATE_REFUSED",
     );
 
     expect(server.requests).toHaveLength(1);
@@ -241,7 +241,14 @@ describe("GithubGateway HTTP contract", () => {
   it("finds an existing draft pull request by head for idempotent retry", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, [
-        { number: 9, draft: true, state: "open", base: { ref: "main" } },
+        {
+          number: 9,
+          draft: true,
+          state: "open",
+          base: { ref: "main" },
+          head: { ref: `icarus/${runId}` },
+          merged_at: null,
+        },
       ]);
     });
 
@@ -262,13 +269,58 @@ describe("GithubGateway HTTP contract", () => {
     // it, or an interrupted attempt would open a second one.
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, [
-        { number: 11, draft: false, state: "open", base: { ref: "main" } },
+        {
+          number: 11,
+          draft: false,
+          state: "open",
+          base: { ref: "main" },
+          head: { ref: `icarus/${runId}` },
+          merged_at: null,
+        },
       ]);
     });
 
     const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
 
     expect(receipt).toMatchObject({ number: 11, isDraft: false });
+  });
+
+  it("refuses a listed pull request whose head or base is not the one requested", async () => {
+    for (const entry of [
+      { base: { ref: "release" }, head: { ref: `icarus/${runId}` } },
+      { base: { ref: "main" }, head: { ref: "someone-elses-branch" } },
+    ]) {
+      await server?.close();
+      server = await startProviderHttpServer((_request, response) => {
+        sendProviderJson(response, 200, [
+          { number: 3, draft: true, state: "open", merged_at: null, ...entry },
+        ]);
+      });
+
+      await expectCode(
+        gatewayFor(server).readPullRequestByHead(coordinates, ref, "main"),
+        "GITHUB_PROTOCOL_ERROR",
+      );
+    }
+  });
+
+  it("distinguishes a merged pull request from an abandoned one", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, [
+        {
+          number: 12,
+          draft: false,
+          state: "closed",
+          base: { ref: "main" },
+          head: { ref: `icarus/${runId}` },
+          merged_at: "2026-08-08T04:00:00Z",
+        },
+      ]);
+    });
+
+    const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
+
+    expect(receipt).toMatchObject({ number: 12, state: "closed", isMerged: true });
   });
 
   it("reports no existing pull request as null", async () => {
@@ -392,6 +444,8 @@ describe("GithubGateway HTTP contract", () => {
           draft: true,
           state: "open",
           base: { ref: "main" },
+          head: { ref: `icarus/${runId}` },
+          merged_at: null,
         })),
       );
     });
@@ -405,8 +459,22 @@ describe("GithubGateway HTTP contract", () => {
   it("fails closed when more than one pull request matches the exact head", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, [
-        { number: 1, draft: true, state: "open", base: { ref: "main" } },
-        { number: 2, draft: true, state: "open", base: { ref: "main" } },
+        {
+          number: 1,
+          draft: true,
+          state: "open",
+          base: { ref: "main" },
+          head: { ref: `icarus/${runId}` },
+          merged_at: null,
+        },
+        {
+          number: 2,
+          draft: true,
+          state: "open",
+          base: { ref: "main" },
+          head: { ref: `icarus/${runId}` },
+          merged_at: null,
+        },
       ]);
     });
 

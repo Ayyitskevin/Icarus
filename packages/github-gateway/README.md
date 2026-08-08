@@ -39,7 +39,16 @@ editing the operation table under its own ADR.
 - **A reference outside `refs/heads/icarus/<run-id>`**, matching the private
   local namespace Packet 3 already writes.
 - **Sending the credential anywhere but `api.github.com`** over HTTPS, or a
-  loopback origin for offline tests. Redirects are never followed.
+  loopback origin for offline tests. The base URL must be the origin root, and a
+  built URL that left the pinned origin is never dispatched. Redirects are never
+  followed.
+- **Uploading continuous-integration configuration.** Creating the reference
+  fires GitHub's `create` and `push` events, and a same-repository pull request
+  fires `pull_request`; in each case the head branch's own automation would run
+  with repository secrets before a human reviewed the draft. `.github/**` and the
+  other CI roots and files are refused with `GITHUB_AUTOMATION_PATH_DENIED`.
+  `@icarus/core`'s path policy is the authoritative layer; this is an
+  independent second one, because the two packages cannot import each other.
 
 `read_actor` is the one endpoint outside a repository path. ADR 0027 requires
 the credential's login to be verified against the landing profile's expected
@@ -66,6 +75,13 @@ dispatched raises `GITHUB_OUTCOME_AMBIGUOUS`, because whether GitHub applied the
 effect is unknown. Interrupted reads raise ordinary `GITHUB_TIMEOUT`,
 `GITHUB_CANCELLED`, or `GITHUB_TRANSPORT_ERROR`.
 
+A refused reference creation reports `GITHUB_REF_CREATE_REFUSED`, not "already
+exists". GitHub returns 422 for an existing reference, a missing object, an
+unusable name, and a ruleset or branch-protection refusal alike; reading no
+upstream bytes means the gateway cannot tell them apart, and recording a
+protection refusal as benign idempotency would be a false claim. The coordinator
+disambiguates with the reference read it already owns.
+
 Reconciliation reads pin ADR 0027's exact parameters (`state=all`, `page=1`,
 `per_page=100`, plus the exact owner-qualified head and base). A full page or
 more than one match raises `GITHUB_RECONCILIATION_AMBIGUOUS` rather than being
@@ -74,6 +90,11 @@ read as "no pull request exists".
 There is no automatic retry of a mutating request. ADR 0027 places retry with
 the coordinator's durable intent and reconciliation, where it can be made
 idempotent; a gateway-internal retry could duplicate a remote effect.
+
+A reconciliation receipt verifies the head and base of the pull request it
+returns rather than restating the caller's arguments, and reports `isMerged`
+derived from the merge timestamp — a merged pull request's `state` is `closed`,
+identical to an abandoned one.
 
 ## Evidence discipline
 
