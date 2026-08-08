@@ -42,6 +42,16 @@ interface HeldLease {
   readonly owner: LeaseOwner;
 }
 
+interface RunLeaseGuardState {
+  readonly runId: string;
+  readonly leasePath: string;
+  readonly lease: HeldLease;
+  active: boolean;
+}
+
+const RUN_LEASE_GUARD_ISSUER = Symbol("run-lease-guard-issuer");
+const RUN_LEASE_GUARD_STATES = new WeakMap<RunLeaseGuard, RunLeaseGuardState>();
+
 type ProcessIdentity =
   | { readonly kind: "present"; readonly processStart: string }
   | { readonly kind: "missing" }
@@ -168,6 +178,90 @@ async function readLeaseSnapshot(
     message,
   );
   return { metadata: parseMetadata(bytes.toString("utf8")) };
+}
+
+function sameLeaseOwner(actual: LeaseOwner, expected: LeaseOwner): boolean {
+  return (
+    actual.protocolVersion === expected.protocolVersion &&
+    actual.pid === expected.pid &&
+    actual.processStart === expected.processStart &&
+    actual.nonce === expected.nonce
+  );
+}
+
+async function assertHeldLease(leasePath: string, lease: HeldLease): Promise<void> {
+  await assertLeaseIdentity(
+    lease.handle,
+    leasePath,
+    "RUN_LEASE_LOST",
+    "Run execution lease identity changed",
+  );
+  const snapshot = await readLeaseSnapshot(
+    lease.handle,
+    "RUN_LEASE_LOST",
+    "Run execution lease metadata changed while reading",
+  );
+  await assertLeaseIdentity(
+    lease.handle,
+    leasePath,
+    "RUN_LEASE_LOST",
+    "Run execution lease identity changed",
+  );
+  invariant(
+    snapshot.metadata.kind === "current" && sameLeaseOwner(snapshot.metadata.owner, lease.owner),
+    "RUN_LEASE_LOST",
+    "Run execution lease owner changed",
+  );
+}
+
+function runLeaseGuardState(guard: RunLeaseGuard): RunLeaseGuardState {
+  const state = RUN_LEASE_GUARD_STATES.get(guard);
+  invariant(state !== undefined, "RUN_LEASE_LOST", "Run execution lease guard is invalid");
+  return state;
+}
+
+/**
+ * An opaque, manager-issued capability proving that one exact run lease is live.
+ * The capability is valid only for the dynamic extent of its lease callback.
+ */
+export class RunLeaseGuard {
+  readonly #brand = RUN_LEASE_GUARD_ISSUER;
+
+  constructor(issuer: symbol) {
+    invariant(
+      issuer === RUN_LEASE_GUARD_ISSUER,
+      "RUN_LEASE_LOST",
+      "Run execution lease guard was not issued by its manager",
+    );
+  }
+
+  get runId(): string {
+    void this.#brand;
+    return runLeaseGuardState(this).runId;
+  }
+
+  async assertHeld(expectedRunId = this.runId): Promise<void> {
+    const state = runLeaseGuardState(this);
+    invariant(
+      expectedRunId === state.runId,
+      "RUN_LEASE_MISMATCH",
+      "Run execution lease guard belongs to another run",
+    );
+    invariant(state.active, "RUN_LEASE_LOST", "Run execution lease guard is no longer active");
+    await assertHeldLease(state.leasePath, state.lease);
+    invariant(state.active, "RUN_LEASE_LOST", "Run execution lease guard is no longer active");
+  }
+}
+
+function issueRunLeaseGuard(runId: string, leasePath: string, lease: HeldLease): RunLeaseGuard {
+  const guard = new RunLeaseGuard(RUN_LEASE_GUARD_ISSUER);
+  Object.freeze(guard);
+  RUN_LEASE_GUARD_STATES.set(guard, { runId, leasePath, lease, active: true });
+  return guard;
+}
+
+function revokeRunLeaseGuard(guard: RunLeaseGuard): void {
+  runLeaseGuardState(guard).active = false;
 }
 
 async function acquireKernelLock(handle: FileHandle): Promise<boolean> {
@@ -319,18 +413,20 @@ export class RunLeaseManager {
     );
   }
 
-  async withLease<T>(runId: string, action: () => Promise<T>): Promise<T> {
+  async withLease<T>(runId: string, action: (guard: RunLeaseGuard) => Promise<T>): Promise<T> {
     const lease = await this.#acquire(runId);
+    const guard = issueRunLeaseGuard(runId, path.join(this.#root, `${runId}.lock`), lease);
     try {
-      return await action();
+      return await action(guard);
     } finally {
+      revokeRunLeaseGuard(guard);
       await this.#release(runId, lease);
     }
   }
 
   async tryWithLease<T>(
     runId: string,
-    action: () => Promise<T>,
+    action: (guard: RunLeaseGuard) => Promise<T>,
   ): Promise<{ readonly acquired: true; readonly value: T } | { readonly acquired: false }> {
     let lease: HeldLease;
     try {
@@ -341,9 +437,11 @@ export class RunLeaseManager {
       }
       throw error;
     }
+    const guard = issueRunLeaseGuard(runId, path.join(this.#root, `${runId}.lock`), lease);
     try {
-      return { acquired: true, value: await action() };
+      return { acquired: true, value: await action(guard) };
     } finally {
+      revokeRunLeaseGuard(guard);
       await this.#release(runId, lease);
     }
   }
@@ -405,24 +503,7 @@ export class RunLeaseManager {
   async #release(runId: string, lease: HeldLease): Promise<void> {
     const leasePath = path.join(this.#root, `${runId}.lock`);
     try {
-      await assertLeaseIdentity(
-        lease.handle,
-        leasePath,
-        "RUN_LEASE_LOST",
-        "Run execution lease identity changed",
-      );
-      const snapshot = await readLeaseSnapshot(
-        lease.handle,
-        "RUN_LEASE_LOST",
-        "Run execution lease metadata changed while reading",
-      );
-      invariant(
-        snapshot.metadata.kind === "current" &&
-          snapshot.metadata.owner.protocolVersion === LEASE_PROTOCOL_VERSION &&
-          snapshot.metadata.owner.nonce === lease.owner.nonce,
-        "RUN_LEASE_LOST",
-        "Run execution lease owner changed",
-      );
+      await assertHeldLease(leasePath, lease);
     } finally {
       // Closing the held descriptor is the only unlock operation. In particular, never
       // unlink a pathname that another owner may have replaced while this lease was held.

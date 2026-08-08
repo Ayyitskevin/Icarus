@@ -5,10 +5,11 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { RunLeaseManager } from "../../packages/core/src/lease.js";
+import { type RunLeaseGuard, RunLeaseManager } from "../../packages/core/src/lease.js";
 import { UNIT_RUN_ID } from "../support/unit-fixtures.js";
 
 const temporaryRoots: string[] = [];
+const OTHER_RUN_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 interface Gate {
   readonly promise: Promise<void>;
@@ -113,6 +114,26 @@ afterEach(async () => {
 });
 
 describe("run execution leases", () => {
+  it("issues an exact-run guard and revokes it after the lease callback", async () => {
+    const root = await makeTemporaryRoot();
+    const manager = new RunLeaseManager(root);
+    let captured: RunLeaseGuard | undefined;
+
+    await manager.withLease(UNIT_RUN_ID, async (guard) => {
+      captured = guard;
+      expect(guard.runId).toBe(UNIT_RUN_ID);
+      await expect(guard.assertHeld()).resolves.toBeUndefined();
+      await expect(guard.assertHeld(OTHER_RUN_ID)).rejects.toMatchObject({
+        code: "RUN_LEASE_MISMATCH",
+      });
+    });
+
+    if (captured === undefined) {
+      throw new Error("Run lease guard was not issued");
+    }
+    await expect(captured.assertHeld()).rejects.toMatchObject({ code: "RUN_LEASE_LOST" });
+  });
+
   it("rejects a second live owner until the kernel lease is released", async () => {
     const root = await makeTemporaryRoot();
     const first = new RunLeaseManager(root);
@@ -159,10 +180,18 @@ describe("run execution leases", () => {
       release.release();
     }
     await firstLease;
-    await expect(second.tryWithLease(UNIT_RUN_ID, async () => "settled")).resolves.toEqual({
-      acquired: true,
-      value: "settled",
-    });
+    let captured: RunLeaseGuard | undefined;
+    await expect(
+      second.tryWithLease(UNIT_RUN_ID, async (guard) => {
+        captured = guard;
+        await guard.assertHeld();
+        return "settled";
+      }),
+    ).resolves.toEqual({ acquired: true, value: "settled" });
+    if (captured === undefined) {
+      throw new Error("Try-lease guard was not issued");
+    }
+    await expect(captured.assertHeld()).rejects.toMatchObject({ code: "RUN_LEASE_LOST" });
   });
 
   it("refuses a live legacy owner that does not hold a kernel lock", async () => {
@@ -463,13 +492,14 @@ describe("run execution leases", () => {
     let replacementLease: Promise<void> | undefined;
 
     await expect(
-      first.withLease(UNIT_RUN_ID, async () => {
+      first.withLease(UNIT_RUN_ID, async (guard) => {
         await rename(leasePath, displacedPath);
         replacementLease = replacement.withLease(UNIT_RUN_ID, async () => {
           replacementEntered.release();
           await releaseReplacement.promise;
         });
         await replacementEntered.promise;
+        await expect(guard.assertHeld()).rejects.toMatchObject({ code: "RUN_LEASE_LOST" });
       }),
     ).rejects.toMatchObject({ code: "RUN_LEASE_LOST" });
 
