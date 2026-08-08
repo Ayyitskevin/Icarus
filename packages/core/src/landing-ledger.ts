@@ -10,6 +10,7 @@ import type Database from "better-sqlite3";
 
 import { sha256 } from "./digest.js";
 import { IcarusError } from "./errors.js";
+import { validatePersistedGitHubPreflightOperationV1 } from "./landing-preflight-persistence.js";
 import {
   assertGitInstant,
   assertInstant,
@@ -84,11 +85,21 @@ const PACKET3_STATES: ReadonlySet<LandingStateV1> = new Set([
   "abandoned",
   "failed",
 ]);
-const PACKET3_OPERATION_KINDS: ReadonlySet<LandingOperationKindV1> = new Set([
+const LOADER_OPERATION_KINDS: ReadonlySet<LandingOperationKindV1> = new Set([
   "candidate.prepare",
   "local_ref.create",
+  "github.preflight",
   "landing.reconcile",
 ]);
+const LANDING_LOADER_MAX_ATTEMPTS = 8;
+const LANDING_LOADER_MAX_EVENTS = 128;
+const LANDING_LOADER_JSON_MAX_BYTES = 64 * 1024;
+const LANDING_LOADER_ID_MAX_BYTES = 64;
+const LANDING_LOADER_KIND_MAX_BYTES = 128;
+const LANDING_LOADER_STATUS_MAX_BYTES = 16;
+const LANDING_LOADER_DIGEST_MAX_BYTES = 64;
+const LANDING_LOADER_ERROR_MAX_BYTES = 128;
+const LANDING_LOADER_TIMESTAMP_MAX_BYTES = 64;
 const ABSENT_LOCAL_REF_FACT_SHA256 = digestLandingRecord({
   schemaVersion: 1,
   state: "absent",
@@ -228,7 +239,11 @@ export interface LandingOperationRecordV1 {
   readonly id: string;
   readonly landingId: string;
   readonly coordinatorAttempt: number;
-  readonly kind: "candidate.prepare" | "local_ref.create" | "landing.reconcile";
+  readonly kind:
+    | "candidate.prepare"
+    | "local_ref.create"
+    | "github.preflight"
+    | "landing.reconcile";
   readonly kindAttempt: number;
   readonly status: "started" | "completed" | "failed" | "interrupted";
   readonly requestSha256: string;
@@ -250,6 +265,8 @@ export interface LandingEventRecordV1 {
     | "landing.attempt.settled"
     | "landing.operation.started"
     | "landing.operation.settled"
+    | "landing.github.request.admitted"
+    | "landing.github.request.settled"
     | "landing.state.changed"
     | "landing.decision.recorded";
   readonly payload: LandingEventPayloadV1;
@@ -520,7 +537,8 @@ function decodeLandingRow(entry: unknown): LandingRecordV1 {
     (candidateRequiredStates.has(stateValue) && !candidatePresence.every(Boolean)) ||
     (stateValue === "failed" &&
       ((resumeValue === "preparing_candidate" && candidatePresence.some(Boolean)) ||
-        (resumeValue === "approved" && !candidatePresence.every(Boolean))))
+        ((resumeValue === "approved" || resumeValue === "local_ready") &&
+          !candidatePresence.every(Boolean))))
   ) {
     invalid("Landing state and candidate settlement columns disagree");
   }
@@ -647,7 +665,7 @@ function decodeAttemptRow(entry: unknown, landingId: string): LandingAttemptReco
 function decodeOperationRow(entry: unknown, landing: LandingRecordV1): LandingOperationRecordV1 {
   const value = expectRow(entry, "landing operation");
   const kindValue = text(value.kind, "landing_operations.kind");
-  if (!isLandingOperationKindV1(kindValue) || !PACKET3_OPERATION_KINDS.has(kindValue)) {
+  if (!isLandingOperationKindV1(kindValue) || !LOADER_OPERATION_KINDS.has(kindValue)) {
     invalid("Landing operation is outside the implemented local-landing slice");
   }
   const requestEncoded = text(value.request_json, "landing_operations.request_json");
@@ -728,6 +746,7 @@ function decodeOperationRow(entry: unknown, landing: LandingRecordV1): LandingOp
   const expectedEvidence = observation?.facts ?? [];
   if (
     result !== null &&
+    request.kind !== "github.preflight" &&
     (result.evidence.length !== expectedEvidence.length ||
       !result.evidence.every(
         (fact, index) =>
@@ -772,7 +791,7 @@ function decodeOperationRow(entry: unknown, landing: LandingRecordV1): LandingOp
       1,
       8,
     ),
-    kind: kindValue as "candidate.prepare" | "local_ref.create" | "landing.reconcile",
+    kind: kindValue as LandingOperationRecordV1["kind"],
     kindAttempt: integer(value.kind_attempt, "landing_operations.kind_attempt", 1, 9),
     status,
     requestSha256,
@@ -811,6 +830,8 @@ function decodeEventRow(
       "landing.attempt.settled",
       "landing.operation.started",
       "landing.operation.settled",
+      "landing.github.request.admitted",
+      "landing.github.request.settled",
       "landing.state.changed",
       "landing.decision.recorded",
     ] as const,
@@ -913,6 +934,9 @@ function validatePacket3OperationSettlement(
     }
     return;
   }
+  if (operation.kind === "github.preflight") {
+    return;
+  }
   if (operation.kind === "local_ref.create") {
     if (result.outcome === "interrupted") {
       invalid("Local-ref effect interruption must create a reconciliation subject");
@@ -984,7 +1008,181 @@ function validatePacket3OperationSettlement(
   }
 }
 
-function validateAggregate(status: LandingStatusV1): void {
+interface OperationStartAuthorityV1 {
+  readonly state: LandingStateV1;
+  readonly version: number;
+}
+
+function validatePersistedPreflightAggregates(
+  status: LandingStatusV1,
+  rawOperationRows: readonly unknown[],
+  rawHttpRows: readonly unknown[],
+  rawEventRows: readonly unknown[],
+  operationStartAuthority: ReadonlyMap<string, OperationStartAuthorityV1>,
+): number {
+  const preflights = status.operations.filter((operation) => operation.kind === "github.preflight");
+  const preflightsById = new Map(preflights.map((operation) => [operation.id, operation]));
+  const rawOperationRowsById = new Map<string, unknown>();
+  for (const rawOperationRow of rawOperationRows) {
+    const row = expectRow(rawOperationRow, "landing operation");
+    const operationId = assertUuid(row.id, "landing_operations.id");
+    if (rawOperationRowsById.has(operationId)) {
+      invalid("Landing operation query contains a duplicate identity");
+    }
+    rawOperationRowsById.set(operationId, rawOperationRow);
+  }
+  if (rawOperationRowsById.size !== status.operations.length) {
+    invalid("Landing operation rows and decoded operations are not bijective");
+  }
+
+  const httpRowsByOperation = new Map<string, unknown[]>();
+  for (const rawHttpRow of rawHttpRows) {
+    const row = expectRow(rawHttpRow, "landing HTTP request");
+    const operationId = assertUuid(row.operation_id, "landing_http_requests.operation_id");
+    if (!preflightsById.has(operationId)) {
+      invalid("Landing HTTP request belongs to an unsupported operation");
+    }
+    const owned = httpRowsByOperation.get(operationId) ?? [];
+    owned.push(rawHttpRow);
+    httpRowsByOperation.set(operationId, owned);
+  }
+
+  const requestEventsByOperation = new Map<string, unknown[]>();
+  const operationEventsByOperation = new Map<string, unknown[]>();
+  let requestEventCount = 0;
+  for (const [index, event] of status.events.entries()) {
+    const rawEvent = rawEventRows[index];
+    if (rawEvent === undefined) invalid("Landing event query lost a source row");
+    if (
+      event.type === "landing.github.request.admitted" ||
+      event.type === "landing.github.request.settled"
+    ) {
+      const operationId = (event.payload as { readonly operationId: string }).operationId;
+      if (!preflightsById.has(operationId)) {
+        invalid("Landing GitHub request event belongs to an unsupported operation");
+      }
+      const owned = requestEventsByOperation.get(operationId) ?? [];
+      owned.push(rawEvent);
+      requestEventsByOperation.set(operationId, owned);
+      requestEventCount += 1;
+    } else if (
+      event.type === "landing.operation.started" ||
+      event.type === "landing.operation.settled"
+    ) {
+      const operationId = (event.payload as { readonly operationId: string }).operationId;
+      if (preflightsById.has(operationId)) {
+        const owned = operationEventsByOperation.get(operationId) ?? [];
+        owned.push(rawEvent);
+        operationEventsByOperation.set(operationId, owned);
+      }
+    }
+  }
+  if (rawEventRows.length !== status.events.length) {
+    invalid("Landing event rows and decoded events are not bijective");
+  }
+
+  if (preflights.length === 0) {
+    if (rawHttpRows.length !== 0 || requestEventCount !== 0) {
+      invalid("Local landing contains remote request evidence without a supported preflight");
+    }
+    return 0;
+  }
+  const authority = reconstructLandingDigest(status);
+  if (authority === null) {
+    invalid("GitHub preflight has no reconstructed immutable landing authority");
+  }
+
+  for (const operation of preflights) {
+    const attempt = status.attempts[operation.coordinatorAttempt - 1];
+    const operationStart = operationStartAuthority.get(operation.id);
+    const rawOperationRow = rawOperationRowsById.get(operation.id);
+    if (attempt === undefined || operationStart === undefined || rawOperationRow === undefined) {
+      invalid("GitHub preflight is missing its attempt, start authority, or source row");
+    }
+    const evidence = validatePersistedGitHubPreflightOperationV1({
+      landing: authority.record,
+      landingSha256: authority.sha256,
+      operationStartState: operationStart.state,
+      operationStartVersion: operationStart.version,
+      operationRow: rawOperationRow,
+      // This loader rejects a second operation in the attempt, so the sole
+      // preflight HTTP grammar starts a fresh coordinator-wide ordinal prefix.
+      previousRequestOrdinal: 0,
+      httpRows: httpRowsByOperation.get(operation.id) ?? [],
+      requestEvents: requestEventsByOperation.get(operation.id) ?? [],
+      operationEvents: operationEventsByOperation.get(operation.id) ?? [],
+    });
+    const operationSettledEvent = status.events.find(
+      (event) =>
+        event.type === "landing.operation.settled" &&
+        (event.payload as { readonly operationId: string }).operationId === operation.id,
+    );
+    const attemptSettledEvent = status.events.find(
+      (event) =>
+        event.type === "landing.attempt.settled" &&
+        (event.payload as { readonly coordinatorAttempt: number }).coordinatorAttempt ===
+          operation.coordinatorAttempt,
+    );
+    if (
+      ((evidence.status === "next_request" || evidence.status === "admitted") &&
+        (operation.status !== "started" || attempt.status !== "started")) ||
+      (evidence.status === "complete" &&
+        (operation.status !== "completed" || attempt.status !== "started")) ||
+      (evidence.status === "terminal" &&
+        evidence.operationOutcome === "failed" &&
+        (operation.status !== "failed" ||
+          attempt.status !== "failed" ||
+          attempt.errorCode !== evidence.errorCode)) ||
+      (evidence.status === "terminal" &&
+        evidence.operationOutcome === "interrupted" &&
+        (operation.status !== "interrupted" ||
+          attempt.status !== "interrupted" ||
+          attempt.errorCode !== evidence.errorCode))
+    ) {
+      invalid("GitHub preflight evidence disagrees with its owning attempt topology");
+    }
+    if (evidence.status === "terminal" && evidence.operationOutcome === "failed") {
+      const stateEvent =
+        attemptSettledEvent === undefined ? undefined : status.events[attemptSettledEvent.sequence];
+      if (
+        operationSettledEvent === undefined ||
+        attemptSettledEvent === undefined ||
+        attemptSettledEvent.sequence !== operationSettledEvent.sequence + 1 ||
+        stateEvent === undefined ||
+        stateEvent.sequence !== attemptSettledEvent.sequence + 1 ||
+        stateEvent.type !== "landing.state.changed" ||
+        !eventMatches(stateEvent, {
+          schemaVersion: 1,
+          landingId: status.landing.id,
+          from: "local_ready",
+          to: "failed",
+          version: operationStart.version + 1,
+          operationId: operation.id,
+        })
+      ) {
+        invalid("Failed GitHub preflight lacks its exact terminal state-event suffix");
+      }
+    } else if (
+      evidence.status === "terminal" &&
+      evidence.operationOutcome === "interrupted" &&
+      status.events.some(
+        (event) =>
+          event.type === "landing.state.changed" &&
+          (event.payload as LandingStateChangedEventV1).operationId === operation.id,
+      )
+    ) {
+      invalid("Ambiguous GitHub preflight cannot emit a self state transition");
+    }
+  }
+  return requestEventCount;
+}
+
+function validateAggregate(
+  status: LandingStatusV1,
+  rawOperationRows: readonly unknown[],
+  rawHttpRows: readonly unknown[],
+  rawEventRows: readonly unknown[],
+): void {
   const { landing, decision, attempts, operations, events } = status;
   if (
     attempts.length === 0 ||
@@ -1011,7 +1209,22 @@ function validateAggregate(status: LandingStatusV1): void {
     const owned = operationsByAttempt.get(operation.coordinatorAttempt) ?? [];
     owned.push(operation);
     operationsByAttempt.set(operation.coordinatorAttempt, owned);
-    if (operation.status !== attempt.status || operation.errorCode !== attempt.errorCode) {
+    if (operation.kind === "github.preflight") {
+      const topologyMatches =
+        ((operation.status === "started" || operation.status === "completed") &&
+          attempt.status === "started" &&
+          operation.errorCode === null &&
+          attempt.errorCode === null) ||
+        (operation.status === "failed" &&
+          attempt.status === "failed" &&
+          operation.errorCode === attempt.errorCode) ||
+        (operation.status === "interrupted" &&
+          attempt.status === "interrupted" &&
+          operation.errorCode === attempt.errorCode);
+      if (!topologyMatches) {
+        invalid("GitHub preflight and coordinator attempt settlements disagree");
+      }
+    } else if (operation.status !== attempt.status || operation.errorCode !== attempt.errorCode) {
       invalid("Landing operation and coordinator attempt settlements disagree");
     }
     if (operation.request.expectedVersion > landing.version) {
@@ -1071,6 +1284,9 @@ function validateAggregate(status: LandingStatusV1): void {
       ) {
         invalid("Local-ref operation does not bind the approved landing");
       }
+    } else if (operation.kind === "github.preflight") {
+      // Exact immutable binding and result evidence are delegated to the pure
+      // persisted-preflight aggregate validator after chronological replay.
     } else {
       const input = operation.request.input as {
         readonly landingSha256: string;
@@ -1146,21 +1362,35 @@ function validateAggregate(status: LandingStatusV1): void {
       owned.length > 1 ||
       ((attempt.status === "completed" || attempt.status === "failed") && owned.length !== 1)
     ) {
-      invalid("Landing attempt has an impossible Packet 3 operation cardinality");
+      invalid("Landing attempt has an impossible local/preflight operation cardinality");
     }
   }
   const startedAttempt = attempts.find((attempt) => attempt.status === "started");
   const startedOperation = operations.find((operation) => operation.status === "started");
+  const startedAttemptOwned =
+    startedAttempt === undefined ? [] : (operationsByAttempt.get(startedAttempt.ordinal) ?? []);
+  const completedPreflightBoundary =
+    startedAttemptOwned.length === 1 &&
+    startedAttemptOwned[0]?.kind === "github.preflight" &&
+    startedAttemptOwned[0].status === "completed";
+  const localReadyAttemptCrashBoundary =
+    startedAttemptOwned.length === 0 && landing.state === "local_ready";
   if (
     (startedOperation !== undefined && startedAttempt === undefined) ||
     (startedOperation !== undefined &&
       ((startedOperation.kind === "candidate.prepare" && landing.state !== "preparing_candidate") ||
         (startedOperation.kind === "local_ref.create" && landing.state !== "creating_local_ref") ||
+        (startedOperation.kind === "github.preflight" && landing.state !== "local_ready") ||
         (startedOperation.kind === "landing.reconcile" &&
           landing.state !== "reconciliation_required"))) ||
     (startedAttempt !== undefined &&
       startedOperation === undefined &&
-      !(landing.state === "preparing_candidate" || landing.state === "approved")) ||
+      !(
+        landing.state === "preparing_candidate" ||
+        landing.state === "approved" ||
+        (landing.state === "local_ready" &&
+          (completedPreflightBoundary || localReadyAttemptCrashBoundary))
+      )) ||
     (startedAttempt === undefined && landing.state === "creating_local_ref")
   ) {
     invalid("Landing active attempt/operation does not match its current state");
@@ -1180,7 +1410,8 @@ function validateAggregate(status: LandingStatusV1): void {
         landing.state === "creating_local_ref" ||
         landing.state === "local_ready" ||
         landing.state === "reconciliation_required" ||
-        (landing.state === "failed" && landing.resumeState === "approved")
+        (landing.state === "failed" &&
+          (landing.resumeState === "approved" || landing.resumeState === "local_ready"))
       ))
   ) {
     invalid("Landing decision and current state are inconsistent");
@@ -1188,7 +1419,10 @@ function validateAggregate(status: LandingStatusV1): void {
   if (landing.state === "reconciliation_required") {
     localReconciliationSubject(status);
   }
-  if (landing.state === "local_ready") {
+  if (
+    landing.state === "local_ready" ||
+    (landing.state === "failed" && landing.resumeState === "local_ready")
+  ) {
     const readyProofs = operations.filter((operation) => {
       if (operation.status !== "completed" || operation.result?.outcome !== "completed") {
         return false;
@@ -1334,13 +1568,21 @@ function validateAggregate(status: LandingStatusV1): void {
     }
     const operationSettled = operationSettleEvents.get(operation.id);
     const attemptSettled = attemptSettleEvents.get(operation.coordinatorAttempt);
+    const isCompletedPreflightBoundary =
+      operation.kind === "github.preflight" &&
+      operation.status === "completed" &&
+      attempts[operation.coordinatorAttempt - 1]?.status === "started";
     if (
       operation.status !== "started" &&
       (operationSettled === undefined ||
-        attemptSettled === undefined ||
-        attemptSettled.sequence !== operationSettled.sequence + 1)
+        (!isCompletedPreflightBoundary &&
+          (attemptSettled === undefined ||
+            attemptSettled.sequence !== operationSettled.sequence + 1)))
     ) {
       invalid("Landing operation and attempt settlements are not in exact source order");
+    }
+    if (isCompletedPreflightBoundary && attemptSettled !== undefined) {
+      invalid("Completed GitHub preflight cannot settle its still-active attempt");
     }
     if (
       operation.kind === "landing.reconcile" &&
@@ -1357,6 +1599,7 @@ function validateAggregate(status: LandingStatusV1): void {
   let nextAttemptOrdinal = 1;
   let activeAttemptOrdinal: number | null = null;
   const replayedKindAttempts = new Map<LandingOperationKindV1, number>();
+  const operationStartAuthority = new Map<string, OperationStartAuthorityV1>();
   for (const [index, event] of events.entries()) {
     if (event.type === "landing.attempt.started") {
       const ordinal = (event.payload as { readonly coordinatorAttempt: number }).coordinatorAttempt;
@@ -1364,6 +1607,7 @@ function validateAggregate(status: LandingStatusV1): void {
       const allowedAdmissionState =
         replayedState === "preparing_candidate" ||
         replayedState === "approved" ||
+        replayedState === "local_ready" ||
         replayedState === "failed" ||
         replayedState === "reconciliation_required";
       if (
@@ -1387,6 +1631,22 @@ function validateAggregate(status: LandingStatusV1): void {
           nextPayload.operationId !== null
         ) {
           invalid("Failed landing attempt admission lacks its atomic resume transition");
+        }
+      } else if (replayedState === "local_ready") {
+        const nextPayload =
+          nextEvent?.type === "landing.operation.started"
+            ? (nextEvent.payload as {
+                readonly coordinatorAttempt: number;
+                readonly kind: LandingOperationKindV1;
+              })
+            : null;
+        if (
+          nextEvent !== undefined &&
+          (nextPayload === null ||
+            nextPayload.coordinatorAttempt !== ordinal ||
+            nextPayload.kind !== "github.preflight")
+        ) {
+          invalid("Local-ready attempt admission lacks its bounded preflight intent");
         }
       } else if (replayedState === "reconciliation_required") {
         const nextPayload =
@@ -1433,6 +1693,10 @@ function validateAggregate(status: LandingStatusV1): void {
       ) {
         invalid("Landing operation start does not match chronological state authority");
       }
+      operationStartAuthority.set(operation.id, {
+        state: replayedState,
+        version: replayedVersion,
+      });
       replayedKindAttempts.set(payload.kind, expectedKindAttempt);
       continue;
     }
@@ -1544,7 +1808,20 @@ function validateAggregate(status: LandingStatusV1): void {
         invalid("Reconciliation transition has the wrong operation owner");
       }
       replayedResumeState = null;
-    } else if (transition === "failed->preparing_candidate" || transition === "failed->approved") {
+    } else if (transition === "local_ready->failed") {
+      if (
+        owner?.kind !== "github.preflight" ||
+        owner.result?.outcome !== "failed" ||
+        !isSettlementOwned
+      ) {
+        invalid("Preflight failure transition has the wrong operation owner");
+      }
+      replayedResumeState = "local_ready";
+    } else if (
+      transition === "failed->preparing_candidate" ||
+      transition === "failed->approved" ||
+      transition === "failed->local_ready"
+    ) {
       if (
         payload.operationId !== null ||
         replayedResumeState !== to ||
@@ -1564,7 +1841,7 @@ function validateAggregate(status: LandingStatusV1): void {
       }
       replayedResumeState = null;
     } else {
-      invalid("Landing event stream contains a non-Packet-3 transition");
+      invalid("Landing event stream contains an unsupported local/preflight transition");
     }
     replayedErrorCode =
       to === "failed" || to === "reconciliation_required"
@@ -1582,11 +1859,19 @@ function validateAggregate(status: LandingStatusV1): void {
   ) {
     invalid("Landing state/version/error differs from its event replay");
   }
+  const preflightRequestEventCount = validatePersistedPreflightAggregates(
+    status,
+    rawOperationRows,
+    rawHttpRows,
+    rawEventRows,
+    operationStartAuthority,
+  );
   const expectedEventCount =
     attempts.length +
     attempts.filter((attempt) => attempt.status !== "started").length +
     operations.length +
     operations.filter((operation) => operation.status !== "started").length +
+    preflightRequestEventCount +
     (decision === null ? 0 : 1) +
     landing.version;
   if (events.length !== expectedEventCount) {
@@ -1836,6 +2121,130 @@ export class LandingLedger {
     return transaction();
   }
 
+  #assertBoundedLandingHistoryText(canonicalLandingId: string): void {
+    const invalidAttempt = this.#database
+      .prepare(
+        `SELECT 1 FROM landing_attempts WHERE landing_id = ? AND (
+          typeof(landing_id) <> 'text' OR octet_length(landing_id) > ${LANDING_LOADER_ID_MAX_BYTES} OR
+          typeof(status) <> 'text' OR octet_length(status) > ${LANDING_LOADER_STATUS_MAX_BYTES} OR
+          typeof(started_at) <> 'text' OR
+          octet_length(started_at) > ${LANDING_LOADER_TIMESTAMP_MAX_BYTES} OR
+          (finished_at IS NOT NULL AND (
+            typeof(finished_at) <> 'text' OR
+            octet_length(finished_at) > ${LANDING_LOADER_TIMESTAMP_MAX_BYTES}
+          )) OR
+          (error_code IS NOT NULL AND (
+            typeof(error_code) <> 'text' OR
+            octet_length(error_code) > ${LANDING_LOADER_ERROR_MAX_BYTES}
+          ))
+        ) LIMIT 1`,
+      )
+      .get(canonicalLandingId);
+    if (invalidAttempt !== undefined) {
+      invalid("Landing attempt history contains an unbounded or non-text member");
+    }
+
+    const invalidOperation = this.#database
+      .prepare(
+        `SELECT 1 FROM landing_operations WHERE landing_id = ? AND (
+          typeof(id) <> 'text' OR octet_length(id) > ${LANDING_LOADER_ID_MAX_BYTES} OR
+          typeof(landing_id) <> 'text' OR octet_length(landing_id) > ${LANDING_LOADER_ID_MAX_BYTES} OR
+          typeof(kind) <> 'text' OR octet_length(kind) > ${LANDING_LOADER_KIND_MAX_BYTES} OR
+          typeof(status) <> 'text' OR octet_length(status) > ${LANDING_LOADER_STATUS_MAX_BYTES} OR
+          typeof(request_sha256) <> 'text' OR octet_length(request_sha256) > ${LANDING_LOADER_DIGEST_MAX_BYTES} OR
+          typeof(request_json) <> 'text' OR octet_length(request_json) > ${LANDING_LOADER_JSON_MAX_BYTES} OR
+          (observation_sha256 IS NOT NULL AND (
+            typeof(observation_sha256) <> 'text' OR
+            octet_length(observation_sha256) > ${LANDING_LOADER_DIGEST_MAX_BYTES}
+          )) OR
+          (observation_json IS NOT NULL AND (
+            typeof(observation_json) <> 'text' OR
+            octet_length(observation_json) > ${LANDING_LOADER_JSON_MAX_BYTES}
+          )) OR
+          (result_sha256 IS NOT NULL AND (
+            typeof(result_sha256) <> 'text' OR
+            octet_length(result_sha256) > ${LANDING_LOADER_DIGEST_MAX_BYTES}
+          )) OR
+          (result_json IS NOT NULL AND (
+            typeof(result_json) <> 'text' OR
+            octet_length(result_json) > ${LANDING_LOADER_JSON_MAX_BYTES}
+          )) OR
+          (error_code IS NOT NULL AND (
+            typeof(error_code) <> 'text' OR
+            octet_length(error_code) > ${LANDING_LOADER_ERROR_MAX_BYTES}
+          )) OR
+          typeof(started_at) <> 'text' OR
+          octet_length(started_at) > ${LANDING_LOADER_TIMESTAMP_MAX_BYTES} OR
+          (finished_at IS NOT NULL AND (
+            typeof(finished_at) <> 'text' OR
+            octet_length(finished_at) > ${LANDING_LOADER_TIMESTAMP_MAX_BYTES}
+          ))
+        ) LIMIT 1`,
+      )
+      .get(canonicalLandingId);
+    if (invalidOperation !== undefined) {
+      invalid("Landing operation history contains an unbounded or non-text member");
+    }
+
+    const invalidHttpRequest = this.#database
+      .prepare(
+        `SELECT 1 FROM landing_http_requests WHERE landing_id = ? AND (
+          typeof(id) <> 'text' OR octet_length(id) > ${LANDING_LOADER_ID_MAX_BYTES} OR
+          typeof(landing_id) <> 'text' OR octet_length(landing_id) > ${LANDING_LOADER_ID_MAX_BYTES} OR
+          typeof(operation_id) <> 'text' OR octet_length(operation_id) > ${LANDING_LOADER_ID_MAX_BYTES} OR
+          typeof(operation_kind) <> 'text' OR
+          octet_length(operation_kind) > ${LANDING_LOADER_KIND_MAX_BYTES} OR
+          typeof(kind) <> 'text' OR octet_length(kind) > ${LANDING_LOADER_KIND_MAX_BYTES} OR
+          typeof(method) <> 'text' OR octet_length(method) > ${LANDING_LOADER_STATUS_MAX_BYTES} OR
+          typeof(request_sha256) <> 'text' OR octet_length(request_sha256) > ${LANDING_LOADER_DIGEST_MAX_BYTES} OR
+          typeof(request_json) <> 'text' OR octet_length(request_json) > ${LANDING_LOADER_JSON_MAX_BYTES} OR
+          typeof(status) <> 'text' OR octet_length(status) > ${LANDING_LOADER_STATUS_MAX_BYTES} OR
+          (outcome IS NOT NULL AND (
+            typeof(outcome) <> 'text' OR
+            octet_length(outcome) > ${LANDING_LOADER_STATUS_MAX_BYTES}
+          )) OR
+          (result_sha256 IS NOT NULL AND (
+            typeof(result_sha256) <> 'text' OR
+            octet_length(result_sha256) > ${LANDING_LOADER_DIGEST_MAX_BYTES}
+          )) OR
+          (result_json IS NOT NULL AND (
+            typeof(result_json) <> 'text' OR
+            octet_length(result_json) > ${LANDING_LOADER_JSON_MAX_BYTES}
+          )) OR
+          (error_code IS NOT NULL AND (
+            typeof(error_code) <> 'text' OR
+            octet_length(error_code) > ${LANDING_LOADER_ERROR_MAX_BYTES}
+          )) OR
+          typeof(admitted_at) <> 'text' OR
+          octet_length(admitted_at) > ${LANDING_LOADER_TIMESTAMP_MAX_BYTES} OR
+          (settled_at IS NOT NULL AND (
+            typeof(settled_at) <> 'text' OR
+            octet_length(settled_at) > ${LANDING_LOADER_TIMESTAMP_MAX_BYTES}
+          ))
+        ) LIMIT 1`,
+      )
+      .get(canonicalLandingId);
+    if (invalidHttpRequest !== undefined) {
+      invalid("Landing HTTP history contains an unbounded or non-text member");
+    }
+
+    const invalidEvent = this.#database
+      .prepare(
+        `SELECT 1 FROM landing_events WHERE landing_id = ? AND (
+          typeof(landing_id) <> 'text' OR octet_length(landing_id) > ${LANDING_LOADER_ID_MAX_BYTES} OR
+          typeof(type) <> 'text' OR octet_length(type) > ${LANDING_LOADER_KIND_MAX_BYTES} OR
+          typeof(payload_json) <> 'text' OR
+          octet_length(payload_json) > ${LANDING_LOADER_JSON_MAX_BYTES} OR
+          typeof(created_at) <> 'text' OR
+          octet_length(created_at) > ${LANDING_LOADER_TIMESTAMP_MAX_BYTES}
+        ) LIMIT 1`,
+      )
+      .get(canonicalLandingId);
+    if (invalidEvent !== undefined) {
+      invalid("Landing event history contains an unbounded or non-text member");
+    }
+  }
+
   #loadStatus(canonicalLandingId: string): LandingStatusV1 {
     const landingEntry = this.#database
       .prepare("SELECT * FROM landings WHERE id = ?")
@@ -1883,34 +2292,61 @@ export class LandingLedger {
       .prepare("SELECT * FROM landing_decisions WHERE landing_id = ?")
       .get(canonicalLandingId);
     const decision = decisionEntry === undefined ? null : decodeDecisionRow(decisionEntry, landing);
-    const attempts = (
-      this.#database
-        .prepare("SELECT * FROM landing_attempts WHERE landing_id = ? ORDER BY ordinal")
-        .all(canonicalLandingId) as unknown[]
-    ).map((entry) => decodeAttemptRow(entry, canonicalLandingId));
-    const operations = (
-      this.#database
-        .prepare(
-          "SELECT rowid AS source_rowid, * FROM landing_operations " +
-            "WHERE landing_id = ? ORDER BY coordinator_attempt, source_rowid",
-        )
-        .all(canonicalLandingId) as unknown[]
-    ).map((entry) => decodeOperationRow(entry, landing));
+    const attemptSentinelRows = this.#database
+      .prepare("SELECT 1 FROM landing_attempts WHERE landing_id = ? ORDER BY ordinal LIMIT ?")
+      .all(canonicalLandingId, LANDING_LOADER_MAX_ATTEMPTS + 1) as unknown[];
+    if (attemptSentinelRows.length > LANDING_LOADER_MAX_ATTEMPTS) {
+      invalid("Landing attempt history exceeds its fixed loader bound");
+    }
+    const maximumHttpRows = attemptSentinelRows.length * 3;
+    const operationSentinelRows = this.#database
+      .prepare("SELECT 1 FROM landing_operations WHERE landing_id = ? LIMIT ?")
+      .all(canonicalLandingId, attemptSentinelRows.length + 1) as unknown[];
+    if (operationSentinelRows.length > attemptSentinelRows.length) {
+      invalid("Landing operation history exceeds its attempt-bound loader slice");
+    }
+    const httpSentinelRows = this.#database
+      .prepare("SELECT 1 FROM landing_http_requests WHERE landing_id = ? LIMIT ?")
+      .all(canonicalLandingId, maximumHttpRows + 1) as unknown[];
+    if (httpSentinelRows.length > maximumHttpRows) {
+      invalid("Landing HTTP request history exceeds the bounded preflight loader slice");
+    }
+    const eventSentinelRows = this.#database
+      .prepare("SELECT 1 FROM landing_events WHERE landing_id = ? LIMIT ?")
+      .all(canonicalLandingId, LANDING_LOADER_MAX_EVENTS + 1) as unknown[];
+    if (eventSentinelRows.length > LANDING_LOADER_MAX_EVENTS) {
+      invalid("Landing event history exceeds its fixed loader bound");
+    }
+    this.#assertBoundedLandingHistoryText(canonicalLandingId);
+    const attemptRows = this.#database
+      .prepare("SELECT * FROM landing_attempts WHERE landing_id = ? ORDER BY ordinal LIMIT ?")
+      .all(canonicalLandingId, LANDING_LOADER_MAX_ATTEMPTS) as unknown[];
+    const attempts = attemptRows.map((entry) => decodeAttemptRow(entry, canonicalLandingId));
+    const operationRows = this.#database
+      .prepare(
+        "SELECT * FROM landing_operations " +
+          "WHERE landing_id = ? ORDER BY coordinator_attempt, rowid LIMIT ?",
+      )
+      .all(canonicalLandingId, attempts.length) as unknown[];
+    const operations = operationRows.map((entry) => decodeOperationRow(entry, landing));
+    const httpRows = this.#database
+      .prepare(
+        "SELECT * FROM landing_http_requests " +
+          "WHERE landing_id = ? ORDER BY coordinator_attempt, request_ordinal LIMIT ?",
+      )
+      .all(canonicalLandingId, maximumHttpRows) as unknown[];
     const eventRows = this.#database
-      .prepare("SELECT * FROM landing_events WHERE landing_id = ? ORDER BY sequence")
-      .all(canonicalLandingId) as unknown[];
+      .prepare("SELECT * FROM landing_events WHERE landing_id = ? ORDER BY sequence LIMIT ?")
+      .all(canonicalLandingId, LANDING_LOADER_MAX_EVENTS) as unknown[];
     const events = eventRows.map((entry, index) =>
       decodeEventRow(entry, canonicalLandingId, index + 1),
     );
     if (
       this.#database
-        .prepare("SELECT 1 FROM landing_http_requests WHERE landing_id = ? LIMIT 1")
-        .get(canonicalLandingId) !== undefined ||
-      this.#database
         .prepare("SELECT 1 FROM landing_receipts WHERE landing_id = ? LIMIT 1")
         .get(canonicalLandingId) !== undefined
     ) {
-      invalid("Packet 3 local landing cannot contain HTTP requests or a remote receipt");
+      invalid("Local/preflight landing cannot contain a remote receipt");
     }
     const status: LandingStatusV1 = {
       landing,
@@ -1920,7 +2356,7 @@ export class LandingLedger {
       events,
       revision: events.at(-1)?.sequence ?? 0,
     };
-    validateAggregate(status);
+    validateAggregate(status, operationRows, httpRows, eventRows);
     reconstructLandingDigest(status);
     return status;
   }
