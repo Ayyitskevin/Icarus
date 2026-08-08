@@ -41,9 +41,9 @@ editing the operation table under its own ADR.
 - **Sending the credential anywhere but `api.github.com`** over HTTPS, or a
   loopback origin that the caller explicitly opted into with `allowLoopback`.
   Loopback receives the credential in cleartext, so a misconfigured or
-  environment-derived local URL is refused rather than silently handed the token. The base URL must be the origin root, and a
-  built URL that left the pinned origin is never dispatched. Redirects are never
-  followed.
+  environment-derived local URL is refused rather than silently handed the
+  token. The base URL must be the origin root, and a built URL that left the
+  pinned origin is never dispatched. Redirects are never followed.
 - **Uploading continuous-integration configuration.** Creating the reference
   fires GitHub's `create` and `push` events, and a same-repository pull request
   fires `pull_request`; in each case the head branch's own automation would run
