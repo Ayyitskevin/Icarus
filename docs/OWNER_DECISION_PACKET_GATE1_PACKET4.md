@@ -33,6 +33,14 @@
 
 **Alternative.** Add a v2 canonical rate-limit observation and an explicit operator-visible retry grant. It must define trusted clock semantics, header multiplicity/parsing, maximum delay, restart behavior, and digest/event correlation before automation.
 
+## Decision 4 — durable wire-request and raw-response digests
+
+**Why a decision is required.** The accepted v1 tables durably bind canonical request and projected-result JSON through `request_sha256` and `result_sha256`. They have no columns for the gateway's credential-redacted wire-request digest or raw response-body digest. The fake gateway returns both values to its coordinator, but persisting them in an existing database would change the exact accepted schema and require an owner-approved migration.
+
+**Recommended owner choice.** Keep v1 settlement limited to the accepted canonical request/result digests and label the wire/body digests as transient fake-transport evidence. Before live credentials, amend the record contract and schema with exact nullable digest members, define which transport failures have no response bytes, and approve a stop-the-world migration. Never persist an authorization header, credential digest, or raw provider body.
+
+**Alternative.** Explicitly declare canonical request/result digests sufficient for v1 live audit and discard the transient wire/body digests after settlement. This avoids a migration but cannot later prove byte identity of the original provider body independently of the bounded projection.
+
 ## Closed without an owner decision
 
 - Provider owner, repository, and login values normalize to canonical lowercase; branch/ref bytes remain case-sensitive. One mismatching or unprojectable pull request fails the whole list.
