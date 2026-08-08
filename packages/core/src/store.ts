@@ -41,8 +41,10 @@ import { assertGate1SchemasForStartup, createGate1Schemas } from "./gate1-schema
 import {
   type CandidateSettlementInputV1,
   type CreateLandingInputV1,
+  copyLandingGitHubMaterialSnapshotV1,
   type LandingEligibilityV1,
   type LandingGitHubAdmittedRequestClaimV1,
+  type LandingGitHubMaterialSnapshotV1,
   type LandingGitHubPreflightRequestAdmissionV1,
   type LandingGitHubPreflightSettlementInputV1,
   LandingLedger,
@@ -72,11 +74,13 @@ import {
   assertSandboxProfile,
   assertSunCeiling,
   checkpointDigest,
+  MAX_CHANGED_FILES,
   MAX_SESSION_ITERATIONS,
   planApprovalDigest,
   readableManifestDigest,
   treeCheckpointDigest,
 } from "./policy.js";
+import { MAX_CONTROLLER_STDIN_BYTES } from "./process.js";
 import { assertTransition } from "./state-machine.js";
 import type {
   ApprovalRecord,
@@ -148,6 +152,30 @@ const REVIEW_VALIDATION_OPERATION_KIND = "review.validate";
 const CHECKPOINT_ROLLBACK_OPERATION_KIND = "checkpoint.rollback";
 const CHECKPOINT_RESTORE_OPERATION_KIND = "checkpoint.restore";
 const MAX_OPERATION_JSON_BYTES = 32 * 1024 * 1024;
+const CHECKPOINT_PATH_MAX_BYTES = 4 * 1024;
+const CHECKPOINT_OPERATION_MAX_BYTES = 8;
+
+export interface CheckpointReadBoundsV1 {
+  readonly maxFiles: number;
+  readonly maxEncodedFileBytes: number;
+  readonly maxSelectedBytes: number;
+}
+
+export function checkpointReadBoundsV1(
+  maxFiles: number,
+  maxFileBytes: number,
+): CheckpointReadBoundsV1 {
+  const boundedFiles = Math.min(maxFiles, MAX_CHANGED_FILES);
+  const boundedFileBytes = Math.min(maxFileBytes, MAX_CONTROLLER_STDIN_BYTES);
+  const maxEncodedFileBytes = 4 * Math.ceil(boundedFileBytes / 3);
+  return {
+    maxFiles: boundedFiles,
+    maxEncodedFileBytes,
+    maxSelectedBytes:
+      boundedFiles *
+      (CHECKPOINT_PATH_MAX_BYTES + CHECKPOINT_OPERATION_MAX_BYTES + 2 * maxEncodedFileBytes),
+  };
+}
 const REPAIR_SESSION_OPERATION_KINDS: ReadonlySet<string> = new Set([
   SESSION_ITERATION_OPERATION_KIND,
   SESSION_READ_MANIFEST_OPERATION_KIND,
@@ -1469,6 +1497,17 @@ export class IcarusStore {
   readonly #landingLedger: LandingLedger;
   readonly #registeredLandingOperationIds = new WeakMap<RunLeaseGuard, Set<string>>();
   readonly #claimedLandingRequestIds = new WeakMap<RunLeaseGuard, Set<string>>();
+  readonly #claimedLandingMaterials = new WeakMap<
+    RunLeaseGuard,
+    Map<
+      string,
+      {
+        readonly landingId: string;
+        readonly operationId: string;
+        readonly material: LandingGitHubMaterialSnapshotV1;
+      }
+    >
+  >();
 
   constructor(
     databasePath: string,
@@ -1686,6 +1725,70 @@ export class IcarusStore {
       );
     }
     return claim;
+  }
+
+  async claimAdmittedGitHubPreflightRequestWithMaterial(
+    guard: RunLeaseGuard,
+    requestId: string,
+  ): Promise<LandingGitHubAdmittedRequestClaimV1> {
+    const runId = guard.runId;
+    await guard.assertHeld(runId);
+    const claimed = this.#claimedLandingRequestIds.get(guard) ?? new Set<string>();
+    this.#claimedLandingRequestIds.set(guard, claimed);
+    if (claimed.has(requestId)) {
+      throw new IcarusError(
+        "GITHUB_REQUEST_ALREADY_CLAIMED",
+        "GitHub request was already claimed under this run lease",
+      );
+    }
+    claimed.add(requestId);
+    const registered = this.#registeredLandingOperationIds.get(guard);
+    if (registered === undefined || registered.size === 0) {
+      throw new IcarusError(
+        "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
+        "GitHub preflight operation is not registered under this run lease",
+      );
+    }
+    const snapshot = this.#landingLedger.claimAdmittedGitHubPreflightRequestWithMaterial(
+      runId,
+      requestId,
+    );
+    if (!registered.has(snapshot.claim.request.operationId)) {
+      throw new IcarusError(
+        "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
+        "GitHub request belongs to an unregistered preflight operation",
+      );
+    }
+    const materials = this.#claimedLandingMaterials.get(guard) ?? new Map();
+    this.#claimedLandingMaterials.set(guard, materials);
+    materials.set(requestId, {
+      landingId: snapshot.claim.request.landingId,
+      operationId: snapshot.claim.request.operationId,
+      material: copyLandingGitHubMaterialSnapshotV1(snapshot.material),
+    });
+    return snapshot.claim;
+  }
+
+  async readClaimedGitHubLandingMaterial(
+    guard: RunLeaseGuard,
+    requestId: string,
+    landingId: string,
+  ): Promise<LandingGitHubMaterialSnapshotV1> {
+    const runId = guard.runId;
+    await guard.assertHeld(runId);
+    const entry = this.#claimedLandingMaterials.get(guard)?.get(requestId);
+    if (
+      entry === undefined ||
+      entry.landingId !== landingId ||
+      !this.#claimedLandingRequestIds.get(guard)?.has(requestId) ||
+      !this.#registeredLandingOperationIds.get(guard)?.has(entry.operationId)
+    ) {
+      throw new IcarusError(
+        "GITHUB_GATEWAY_MATERIAL_UNAVAILABLE",
+        "Immutable GitHub landing material is not registered under this run lease",
+      );
+    }
+    return copyLandingGitHubMaterialSnapshotV1(entry.material);
   }
 
   async settleGitHubPreflightRequest(
@@ -3858,28 +3961,86 @@ export class IcarusStore {
     return this.getRun(runId);
   }
 
-  listCheckpointFiles(runId: string): CheckpointFile[] {
-    const rows = this.#database
-      .prepare(
-        `SELECT path, op, baseline_base64, approved_base64 FROM checkpoint_files
-         WHERE run_id = ? ORDER BY path ASC`,
-      )
-      .all(runId) as unknown[];
-    return rows.map((entry) => {
-      const value = row(entry, "checkpoint file");
-      const op = text(value.op, "checkpoint file.op");
-      invariant(
-        op === "modify" || op === "create" || op === "delete",
-        "DATABASE_ERROR",
-        "checkpoint file.op is invalid",
+  #listCheckpointFilesBounded(runId: string, bounds: CheckpointReadBoundsV1): CheckpointFile[] {
+    const transaction = this.#database.transaction(() => {
+      const preflight = row(
+        this.#database
+          .prepare(
+            `SELECT COUNT(*) AS row_count,
+             COALESCE(SUM(CASE
+               WHEN typeof(path) <> 'text' OR octet_length(path) > ?
+                 OR typeof(op) <> 'text' OR octet_length(op) > ?
+                 OR (baseline_base64 IS NOT NULL AND
+                   (typeof(baseline_base64) <> 'text' OR octet_length(baseline_base64) > ?))
+                 OR (approved_base64 IS NOT NULL AND
+                   (typeof(approved_base64) <> 'text' OR octet_length(approved_base64) > ?))
+               THEN 1 ELSE 0 END), 0) AS invalid_rows,
+             COALESCE(SUM(
+               CASE WHEN typeof(path) = 'text' THEN octet_length(path) ELSE 0 END +
+               CASE WHEN typeof(op) = 'text' THEN octet_length(op) ELSE 0 END +
+               CASE WHEN typeof(baseline_base64) = 'text'
+                 THEN octet_length(baseline_base64) ELSE 0 END +
+               CASE WHEN typeof(approved_base64) = 'text'
+                 THEN octet_length(approved_base64) ELSE 0 END
+             ), 0) AS selected_bytes
+             FROM (
+               SELECT path, op, baseline_base64, approved_base64
+               FROM checkpoint_files WHERE run_id = ? LIMIT ?
+             ) AS bounded_checkpoint_files`,
+          )
+          .get(
+            CHECKPOINT_PATH_MAX_BYTES,
+            CHECKPOINT_OPERATION_MAX_BYTES,
+            bounds.maxEncodedFileBytes,
+            bounds.maxEncodedFileBytes,
+            runId,
+            bounds.maxFiles + 1,
+          ),
+        "checkpoint file preflight",
       );
-      return {
-        path: assertRepositoryRelativePath(text(value.path, "checkpoint file.path")),
-        op,
-        baselineBase64: nullableText(value.baseline_base64, "checkpoint file.baseline_base64"),
-        approvedBase64: nullableText(value.approved_base64, "checkpoint file.approved_base64"),
-      };
+      invariant(
+        numberValue(preflight.row_count, "checkpoint file count") <= bounds.maxFiles &&
+          numberValue(preflight.invalid_rows, "checkpoint invalid row count") === 0 &&
+          numberValue(preflight.selected_bytes, "checkpoint selected bytes") <=
+            bounds.maxSelectedBytes,
+        "DATABASE_ERROR",
+        "Checkpoint file records exceed their bounded storage contract",
+      );
+      const rows = this.#database
+        .prepare(
+          `SELECT path, op, baseline_base64, approved_base64 FROM checkpoint_files
+           WHERE run_id = ? ORDER BY path ASC LIMIT ?`,
+        )
+        .all(runId, bounds.maxFiles + 1) as unknown[];
+      invariant(
+        rows.length <= bounds.maxFiles,
+        "DATABASE_ERROR",
+        "Checkpoint file set exceeds the bounded row ceiling",
+      );
+      return rows.map((entry): CheckpointFile => {
+        const value = row(entry, "checkpoint file");
+        const op = text(value.op, "checkpoint file.op");
+        invariant(
+          op === "modify" || op === "create" || op === "delete",
+          "DATABASE_ERROR",
+          "checkpoint file.op is invalid",
+        );
+        return {
+          path: assertRepositoryRelativePath(text(value.path, "checkpoint file.path")),
+          op,
+          baselineBase64: nullableText(value.baseline_base64, "checkpoint file.baseline_base64"),
+          approvedBase64: nullableText(value.approved_base64, "checkpoint file.approved_base64"),
+        };
+      });
     });
+    return transaction();
+  }
+
+  listCheckpointFiles(runId: string): CheckpointFile[] {
+    return this.#listCheckpointFilesBounded(
+      runId,
+      checkpointReadBoundsV1(MAX_CHANGED_FILES, MAX_CONTROLLER_STDIN_BYTES),
+    );
   }
 
   #readPatchSet(runId: string, value: Row): PatchSet | null {
@@ -6943,7 +7104,10 @@ export class IcarusStore {
       "Landing diff does not match passing verification",
     );
     const checkpoint = this.getCheckpoint(runId);
-    const checkpointFiles = this.listCheckpointFiles(runId);
+    const checkpointFiles = this.#listCheckpointFilesBounded(
+      runId,
+      checkpointReadBoundsV1(project.ceiling.maxFilesChanged, project.ceiling.maxFileBytes),
+    );
     invariant(
       checkpointFiles.length > 0 &&
         treeCheckpointDigest({
@@ -7052,6 +7216,7 @@ export class IcarusStore {
       reviewDecisionSha256: digestLandingRecord(reviewDecision),
       changedPaths,
       changedPathsSha256,
+      ceiling: { ...project.ceiling },
     };
   }
 

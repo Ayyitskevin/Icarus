@@ -8,8 +8,10 @@
  */
 import type Database from "better-sqlite3";
 
+import { containsSecretShapedContent } from "./context.js";
 import { sha256 } from "./digest.js";
 import { IcarusError } from "./errors.js";
+import type { GitHubLandingMaterialV1 } from "./github-landing-gateway.js";
 import { validateGitHubPreflightHttpHistoryV1 } from "./landing-http-history.js";
 import {
   type PersistedGitHubPreflightEvidenceV1,
@@ -24,6 +26,8 @@ import {
   assertSha1,
   assertSha256,
   assertUuid,
+  buildUnsignedCommitPayloadV1,
+  type CandidateObjectManifestV1,
   type CandidateReadyValueV1,
   canonicalizeCommitMessage,
   canonicalizePullRequestBodyPrefix,
@@ -33,6 +37,8 @@ import {
   DERIVATIVE_EFFECTS,
   DERIVATIVE_GITHUB_EVENTS,
   DIRECT_ICARUS_EFFECTS,
+  decodeCandidateCredentialAuditV1,
+  decodeCandidateObjectManifestV1,
   decodeCanonicalLandingJson,
   decodeChangedPathsDigestV1,
   decodeGitHubLandingProfileV1,
@@ -49,6 +55,7 @@ import {
   digestLandingRecord,
   GITHUB_API_VERSION,
   type GitHubLandingProfileV1,
+  gitObjectSha1,
   type LandingDecisionV1,
   type LandingDigestV1,
   type LandingEventPayloadV1,
@@ -75,8 +82,9 @@ import {
   type LandingResumeStateV1,
   type LandingStateV1,
 } from "./landing-state.js";
-import { assertOperatorActor } from "./policy.js";
-import type { CheckpointFile } from "./types.js";
+import { assertOperatorActor, MAX_CHANGED_FILES } from "./policy.js";
+import { MAX_CONTROLLER_STDIN_BYTES } from "./process.js";
+import type { CheckpointFile, SunCeiling } from "./types.js";
 
 type Row = Record<string, unknown>;
 type JsonRecord = Record<string, unknown>;
@@ -110,6 +118,7 @@ const LANDING_LOADER_ERROR_MAX_BYTES = 128;
 const LANDING_LOADER_TIMESTAMP_MAX_BYTES = 64;
 const LANDING_COORDINATOR_TAKEOVER = "LANDING_COORDINATOR_TAKEOVER";
 const GITHUB_OUTCOME_AMBIGUOUS = "GITHUB_OUTCOME_AMBIGUOUS";
+const CANONICAL_BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const ABSENT_LOCAL_REF_FACT_SHA256 = digestLandingRecord({
   schemaVersion: 1,
   state: "absent",
@@ -249,6 +258,8 @@ export interface LandingEligibilityV1 {
   readonly reviewDecisionSha256: string;
   readonly changedPaths: readonly string[];
   readonly changedPathsSha256: string;
+  /** Current project bounds, re-bound by the full plan approval digest. */
+  readonly ceiling: SunCeiling;
 }
 
 export interface CreateLandingInputV1 {
@@ -397,6 +408,31 @@ export interface LandingGitHubAdmittedRequestClaimV1 {
     readonly method: "GET";
   };
   readonly landingSha256: string;
+}
+
+export interface LandingGitHubMaterialSnapshotV1 extends GitHubLandingMaterialV1 {
+  readonly landing: LandingDigestV1;
+  readonly profile: GitHubLandingProfileV1;
+  readonly objectManifest: CandidateObjectManifestV1;
+  readonly text: {
+    readonly commitMessage: string;
+    readonly pullRequestTitle: string;
+    readonly pullRequestBodyPrefix: string;
+  };
+  readonly changedBlobs: readonly {
+    readonly path: string;
+    readonly content: Uint8Array;
+  }[];
+}
+
+export interface LandingGitHubAdmittedRequestSnapshotV1 {
+  readonly claim: LandingGitHubAdmittedRequestClaimV1;
+  readonly material: LandingGitHubMaterialSnapshotV1;
+}
+
+interface LandingGitHubClaimSnapshotResultV1 {
+  readonly claim: LandingGitHubAdmittedRequestClaimV1;
+  readonly material: LandingGitHubMaterialSnapshotV1 | null;
 }
 
 export interface LandingGitHubPreflightSettlementInputV1 {
@@ -2099,6 +2135,213 @@ function reconstructLandingDigest(status: LandingStatusV1): {
   return { record, sha256: authoritySha256, candidate };
 }
 
+function boundedCheckpointBytes(
+  value: string,
+  field: string,
+  fileLimit: number,
+  aggregateRemaining: number,
+): Uint8Array {
+  const encodedLimit = 4 * Math.ceil(fileLimit / 3);
+  if (
+    value.length > encodedLimit ||
+    value.length % 4 !== 0 ||
+    !CANONICAL_BASE64_PATTERN.test(value)
+  ) {
+    invalid(`${field} is not bounded canonical base64`);
+  }
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  const decodedLength = (value.length / 4) * 3 - padding;
+  if (decodedLength > fileLimit || decodedLength > aggregateRemaining) {
+    invalid(`${field} exceeds its immutable material byte ceiling`);
+  }
+  const bytes = Buffer.from(value, "base64");
+  if (bytes.byteLength !== decodedLength || bytes.toString("base64") !== value) {
+    invalid(`${field} is not canonical base64`);
+  }
+  return new Uint8Array(bytes);
+}
+
+function reconstructGitHubLandingMaterial(
+  status: LandingStatusV1,
+  evidence: LandingEligibilityV1,
+  authority: NonNullable<ReturnType<typeof reconstructLandingDigest>>,
+): LandingGitHubMaterialSnapshotV1 {
+  const { landing } = status;
+  const fileLimit = Math.min(evidence.ceiling.maxFileBytes, MAX_CONTROLLER_STDIN_BYTES);
+  const fileCountLimit = Math.min(evidence.ceiling.maxFilesChanged, MAX_CHANGED_FILES);
+  const aggregateLimit = fileLimit * fileCountLimit;
+  if (
+    evidence.checkpointFiles.length === 0 ||
+    evidence.checkpointFiles.length > fileCountLimit ||
+    evidence.checkpointFiles.length !== authority.record.changedPaths.length
+  ) {
+    invalid("Landing checkpoint exceeds its immutable material file ceiling");
+  }
+
+  const manifestEntries: CandidateObjectManifestV1["entries"][number][] = [];
+  const changedBlobs: { path: string; content: Uint8Array }[] = [];
+  let aggregateBytes = 0;
+  for (const [index, file] of evidence.checkpointFiles.entries()) {
+    if (file.path !== authority.record.changedPaths[index]) {
+      invalid("Landing checkpoint paths differ from immutable landing authority");
+    }
+    const baseline =
+      file.baselineBase64 === null
+        ? null
+        : boundedCheckpointBytes(
+            file.baselineBase64,
+            `checkpointFiles[${index}].baselineBase64`,
+            fileLimit,
+            fileLimit,
+          );
+    if (file.op === "delete") {
+      if (file.approvedBase64 !== null || baseline === null) {
+        invalid("Landing delete checkpoint has inconsistent byte presence");
+      }
+      manifestEntries.push({
+        path: file.path,
+        op: "delete",
+        mode: "100644",
+        blobSha1: null,
+        contentBytes: null,
+        contentSha256: null,
+      });
+      continue;
+    }
+    if (
+      file.approvedBase64 === null ||
+      (file.op === "create" && baseline !== null) ||
+      (file.op === "modify" && baseline === null)
+    ) {
+      invalid("Landing checkpoint operation has inconsistent byte presence");
+    }
+    const content = boundedCheckpointBytes(
+      file.approvedBase64,
+      `checkpointFiles[${index}].approvedBase64`,
+      fileLimit,
+      aggregateLimit - aggregateBytes,
+    );
+    aggregateBytes += content.byteLength;
+    manifestEntries.push({
+      path: file.path,
+      op: file.op,
+      mode: "100644",
+      blobSha1: gitObjectSha1("blob", content),
+      contentBytes: content.byteLength,
+      contentSha256: sha256(content),
+    });
+    changedBlobs.push({ path: file.path, content: new Uint8Array(content) });
+  }
+
+  const objectManifest = decodeCandidateObjectManifestV1({
+    schemaVersion: 1,
+    baseCommitSha1: authority.record.baseCommitSha1,
+    baseTreeSha1: authority.record.baseTreeSha1,
+    candidateTreeSha1: authority.record.candidateTreeSha1,
+    candidateCommitSha1: authority.record.candidateCommitSha1,
+    candidateCommitPayloadSha256: authority.record.candidateCommitPayloadSha256,
+    entries: manifestEntries,
+  });
+  if (digestLandingRecord(objectManifest) !== authority.record.candidateObjectManifestSha256) {
+    invalid("Landing checkpoint does not reconstruct the candidate object manifest");
+  }
+
+  const textBindings = assertLandingDigestTextBindingsV1(authority.record, {
+    commitMessage: landing.commitMessage,
+    pullRequestTitle: landing.pullRequestTitle,
+    pullRequestBodyPrefix: landing.pullRequestBodyPrefix,
+  });
+  const commitPayload = buildUnsignedCommitPayloadV1({
+    candidateTreeSha1: authority.record.candidateTreeSha1,
+    baseCommitSha1: authority.record.baseCommitSha1,
+    commitIdentity: authority.record.commitAuthor,
+    commitEpochSeconds: authority.record.commitEpochSeconds,
+    commitMessage: textBindings.commitMessage,
+  });
+  if (
+    sha256(commitPayload) !== authority.record.candidateCommitPayloadSha256 ||
+    gitObjectSha1("commit", commitPayload) !== authority.record.candidateCommitSha1
+  ) {
+    invalid("Landing text does not reconstruct the immutable candidate commit");
+  }
+
+  const credentialSubjects = changedBlobs.map(({ path, content }) => {
+    if (containsSecretShapedContent(content)) {
+      throw new IcarusError(
+        "LANDING_CREDENTIAL_AUDIT_FAILED",
+        "Candidate changed bytes contain recognizable credential material",
+      );
+    }
+    return {
+      kind: "changed_blob" as const,
+      path,
+      bytes: content.byteLength,
+      sha256: sha256(content),
+    };
+  });
+  const textSubjects = (
+    [
+      ["commit_message", textBindings.commitMessage],
+      ["pull_request_title", textBindings.pullRequestTitle],
+      ["pull_request_body_prefix", textBindings.pullRequestBodyPrefix],
+    ] as const
+  ).map(([kind, value]) => {
+    const bytes = Buffer.from(value, "utf8");
+    if (containsSecretShapedContent(bytes)) {
+      throw new IcarusError(
+        "LANDING_CREDENTIAL_AUDIT_FAILED",
+        "Candidate landing text contains recognizable credential material",
+      );
+    }
+    return { kind, path: null, bytes: bytes.byteLength, sha256: sha256(bytes) };
+  });
+  const credentialAudit = decodeCandidateCredentialAuditV1({
+    schemaVersion: 1,
+    policyVersion: "landing-outgoing-v1",
+    outcome: "passed",
+    subjects: [...credentialSubjects, ...textSubjects],
+  });
+  if (digestLandingRecord(credentialAudit) !== authority.record.candidateCredentialAuditSha256) {
+    invalid("Landing checkpoint and text do not reconstruct the credential audit");
+  }
+
+  return {
+    landing: authority.record,
+    profile: authority.record.profile,
+    objectManifest,
+    text: textBindings,
+    changedBlobs,
+  };
+}
+
+export function copyLandingGitHubMaterialSnapshotV1(
+  material: LandingGitHubMaterialSnapshotV1,
+): LandingGitHubMaterialSnapshotV1 {
+  return {
+    landing: decodeCanonicalLandingJson(
+      canonicalLandingJson(material.landing),
+      decodeLandingDigestV1,
+    ),
+    profile: decodeCanonicalLandingJson(
+      canonicalLandingJson(material.profile),
+      decodeGitHubLandingProfileV1,
+    ),
+    objectManifest: decodeCanonicalLandingJson(
+      canonicalLandingJson(material.objectManifest),
+      decodeCandidateObjectManifestV1,
+    ),
+    text: {
+      commitMessage: material.text.commitMessage,
+      pullRequestTitle: material.text.pullRequestTitle,
+      pullRequestBodyPrefix: material.text.pullRequestBodyPrefix,
+    },
+    changedBlobs: material.changedBlobs.map(({ path, content }) => ({
+      path,
+      content: new Uint8Array(content),
+    })),
+  };
+}
+
 export class LandingLedger {
   readonly #database: Database.Database;
   readonly #now: () => string;
@@ -2150,7 +2393,7 @@ export class LandingLedger {
     }
   }
 
-  #assertImmutableEvidence(status: LandingStatusV1): void {
+  #assertImmutableEvidence(status: LandingStatusV1): LandingEligibilityV1 {
     const evidence = this.#evidenceSource(status.landing.runId);
     const landing = status.landing;
     if (
@@ -2171,6 +2414,7 @@ export class LandingLedger {
         "Landing immutable run evidence no longer matches its snapshot",
       );
     }
+    return evidence;
   }
 
   getProfile(projectId: string): LandingProfileRecordV1 | null {
@@ -3634,13 +3878,14 @@ export class LandingLedger {
     return runImmediate(transaction);
   }
 
-  claimAdmittedGitHubPreflightRequest(
+  #claimAdmittedGitHubPreflightRequest(
     expectedRunId: string,
     requestId: string,
-  ): LandingGitHubAdmittedRequestClaimV1 {
+    includeMaterial: boolean,
+  ): LandingGitHubClaimSnapshotResultV1 {
     const canonicalRunId = assertUuid(expectedRunId, "runId");
     const canonicalRequestId = assertUuid(requestId, "requestId");
-    const transaction = this.#database.transaction((): LandingGitHubAdmittedRequestClaimV1 => {
+    const transaction = this.#database.transaction((): LandingGitHubClaimSnapshotResultV1 => {
       const identityPreflight = this.#database
         .prepare(
           "SELECT typeof(landing_id) AS landing_id_type, " +
@@ -3682,7 +3927,7 @@ export class LandingLedger {
       if (status.landing.runId !== canonicalRunId) {
         throw new IcarusError("RUN_LEASE_MISMATCH", "GitHub request belongs to another run lease");
       }
-      this.#assertImmutableEvidence(status);
+      const immutableEvidence = this.#assertImmutableEvidence(status);
       const operation = this.#startedOperation(status, "github.preflight");
       const attempt = this.#startedAttempt(status);
       if (operation.coordinatorAttempt !== attempt.ordinal) {
@@ -3700,12 +3945,39 @@ export class LandingLedger {
           "Admitted GitHub request is unavailable",
         );
       }
-      return {
+      const claim = {
         request: evidence.request as LandingGitHubAdmittedRequestClaimV1["request"],
         landingSha256: status.landing.landingSha256,
       };
+      if (!includeMaterial) return { claim, material: null };
+      const authority = reconstructLandingDigest(status);
+      if (authority === null) {
+        invalid("Admitted GitHub request lacks immutable landing authority");
+      }
+      return {
+        claim,
+        material: reconstructGitHubLandingMaterial(status, immutableEvidence, authority),
+      };
     });
     return runImmediate(transaction);
+  }
+
+  claimAdmittedGitHubPreflightRequest(
+    expectedRunId: string,
+    requestId: string,
+  ): LandingGitHubAdmittedRequestClaimV1 {
+    return this.#claimAdmittedGitHubPreflightRequest(expectedRunId, requestId, false).claim;
+  }
+
+  claimAdmittedGitHubPreflightRequestWithMaterial(
+    expectedRunId: string,
+    requestId: string,
+  ): LandingGitHubAdmittedRequestSnapshotV1 {
+    const snapshot = this.#claimAdmittedGitHubPreflightRequest(expectedRunId, requestId, true);
+    if (snapshot.material === null) {
+      invalid("Claimed GitHub request did not produce immutable material");
+    }
+    return { claim: snapshot.claim, material: snapshot.material };
   }
 
   #writePreflightOperationSettlement(
