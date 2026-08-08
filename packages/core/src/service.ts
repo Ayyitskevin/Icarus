@@ -20,6 +20,11 @@ import { digestJson, sha256 } from "./digest.js";
 import { errorMessage, IcarusError, invariant } from "./errors.js";
 import type { GitController, RepositoryInspection, WorktreeFileWrite } from "./git.js";
 import {
+  type GitHubLandingCredentialResolverV1,
+  GitHubLandingGatewayV1,
+  type GitHubLandingTransport,
+} from "./github-landing-gateway.js";
+import {
   type LandingCandidateResult,
   LandingGitController,
   type LandingLocalRefFact,
@@ -30,6 +35,7 @@ import {
 import type {
   CandidateSettlementInputV1,
   LandingEligibilityV1,
+  LandingGitHubPreflightSettlementInputV1,
   LandingProfileRecordV1,
   LandingRecordV1,
   LandingStatusV1,
@@ -54,7 +60,7 @@ import {
   type LocalRefFactV1,
   renderPullRequestBodyV1,
 } from "./landing-records.js";
-import { RunLeaseManager } from "./lease.js";
+import { type RunLeaseGuard, RunLeaseManager } from "./lease.js";
 import {
   assertAllowedTarget,
   assertCheckProfiles,
@@ -758,6 +764,10 @@ export type LandingGitService = Pick<
   LandingGitController,
   "inspectBase" | "prepareCandidate" | "observeLocalRef" | "createAbsentLocalRef"
 >;
+type FakeGitHubPreflightSessionFactory = () => Readonly<{
+  transport: GitHubLandingTransport;
+  credentialResolver: GitHubLandingCredentialResolverV1;
+}>;
 
 export interface IcarusServiceOptions {
   readonly stateRoot: string;
@@ -768,6 +778,8 @@ export interface IcarusServiceOptions {
   readonly landingCredentialEnvironmentNames?: readonly string[];
   readonly checks: CheckRunner;
   readonly gatewayFactory?: GatewayFactory;
+  /** Test-only fake transport seam; production has no default or runtime wiring. */
+  readonly fakeGitHubPreflightSessionFactory?: FakeGitHubPreflightSessionFactory;
   readonly id?: () => string;
   readonly now?: () => string;
   /** Test seam only; production always defaults to the live Node platform. */
@@ -832,6 +844,7 @@ export class IcarusService {
   readonly #landingCredentialEnvironmentNames: ReadonlySet<string>;
   readonly #checks: CheckRunner;
   readonly #gatewayFactory: GatewayFactory;
+  readonly #fakeGitHubPreflightSessionFactory: FakeGitHubPreflightSessionFactory | undefined;
   readonly #id: () => string;
   readonly #now: () => string;
   readonly #leases: RunLeaseManager;
@@ -862,6 +875,7 @@ export class IcarusService {
     this.#checks = options.checks;
     this.#gatewayFactory =
       options.gatewayFactory ?? ((config) => createGateway(config, process.env));
+    this.#fakeGitHubPreflightSessionFactory = options.fakeGitHubPreflightSessionFactory;
     this.#id = options.id ?? randomUUID;
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#leases = new RunLeaseManager(this.#stateRoot);
@@ -1448,6 +1462,120 @@ export class IcarusService {
     });
   }
 
+  async #executeFakeGitHubPreflight(
+    guard: RunLeaseGuard,
+    landingId: string,
+    signal?: AbortSignal,
+  ): Promise<LandingStatusV1> {
+    const sessionFactory = this.#fakeGitHubPreflightSessionFactory;
+    invariant(
+      sessionFactory !== undefined,
+      "INVALID_LANDING_STATE",
+      "Fake GitHub preflight execution was not enabled",
+    );
+    const runId = guard.runId;
+    const started = await this.#store.startGitHubPreflight(guard, landingId);
+    let materialSlot: Readonly<{ requestId: string; landingId: string }> | null = null;
+    let gateway: GitHubLandingGatewayV1 | null = null;
+    try {
+      for (let requestIndex = 0; requestIndex < 3; requestIndex += 1) {
+        const admitted = await this.#store.admitNextGitHubPreflightRequest(
+          guard,
+          landingId,
+          started.operationId,
+        );
+        if (gateway === null) {
+          const session = sessionFactory();
+          gateway = new GitHubLandingGatewayV1({
+            requestClaimer: {
+              claimAdmitted: async (requestId) => {
+                invariant(
+                  materialSlot === null,
+                  "GITHUB_GATEWAY_MATERIAL_UNAVAILABLE",
+                  "A claimed GitHub material slot is already active",
+                );
+                const claim = await this.#store.claimAdmittedGitHubPreflightRequestWithMaterial(
+                  guard,
+                  requestId,
+                );
+                materialSlot = {
+                  requestId: claim.request.requestId,
+                  landingId: claim.request.landingId,
+                };
+                return claim;
+              },
+            },
+            materialReader: {
+              read: async (claimedLandingId) => {
+                const claimed = materialSlot;
+                materialSlot = null;
+                invariant(
+                  claimed !== null && claimed.landingId === claimedLandingId,
+                  "GITHUB_GATEWAY_MATERIAL_UNAVAILABLE",
+                  "Claimed GitHub material does not bind the requested landing",
+                );
+                return this.#store.readClaimedGitHubLandingMaterial(
+                  guard,
+                  claimed.requestId,
+                  claimed.landingId,
+                );
+              },
+            },
+            credentialResolver: {
+              resolve: async (reference) => {
+                await guard.assertHeld(runId);
+                return session.credentialResolver.resolve(reference);
+              },
+            },
+            transport: {
+              dispatch: async (request, dispatchSignal) => {
+                await guard.assertHeld(runId);
+                return session.transport.dispatch(request, dispatchSignal);
+              },
+            },
+          });
+        }
+
+        const exchange = await gateway.executeAdmitted(
+          { requestId: admitted.request.requestId },
+          signal,
+        );
+        invariant(
+          exchange.request.operationKind === "github.preflight" &&
+            exchange.request.method === "GET",
+          "LANDING_RECORD_INVALID",
+          "GitHub preflight gateway returned a request outside its fixed grammar",
+        );
+        const settled = await this.#store.settleGitHubPreflightRequest(
+          guard,
+          landingId,
+          started.operationId,
+          {
+            request: exchange.request as LandingGitHubPreflightSettlementInputV1["request"],
+            requestSha256: exchange.requestSha256,
+            result: exchange.result,
+            resultSha256: exchange.resultSha256,
+          },
+        );
+        const operation = settled.operations.find(
+          (entry) => entry.id === started.operationId && entry.kind === "github.preflight",
+        );
+        invariant(
+          operation !== undefined,
+          "LANDING_RECORD_INVALID",
+          "GitHub preflight settlement lost its exact operation",
+        );
+        if (operation.status !== "started") return settled;
+      }
+      throw new IcarusError(
+        "LANDING_RECORD_INVALID",
+        "GitHub preflight remained active after its fixed three-request bound",
+      );
+    } finally {
+      gateway?.closeOperation();
+    }
+  }
+
   setLandingProfile(
     projectName: string,
     profileInput: GitHubLandingProfileV1,
@@ -1545,7 +1673,7 @@ export class IcarusService {
 
   async resumeLanding(runId: string, signal?: AbortSignal): Promise<LandingStatusV1> {
     this.#assertLandingMutationPlatform();
-    return this.#leases.withLease(runId, async () => {
+    return this.#leases.withLease(runId, async (guard) => {
       const attemptSignal = boundedSignal(signal, LANDING_ATTEMPT_TIMEOUT_MS);
       const current = this.#store.getLandingStatusForRun(runId);
       invariant(current !== null, "NOT_FOUND", "Landing was not found");
@@ -1553,14 +1681,21 @@ export class IcarusService {
         current.landing.profile,
         this.#landingCredentialEnvironmentNames,
       );
-      if (current.landing.state === "local_ready") {
+      if (
+        current.landing.state === "local_ready" &&
+        this.#fakeGitHubPreflightSessionFactory === undefined
+      ) {
         return current;
       }
       invariant(
         !(
           current.landing.state === "failed" &&
           current.landing.resumeState !== "preparing_candidate" &&
-          current.landing.resumeState !== "approved"
+          current.landing.resumeState !== "approved" &&
+          !(
+            this.#fakeGitHubPreflightSessionFactory !== undefined &&
+            current.landing.resumeState === "local_ready"
+          )
         ),
         "INVALID_LANDING_STATE",
         "Packet 3 cannot resume this later landing stage",
@@ -1598,6 +1733,13 @@ export class IcarusService {
             admission.operationId,
             attemptSignal,
           );
+        case "local_ready":
+          invariant(
+            this.#fakeGitHubPreflightSessionFactory !== undefined && admission.operationId === null,
+            "LANDING_RECORD_INVALID",
+            "Local-ready resume unexpectedly crossed its fake preflight admission boundary",
+          );
+          return this.#executeFakeGitHubPreflight(guard, current.landing.id, attemptSignal);
         default:
           throw new IcarusError(
             "INVALID_LANDING_STATE",
