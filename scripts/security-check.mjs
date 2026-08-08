@@ -2089,6 +2089,13 @@ const assertions = {
   githubGatewayReconciliationFailsClosedOnAmbiguity:
     githubGatewayGatewaySource.includes("const PULL_REQUEST_PAGE_SIZE = 100") &&
     githubGatewayGatewaySource.includes('page: "1"') &&
+    // Truncation is decided by GitHub's Link header, not by a full page.
+    githubGatewayHttpSource.includes("hasNextPage") &&
+    githubGatewayGatewaySource.includes("!response.hasNextPage") &&
+    // A loopback origin receives the credential in cleartext and must be opted
+    // into, so a config-derived local URL cannot silently be handed the token.
+    githubGatewayGatewaySource.includes('"GITHUB_LOOPBACK_NOT_ALLOWED"') &&
+    githubGatewayGatewaySource.includes('"GITHUB_PULL_REQUEST_CREATE_REFUSED"') &&
     githubGatewayGatewaySource.includes('"GITHUB_RECONCILIATION_AMBIGUOUS"') &&
     githubGatewayGatewaySource.includes('"GITHUB_ACTOR_MISMATCH"') &&
     githubGatewayHttpSource.includes('"GITHUB_OUTCOME_AMBIGUOUS"') &&

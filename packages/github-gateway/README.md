@@ -39,9 +39,11 @@ editing the operation table under its own ADR.
 - **A reference outside `refs/heads/icarus/<run-id>`**, matching the private
   local namespace Packet 3 already writes.
 - **Sending the credential anywhere but `api.github.com`** over HTTPS, or a
-  loopback origin for offline tests. The base URL must be the origin root, and a
-  built URL that left the pinned origin is never dispatched. Redirects are never
-  followed.
+  loopback origin that the caller explicitly opted into with `allowLoopback`.
+  Loopback receives the credential in cleartext, so a misconfigured or
+  environment-derived local URL is refused rather than silently handed the
+  token. The base URL must be the origin root, and a built URL that left the
+  pinned origin is never dispatched. Redirects are never followed.
 - **Uploading continuous-integration configuration.** Creating the reference
   fires GitHub's `create` and `push` events, and a same-repository pull request
   fires `pull_request`; in each case the head branch's own automation would run
@@ -82,10 +84,19 @@ upstream bytes means the gateway cannot tell them apart, and recording a
 protection refusal as benign idempotency would be a false claim. The coordinator
 disambiguates with the reference read it already owns.
 
+A refused pull request creation reports `GITHUB_PULL_REQUEST_CREATE_REFUSED`
+for the same reason: 422 covers a duplicate head, "no commits between", an
+invalid base, and unsupported drafts alike.
+
 Reconciliation reads pin ADR 0027's exact parameters (`state=all`, `page=1`,
-`per_page=100`, plus the exact owner-qualified head and base). A full page or
-more than one match raises `GITHUB_RECONCILIATION_AMBIGUOUS` rather than being
-read as "no pull request exists".
+`per_page=100`, plus the exact owner-qualified head and base). Truncation is
+decided by GitHub's `Link: …rel="next"` header, not by a full page — a full page
+with no next link is complete. GitHub permits many pull requests on one head so
+long as at most one is open, so the read prefers the open one, then a single
+merged one, then a single closed one, and raises
+`GITHUB_RECONCILIATION_AMBIGUOUS` only when the choice is genuinely ambiguous.
+Requiring exactly one would deadlock a run permanently after an ordinary
+close-and-reopen.
 
 There is no automatic retry of a mutating request. ADR 0027 places retry with
 the coordinator's durable intent and reconciliation, where it can be made

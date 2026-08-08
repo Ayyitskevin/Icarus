@@ -42,6 +42,13 @@ export interface GithubGatewayOptions {
   readonly token: string;
   readonly fetchImplementation?: typeof fetch;
   readonly timeoutMs?: number;
+  /**
+   * Loopback origins exist for offline tests and the deterministic benchmark
+   * transport, and they receive the credential in cleartext. They must be opted
+   * into explicitly, so a misconfigured or environment-derived base URL pointing
+   * at a local port cannot silently be handed the token.
+   */
+  readonly allowLoopback?: boolean;
 }
 
 export interface GithubCallOptions {
@@ -170,6 +177,11 @@ export class GithubGateway {
       "A GitHub token must contain 8 to 512 non-whitespace, non-control characters",
     );
     const origin = resolveGithubOrigin(options.baseUrl);
+    invariant(
+      origin.locality === "remote" || options.allowLoopback === true,
+      "GITHUB_LOOPBACK_NOT_ALLOWED",
+      "A loopback GitHub origin requires an explicit allowLoopback opt-in",
+    );
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     invariant(
       Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 120_000,
@@ -292,7 +304,7 @@ export class GithubGateway {
     options: GithubCallOptions = {},
   ): Promise<GithubObjectReceipt> {
     invariant(
-      /^[A-Za-z0-9+/]*={0,2}$/.test(contentBase64),
+      /^[A-Za-z0-9+/]*={0,2}$/.test(contentBase64) && contentBase64.length % 4 === 0,
       "GITHUB_CONTENT_INVALID",
       "Blob content must be base64",
     );
@@ -451,6 +463,17 @@ export class GithubGateway {
       },
       signal: options.signal,
     });
+    if (response.status === 422) {
+      // GitHub answers 422 here for a duplicate head, "no commits between",
+      // an invalid base, and unsupported drafts alike. Report the refusal
+      // without attributing a cause so the coordinator re-reads instead of
+      // treating it as terminal.
+      throw new GithubGatewayError(
+        "GITHUB_PULL_REQUEST_CREATE_REFUSED",
+        "GitHub refused to create the pull request; nothing was created",
+        { status: response.status, responseSha256: response.bodySha256 },
+      );
+    }
     this.#expectStatus(response, 201, "create_draft_pull_request");
     const receipt = this.#readPullRequest(response, coordinates, input.headRef, baseBranch);
     invariant(
@@ -525,20 +548,20 @@ export class GithubGateway {
       "GitHub pull request listing is not an array",
       { status: response.status, responseSha256: response.bodySha256 },
     );
+    // The real truncation signal is the Link header, not a full page: a page of
+    // exactly PULL_REQUEST_PAGE_SIZE with no next link is complete.
     invariant(
-      response.value.length < PULL_REQUEST_PAGE_SIZE,
+      !response.hasNextPage,
       "GITHUB_RECONCILIATION_AMBIGUOUS",
-      "GitHub returned a full pull request page, so absence cannot be established",
+      "GitHub signalled a further pull request page, so the result may be truncated",
       { status: response.status, responseSha256: response.bodySha256 },
     );
-    invariant(
-      response.value.length <= 1,
-      "GITHUB_RECONCILIATION_AMBIGUOUS",
-      "GitHub returned more than one pull request for this exact head and base",
-      { status: response.status, responseSha256: response.bodySha256 },
-    );
-    const first = response.value[0];
-    if (first === undefined) {
+    // GitHub permits many pull requests on one head so long as at most one is
+    // open, so "exactly one ever" would deadlock a run permanently after an
+    // ordinary close-and-reopen. Prefer the open one, then a merged one, and
+    // fail closed only when the choice is genuinely ambiguous.
+    const first = selectReconciledPullRequest(response);
+    if (first === null) {
       return null;
     }
     // The listing is filtered by head and base, but the receipt would otherwise
@@ -612,6 +635,51 @@ export class GithubGateway {
       latencyMs: response.latencyMs,
     };
   }
+}
+
+/**
+ * Chooses the pull request a reconciliation read should report. At most one
+ * pull request may be open on a head, so an open one is the answer whenever it
+ * exists; otherwise a single merged or single closed record still identifies
+ * the run's pull request. Anything else is genuinely ambiguous and fails closed.
+ */
+function selectReconciledPullRequest(response: GithubHttpResponse): unknown {
+  const entries = response.value as readonly unknown[];
+  const ambiguous = (subject: string): never => {
+    throw new GithubGatewayError("GITHUB_RECONCILIATION_AMBIGUOUS", subject, {
+      status: response.status,
+      responseSha256: response.bodySha256,
+    });
+  };
+  const open = entries.filter((entry) => readStringMember(entry, "state") === "open");
+  if (open.length === 1) {
+    return open[0];
+  }
+  if (open.length > 1) {
+    return ambiguous("GitHub reported more than one open pull request for this head and base");
+  }
+  const merged = entries.filter((entry) => readStringMember(entry, "merged_at") !== null);
+  if (merged.length === 1) {
+    return merged[0];
+  }
+  if (merged.length > 1) {
+    return ambiguous("GitHub reported more than one merged pull request for this head and base");
+  }
+  if (entries.length === 1) {
+    return entries[0];
+  }
+  if (entries.length > 1) {
+    return ambiguous("GitHub reported several closed pull requests for this head and base");
+  }
+  return null;
+}
+
+function readStringMember(entry: unknown, member: string): string | null {
+  if (typeof entry !== "object" || entry === null) {
+    return null;
+  }
+  const value = (entry as Record<string, unknown>)[member];
+  return typeof value === "string" ? value : null;
 }
 
 function readHeadBranch(value: unknown, response: GithubHttpResponse): string {

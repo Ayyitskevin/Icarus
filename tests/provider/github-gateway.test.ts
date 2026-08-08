@@ -41,7 +41,12 @@ describe("GithubGateway HTTP contract", () => {
   });
 
   function gatewayFor(target: ProviderHttpServer): GithubGateway {
-    return new GithubGateway({ baseUrl: target.baseUrl, token, timeoutMs: 2_000 });
+    return new GithubGateway({
+      baseUrl: target.baseUrl,
+      token,
+      timeoutMs: 2_000,
+      allowLoopback: true,
+    });
   }
 
   it("uploads a blob to the exact endpoint with the pinned API version", async () => {
@@ -409,6 +414,7 @@ describe("GithubGateway HTTP contract", () => {
       baseUrl: "http://127.0.0.1:1/",
       token,
       timeoutMs: 1_000,
+      allowLoopback: true,
     });
 
     const error = await expectCode(
@@ -424,6 +430,7 @@ describe("GithubGateway HTTP contract", () => {
       baseUrl: "http://127.0.0.1:1/",
       token,
       timeoutMs: 1_000,
+      allowLoopback: true,
     });
 
     const error = await expectCode(
@@ -434,12 +441,124 @@ describe("GithubGateway HTTP contract", () => {
     expect(`${error.message} ${JSON.stringify(error.details)}`).not.toContain(token);
   });
 
-  it("fails closed when a full pull request page makes absence unprovable", async () => {
+  it("accepts a full page that GitHub did not mark as truncated", async () => {
+    // A full page is only a hint; the Link header is the real signal. One open
+    // entry among many closed ones is still unambiguous.
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, [
+        {
+          number: 1,
+          draft: true,
+          state: "open",
+          base: { ref: "main" },
+          head: { ref: `icarus/${runId}` },
+          merged_at: null,
+        },
+        ...Array.from({ length: 99 }, (_value, index) => ({
+          number: index + 2,
+          draft: true,
+          state: "closed",
+          base: { ref: "main" },
+          head: { ref: `icarus/${runId}` },
+          merged_at: null,
+        })),
+      ]);
+    });
+
+    const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
+
+    expect(receipt).toMatchObject({ number: 1, state: "open" });
+  });
+
+  it("fails closed when GitHub signals a further page", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      response.writeHead(200, {
+        "content-type": "application/json",
+        link: '<https://api.github.com/repositories/1/pulls?page=2>; rel="next"',
+      });
+      response.end(JSON.stringify([]));
+    });
+
+    await expectCode(
+      gatewayFor(server).readPullRequestByHead(coordinates, ref, "main"),
+      "GITHUB_RECONCILIATION_AMBIGUOUS",
+    );
+  });
+
+  it("still reconciles after a human closed and reopened the pull request", async () => {
+    // GitHub permits many pull requests on one head so long as at most one is
+    // open. Requiring exactly one would deadlock the run permanently.
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, [
+        {
+          number: 5,
+          draft: true,
+          state: "closed",
+          base: { ref: "main" },
+          head: { ref: `icarus/${runId}` },
+          merged_at: null,
+        },
+        {
+          number: 6,
+          draft: true,
+          state: "open",
+          base: { ref: "main" },
+          head: { ref: `icarus/${runId}` },
+          merged_at: null,
+        },
+      ]);
+    });
+
+    const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
+
+    expect(receipt).toMatchObject({ number: 6, state: "open" });
+  });
+
+  it("reports a refused pull request creation without attributing a cause", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 422, {
+        message: "A pull request already exists for ayyitskevin:icarus/x.",
+      });
+    });
+
+    await expectCode(
+      gatewayFor(server).createDraftPullRequest(coordinates, {
+        title: "t",
+        body: "b",
+        headRef: ref,
+        baseBranch: "main",
+      }),
+      "GITHUB_PULL_REQUEST_CREATE_REFUSED",
+    );
+  });
+
+  it("refuses a loopback origin unless it is explicitly allowed", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, {});
+    });
+    const target = server;
+
+    expect(() => new GithubGateway({ baseUrl: target.baseUrl, token, timeoutMs: 2_000 })).toThrow(
+      GithubGatewayError,
+    );
+    expect(target.requests).toHaveLength(0);
+  });
+
+  it("refuses undecodable base64 before dispatching a mutation", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 201, { sha: blobSha });
+    });
+
+    await expectCode(gatewayFor(server).createBlob(coordinates, "abcde"), "GITHUB_CONTENT_INVALID");
+    expect(server.requests).toHaveLength(0);
+  });
+
+  it("fails closed when more than one open pull request matches", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(
         response,
         200,
-        Array.from({ length: 100 }, (_value, index) => ({
+        Array.from({ length: 2 }, (_value, index) => ({
           number: index + 1,
           draft: true,
           state: "open",

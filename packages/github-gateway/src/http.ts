@@ -17,6 +17,12 @@ export interface GithubHttpResponse {
   readonly value: unknown;
   /** SHA-256 of the exact response bytes, for evidence correlation. */
   readonly bodySha256: string;
+  /**
+   * Whether GitHub signalled a further page via `Link: …rel="next"`. This is
+   * the real truncation signal; a full page is only a hint. Reduced to a
+   * boolean, so no upstream text is carried.
+   */
+  readonly hasNextPage: boolean;
   readonly latencyMs: number;
 }
 
@@ -137,9 +143,9 @@ export async function sendGithubRequest(
     const latencyMs = performance.now() - startedAt;
     const bodySha256 = createHash("sha256").update(bytes).digest("hex");
     invariant(
-      response.status < 300 || response.status >= 400,
+      response.status !== 0 && (response.status < 300 || response.status >= 400),
       "GITHUB_REDIRECT_DENIED",
-      "GitHub returned a redirect, which is never followed",
+      "GitHub returned a redirect or opaque response, which is never followed",
       { status: response.status, bodySha256 },
     );
     const text = new TextDecoder().decode(bytes);
@@ -154,7 +160,14 @@ export async function sendGithubRequest(
         });
       }
     }
-    return { status: response.status, value, bodySha256, latencyMs };
+    const link = response.headers.get("link") ?? "";
+    return {
+      status: response.status,
+      value,
+      bodySha256,
+      hasNextPage: /\brel="?next"?/.test(link),
+      latencyMs,
+    };
   } finally {
     clearTimeout(timeout);
     request.signal?.removeEventListener("abort", onAbort);
