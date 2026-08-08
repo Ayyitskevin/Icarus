@@ -522,6 +522,84 @@ function makeFixture(successCount: number, tail?: Tail): Fixture {
   };
 }
 
+function settleAsTakeover(fixture: Fixture): Fixture {
+  const evidence = fixture.input.httpRows.flatMap((row) => {
+    if (row.status !== "settled") return [];
+    if (typeof row.id !== "string" || typeof row.result_sha256 !== "string") {
+      throw new Error("settled takeover fixture row is incomplete");
+    }
+    return [{ requestId: row.id, resultSha256: row.result_sha256 }];
+  });
+  const result: LandingOperationResultV1 = {
+    schemaVersion: 1,
+    operationId: OPERATION_ID,
+    kind: "github.preflight",
+    outcome: "interrupted",
+    boundary: "operation_interrupted",
+    evidence,
+    value: null,
+    errorCode: "LANDING_COORDINATOR_TAKEOVER",
+  };
+  const resultJson = canonicalLandingJson(result);
+  const resultSha256 = sha256(resultJson);
+  fixture.input.operationRow.status = "interrupted";
+  fixture.input.operationRow.observation_sha256 = null;
+  fixture.input.operationRow.observation_json = null;
+  fixture.input.operationRow.result_sha256 = resultSha256;
+  fixture.input.operationRow.result_json = resultJson;
+  fixture.input.operationRow.error_code = "LANDING_COORDINATOR_TAKEOVER";
+  fixture.input.operationRow.finished_at = FINISHED_AT;
+
+  const settlementPayload: LandingOperationSettledEventV1 = {
+    schemaVersion: 1,
+    landingId: LANDING_ID,
+    operationId: OPERATION_ID,
+    coordinatorAttempt: 2,
+    kind: "github.preflight",
+    outcome: "interrupted",
+    resultSha256,
+    errorCode: "LANDING_COORDINATOR_TAKEOVER",
+  };
+  const existingSettlement = fixture.input.operationEvents[1];
+  if (existingSettlement === undefined) {
+    const ownedEvents = [...fixture.input.operationEvents, ...fixture.input.requestEvents];
+    const lastSequence = Math.max(...ownedEvents.map((event) => event.sequence as number));
+    const lastId = Math.max(...ownedEvents.map((event) => event.id as number));
+    fixture.input.operationEvents.push(
+      eventRow(lastId + 1, lastSequence + 1, "landing.operation.settled", settlementPayload),
+    );
+  } else {
+    existingSettlement.payload_json = canonicalLandingJson(settlementPayload);
+  }
+  return fixture;
+}
+
+function replaceTakeoverError(fixture: Fixture, errorCode: string): void {
+  const result = JSON.parse(fixture.input.operationRow.result_json as string) as MutableRow;
+  result.errorCode = errorCode;
+  const resultJson = canonicalLandingJson(result);
+  const resultSha256 = sha256(resultJson);
+  fixture.input.operationRow.result_json = resultJson;
+  fixture.input.operationRow.result_sha256 = resultSha256;
+  fixture.input.operationRow.error_code = errorCode;
+  const settlement = operationEventAt(fixture, 1);
+  const payload = JSON.parse(settlement.payload_json as string) as MutableRow;
+  payload.resultSha256 = resultSha256;
+  payload.errorCode = errorCode;
+  settlement.payload_json = canonicalLandingJson(payload);
+}
+
+function replaceTakeoverResult(fixture: Fixture, result: MutableRow): void {
+  const resultJson = canonicalLandingJson(result);
+  const resultSha256 = sha256(resultJson);
+  fixture.input.operationRow.result_json = resultJson;
+  fixture.input.operationRow.result_sha256 = resultSha256;
+  const settlement = operationEventAt(fixture, 1);
+  const payload = JSON.parse(settlement.payload_json as string) as MutableRow;
+  payload.resultSha256 = resultSha256;
+  settlement.payload_json = canonicalLandingJson(payload);
+}
+
 function expectInvalid(value: unknown): void {
   try {
     validatePersistedGitHubPreflightOperationV1(value);
@@ -578,6 +656,129 @@ describe("persisted local-ready GitHub preflight aggregate evidence", () => {
       expect(projected.request.requestOrdinal).toBe(PREVIOUS_REQUEST_ORDINAL + successes + 1);
     },
   );
+
+  it.each([0, 1, 2] as const)(
+    "recognizes takeover after %i successful GETs with no admitted request",
+    (successes) => {
+      const fixture = settleAsTakeover(makeFixture(successes));
+      const projected = validatePersistedGitHubPreflightOperationV1(fixture.input);
+      expect(projected.status).toBe("takeover");
+      if (projected.status !== "takeover") throw new Error("expected takeover evidence");
+      expect(projected).toMatchObject({
+        operationOutcome: "interrupted",
+        errorCode: "LANDING_COORDINATOR_TAKEOVER",
+      });
+      expect(projected.exchanges).toHaveLength(successes);
+      expect(projected.result.evidence).toHaveLength(successes);
+      expect(projected.resultSha256).toBe(digestLandingRecord(projected.result));
+    },
+  );
+
+  it.each([0, 1, 2] as const)(
+    "recognizes takeover after %i successes and the exact ambiguous admitted-request settlement",
+    (successes) => {
+      const fixture = settleAsTakeover(makeFixture(successes, "ambiguous"));
+      const projected = validatePersistedGitHubPreflightOperationV1(fixture.input);
+      expect(projected.status).toBe("takeover");
+      if (projected.status !== "takeover") throw new Error("expected takeover evidence");
+      expect(projected.exchanges).toHaveLength(successes + 1);
+      const tail = projected.exchanges.at(-1);
+      expect(tail?.status).toBe("settled");
+      if (tail?.status !== "settled") throw new Error("expected settled takeover tail");
+      expect(tail.result).toMatchObject({
+        outcome: "ambiguous",
+        errorCode: "GITHUB_OUTCOME_AMBIGUOUS",
+      });
+      expect(projected.result).toMatchObject({
+        outcome: "interrupted",
+        errorCode: "LANDING_COORDINATOR_TAKEOVER",
+      });
+    },
+  );
+
+  it.each([0, 1, 2] as const)(
+    "rejects a failed HTTP tail relabeled as takeover after %i successes",
+    (successes) => {
+      expectInvalid(settleAsTakeover(makeFixture(successes, "failed")).input);
+    },
+  );
+
+  it.each([0, 1, 2] as const)(
+    "rejects takeover settlement while an admitted request remains after %i successes",
+    (successes) => {
+      expectInvalid(settleAsTakeover(makeFixture(successes, "admitted")).input);
+    },
+  );
+
+  it("rejects relabeling a complete three-GET history as takeover", () => {
+    expectInvalid(settleAsTakeover(makeFixture(3)).input);
+  });
+
+  it("rejects takeover error swaps while preserving ordinary ambiguous settlement", () => {
+    const ordinary = makeFixture(1, "ambiguous");
+    const ordinaryProjected = validatePersistedGitHubPreflightOperationV1(ordinary.input);
+    expect(ordinaryProjected.status).toBe("terminal");
+    if (ordinaryProjected.status !== "terminal") {
+      throw new Error("expected ordinary terminal evidence");
+    }
+    expect(ordinaryProjected.errorCode).toBe("GITHUB_OUTCOME_AMBIGUOUS");
+
+    const prefixErrorSwap = settleAsTakeover(makeFixture(1));
+    replaceTakeoverError(prefixErrorSwap, "GITHUB_OUTCOME_AMBIGUOUS");
+    expectInvalid(prefixErrorSwap.input);
+
+    const ambiguousErrorSwap = settleAsTakeover(makeFixture(1, "ambiguous"));
+    replaceTakeoverError(ambiguousErrorSwap, "GITHUB_RATE_LIMITED");
+    expectInvalid(ambiguousErrorSwap.input);
+
+    const rowEventSwap = settleAsTakeover(makeFixture(1));
+    rowEventSwap.input.operationRow.error_code = "GITHUB_OUTCOME_AMBIGUOUS";
+    expectInvalid(rowEventSwap.input);
+
+    const settlementEventSwap = settleAsTakeover(makeFixture(1));
+    const settlement = operationEventAt(settlementEventSwap, 1);
+    const settlementPayload = JSON.parse(settlement.payload_json as string) as MutableRow;
+    settlementPayload.errorCode = "GITHUB_OUTCOME_AMBIGUOUS";
+    settlement.payload_json = canonicalLandingJson(settlementPayload);
+    expectInvalid(settlementEventSwap.input);
+  });
+
+  it("rejects takeover evidence, digest, order, and observation drift", () => {
+    const evidenceDrift = settleAsTakeover(makeFixture(1));
+    const evidenceResult = JSON.parse(
+      evidenceDrift.input.operationRow.result_json as string,
+    ) as MutableRow;
+    const evidence = evidenceResult.evidence as MutableRow[];
+    (evidence[0] as MutableRow).resultSha256 = "f".repeat(64);
+    replaceTakeoverResult(evidenceDrift, evidenceResult);
+    expectInvalid(evidenceDrift.input);
+
+    const digestDrift = settleAsTakeover(makeFixture(1));
+    digestDrift.input.operationRow.result_sha256 = "e".repeat(64);
+    expectInvalid(digestDrift.input);
+
+    const evidenceOrderDrift = settleAsTakeover(makeFixture(2));
+    const orderedResult = JSON.parse(
+      evidenceOrderDrift.input.operationRow.result_json as string,
+    ) as MutableRow;
+    (orderedResult.evidence as MutableRow[]).reverse();
+    replaceTakeoverResult(evidenceOrderDrift, orderedResult);
+    expectInvalid(evidenceOrderDrift.input);
+
+    const observed = settleAsTakeover(makeFixture(1));
+    const observation = operationObservation([succeededResult(0)]);
+    const observationJson = canonicalLandingJson(observation);
+    observed.input.operationRow.observation_json = observationJson;
+    observed.input.operationRow.observation_sha256 = sha256(observationJson);
+    expectInvalid(observed.input);
+
+    const eventDigestDrift = settleAsTakeover(makeFixture(1));
+    const settlement = operationEventAt(eventDigestDrift, 1);
+    const settlementPayload = JSON.parse(settlement.payload_json as string) as MutableRow;
+    settlementPayload.resultSha256 = "d".repeat(64);
+    settlement.payload_json = canonicalLandingJson(settlementPayload);
+    expectInvalid(eventDigestDrift.input);
+  });
 
   it("accepts the canonical three-GET completion only with exact observation/result settlement", () => {
     const fixture = makeFixture(3);
@@ -764,7 +965,7 @@ describe("persisted local-ready GitHub preflight aggregate evidence", () => {
     expectInvalid(noncanonicalTimestamp.input);
   });
 
-  it("rejects terminal evidence drift and unsupported takeover-specific error inference", () => {
+  it("rejects ordinary terminal evidence drift", () => {
     const errorDrift = makeFixture(0, "failed");
     errorDrift.input.operationRow.error_code = "GITHUB_RATE_LIMITED";
     expectInvalid(errorDrift.input);
@@ -776,21 +977,6 @@ describe("persisted local-ready GitHub preflight aggregate evidence", () => {
     observedTerminal.input.operationRow.observation_sha256 =
       complete.input.operationRow.observation_sha256;
     expectInvalid(observedTerminal.input);
-
-    const takeover = makeFixture(0, "ambiguous");
-    const result = JSON.parse(takeover.input.operationRow.result_json as string) as MutableRow;
-    result.errorCode = "LANDING_COORDINATOR_TAKEOVER";
-    const resultJson = canonicalLandingJson(result);
-    const resultSha256 = sha256(resultJson);
-    takeover.input.operationRow.result_json = resultJson;
-    takeover.input.operationRow.result_sha256 = resultSha256;
-    takeover.input.operationRow.error_code = "LANDING_COORDINATOR_TAKEOVER";
-    const settlement = operationEventAt(takeover, 1);
-    const payload = JSON.parse(settlement.payload_json as string) as MutableRow;
-    payload.resultSha256 = resultSha256;
-    payload.errorCode = "LANDING_COORDINATOR_TAKEOVER";
-    settlement.payload_json = canonicalLandingJson(payload);
-    expectInvalid(takeover.input);
   });
 
   it("rejects extra aggregate members and a complete history with a noncanonical result digest", () => {

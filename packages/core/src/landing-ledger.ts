@@ -35,6 +35,8 @@ import {
   decodeLandingDecisionV1,
   decodeLandingDigestV1,
   decodeLandingEventPayloadV1,
+  decodeLandingHttpRequestV1,
+  decodeLandingHttpResultV1,
   decodeLandingOperationObservationV1,
   decodeLandingOperationRequestV1,
   decodeLandingOperationResultV1,
@@ -100,6 +102,8 @@ const LANDING_LOADER_STATUS_MAX_BYTES = 16;
 const LANDING_LOADER_DIGEST_MAX_BYTES = 64;
 const LANDING_LOADER_ERROR_MAX_BYTES = 128;
 const LANDING_LOADER_TIMESTAMP_MAX_BYTES = 64;
+const LANDING_COORDINATOR_TAKEOVER = "LANDING_COORDINATOR_TAKEOVER";
+const GITHUB_OUTCOME_AMBIGUOUS = "GITHUB_OUTCOME_AMBIGUOUS";
 const ABSENT_LOCAL_REF_FACT_SHA256 = digestLandingRecord({
   schemaVersion: 1,
   state: "absent",
@@ -1127,7 +1131,11 @@ function validatePersistedPreflightAggregates(
       ((evidence.status === "next_request" || evidence.status === "admitted") &&
         (operation.status !== "started" || attempt.status !== "started")) ||
       (evidence.status === "complete" &&
-        (operation.status !== "completed" || attempt.status !== "started")) ||
+        (operation.status !== "completed" ||
+          !(
+            (attempt.status === "started" && attempt.errorCode === null) ||
+            (attempt.status === "interrupted" && attempt.errorCode === LANDING_COORDINATOR_TAKEOVER)
+          ))) ||
       (evidence.status === "terminal" &&
         evidence.operationOutcome === "failed" &&
         (operation.status !== "failed" ||
@@ -1137,7 +1145,12 @@ function validatePersistedPreflightAggregates(
         evidence.operationOutcome === "interrupted" &&
         (operation.status !== "interrupted" ||
           attempt.status !== "interrupted" ||
-          attempt.errorCode !== evidence.errorCode))
+          attempt.errorCode !== evidence.errorCode)) ||
+      (evidence.status === "takeover" &&
+        (operation.status !== "interrupted" ||
+          operation.errorCode !== LANDING_COORDINATOR_TAKEOVER ||
+          attempt.status !== "interrupted" ||
+          attempt.errorCode !== LANDING_COORDINATOR_TAKEOVER))
     ) {
       invalid("GitHub preflight evidence disagrees with its owning attempt topology");
     }
@@ -1163,7 +1176,7 @@ function validatePersistedPreflightAggregates(
         invalid("Failed GitHub preflight lacks its exact terminal state-event suffix");
       }
     } else if (
-      evidence.status === "terminal" &&
+      (evidence.status === "terminal" || evidence.status === "takeover") &&
       evidence.operationOutcome === "interrupted" &&
       status.events.some(
         (event) =>
@@ -1215,6 +1228,10 @@ function validateAggregate(
           attempt.status === "started" &&
           operation.errorCode === null &&
           attempt.errorCode === null) ||
+        (operation.status === "completed" &&
+          operation.errorCode === null &&
+          attempt.status === "interrupted" &&
+          attempt.errorCode === LANDING_COORDINATOR_TAKEOVER) ||
         (operation.status === "failed" &&
           attempt.status === "failed" &&
           operation.errorCode === attempt.errorCode) ||
@@ -1633,19 +1650,29 @@ function validateAggregate(
           invalid("Failed landing attempt admission lacks its atomic resume transition");
         }
       } else if (replayedState === "local_ready") {
-        const nextPayload =
+        const nextOperation =
           nextEvent?.type === "landing.operation.started"
             ? (nextEvent.payload as {
                 readonly coordinatorAttempt: number;
                 readonly kind: LandingOperationKindV1;
               })
             : null;
-        if (
-          nextEvent !== undefined &&
-          (nextPayload === null ||
-            nextPayload.coordinatorAttempt !== ordinal ||
-            nextPayload.kind !== "github.preflight")
-        ) {
+        const nextTakeover =
+          nextEvent?.type === "landing.attempt.settled"
+            ? (nextEvent.payload as {
+                readonly coordinatorAttempt: number;
+                readonly outcome: string;
+                readonly errorCode: string | null;
+              })
+            : null;
+        const startsPreflight =
+          nextOperation?.coordinatorAttempt === ordinal &&
+          nextOperation.kind === "github.preflight";
+        const closesZeroOperationTakeover =
+          nextTakeover?.coordinatorAttempt === ordinal &&
+          nextTakeover.outcome === "interrupted" &&
+          nextTakeover.errorCode === LANDING_COORDINATOR_TAKEOVER;
+        if (nextEvent !== undefined && !startsPreflight && !closesZeroOperationTakeover) {
           invalid("Local-ready attempt admission lacks its bounded preflight intent");
         }
       } else if (replayedState === "reconciliation_required") {
@@ -1669,9 +1696,35 @@ function validateAggregate(
       continue;
     }
     if (event.type === "landing.attempt.settled") {
-      const ordinal = (event.payload as { readonly coordinatorAttempt: number }).coordinatorAttempt;
+      const payload = event.payload as {
+        readonly coordinatorAttempt: number;
+        readonly outcome: string;
+        readonly errorCode: string | null;
+      };
+      const ordinal = payload.coordinatorAttempt;
       if (activeAttemptOrdinal !== ordinal) {
         invalid("Landing attempt settlement does not close the active attempt");
+      }
+      if (payload.outcome === "interrupted" && payload.errorCode === LANDING_COORDINATOR_TAKEOVER) {
+        const successor = attempts[ordinal];
+        const transitionOffset = replayedState === "creating_local_ref" ? 1 : 0;
+        const transitionEvent = transitionOffset === 1 ? events[index + 1] : undefined;
+        if (transitionOffset === 1 && transitionEvent?.type !== "landing.state.changed") {
+          invalid("Effect takeover omitted its required reconciliation state transition");
+        }
+        const nextEvent = events[index + transitionOffset + 1];
+        const nextPayload =
+          nextEvent?.type === "landing.attempt.started"
+            ? (nextEvent.payload as { readonly coordinatorAttempt: number })
+            : null;
+        if (
+          (ordinal < 8 &&
+            (successor?.ordinal !== ordinal + 1 ||
+              nextPayload?.coordinatorAttempt !== ordinal + 1)) ||
+          (ordinal === 8 && (successor !== undefined || nextEvent !== undefined))
+        ) {
+          invalid("Landing takeover lacks its exact atomic replacement-attempt boundary");
+        }
       }
       activeAttemptOrdinal = null;
       continue;
@@ -3306,17 +3359,224 @@ export class LandingLedger {
     });
   }
 
+  #preflightHttpRows(operation: LandingOperationRecordV1): readonly Row[] {
+    const rows = this.#database
+      .prepare(
+        "SELECT * FROM landing_http_requests " +
+          "WHERE landing_id = ? AND operation_id = ? ORDER BY request_ordinal LIMIT 4",
+      )
+      .all(operation.landingId, operation.id) as unknown[];
+    if (rows.length > 3) {
+      invalid("GitHub preflight takeover exceeds its bounded HTTP history");
+    }
+    return rows.map((row) => expectRow(row, "landing HTTP request"));
+  }
+
+  #preflightTakeoverEvidence(
+    operation: LandingOperationRecordV1,
+  ): LandingOperationResultV1["evidence"] {
+    let rows = this.#preflightHttpRows(operation);
+    const admitted = rows
+      .map((row, index) =>
+        oneOf(row.status, ["admitted", "settled"] as const, "landing_http_requests.status") ===
+        "admitted"
+          ? index
+          : null,
+      )
+      .filter((index): index is number => index !== null);
+    if (admitted.length > 1 || (admitted.length === 1 && admitted[0] !== rows.length - 1)) {
+      invalid("GitHub preflight takeover has a non-trailing admitted request");
+    }
+    const admittedIndex = admitted[0];
+    if (admittedIndex !== undefined) {
+      const row = rows[admittedIndex];
+      if (row === undefined) invalid("GitHub preflight admitted request disappeared");
+      const requestJson = text(row.request_json, "landing_http_requests.request_json");
+      const request = decodeCanonicalLandingJson(requestJson, decodeLandingHttpRequestV1);
+      const requestSha256 = requireDigest(
+        requestJson,
+        row.request_sha256,
+        "landing_http_requests.request_sha256",
+      );
+      if (
+        request.landingId !== operation.landingId ||
+        request.operationId !== operation.id ||
+        request.coordinatorAttempt !== operation.coordinatorAttempt ||
+        request.operationKind !== "github.preflight" ||
+        request.method !== "GET" ||
+        assertUuid(row.id, "landing_http_requests.id") !== request.requestId
+      ) {
+        invalid("GitHub preflight admitted request crosses its takeover operation");
+      }
+      const result = decodeLandingHttpResultV1({
+        schemaVersion: 1,
+        requestId: request.requestId,
+        kind: request.kind,
+        outcome: "ambiguous",
+        httpStatus: null,
+        projection: null,
+        errorCode: GITHUB_OUTCOME_AMBIGUOUS,
+      });
+      const resultJson = canonicalLandingJson(result);
+      const resultSha256 = sha256(resultJson);
+      const settledAt = this.#timestamp();
+      const update = this.#database
+        .prepare(
+          "UPDATE landing_http_requests SET status = 'settled', outcome = 'ambiguous', " +
+            "http_status = NULL, result_sha256 = ?, result_json = ?, error_code = ?, settled_at = ? " +
+            "WHERE id = ? AND landing_id = ? AND operation_id = ? AND coordinator_attempt = ? " +
+            "AND operation_kind = 'github.preflight' AND request_ordinal = ? " +
+            "AND kind = ? AND method = 'GET' AND request_sha256 = ? AND request_json = ? " +
+            "AND status = 'admitted' " +
+            "AND outcome IS NULL AND http_status IS NULL AND result_sha256 IS NULL " +
+            "AND result_json IS NULL AND error_code IS NULL AND settled_at IS NULL",
+        )
+        .run(
+          resultSha256,
+          resultJson,
+          GITHUB_OUTCOME_AMBIGUOUS,
+          settledAt,
+          request.requestId,
+          operation.landingId,
+          operation.id,
+          operation.coordinatorAttempt,
+          request.requestOrdinal,
+          request.kind,
+          requestSha256,
+          requestJson,
+        );
+      if (update.changes !== 1) {
+        throw new IcarusError(
+          "LANDING_CONFLICT",
+          "GitHub preflight request admission changed during takeover",
+        );
+      }
+      this.#appendEvent(operation.landingId, "landing.github.request.settled", {
+        schemaVersion: 1,
+        landingId: operation.landingId,
+        operationId: operation.id,
+        requestId: request.requestId,
+        coordinatorAttempt: operation.coordinatorAttempt,
+        operationKind: "github.preflight",
+        requestOrdinal: request.requestOrdinal,
+        kind: request.kind,
+        outcome: "ambiguous",
+        resultSha256,
+        errorCode: GITHUB_OUTCOME_AMBIGUOUS,
+      });
+      rows = this.#preflightHttpRows(operation);
+    }
+
+    return rows.map((row) => {
+      if (row.status !== "settled") {
+        invalid("GitHub preflight takeover left an admitted request unsettled");
+      }
+      const request = decodeCanonicalLandingJson(
+        text(row.request_json, "landing_http_requests.request_json"),
+        decodeLandingHttpRequestV1,
+      );
+      const resultJson = text(row.result_json, "landing_http_requests.result_json");
+      const result = decodeCanonicalLandingJson(resultJson, decodeLandingHttpResultV1);
+      const resultSha256 = requireDigest(
+        resultJson,
+        row.result_sha256,
+        "landing_http_requests.result_sha256",
+      );
+      const httpStatus =
+        row.http_status === null
+          ? null
+          : integer(row.http_status, "landing_http_requests.http_status", 100, 599);
+      if (
+        request.landingId !== operation.landingId ||
+        request.operationId !== operation.id ||
+        request.coordinatorAttempt !== operation.coordinatorAttempt ||
+        request.operationKind !== "github.preflight" ||
+        request.method !== "GET" ||
+        assertUuid(row.id, "landing_http_requests.id") !== request.requestId ||
+        result.requestId !== request.requestId ||
+        result.kind !== request.kind ||
+        row.outcome !== result.outcome ||
+        httpStatus !== result.httpStatus ||
+        nullableText(row.error_code, "landing_http_requests.error_code") !== result.errorCode
+      ) {
+        invalid("GitHub preflight takeover evidence does not replay its settled HTTP row");
+      }
+      return { requestId: request.requestId, resultSha256 };
+    });
+  }
+
+  #settlePreflightTakeoverOperation(
+    operation: LandingOperationRecordV1,
+    evidence: LandingOperationResultV1["evidence"],
+  ): void {
+    const result = decodeLandingOperationResultV1({
+      schemaVersion: 1,
+      operationId: operation.id,
+      kind: "github.preflight",
+      outcome: "interrupted",
+      boundary: "operation_interrupted",
+      evidence,
+      value: null,
+      errorCode: LANDING_COORDINATOR_TAKEOVER,
+    });
+    const resultJson = canonicalLandingJson(result);
+    const resultSha256 = sha256(resultJson);
+    const update = this.#database
+      .prepare(
+        "UPDATE landing_operations SET status = 'interrupted', result_sha256 = ?, " +
+          "result_json = ?, error_code = ?, finished_at = ? " +
+          "WHERE id = ? AND landing_id = ? AND coordinator_attempt = ? " +
+          "AND kind = 'github.preflight' AND kind_attempt = ? " +
+          "AND request_sha256 = ? AND request_json = ? AND status = 'started' " +
+          "AND observation_sha256 IS NULL AND observation_json IS NULL " +
+          "AND result_sha256 IS NULL AND result_json IS NULL AND error_code IS NULL " +
+          "AND finished_at IS NULL",
+      )
+      .run(
+        resultSha256,
+        resultJson,
+        LANDING_COORDINATOR_TAKEOVER,
+        this.#timestamp(),
+        operation.id,
+        operation.landingId,
+        operation.coordinatorAttempt,
+        operation.kindAttempt,
+        operation.requestSha256,
+        canonicalLandingJson(operation.request),
+      );
+    if (update.changes !== 1) {
+      throw new IcarusError(
+        "LANDING_CONFLICT",
+        "GitHub preflight operation changed during takeover",
+      );
+    }
+    this.#appendEvent(operation.landingId, "landing.operation.settled", {
+      schemaVersion: 1,
+      landingId: operation.landingId,
+      operationId: operation.id,
+      coordinatorAttempt: operation.coordinatorAttempt,
+      kind: "github.preflight",
+      outcome: "interrupted",
+      resultSha256,
+      errorCode: LANDING_COORDINATOR_TAKEOVER,
+    });
+  }
+
   admitResume(landingId: string): LandingResumeAdmissionV1 {
     let attemptOrdinal: number | null = null;
     let operationId: string | null = null;
     let attemptLimitReached = false;
     const transaction = this.#database.transaction(() => {
-      let status = this.#mutableStatus(landingId);
+      const status = this.#mutableStatus(landingId);
       const activeAttempt = status.attempts.find((attempt) => attempt.status === "started");
       if (activeAttempt !== undefined) {
-        const activeOperation = status.operations.find(
-          (operation) => operation.status === "started",
+        const activeOperations = status.operations.filter(
+          (operation) => operation.coordinatorAttempt === activeAttempt.ordinal,
         );
+        if (activeOperations.length > 1) {
+          invalid("Orphaned landing attempt owns more than one operation");
+        }
+        const activeOperation = activeOperations[0];
         const expectedActiveKind =
           status.landing.state === "preparing_candidate"
             ? "candidate.prepare"
@@ -3324,70 +3584,149 @@ export class LandingLedger {
               ? "local_ref.create"
               : status.landing.state === "reconciliation_required"
                 ? "landing.reconcile"
-                : null;
+                : status.landing.state === "local_ready"
+                  ? "github.preflight"
+                  : null;
         if (
           (activeOperation === undefined &&
             !(
-              status.landing.state === "preparing_candidate" || status.landing.state === "approved"
+              status.landing.state === "preparing_candidate" ||
+              status.landing.state === "approved" ||
+              status.landing.state === "local_ready"
             )) ||
-          (activeOperation !== undefined && activeOperation.kind !== expectedActiveKind)
+          (activeOperation !== undefined &&
+            (activeOperation.kind !== expectedActiveKind ||
+              !(
+                activeOperation.status === "started" ||
+                (activeOperation.kind === "github.preflight" &&
+                  activeOperation.status === "completed")
+              )))
         ) {
           invalid("Orphaned landing attempt does not match its current state");
         }
-        const takeoverError = "LANDING_COORDINATOR_TAKEOVER";
+        let settledTakeoverResult: LandingOperationResultV1 | null = null;
         if (activeOperation !== undefined) {
-          const evidence =
-            activeOperation.observation?.facts.map(({ requestId, resultSha256 }) => ({
-              requestId,
-              resultSha256,
-            })) ?? [];
-          if (activeOperation.kind === "local_ref.create") {
-            this.#settleOperation(activeOperation, {
-              schemaVersion: 1,
-              operationId: activeOperation.id,
-              kind: activeOperation.kind,
-              outcome: "reconciliation_required",
-              boundary: "reconciliation_required",
-              evidence,
-              value: { subjectOperationId: activeOperation.id, remoteResidue: "none" },
-              errorCode: takeoverError,
-            });
-          } else if (activeOperation.kind === "landing.reconcile") {
-            const subject = this.#localReconciliationSubject(status);
-            this.#settleOperation(activeOperation, {
-              schemaVersion: 1,
-              operationId: activeOperation.id,
-              kind: activeOperation.kind,
-              outcome: "reconciliation_required",
-              boundary: "reconciliation_required",
-              evidence,
-              value: { subjectOperationId: subject.id, remoteResidue: "none" },
-              errorCode: takeoverError,
-            });
+          if (activeOperation.kind === "github.preflight") {
+            if (activeOperation.status === "started") {
+              const evidence = this.#preflightTakeoverEvidence(activeOperation);
+              this.#settlePreflightTakeoverOperation(activeOperation, evidence);
+            }
           } else {
-            this.#settleOperation(activeOperation, {
-              schemaVersion: 1,
-              operationId: activeOperation.id,
-              kind: activeOperation.kind,
-              outcome: "interrupted",
-              boundary: "operation_interrupted",
-              evidence,
-              value: null,
-              errorCode: takeoverError,
-            });
+            const evidence =
+              activeOperation.observation?.facts.map(({ requestId, resultSha256 }) => ({
+                requestId,
+                resultSha256,
+              })) ?? [];
+            if (activeOperation.kind === "local_ref.create") {
+              settledTakeoverResult = this.#settleOperation(activeOperation, {
+                schemaVersion: 1,
+                operationId: activeOperation.id,
+                kind: activeOperation.kind,
+                outcome: "reconciliation_required",
+                boundary: "reconciliation_required",
+                evidence,
+                value: { subjectOperationId: activeOperation.id, remoteResidue: "none" },
+                errorCode: LANDING_COORDINATOR_TAKEOVER,
+              });
+            } else if (activeOperation.kind === "landing.reconcile") {
+              const subject = this.#localReconciliationSubject(status);
+              settledTakeoverResult = this.#settleOperation(activeOperation, {
+                schemaVersion: 1,
+                operationId: activeOperation.id,
+                kind: activeOperation.kind,
+                outcome: "reconciliation_required",
+                boundary: "reconciliation_required",
+                evidence,
+                value: { subjectOperationId: subject.id, remoteResidue: "none" },
+                errorCode: LANDING_COORDINATOR_TAKEOVER,
+              });
+            } else {
+              this.#settleOperation(activeOperation, {
+                schemaVersion: 1,
+                operationId: activeOperation.id,
+                kind: activeOperation.kind,
+                outcome: "interrupted",
+                boundary: "operation_interrupted",
+                evidence,
+                value: null,
+                errorCode: LANDING_COORDINATOR_TAKEOVER,
+              });
+            }
           }
         }
-        this.#settleAttempt(activeAttempt, "interrupted", takeoverError);
+        this.#settleAttempt(activeAttempt, "interrupted", LANDING_COORDINATOR_TAKEOVER);
         if (activeOperation?.kind === "local_ref.create") {
           this.#transition(
             status.landing,
             "reconciliation_required",
             "approved",
-            takeoverError,
+            LANDING_COORDINATOR_TAKEOVER,
             activeOperation.id,
           );
         }
-        status = this.getStatus(landingId);
+        if (activeAttempt.ordinal >= 8) {
+          attemptLimitReached = true;
+          return;
+        }
+        const attempt = this.#startAttempt(status);
+        attemptOrdinal = attempt.ordinal;
+        if (
+          activeOperation?.kind === "local_ref.create" ||
+          activeOperation?.kind === "landing.reconcile"
+        ) {
+          if (settledTakeoverResult === null) {
+            invalid("Landing reconciliation takeover lost its settled operation result");
+          }
+          const settledOperation: LandingOperationRecordV1 = {
+            ...activeOperation,
+            status: "interrupted",
+            resultSha256: digestLandingRecord(settledTakeoverResult),
+            result: settledTakeoverResult,
+            errorCode: LANDING_COORDINATOR_TAKEOVER,
+            finishedAt: activeOperation.startedAt,
+          };
+          const reconciliationStatus: LandingStatusV1 = {
+            ...status,
+            landing: {
+              ...status.landing,
+              state:
+                activeOperation.kind === "local_ref.create"
+                  ? "reconciliation_required"
+                  : status.landing.state,
+              resumeState:
+                activeOperation.kind === "local_ref.create"
+                  ? "approved"
+                  : status.landing.resumeState,
+              errorCode:
+                activeOperation.kind === "local_ref.create"
+                  ? LANDING_COORDINATOR_TAKEOVER
+                  : status.landing.errorCode,
+              attemptCount: attempt.ordinal,
+              version:
+                activeOperation.kind === "local_ref.create"
+                  ? status.landing.version + 1
+                  : status.landing.version,
+            },
+            attempts: [
+              ...status.attempts.map((entry) =>
+                entry.ordinal === activeAttempt.ordinal
+                  ? {
+                      ...entry,
+                      status: "interrupted" as const,
+                      finishedAt: entry.startedAt,
+                      errorCode: LANDING_COORDINATOR_TAKEOVER,
+                    }
+                  : entry,
+              ),
+              attempt,
+            ],
+            operations: status.operations.map((entry) =>
+              entry.id === settledOperation.id ? settledOperation : entry,
+            ),
+          };
+          operationId = this.#startReconciliation(reconciliationStatus);
+        }
+        return;
       }
 
       if (status.landing.state === "failed") {
@@ -3404,6 +3743,7 @@ export class LandingLedger {
       const resumable =
         status.landing.state === "preparing_candidate" ||
         status.landing.state === "approved" ||
+        status.landing.state === "local_ready" ||
         status.landing.state === "reconciliation_required";
       if (!resumable) return;
       if (status.attempts.some((attempt) => attempt.status === "started")) {

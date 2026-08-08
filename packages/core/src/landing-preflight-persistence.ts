@@ -43,6 +43,8 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
+const TAKEOVER_ERROR_CODE = "LANDING_COORDINATOR_TAKEOVER" as const;
+
 const INPUT_KEYS = [
   "landing",
   "landingSha256",
@@ -178,11 +180,20 @@ export interface PersistedGitHubPreflightTerminalEvidenceV1 extends ProjectionBa
   readonly resultSha256: string;
 }
 
+export interface PersistedGitHubPreflightTakeoverEvidenceV1 extends ProjectionBaseV1 {
+  readonly status: "takeover";
+  readonly operationOutcome: "interrupted";
+  readonly errorCode: typeof TAKEOVER_ERROR_CODE;
+  readonly result: LandingOperationResultV1;
+  readonly resultSha256: string;
+}
+
 export type PersistedGitHubPreflightEvidenceV1 =
   | PersistedGitHubPreflightNextRequestEvidenceV1
   | PersistedGitHubPreflightAdmittedEvidenceV1
   | PersistedGitHubPreflightCompleteEvidenceV1
-  | PersistedGitHubPreflightTerminalEvidenceV1;
+  | PersistedGitHubPreflightTerminalEvidenceV1
+  | PersistedGitHubPreflightTakeoverEvidenceV1;
 
 function invalid(message: string): never {
   throw new IcarusError("LANDING_RECORD_INVALID", message);
@@ -634,6 +645,55 @@ function terminalOperationResult(
   });
 }
 
+function takeoverOperationResult(
+  operation: PersistedPreflightOperationV1,
+  exchanges: readonly PersistedGitHubPreflightHttpExchangeV1[],
+): LandingOperationResultV1 {
+  return decodeLandingOperationResultV1({
+    schemaVersion: 1,
+    operationId: operation.id,
+    kind: "github.preflight",
+    outcome: "interrupted",
+    boundary: "operation_interrupted",
+    evidence: exchanges.map((exchange) => {
+      if (exchange.status !== "settled") {
+        return invalid("Takeover preflight evidence contains an admitted request");
+      }
+      return { requestId: exchange.request.requestId, resultSha256: exchange.resultSha256 };
+    }),
+    value: null,
+    errorCode: TAKEOVER_ERROR_CODE,
+  });
+}
+
+function projectTakeover(
+  base: ProjectionBaseV1,
+  operation: PersistedPreflightOperationV1,
+  exchanges: readonly PersistedGitHubPreflightHttpExchangeV1[],
+): PersistedGitHubPreflightTakeoverEvidenceV1 {
+  const expected = takeoverOperationResult(operation, exchanges);
+  if (
+    operation.status !== "interrupted" ||
+    operation.observation !== null ||
+    operation.observationSha256 !== null ||
+    operation.result === null ||
+    operation.resultSha256 === null ||
+    operation.errorCode !== TAKEOVER_ERROR_CODE ||
+    !sameCanonical(operation.result, expected) ||
+    operation.resultSha256 !== digestLandingRecord(expected)
+  ) {
+    invalid("Takeover preflight operation does not exactly settle its persisted prefix");
+  }
+  return {
+    ...base,
+    status: "takeover",
+    operationOutcome: "interrupted",
+    errorCode: TAKEOVER_ERROR_CODE,
+    result: operation.result,
+    resultSha256: operation.resultSha256,
+  };
+}
+
 function assertEventTopology(
   operationEvents: readonly DecodedEventV1<OperationEventPayload>[],
   requestEvents: readonly DecodedEventV1<RequestEventPayload>[],
@@ -700,10 +760,12 @@ function assertEventTopology(
  * inputs at the operation-start event, not claims about current landing state.
  * The returned discriminant is evidence only, never request or retry authority.
  *
- * The first slice accepts ordinary terminal settlement where a failed GET maps
- * to a failed operation and an ambiguous GET maps to an interrupted operation,
- * using the same terminal error. Takeover-specific operation errors are not
- * inferred here and therefore fail closed.
+ * Ordinary terminal settlement maps a failed GET to a failed operation and an
+ * ambiguous GET to an interrupted operation using the same terminal error. A
+ * takeover is separately recognizable only as an exact interrupted operation
+ * over either an incomplete successful GET prefix or that prefix followed by
+ * the canonical ambiguous settlement of the request admitted before restart.
+ * This projection remains evidence only and grants no request or retry.
  */
 export function validatePersistedGitHubPreflightOperationV1(
   rawValue: unknown,
@@ -833,6 +895,8 @@ export function validatePersistedGitHubPreflightOperationV1(
     operationRequestSha256: operation.requestSha256,
     exchanges: decodedExchanges,
   };
+  const isTakeover =
+    operation.status === "interrupted" && operation.errorCode === TAKEOVER_ERROR_CODE;
 
   if (admittedIndex !== null) {
     if (operation.status !== "started" || history.status !== "next_request") {
@@ -860,6 +924,15 @@ export function validatePersistedGitHubPreflightOperationV1(
       return invalid("Terminal preflight request is missing");
     }
     compareNextRequest(terminal.request, history.nextRequest);
+    if (isTakeover) {
+      if (
+        terminal.result.outcome !== "ambiguous" ||
+        terminal.result.errorCode !== "GITHUB_OUTCOME_AMBIGUOUS"
+      ) {
+        invalid("Takeover preflight tail is not the canonical ambiguous request settlement");
+      }
+      return projectTakeover(base, operation, decodedExchanges);
+    }
     const expected = terminalOperationResult(operation, decodedExchanges);
     const expectedStatus = terminal.result.outcome === "failed" ? "failed" : "interrupted";
     if (
@@ -882,6 +955,13 @@ export function validatePersistedGitHubPreflightOperationV1(
       result: operation.result,
       resultSha256: operation.resultSha256,
     };
+  }
+
+  if (isTakeover) {
+    if (history.status !== "next_request") {
+      invalid("Takeover preflight cannot interrupt a complete successful history");
+    }
+    return projectTakeover(base, operation, decodedExchanges);
   }
 
   if (history.status === "complete") {

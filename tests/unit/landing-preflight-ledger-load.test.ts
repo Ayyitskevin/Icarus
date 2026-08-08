@@ -29,6 +29,7 @@ import {
   renderPullRequestBodyV1,
 } from "../../packages/core/src/landing-records.js";
 import { planApprovalDigest, treeCheckpointDigest } from "../../packages/core/src/policy.js";
+import { IcarusStore } from "../../packages/core/src/store.js";
 import type {
   CheckpointFile,
   PatchSet,
@@ -70,8 +71,8 @@ const CANDIDATE_COMMIT_SHA1 = "3".repeat(40);
 const CANDIDATE_PAYLOAD_SHA256 = "4".repeat(64);
 const CANDIDATE_MANIFEST_SHA256 = "5".repeat(64);
 const CANDIDATE_AUDIT_SHA256 = "6".repeat(64);
-const STARTED_AT = "2026-08-08T12:00:00.000Z";
-const FINISHED_AT = "2026-08-08T12:01:00.000Z";
+const STARTED_AT = "2026-07-19T12:00:00.000Z";
+const FINISHED_AT = "2026-07-19T12:01:00.000Z";
 const COMMIT_MESSAGE = "Apply the reviewed greeting change\n";
 const PULL_REQUEST_TITLE = "Apply the reviewed greeting change";
 const PULL_REQUEST_BODY_PREFIX = "This draft was prepared from an approved Icarus run.";
@@ -106,6 +107,16 @@ function expectRecordInvalid(action: () => unknown): void {
   } catch (error) {
     expect(error).toBeInstanceOf(IcarusError);
     expect((error as IcarusError).code).toBe("LANDING_RECORD_INVALID");
+  }
+}
+
+function expectIcarusCode(action: () => unknown, code: string): void {
+  try {
+    action();
+    throw new Error(`Expected ${code}`);
+  } catch (error) {
+    expect(error).toBeInstanceOf(IcarusError);
+    expect((error as IcarusError).code).toBe(code);
   }
 }
 
@@ -264,7 +275,7 @@ function candidateAuthority(status: LandingStatusV1) {
   });
 }
 
-function createLocalReadyFixture(): ReturnType<typeof createUnitStore> & {
+function createApprovedFixture(): ReturnType<typeof createUnitStore> & {
   readonly landingId: string;
 } {
   const fixture = seedEligibleRun();
@@ -297,22 +308,30 @@ function createLocalReadyFixture(): ReturnType<typeof createUnitStore> & {
     landingDigest: authority,
     pullRequestBodySha256: sha256(pullRequestBody),
   });
-  fixture.store.recordLandingDecision(
+  const approved = fixture.store.recordLandingDecision(
     candidate.landing.id,
     candidate.landing.landingSha256 ?? "",
     "unit-operator",
     "approve",
   );
-  fixture.store.admitLandingResume(candidate.landing.id);
-  const local = fixture.store.startLocalRefCreation(candidate.landing.id);
+  expect(approved.landing.state).toBe("approved");
+  return { ...fixture, landingId: candidate.landing.id };
+}
+
+function createLocalReadyFixture(): ReturnType<typeof createUnitStore> & {
+  readonly landingId: string;
+} {
+  const fixture = createApprovedFixture();
+  fixture.store.admitLandingResume(fixture.landingId);
+  const local = fixture.store.startLocalRefCreation(fixture.landingId);
   const absent: LocalRefFactV1 = {
     schemaVersion: 1,
     state: "absent",
     objectSha1: null,
     symbolicTargetSha256: null,
   };
-  fixture.store.recordLocalRefObservation(candidate.landing.id, local.operationId, absent);
-  fixture.store.settleLocalRefCreation(candidate.landing.id, {
+  fixture.store.recordLocalRefObservation(fixture.landingId, local.operationId, absent);
+  fixture.store.settleLocalRefCreation(fixture.landingId, {
     outcome: "succeeded",
     errorCode: null,
     observedFact: absent,
@@ -323,8 +342,8 @@ function createLocalReadyFixture(): ReturnType<typeof createUnitStore> & {
       symbolicTargetSha256: null,
     },
   });
-  expect(fixture.store.getLandingStatus(candidate.landing.id).landing.state).toBe("local_ready");
-  return { ...fixture, landingId: candidate.landing.id };
+  expect(fixture.store.getLandingStatus(fixture.landingId).landing.state).toBe("local_ready");
+  return fixture;
 }
 
 type Tail = "admitted" | "failed" | "ambiguous";
@@ -360,11 +379,60 @@ function appendEvent(
     .run(landingId, prior.sequence + 1, type, canonicalLandingJson(payload), STARTED_AT);
 }
 
+function removeTakeoverSuccessor(
+  fixture: { readonly databasePath: string; readonly landingId: string },
+  successorOrdinal: number,
+  replacementOperationId: string | null = null,
+): void {
+  const database = new Database(fixture.databasePath);
+  if (replacementOperationId !== null) {
+    expect(
+      database
+        .prepare(
+          "DELETE FROM landing_events WHERE landing_id = ? " +
+            "AND type = 'landing.operation.started' AND payload_json LIKE ?",
+        )
+        .run(fixture.landingId, `%${replacementOperationId}%`).changes,
+    ).toBe(1);
+    expect(
+      database
+        .prepare("DELETE FROM landing_operations WHERE id = ? AND landing_id = ?")
+        .run(replacementOperationId, fixture.landingId).changes,
+    ).toBe(1);
+  }
+  expect(
+    database
+      .prepare(
+        "DELETE FROM landing_events WHERE landing_id = ? " +
+          "AND type = 'landing.attempt.started' AND payload_json = ?",
+      )
+      .run(
+        fixture.landingId,
+        canonicalLandingJson({
+          schemaVersion: 1,
+          landingId: fixture.landingId,
+          coordinatorAttempt: successorOrdinal,
+        }),
+      ).changes,
+  ).toBe(1);
+  expect(
+    database
+      .prepare("DELETE FROM landing_attempts WHERE landing_id = ? AND ordinal = ?")
+      .run(fixture.landingId, successorOrdinal).changes,
+  ).toBe(1);
+  expect(
+    database
+      .prepare("UPDATE landings SET attempt_count = ? WHERE id = ? AND attempt_count = ?")
+      .run(successorOrdinal - 1, fixture.landingId, successorOrdinal).changes,
+  ).toBe(1);
+  database.close();
+}
+
 function admitPreflightAttempt(fixture: ReturnType<typeof createLocalReadyFixture>): {
   readonly status: LandingStatusV1;
   readonly attempt: number;
 } {
-  let status = fixture.store.getLandingStatus(fixture.landingId);
+  const status = fixture.store.getLandingStatus(fixture.landingId);
   const alreadyActive = status.attempts.find((attempt) => attempt.status === "started");
   if (alreadyActive !== undefined) return { status, attempt: alreadyActive.ordinal };
   if (status.landing.state === "failed") {
@@ -375,26 +443,11 @@ function admitPreflightAttempt(fixture: ReturnType<typeof createLocalReadyFixtur
   if (status.landing.state !== "local_ready") {
     throw new Error("preflight fixture is not at the local-ready admission boundary");
   }
-  const attempt = status.landing.attemptCount + 1;
-  const database = new Database(fixture.databasePath);
-  database
-    .prepare("UPDATE landings SET attempt_count = ?, updated_at = ? WHERE id = ?")
-    .run(attempt, STARTED_AT, fixture.landingId);
-  database
-    .prepare(
-      "INSERT INTO landing_attempts " +
-        "(landing_id, ordinal, status, started_at, finished_at, error_code) " +
-        "VALUES (?, ?, 'started', ?, NULL, NULL)",
-    )
-    .run(fixture.landingId, attempt, STARTED_AT);
-  appendEvent(database, fixture.landingId, "landing.attempt.started", {
-    schemaVersion: 1,
-    landingId: fixture.landingId,
-    coordinatorAttempt: attempt,
-  });
-  database.close();
-  status = fixture.store.getLandingStatus(fixture.landingId);
-  return { status, attempt };
+  const admission = fixture.store.admitLandingResume(fixture.landingId);
+  if (admission.attemptOrdinal === null) {
+    throw new Error("local-ready landing did not admit a coordinator attempt");
+  }
+  return { status: admission.status, attempt: admission.attemptOrdinal };
 }
 
 function requestFor(
@@ -766,6 +819,9 @@ describe("landing ledger persisted GitHub preflight loader", () => {
   it.each([
     [0, undefined, 0],
     [1, undefined, 1],
+    [2, undefined, 2],
+    [0, "admitted", 1],
+    [1, "admitted", 2],
     [2, "admitted", 3],
   ] as const)(
     "loads a started preflight with %i successful GETs and tail %s",
@@ -843,6 +899,349 @@ describe("landing ledger persisted GitHub preflight loader", () => {
     fixture.store.close();
   });
 
+  it.each([
+    [0, undefined, 0],
+    [1, undefined, 1],
+    [2, undefined, 2],
+    [0, "admitted", 1],
+    [1, "admitted", 2],
+    [2, "admitted", 3],
+  ] as const)(
+    "takes over an incomplete %i-success preflight with tail %s and preserves exact evidence",
+    (successCount, tail, expectedEvidenceCount) => {
+      const fixture = openFixture();
+      const injected = injectPreflight(fixture, successCount, tail);
+      const before = fixture.store.getLandingStatus(fixture.landingId);
+      const beforeDatabase = new Database(fixture.databasePath);
+      const beforeHttpRows = beforeDatabase
+        .prepare(
+          "SELECT * FROM landing_http_requests WHERE operation_id = ? ORDER BY request_ordinal",
+        )
+        .all(injected.operationId);
+      beforeDatabase.close();
+      const admission = fixture.store.admitLandingResume(fixture.landingId);
+      expect(admission).toMatchObject({
+        attemptOrdinal: injected.attempt + 1,
+        operationId: null,
+        attemptLimitReached: false,
+        status: { landing: { state: "local_ready", version: before.landing.version } },
+      });
+      expect(admission.status.attempts.slice(-2)).toMatchObject([
+        {
+          ordinal: injected.attempt,
+          status: "interrupted",
+          errorCode: "LANDING_COORDINATOR_TAKEOVER",
+        },
+        { ordinal: injected.attempt + 1, status: "started", errorCode: null },
+      ]);
+      const operation = admission.status.operations.find(
+        (entry) => entry.id === injected.operationId,
+      );
+      expect(operation).toMatchObject({
+        status: "interrupted",
+        errorCode: "LANDING_COORDINATOR_TAKEOVER",
+        observation: null,
+        result: {
+          outcome: "interrupted",
+          boundary: "operation_interrupted",
+          errorCode: "LANDING_COORDINATOR_TAKEOVER",
+        },
+      });
+      expect(operation?.result?.evidence).toHaveLength(expectedEvidenceCount);
+      const appended = admission.status.events.slice(before.events.length);
+      expect(appended.map((event) => event.type)).toEqual(
+        tail === "admitted"
+          ? [
+              "landing.github.request.settled",
+              "landing.operation.settled",
+              "landing.attempt.settled",
+              "landing.attempt.started",
+            ]
+          : ["landing.operation.settled", "landing.attempt.settled", "landing.attempt.started"],
+      );
+      expect(appended.some((event) => event.type === "landing.state.changed")).toBe(false);
+
+      const database = new Database(fixture.databasePath);
+      const afterHttpRows = database
+        .prepare(
+          "SELECT * FROM landing_http_requests WHERE operation_id = ? ORDER BY request_ordinal",
+        )
+        .all(injected.operationId);
+      const httpRows = database
+        .prepare(
+          "SELECT id, status, outcome, http_status, result_sha256, result_json, error_code " +
+            "FROM landing_http_requests WHERE operation_id = ? ORDER BY request_ordinal",
+        )
+        .all(injected.operationId) as Row[];
+      const operationRow = database
+        .prepare("SELECT result_sha256, result_json FROM landing_operations WHERE id = ?")
+        .get(injected.operationId) as {
+        readonly result_sha256: string;
+        readonly result_json: string;
+      };
+      database.close();
+      expect(tail === "admitted" ? afterHttpRows.slice(0, -1) : afterHttpRows).toEqual(
+        tail === "admitted" ? beforeHttpRows.slice(0, -1) : beforeHttpRows,
+      );
+      expect(httpRows).toHaveLength(expectedEvidenceCount);
+      expect(
+        httpRows.map((row) => ({ requestId: row.id, resultSha256: row.result_sha256 })),
+      ).toEqual(operation?.result?.evidence);
+      expect(
+        httpRows.every(
+          (row) =>
+            typeof row.result_json === "string" && sha256(row.result_json) === row.result_sha256,
+        ),
+      ).toBe(true);
+      expect(sha256(operationRow.result_json)).toBe(operationRow.result_sha256);
+      expect(operationRow.result_sha256).toBe(operation?.resultSha256);
+      if (tail === "admitted") {
+        expect(httpRows.at(-1)).toMatchObject({
+          status: "settled",
+          outcome: "ambiguous",
+          http_status: null,
+          error_code: "GITHUB_OUTCOME_AMBIGUOUS",
+        });
+      }
+      fixture.store.close();
+    },
+  );
+
+  it("preserves completed preflight bytes while taking over only its active attempt", () => {
+    const fixture = openFixture();
+    const injected = injectPreflight(fixture, 3);
+    const database = new Database(fixture.databasePath);
+    const beforeOperation = database
+      .prepare("SELECT * FROM landing_operations WHERE id = ?")
+      .get(injected.operationId);
+    const beforeRequests = database
+      .prepare(
+        "SELECT * FROM landing_http_requests WHERE operation_id = ? ORDER BY request_ordinal",
+      )
+      .all(injected.operationId);
+    const beforeOwnedEvents = database
+      .prepare(
+        "SELECT * FROM landing_events WHERE landing_id = ? AND (" +
+          "type LIKE 'landing.github.request.%' OR " +
+          "(type LIKE 'landing.operation.%' AND payload_json LIKE ?)) ORDER BY sequence",
+      )
+      .all(fixture.landingId, `%${injected.operationId}%`);
+    database.close();
+
+    const before = fixture.store.getLandingStatus(fixture.landingId);
+    const admission = fixture.store.admitLandingResume(fixture.landingId);
+    expect(admission.status.operations.find((entry) => entry.id === injected.operationId)).toEqual(
+      before.operations.find((entry) => entry.id === injected.operationId),
+    );
+    expect(admission.status.attempts.slice(-2)).toMatchObject([
+      {
+        ordinal: injected.attempt,
+        status: "interrupted",
+        errorCode: "LANDING_COORDINATOR_TAKEOVER",
+      },
+      { ordinal: injected.attempt + 1, status: "started" },
+    ]);
+    expect(admission.status.events.slice(before.events.length).map((event) => event.type)).toEqual([
+      "landing.attempt.settled",
+      "landing.attempt.started",
+    ]);
+
+    const afterDatabase = new Database(fixture.databasePath);
+    expect(
+      afterDatabase
+        .prepare("SELECT * FROM landing_operations WHERE id = ?")
+        .get(injected.operationId),
+    ).toEqual(beforeOperation);
+    expect(
+      afterDatabase
+        .prepare(
+          "SELECT * FROM landing_http_requests WHERE operation_id = ? ORDER BY request_ordinal",
+        )
+        .all(injected.operationId),
+    ).toEqual(beforeRequests);
+    expect(
+      afterDatabase
+        .prepare(
+          "SELECT * FROM landing_events WHERE landing_id = ? AND (" +
+            "type LIKE 'landing.github.request.%' OR " +
+            "(type LIKE 'landing.operation.%' AND payload_json LIKE ?)) ORDER BY sequence",
+        )
+        .all(fixture.landingId, `%${injected.operationId}%`),
+    ).toEqual(beforeOwnedEvents);
+    afterDatabase.close();
+    fixture.store.close();
+  });
+
+  it("reopens a historical zero-operation takeover without inventing state or evidence", () => {
+    const fixture = openFixture();
+    const oldAttempt = admitPreflightAttempt(fixture).attempt;
+    const before = fixture.store.getLandingStatus(fixture.landingId);
+    const admission = fixture.store.admitLandingResume(fixture.landingId);
+    expect(admission.status.operations).toEqual(before.operations);
+    expect(admission.status.events.slice(before.events.length).map((event) => event.type)).toEqual([
+      "landing.attempt.settled",
+      "landing.attempt.started",
+    ]);
+    expect(admission.status.attempts.slice(-2)).toMatchObject([
+      {
+        ordinal: oldAttempt,
+        status: "interrupted",
+        errorCode: "LANDING_COORDINATOR_TAKEOVER",
+      },
+      { ordinal: oldAttempt + 1, status: "started" },
+    ]);
+    fixture.store.close();
+
+    const reopened = new IcarusStore(fixture.databasePath);
+    const status = reopened.getLandingStatus(fixture.landingId);
+    expect(status.landing).toMatchObject({ state: "local_ready", version: before.landing.version });
+    expect(status.attempts.slice(-2)).toEqual(admission.status.attempts.slice(-2));
+    expect(status.operations).toEqual(before.operations);
+    reopened.close();
+  });
+
+  it.each(["zero-operation", "started-preflight", "completed-preflight"] as const)(
+    "rejects a %s takeover whose below-ceiling replacement attempt was removed",
+    (topology) => {
+      const fixture = openFixture();
+      const oldAttempt =
+        topology === "zero-operation"
+          ? admitPreflightAttempt(fixture).attempt
+          : injectPreflight(fixture, topology === "completed-preflight" ? 3 : 1).attempt;
+      const takeover = fixture.store.admitLandingResume(fixture.landingId);
+      const successor = takeover.attemptOrdinal;
+      expect(successor).toBe(oldAttempt + 1);
+      const database = new Database(fixture.databasePath);
+      database
+        .prepare(
+          "DELETE FROM landing_events WHERE landing_id = ? AND sequence = " +
+            "(SELECT MAX(sequence) FROM landing_events WHERE landing_id = ?)",
+        )
+        .run(fixture.landingId, fixture.landingId);
+      database
+        .prepare("DELETE FROM landing_attempts WHERE landing_id = ? AND ordinal = ?")
+        .run(fixture.landingId, successor);
+      database
+        .prepare("UPDATE landings SET attempt_count = ? WHERE id = ?")
+        .run(oldAttempt, fixture.landingId);
+      database.close();
+      expectRecordInvalid(() => fixture.store.getLandingStatus(fixture.landingId));
+      fixture.store.close();
+    },
+  );
+
+  it("rejects a candidate takeover whose below-ceiling replacement attempt was removed", () => {
+    const fixture = seedEligibleRun();
+    const created = fixture.store.createLanding(
+      {
+        runId: UNIT_RUN_ID,
+        baseTreeSha1: BASE_TREE_SHA1,
+        commitMessage: COMMIT_MESSAGE,
+        commitEpochSeconds: 0,
+        commitIso8601: commitEpochToGitInstant(0),
+        pullRequestTitle: PULL_REQUEST_TITLE,
+        pullRequestBodyPrefix: PULL_REQUEST_BODY_PREFIX,
+      },
+      new Set([PROFILE.credentialRef.name]),
+    );
+    fixture.store.startCandidatePreparation(created.landing.id);
+    const takeover = fixture.store.admitLandingResume(created.landing.id);
+    expect(takeover).toMatchObject({ attemptOrdinal: 2, operationId: null });
+    removeTakeoverSuccessor(
+      { databasePath: fixture.databasePath, landingId: created.landing.id },
+      2,
+    );
+    expectRecordInvalid(() => fixture.store.getLandingStatus(created.landing.id));
+    fixture.store.close();
+  });
+
+  it("rejects an approved zero-operation takeover without its replacement attempt", () => {
+    const fixture = createApprovedFixture();
+    const admitted = fixture.store.admitLandingResume(fixture.landingId);
+    expect(admitted.attemptOrdinal).toBe(2);
+    const takeover = fixture.store.admitLandingResume(fixture.landingId);
+    expect(takeover).toMatchObject({ attemptOrdinal: 3, operationId: null });
+    removeTakeoverSuccessor(fixture, 3);
+    expectRecordInvalid(() => fixture.store.getLandingStatus(fixture.landingId));
+    fixture.store.close();
+  });
+
+  it("rejects a local-ref takeover without its replacement attempt and reconciliation intent", () => {
+    const fixture = createApprovedFixture();
+    fixture.store.admitLandingResume(fixture.landingId);
+    fixture.store.startLocalRefCreation(fixture.landingId);
+    const takeover = fixture.store.admitLandingResume(fixture.landingId);
+    expect(takeover).toMatchObject({
+      attemptOrdinal: 3,
+      status: { landing: { state: "reconciliation_required" } },
+    });
+    expect(takeover.operationId).not.toBeNull();
+    removeTakeoverSuccessor(fixture, 3, takeover.operationId);
+    expectRecordInvalid(() => fixture.store.getLandingStatus(fixture.landingId));
+    fixture.store.close();
+  });
+
+  it("rejects an interrupted reconciliation takeover without its replacement boundary", () => {
+    const fixture = createApprovedFixture();
+    fixture.store.admitLandingResume(fixture.landingId);
+    fixture.store.startLocalRefCreation(fixture.landingId);
+    const reconciliation = fixture.store.admitLandingResume(fixture.landingId);
+    expect(reconciliation.operationId).not.toBeNull();
+    const takeover = fixture.store.admitLandingResume(fixture.landingId);
+    expect(takeover).toMatchObject({
+      attemptOrdinal: 4,
+      status: { landing: { state: "reconciliation_required" } },
+    });
+    expect(takeover.operationId).not.toBeNull();
+    expect(takeover.operationId).not.toBe(reconciliation.operationId);
+    removeTakeoverSuccessor(fixture, 4, takeover.operationId);
+    expectRecordInvalid(() => fixture.store.getLandingStatus(fixture.landingId));
+    fixture.store.close();
+  });
+
+  it("commits attempt-eight preflight takeover once and never admits a ninth attempt", () => {
+    const fixture = openFixture();
+    admitPreflightAttempt(fixture);
+    while (fixture.store.getLandingStatus(fixture.landingId).landing.attemptCount < 8) {
+      fixture.store.admitLandingResume(fixture.landingId);
+    }
+    const injected = injectPreflight(fixture, 2, "admitted");
+    expect(injected.attempt).toBe(8);
+    const before = fixture.store.getLandingStatus(fixture.landingId);
+    expectIcarusCode(
+      () => fixture.store.admitLandingResume(fixture.landingId),
+      "LANDING_ATTEMPT_LIMIT",
+    );
+    const settled = fixture.store.getLandingStatus(fixture.landingId);
+    expect(settled.attempts).toHaveLength(8);
+    expect(settled.attempts.at(-1)).toMatchObject({
+      ordinal: 8,
+      status: "interrupted",
+      errorCode: "LANDING_COORDINATOR_TAKEOVER",
+    });
+    expect(settled.operations.at(-1)).toMatchObject({
+      id: injected.operationId,
+      status: "interrupted",
+      errorCode: "LANDING_COORDINATOR_TAKEOVER",
+    });
+    expect(settled.events.slice(before.events.length).map((event) => event.type)).toEqual([
+      "landing.github.request.settled",
+      "landing.operation.settled",
+      "landing.attempt.settled",
+    ]);
+    const revision = settled.revision;
+    const resultSha256 = settled.operations.at(-1)?.resultSha256;
+    expectIcarusCode(
+      () => fixture.store.admitLandingResume(fixture.landingId),
+      "LANDING_ATTEMPT_LIMIT",
+    );
+    const replay = fixture.store.getLandingStatus(fixture.landingId);
+    expect(replay.revision).toBe(revision);
+    expect(replay.operations.at(-1)?.resultSha256).toBe(resultSha256);
+    expect(replay.attempts).toHaveLength(8);
+    fixture.store.close();
+  });
+
   it("replays a failed historical preflight before a later successful retry", () => {
     const fixture = openFixture();
     injectPreflight(fixture, 0, "failed");
@@ -855,6 +1254,118 @@ describe("landing ledger persisted GitHub preflight loader", () => {
         .filter((operation) => operation.kind === "github.preflight")
         .map((operation) => operation.status),
     ).toEqual(["failed", "completed"]);
+    fixture.store.close();
+  });
+
+  it("refuses corrupt admitted evidence before takeover mutates any durable row", () => {
+    const fixture = openFixture();
+    const injected = injectPreflight(fixture, 2, "admitted");
+    const database = new Database(fixture.databasePath);
+    const event = database
+      .prepare(
+        "SELECT sequence, payload_json FROM landing_events WHERE landing_id = ? " +
+          "AND type = 'landing.github.request.admitted' ORDER BY sequence DESC LIMIT 1",
+      )
+      .get(fixture.landingId) as { readonly sequence: number; readonly payload_json: string };
+    const payload = JSON.parse(event.payload_json) as Row;
+    payload.requestOrdinal = 2;
+    database
+      .prepare("UPDATE landing_events SET payload_json = ? WHERE landing_id = ? AND sequence = ?")
+      .run(canonicalLandingJson(payload), fixture.landingId, event.sequence);
+    const before = database
+      .prepare(
+        "SELECT " +
+          "(SELECT status FROM landing_http_requests WHERE id = ?) AS request_status, " +
+          "(SELECT status FROM landing_operations WHERE id = ?) AS operation_status, " +
+          "(SELECT status FROM landing_attempts WHERE landing_id = ? AND ordinal = ?) AS attempt_status, " +
+          "(SELECT COUNT(*) FROM landing_events WHERE landing_id = ?) AS event_count",
+      )
+      .get(
+        injected.requestIds.at(-1),
+        injected.operationId,
+        fixture.landingId,
+        injected.attempt,
+        fixture.landingId,
+      );
+    database.close();
+
+    expectRecordInvalid(() => fixture.store.admitLandingResume(fixture.landingId));
+    const afterDatabase = new Database(fixture.databasePath);
+    const after = afterDatabase
+      .prepare(
+        "SELECT " +
+          "(SELECT status FROM landing_http_requests WHERE id = ?) AS request_status, " +
+          "(SELECT status FROM landing_operations WHERE id = ?) AS operation_status, " +
+          "(SELECT status FROM landing_attempts WHERE landing_id = ? AND ordinal = ?) AS attempt_status, " +
+          "(SELECT COUNT(*) FROM landing_events WHERE landing_id = ?) AS event_count",
+      )
+      .get(
+        injected.requestIds.at(-1),
+        injected.operationId,
+        fixture.landingId,
+        injected.attempt,
+        fixture.landingId,
+      );
+    afterDatabase.close();
+    expect(after).toEqual(before);
+    expect(after).toMatchObject({
+      request_status: "admitted",
+      operation_status: "started",
+      attempt_status: "started",
+    });
+    fixture.store.close();
+  });
+
+  it("rolls back request settlement and its event when later takeover settlement aborts", () => {
+    const fixture = openFixture();
+    const injected = injectPreflight(fixture, 2, "admitted");
+    const before = fixture.store.getLandingStatus(fixture.landingId);
+    const database = new Database(fixture.databasePath);
+    database
+      .prepare(
+        "CREATE TRIGGER takeover_operation_settlement_fault " +
+          "BEFORE INSERT ON landing_events " +
+          "WHEN NEW.type = 'landing.operation.settled' " +
+          "BEGIN SELECT RAISE(ABORT, 'injected takeover settlement fault'); END",
+      )
+      .run();
+    database.close();
+
+    expect(() => fixture.store.admitLandingResume(fixture.landingId)).toThrow(
+      "injected takeover settlement fault",
+    );
+
+    const afterDatabase = new Database(fixture.databasePath);
+    afterDatabase.prepare("DROP TRIGGER takeover_operation_settlement_fault").run();
+    const durable = afterDatabase
+      .prepare(
+        "SELECT " +
+          "(SELECT status FROM landing_http_requests WHERE id = ?) AS request_status, " +
+          "(SELECT outcome FROM landing_http_requests WHERE id = ?) AS request_outcome, " +
+          "(SELECT result_sha256 FROM landing_http_requests WHERE id = ?) AS request_result_sha256, " +
+          "(SELECT status FROM landing_operations WHERE id = ?) AS operation_status, " +
+          "(SELECT status FROM landing_attempts WHERE landing_id = ? AND ordinal = ?) AS attempt_status, " +
+          "(SELECT COUNT(*) FROM landing_events WHERE landing_id = ?) AS event_count",
+      )
+      .get(
+        injected.requestIds.at(-1),
+        injected.requestIds.at(-1),
+        injected.requestIds.at(-1),
+        injected.operationId,
+        fixture.landingId,
+        injected.attempt,
+        fixture.landingId,
+      );
+    afterDatabase.close();
+    expect(durable).toMatchObject({
+      request_status: "admitted",
+      request_outcome: null,
+      request_result_sha256: null,
+      operation_status: "started",
+      attempt_status: "started",
+      event_count: before.events.length,
+    });
+    expect(fixture.store.getLandingStatus(fixture.landingId)).toEqual(before);
     fixture.store.close();
   });
 
@@ -1133,9 +1644,9 @@ describe("landing ledger persisted GitHub preflight loader", () => {
     fixture.store.close();
   });
 
-  it("rejects takeover-specific operation error inference from an ordinary ambiguous GET", () => {
+  it("rejects takeover relabeling of a definitive failed GET", () => {
     const fixture = openFixture();
-    injectPreflight(fixture, 0, "ambiguous", "LANDING_COORDINATOR_TAKEOVER");
+    injectPreflight(fixture, 0, "failed", "LANDING_COORDINATOR_TAKEOVER");
     expectRecordInvalid(() => fixture.store.getLandingStatus(fixture.landingId));
     fixture.store.close();
   });
