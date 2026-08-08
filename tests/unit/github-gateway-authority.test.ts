@@ -105,7 +105,9 @@ describe("GitHub gateway authority boundary", () => {
       );
       expect(source, `${name} must not express a force update`).not.toMatch(/\bforce\b/i);
       expect(source, `${name} must not reach deployments`).not.toMatch(/\bdeployments?\b/i);
-      expect(source, `${name} must not dispatch workflows`).not.toMatch(/workflow|dispatches/i);
+      expect(source, `${name} must not dispatch workflows`).not.toMatch(
+        /actions\/workflows|\bdispatches\b|workflow_dispatch/i,
+      );
     }
   });
 
@@ -212,6 +214,58 @@ describe("GitHub gateway origin escape regressions", () => {
     await gateway.createBlob(coordinates, "aGk=");
 
     expect(contacted).toEqual(["api.github.com"]);
+  });
+});
+
+describe("GitHub gateway automation-path denial", () => {
+  // Creating the ref fires push/create, and a same-repository pull request
+  // fires pull_request; in both cases the head branch's own automation runs
+  // with repository secrets before any human sees the draft.
+  it("refuses continuous-integration configuration the push would execute", async () => {
+    const gateway = new GithubGateway({ baseUrl: "https://api.github.com", token });
+    for (const denied of [
+      ".github/workflows/deploy.yml",
+      ".github/actions/build/action.yml",
+      ".github/dependabot.yml",
+      ".circleci/config.yml",
+      ".gitlab-ci.yml",
+      "Jenkinsfile",
+      "azure-pipelines.yml",
+      ".buildkite/pipeline.yml",
+    ]) {
+      await expect(
+        gateway.createTree(
+          coordinates,
+          [{ path: denied, mode: "100644", blobSha: "a".repeat(40) }],
+          undefined,
+        ),
+      ).rejects.toMatchObject({ code: "GITHUB_AUTOMATION_PATH_DENIED" });
+    }
+  });
+
+  it("still accepts ordinary source paths", async () => {
+    const gateway = new GithubGateway({ baseUrl: "https://api.github.com", token });
+    let dispatched = false;
+    const permissive = new GithubGateway({
+      baseUrl: "https://api.github.com",
+      token,
+      fetchImplementation: async () => {
+        dispatched = true;
+        return new Response(JSON.stringify({ sha: "b".repeat(40) }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    expect(gateway).toBeInstanceOf(GithubGateway);
+
+    await permissive.createTree(
+      coordinates,
+      [{ path: "src/github/workflows.ts", mode: "100644", blobSha: "a".repeat(40) }],
+      undefined,
+    );
+
+    expect(dispatched).toBe(true);
   });
 });
 

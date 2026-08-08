@@ -81,6 +81,10 @@ const githubGatewayIdentifiersSource = await readFile(
   "utf8",
 );
 const githubGatewayHttpSource = await readFile("packages/github-gateway/src/http.ts", "utf8");
+const githubGatewayProviderTestSource = await readFile(
+  "tests/provider/github-gateway.test.ts",
+  "utf8",
+);
 const githubGatewayGatewaySource = await readFile("packages/github-gateway/src/gateway.ts", "utf8");
 const providerSource = await readFile("packages/core/src/providers.ts", "utf8");
 const policySource = await readFile("packages/core/src/policy.ts", "utf8");
@@ -2110,6 +2114,17 @@ const assertions = {
     // Second, independent layer: whatever the path builder produced, a URL that
     // left the pinned origin is never dispatched.
     githubGatewayGatewaySource.includes("url.origin === this.#baseUrl.origin"),
+  githubGatewayCannotUploadContinuousIntegrationConfiguration:
+    // Creating the ref fires push/create and a same-repository pull request
+    // fires pull_request; in each case the head branch's own automation runs
+    // with repository secrets before review. Uploading such a file would turn
+    // the authorized sequence into remote code execution.
+    githubGatewayIdentifiersSource.includes("const AUTOMATION_ROOTS = new Set([") &&
+    githubGatewayIdentifiersSource.includes('".github"') &&
+    githubGatewayIdentifiersSource.includes('".circleci"') &&
+    githubGatewayIdentifiersSource.includes('"jenkinsfile"') &&
+    githubGatewayIdentifiersSource.includes('"GITHUB_AUTOMATION_PATH_DENIED"') &&
+    githubGatewayIdentifiersSource.includes("AUTOMATION_ROOTS.has(root)"),
   githubGatewayScansDecodedBlobContentForItsOwnCredential:
     githubGatewayGatewaySource.includes(
       'Buffer.from(contentBase64, "base64").includes(this.#token, 0, "utf8")',
@@ -2125,12 +2140,28 @@ const assertions = {
     /draft: true/.test(githubGatewayGatewaySource) &&
     !/draft:(?!\s*true)/.test(executableSource(githubGatewayGatewaySource)) &&
     githubGatewayGatewaySource.includes('"GITHUB_DRAFT_NOT_HONORED"') &&
-    githubGatewayGatewaySource.includes('"GITHUB_REF_EXISTS"'),
+    githubGatewayGatewaySource.includes('"GITHUB_REF_CREATE_REFUSED"') &&
+    // A 422 has several causes and no upstream bytes are read, so the gateway
+    // must not claim the reference already exists.
+    !githubGatewayGatewaySource.includes('"GITHUB_REF_EXISTS"'),
   githubGatewayKeepsCredentialsAndUpstreamBytesOutOfEvidence:
     githubGatewayGatewaySource.includes("readonly #token: string") &&
     githubGatewayGatewaySource.includes('"GITHUB_SECRET_DETECTED"') &&
     githubGatewayGatewaySource.includes("responseSha256: response.bodySha256") &&
-    !/details:[^;]*\bbody\b/.test(githubGatewayGatewaySource),
+    // Detail bags are passed positionally, so a `details:` regex would never
+    // match anything. Assert over the real construct instead: every key used in
+    // an error detail bag must come from this allowlist, so upstream prose
+    // cannot be added beside the digest.
+    // No upstream text may be echoed into an error or a receipt. These are the
+    // shapes an echo would take; the runtime leak test below is the check that
+    // exercises it, and must remain present.
+    !/\b(?:object|first|target|body)\.(?:message|documentation_url|errors)\b/.test(
+      githubGatewayGatewaySource,
+    ) &&
+    !githubGatewayGatewaySource.includes("html_url") &&
+    githubGatewayProviderTestSource.includes(
+      "keeps upstream response bytes out of the error surface",
+    ),
   noFocusedOrSkippedGateTests: testSources.every(
     (source) => !/\.(?:only|skip|todo)(?:\s*\(|\.)/.test(source),
   ),

@@ -77,6 +77,8 @@ export interface GithubPullRequestReceipt extends GithubReceipt {
    * to find it.
    */
   readonly isDraft: boolean;
+  /** Derived from the merge timestamp: a merged pull request's state is "closed". */
+  readonly isMerged: boolean;
   readonly state: string;
   readonly headRef: string;
   readonly baseBranch: string;
@@ -399,9 +401,15 @@ export class GithubGateway {
       signal: options.signal,
     });
     if (response.status === 422) {
+      // GitHub returns 422 for an existing reference, a missing object, an
+      // unusable name, and a ruleset or branch-protection refusal alike. This
+      // gateway reads no upstream bytes, so it cannot distinguish them and must
+      // not claim the reference already exists — a protection refusal would
+      // otherwise be recorded as benign idempotency. The coordinator
+      // disambiguates with the read_reference it already owns.
       throw new GithubGatewayError(
-        "GITHUB_REF_EXISTS",
-        "The Icarus reference already exists and was not modified",
+        "GITHUB_REF_CREATE_REFUSED",
+        "GitHub refused to create the Icarus reference; nothing was modified",
         { status: response.status, ref: validatedRef, responseSha256: response.bodySha256 },
       );
     }
@@ -533,7 +541,21 @@ export class GithubGateway {
     if (first === undefined) {
       return null;
     }
-    readBaseBranch(first, response);
+    // The listing is filtered by head and base, but the receipt would otherwise
+    // restate the caller's arguments as if the response had confirmed them.
+    // Verify both, matching the equality checks the reference paths already make.
+    invariant(
+      readBaseBranch(first, response) === baseBranch,
+      "GITHUB_PROTOCOL_ERROR",
+      "GitHub returned a pull request whose base is not the requested base",
+      { status: response.status, responseSha256: response.bodySha256 },
+    );
+    invariant(
+      readHeadBranch(first, response) === headBranch,
+      "GITHUB_PROTOCOL_ERROR",
+      "GitHub returned a pull request whose head is not the requested head",
+      { status: response.status, responseSha256: response.bodySha256 },
+    );
     return this.#readPullRequest({ ...response, value: first }, coordinates, headRef, baseBranch);
   }
 
@@ -565,9 +587,21 @@ export class GithubGateway {
       "GitHub pull request response has no state",
       { status: response.status, responseSha256: response.bodySha256 },
     );
+    // The list schema carries merged_at but no merged boolean, and a merged
+    // pull request's state is "closed" exactly like an abandoned one. Reduce it
+    // to a boolean so the coordinator can tell whether the change actually
+    // landed; a boolean is not upstream content.
+    const mergedAt = object.merged_at;
+    invariant(
+      mergedAt === null || mergedAt === undefined || typeof mergedAt === "string",
+      "GITHUB_PROTOCOL_ERROR",
+      "GitHub pull request response has an unreadable merge timestamp",
+      { status: response.status, responseSha256: response.bodySha256 },
+    );
     return {
       number,
       isDraft,
+      isMerged: typeof mergedAt === "string" && mergedAt.length > 0,
       state,
       headRef,
       baseBranch,
@@ -578,6 +612,39 @@ export class GithubGateway {
       latencyMs: response.latencyMs,
     };
   }
+}
+
+function readHeadBranch(value: unknown, response: GithubHttpResponse): string {
+  const head = nestedMember(value, "head", response);
+  const ref = (head as Record<string, unknown>).ref;
+  invariant(
+    typeof ref === "string",
+    "GITHUB_PROTOCOL_ERROR",
+    "GitHub pull request entry has no head reference",
+    { status: response.status, responseSha256: response.bodySha256 },
+  );
+  return ref;
+}
+
+function nestedMember(
+  value: unknown,
+  member: string,
+  response: GithubHttpResponse,
+): Record<string, unknown> {
+  invariant(
+    typeof value === "object" && value !== null,
+    "GITHUB_PROTOCOL_ERROR",
+    "GitHub pull request entry is not an object",
+    { status: response.status, responseSha256: response.bodySha256 },
+  );
+  const nested = (value as Record<string, unknown>)[member];
+  invariant(
+    typeof nested === "object" && nested !== null,
+    "GITHUB_PROTOCOL_ERROR",
+    `GitHub pull request entry has no ${member}`,
+    { status: response.status, responseSha256: response.bodySha256 },
+  );
+  return nested as Record<string, unknown>;
 }
 
 function readBaseBranch(value: unknown, response: GithubHttpResponse): string {

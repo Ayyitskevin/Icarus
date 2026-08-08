@@ -35,6 +35,43 @@ export const MAX_PULL_REQUEST_BODY_BYTES = 40 * 1024;
 
 const MAX_TREE_PATH_LENGTH = 512;
 
+/**
+ * Directories and files a continuous-integration system executes on push.
+ *
+ * Creating `refs/heads/icarus/<run-id>` fires GitHub's `create` and `push`
+ * events, and opening a pull request from a same-repository branch fires
+ * `pull_request`. In each case the *head* branch's own automation definitions
+ * run, with repository secrets, before a human has reviewed the draft. Uploading
+ * such a file would therefore turn this gateway's authorized sequence into
+ * arbitrary remote code execution — the effect the operation table declares is
+ * not expressible.
+ *
+ * `@icarus/core`'s path policy is the authoritative layer and denies
+ * `.github/workflows/`; this is an independent second layer covering the same
+ * class, because the two packages cannot import each other.
+ */
+const AUTOMATION_ROOTS = new Set([
+  ".github",
+  ".circleci",
+  ".buildkite",
+  ".gitlab",
+  ".woodpecker",
+  ".teamcity",
+]);
+
+const AUTOMATION_FILES = new Set([
+  ".gitlab-ci.yml",
+  ".gitlab-ci.yaml",
+  ".travis.yml",
+  ".drone.yml",
+  "jenkinsfile",
+  "azure-pipelines.yml",
+  "azure-pipelines.yaml",
+  "appveyor.yml",
+  "cloudbuild.yaml",
+  "bitbucket-pipelines.yml",
+]);
+
 function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, "utf8");
 }
@@ -106,6 +143,13 @@ export function assertTreePath(value: string): string {
       !value.split("/").some((segment) => segment === "." || segment === ".."),
     "GITHUB_PATH_INVALID",
     "A tree path must be a relative, traversal-free repository path",
+  );
+  const segments = value.split("/");
+  const root = (segments[0] ?? "").toLowerCase();
+  invariant(
+    !AUTOMATION_ROOTS.has(root) && !(segments.length === 1 && AUTOMATION_FILES.has(root)),
+    "GITHUB_AUTOMATION_PATH_DENIED",
+    "Icarus may not upload continuous-integration configuration, which the push would execute",
   );
   return value;
 }
