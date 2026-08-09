@@ -3,7 +3,8 @@ document: OPUS_WEEKEND_PLAN
 repository: Ayyitskevin/Icarus
 window: 2026-08-08 (Fri evening) through 2026-08-10 (Sun)
 base_commit: 1d8292b1c3d90814a0cb3b6336a8102e8f7d4b97
-status: READY_FOR_OPUS
+status: SUPERSEDED
+superseded_by: docs/OPUS_CONTINUATION_PLAN_2026-08-09.md
 governing_direction: docs/adr/0036, docs/ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md
 ---
 
