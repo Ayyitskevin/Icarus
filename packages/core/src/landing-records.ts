@@ -3509,3 +3509,161 @@ export function decodeCanonicalLandingEventPayloadJsonV1(
 ): LandingEventPayloadV1 {
   return decodeCanonicalLandingJson(encoded, (value) => decodeLandingEventPayloadV1(type, value));
 }
+
+/**
+ * The immutable landing receipt (ADR 0027, "Receipt is immutable metadata, not
+ * provider authority"). It states what Icarus verified at settlement and
+ * nothing more.
+ *
+ * Every field is an identifier, a digest, an enumerated outcome, or a
+ * reconstructed URL. The receipt deliberately cannot carry a credential value
+ * or reference, a local cache/worktree/source path, commit or pull-request
+ * text, task text, diff or checkpoint bytes, raw provider output, a response
+ * header, or environment data — so a receipt is safe to retain and display
+ * without a redaction pass.
+ *
+ * The outcome selectors are evidence-derived, never caller-chosen: the
+ * coordinator computes them from the terminal stage value of each delivery
+ * stage, per the v1 record contract's `created | reconciled` rules. Uploaded
+ * Git objects are content-addressed, so their only honest outcome is
+ * `created_or_exact`.
+ */
+export interface LandingReceiptV1 {
+  readonly version: 1;
+  readonly landingId: string;
+  readonly runId: string;
+  readonly projectId: string;
+  readonly provider: "github";
+  readonly owner: string;
+  readonly repository: string;
+  readonly baseRef: string;
+  readonly baseCommitSha1: string;
+  readonly headRef: string;
+  readonly candidateTreeSha1: string;
+  readonly candidateCommitSha1: string;
+  readonly pullRequestNumber: number;
+  readonly reconstructedPullRequestUrl: string;
+  readonly draft: true;
+  readonly landingSha256: string;
+  readonly profileSha256: string;
+  readonly planSha256: string;
+  readonly diffSha256: string;
+  readonly checkpointSha256: string;
+  readonly verificationSha256: string;
+  readonly reviewDecisionSha256: string;
+  readonly changedPathsSha256: string;
+  readonly localRefOutcome: "created" | "reconciled";
+  readonly remoteObjectOutcome: "created_or_exact";
+  readonly remoteRefOutcome: "created" | "reconciled";
+  readonly pullRequestOutcome: "created" | "reconciled";
+  readonly completedAt: string;
+}
+
+const LANDING_RECEIPT_KEYS = [
+  "version",
+  "landingId",
+  "runId",
+  "projectId",
+  "provider",
+  "owner",
+  "repository",
+  "baseRef",
+  "baseCommitSha1",
+  "headRef",
+  "candidateTreeSha1",
+  "candidateCommitSha1",
+  "pullRequestNumber",
+  "reconstructedPullRequestUrl",
+  "draft",
+  "landingSha256",
+  "profileSha256",
+  "planSha256",
+  "diffSha256",
+  "checkpointSha256",
+  "verificationSha256",
+  "reviewDecisionSha256",
+  "changedPathsSha256",
+  "localRefOutcome",
+  "remoteObjectOutcome",
+  "remoteRefOutcome",
+  "pullRequestOutcome",
+  "completedAt",
+] as const;
+
+export function decodeLandingReceiptV1(value: unknown): LandingReceiptV1 {
+  const decoded = record(value, LANDING_RECEIPT_KEYS, "receipt");
+  const owner = assertGitHubIdentityPart(decoded.owner, "receipt.owner", true);
+  const repository = assertGitHubIdentityPart(decoded.repository, "receipt.repository", false);
+  const pullRequestNumber = safeInteger(
+    decoded.pullRequestNumber,
+    "receipt.pullRequestNumber",
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  // The URL is reconstructed from validated components, so a stored receipt
+  // cannot smuggle an attacker-chosen link past display. Recomputing it here
+  // means a hand-edited row fails to decode rather than being rendered.
+  const reconstructedPullRequestUrl = literal(
+    decoded.reconstructedPullRequestUrl,
+    `${GITHUB_RECEIPT_ORIGIN}/${owner}/${repository}/pull/${pullRequestNumber}`,
+    "receipt.reconstructedPullRequestUrl",
+  );
+  return {
+    version: literal(decoded.version, 1, "receipt.version"),
+    landingId: assertUuid(decoded.landingId, "receipt.landingId"),
+    runId: assertUuid(decoded.runId, "receipt.runId"),
+    projectId: assertUuid(decoded.projectId, "receipt.projectId"),
+    provider: literal(decoded.provider, "github", "receipt.provider"),
+    owner,
+    repository,
+    baseRef: assertFullHeadRef(decoded.baseRef, "receipt.baseRef"),
+    baseCommitSha1: assertSha1(decoded.baseCommitSha1, "receipt.baseCommitSha1"),
+    headRef: assertFullHeadRef(decoded.headRef, "receipt.headRef"),
+    candidateTreeSha1: assertSha1(decoded.candidateTreeSha1, "receipt.candidateTreeSha1"),
+    candidateCommitSha1: assertSha1(decoded.candidateCommitSha1, "receipt.candidateCommitSha1"),
+    pullRequestNumber,
+    reconstructedPullRequestUrl,
+    // A literal, never a parameter: Icarus opens draft pull requests only, so a
+    // receipt claiming otherwise is a corrupt record rather than a variation.
+    draft: literal(decoded.draft, true, "receipt.draft"),
+    landingSha256: assertSha256(decoded.landingSha256, "receipt.landingSha256"),
+    profileSha256: assertSha256(decoded.profileSha256, "receipt.profileSha256"),
+    planSha256: assertSha256(decoded.planSha256, "receipt.planSha256"),
+    diffSha256: assertSha256(decoded.diffSha256, "receipt.diffSha256"),
+    checkpointSha256: assertSha256(decoded.checkpointSha256, "receipt.checkpointSha256"),
+    verificationSha256: assertSha256(decoded.verificationSha256, "receipt.verificationSha256"),
+    reviewDecisionSha256: assertSha256(
+      decoded.reviewDecisionSha256,
+      "receipt.reviewDecisionSha256",
+    ),
+    changedPathsSha256: assertSha256(decoded.changedPathsSha256, "receipt.changedPathsSha256"),
+    localRefOutcome: oneOf(
+      decoded.localRefOutcome,
+      ["created", "reconciled"] as const,
+      "receipt.localRefOutcome",
+    ),
+    // Git objects are content-addressed: an identical object already present
+    // upstream is indistinguishable from one this landing uploaded, and
+    // claiming either would overstate what the evidence proves.
+    remoteObjectOutcome: literal(
+      decoded.remoteObjectOutcome,
+      "created_or_exact",
+      "receipt.remoteObjectOutcome",
+    ),
+    remoteRefOutcome: oneOf(
+      decoded.remoteRefOutcome,
+      ["created", "reconciled"] as const,
+      "receipt.remoteRefOutcome",
+    ),
+    pullRequestOutcome: oneOf(
+      decoded.pullRequestOutcome,
+      ["created", "reconciled"] as const,
+      "receipt.pullRequestOutcome",
+    ),
+    completedAt: assertInstant(decoded.completedAt, "receipt.completedAt"),
+  };
+}
+
+export function decodeCanonicalLandingReceiptJsonV1(encoded: string): LandingReceiptV1 {
+  return decodeCanonicalLandingJson(encoded, decodeLandingReceiptV1);
+}
