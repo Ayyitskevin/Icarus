@@ -489,7 +489,7 @@ remains source-collaboration truth; Icarus preserves the proof and rationale.
 | --- | --- | --- |
 | Domain policy and digests | `packages/core/src/types.ts`, `policy.ts`, `digests.ts` | typed landing, room, participant, task, write-set, and integration authority |
 | Durable state | `packages/core/src/store.ts`, `state-machine.ts`, `gate1-schema.ts`, `landing-records.ts`, `landing-state.ts`, `landing-ledger.ts` | Packet 3 local landing persistence and coordination complete; later collaboration ledgers and append-only room events |
-| Orchestration | `packages/core/src/service.ts`, `session-loop.ts` | Packet 3 local landing coordinator complete; later room scheduler and child-run integration |
+| Orchestration | `packages/core/src/service.ts`, `session-loop.ts`, `landing-coordinator.ts` | Packet 3 local landing coordinator complete and extracted from `service.ts`; later room scheduler and child-run integration |
 | Git isolation | `packages/core/src/git.ts`, `landing-git.ts` | Packet 3 deterministic candidate and absent-only private-ref integration complete; retain the file-only boundary when adding Packet 4 |
 | Provider landing | `packages/github-gateway` (Packet 4a, merged, unwired) | coordinator wiring, receipt, idempotent reconciliation; interface reconciliation first |
 | Browser boundary | `packages/api/src/server.ts`, `contracts.ts`, `present.ts` | Packet 2 action routes and Packet 3 bounded landing projection complete; shared client remains later work |
