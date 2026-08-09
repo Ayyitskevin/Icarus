@@ -1653,6 +1653,54 @@ export class IcarusStore {
     return this.#landingLedger.admitResume(landingId);
   }
 
+  async admitGuardedLandingResume(
+    guard: RunLeaseGuard,
+    landingId: string,
+  ): Promise<LandingResumeAdmissionV1> {
+    const runId = guard.runId;
+    await guard.assertHeld(runId);
+    const registered = this.#registeredLandingOperationIds.get(guard) ?? new Set<string>();
+    const current = this.#landingLedger.getStatus(landingId);
+    const replayOperationId = current.operations.find((operation) => {
+      if (
+        operation.kind !== "landing.reconcile" ||
+        operation.status !== "started" ||
+        !registered.has(operation.id)
+      ) {
+        return false;
+      }
+      const subjectId = (operation.request.input as { readonly subjectOperationId?: unknown })
+        .subjectOperationId;
+      return (
+        typeof subjectId === "string" &&
+        current.operations.some(
+          (subject) => subject.id === subjectId && subject.kind === "github.objects.upload",
+        )
+      );
+    })?.id;
+    const admission = this.#landingLedger.admitResume(landingId, runId, replayOperationId ?? null);
+    const operation =
+      admission.operationId === null
+        ? undefined
+        : admission.status.operations.find((entry) => entry.id === admission.operationId);
+    if (operation?.kind === "landing.reconcile" && operation.status === "started") {
+      const subjectId = (operation.request.input as { readonly subjectOperationId?: unknown })
+        .subjectOperationId;
+      const subject =
+        typeof subjectId === "string"
+          ? admission.status.operations.find((entry) => entry.id === subjectId)
+          : undefined;
+      if (subject?.kind === "github.objects.upload") {
+        this.#registeredLandingOperationIds.set(guard, registered);
+        // Registration follows the durable admission transaction. A process
+        // death here leaves an orphan that only a fresh guarded takeover may
+        // interrupt; no uncommitted identity is ever process-authoritative.
+        registered.add(operation.id);
+      }
+    }
+    return admission;
+  }
+
   async startGitHubPreflight(
     guard: RunLeaseGuard,
     landingId: string,
@@ -1811,6 +1859,22 @@ export class IcarusStore {
       );
     }
     return this.#landingLedger.settleGitHubPreflightRequest(runId, landingId, operationId, input);
+  }
+
+  async settleGitHubObjectsReconciliation(
+    guard: RunLeaseGuard,
+    landingId: string,
+    operationId: string,
+  ): Promise<LandingStatusV1> {
+    const runId = guard.runId;
+    await guard.assertHeld(runId);
+    if (!this.#registeredLandingOperationIds.get(guard)?.has(operationId)) {
+      throw new IcarusError(
+        "LANDING_NOT_ADMITTED",
+        "Object reconciliation is not registered under this run lease",
+      );
+    }
+    return this.#landingLedger.settleGitHubObjectsReconciliation(runId, landingId, operationId);
   }
 
   startLocalRefCreation(landingId: string): LandingOperationAdmissionV1 {

@@ -1687,6 +1687,18 @@ export class IcarusService {
       ) {
         return current;
       }
+      if (current.landing.state === "objects_ready") {
+        const activeAttempt = current.attempts.find((attempt) => attempt.status === "started");
+        const activeOperations =
+          activeAttempt === undefined
+            ? []
+            : current.operations.filter(
+                (operation) => operation.coordinatorAttempt === activeAttempt.ordinal,
+              );
+        if (activeAttempt === undefined || activeOperations.length === 0) {
+          return current;
+        }
+      }
       invariant(
         !(
           current.landing.state === "failed" &&
@@ -1701,7 +1713,7 @@ export class IcarusService {
         "Packet 3 cannot resume this later landing stage",
       );
 
-      const admission = this.#store.admitLandingResume(current.landing.id);
+      const admission = await this.#store.admitGuardedLandingResume(guard, current.landing.id);
       invariant(
         admission.attemptOrdinal !== null,
         "INVALID_LANDING_STATE",
@@ -1722,17 +1734,40 @@ export class IcarusService {
             "Approved resume unexpectedly pre-admitted an operation",
           );
           return this.#executeLocalRefCreation(current.landing.id, attemptSignal);
-        case "reconciliation_required":
+        case "reconciliation_required": {
           invariant(
             admission.operationId !== null,
             "LANDING_RECORD_INVALID",
             "Reconciliation resume has no durable operation intent",
           );
-          return this.#executeLocalRefReconciliation(
+          const reconciliation = admission.status.operations.find(
+            (operation) => operation.id === admission.operationId,
+          );
+          const subjectId = (
+            reconciliation?.request.input as { readonly subjectOperationId?: unknown } | undefined
+          )?.subjectOperationId;
+          const subject =
+            typeof subjectId === "string"
+              ? admission.status.operations.find((operation) => operation.id === subjectId)
+              : undefined;
+          if (subject?.kind === "local_ref.create") {
+            return this.#executeLocalRefReconciliation(
+              current.landing.id,
+              admission.operationId,
+              attemptSignal,
+            );
+          }
+          invariant(
+            subject?.kind === "github.objects.upload",
+            "LANDING_RECORD_INVALID",
+            "Reconciliation admission does not bind a supported durable subject",
+          );
+          return this.#store.settleGitHubObjectsReconciliation(
+            guard,
             current.landing.id,
             admission.operationId,
-            attemptSignal,
           );
+        }
         case "local_ready":
           invariant(
             this.#fakeGitHubPreflightSessionFactory !== undefined && admission.operationId === null,
@@ -1740,6 +1775,13 @@ export class IcarusService {
             "Local-ready resume unexpectedly crossed its fake preflight admission boundary",
           );
           return this.#executeFakeGitHubPreflight(guard, current.landing.id, attemptSignal);
+        case "objects_ready":
+          invariant(
+            admission.operationId === null,
+            "LANDING_RECORD_INVALID",
+            "Objects-ready recovery unexpectedly admitted a remote effect",
+          );
+          return admission.status;
         default:
           throw new IcarusError(
             "INVALID_LANDING_STATE",
