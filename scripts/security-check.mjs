@@ -2069,9 +2069,15 @@ const assertions = {
     githubGatewayOperationsSource.includes('| "create_absent_ref"') &&
     githubGatewayOperationsSource.includes('| "create_draft_pull_request"') &&
     githubGatewayOperationsSource.includes('| "read_reference"') &&
+    githubGatewayOperationsSource.includes('| "read_base_reference"') &&
     githubGatewayOperationsSource.includes('| "read_pull_requests"') &&
     githubGatewayOperationsSource.includes('| "read_actor"') &&
-    githubGatewayOperationsSource.includes("Object.freeze({"),
+    githubGatewayOperationsSource.includes("Object.freeze({") &&
+    // The base-branch read is the only operation naming a reference outside the
+    // Icarus namespace. It must stay read-only, and it must refuse an
+    // Icarus-namespaced value so no mutation path can be reached through it.
+    githubGatewayIdentifiersSource.includes("export function assertBaseRef") &&
+    githubGatewayIdentifiersSource.includes("value.startsWith(ICARUS_REF_NAMESPACE)"),
   githubGatewayMatchesTheAcceptedLandingRecordContract:
     // The gateway cannot import @icarus/core without inverting the dependency
     // direction, so the wire-format constants it duplicates are pinned here and

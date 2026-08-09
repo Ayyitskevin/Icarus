@@ -12,9 +12,10 @@ export {
   type GithubReferenceReceipt,
   type GithubTreeEntryInput,
 } from "./gateway.js";
-export type { GithubHttpMethod } from "./http.js";
+export type { GithubHttpMethod, GithubThrottleSignals } from "./http.js";
 export {
   assertBaseBranch,
+  assertBaseRef,
   assertIcarusRef,
   branchNameForRef,
   ICARUS_REF_NAMESPACE,

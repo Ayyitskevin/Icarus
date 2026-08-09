@@ -21,6 +21,7 @@ export type GithubOperationKind =
   | "create_absent_ref"
   | "create_draft_pull_request"
   | "read_reference"
+  | "read_base_reference"
   | "read_pull_requests";
 
 export interface GithubOperationDescriptor {
@@ -81,6 +82,18 @@ export const GITHUB_OPERATIONS: Readonly<Record<GithubOperationKind, GithubOpera
       repositoryScoped: true,
     }),
     read_reference: Object.freeze({
+      method: "GET",
+      segments: Object.freeze(["git", "ref"]),
+      mutating: false,
+      repositoryScoped: true,
+    }),
+    // Reads the base branch the candidate commit will parent from. It is the
+    // same read-only endpoint as `read_reference` but a separate kind, because
+    // it is the only operation that may name a reference outside the Icarus
+    // namespace and the record contract records it as its own HTTP kind
+    // (`github.base_ref.get`). Keeping the kinds distinct means the namespace
+    // restriction on the Icarus reference stays exact.
+    read_base_reference: Object.freeze({
       method: "GET",
       segments: Object.freeze(["git", "ref"]),
       mutating: false,

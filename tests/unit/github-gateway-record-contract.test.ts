@@ -9,6 +9,7 @@ import {
 import { GithubGatewayError } from "../../packages/github-gateway/src/errors.js";
 import { GithubGateway } from "../../packages/github-gateway/src/gateway.js";
 import {
+  assertBaseRef,
   assertOwner,
   assertRepository,
   ICARUS_REF_NAMESPACE,
@@ -56,12 +57,29 @@ describe("gateway agreement with the ADR 0027 record contract", () => {
   });
 
   it("accepts the lowercase identities core validates and refuses mixed case", () => {
+    // Core's assertGitHubIdentityPart rejects any value differing from its own
+    // lowercasing, for owner, repository, and headOwner alike. This agreement is
+    // deliberate, not incidental — but see ADR 0043's first open question: the
+    // real remote is `Ayyitskevin/Icarus`, and whether GitHub's pull-request
+    // `head` filter matches that label case-insensitively is unverified. Do not
+    // relax either side here; that is an ADR 0027 amendment.
     expect(assertOwner("ayyitskevin")).toBe("ayyitskevin");
     expect(assertRepository("icarus")).toBe("icarus");
     for (const owner of ["Ayyitskevin", "AYYITSKEVIN", "a--b"]) {
       expect(() => assertOwner(owner)).toThrow(GithubGatewayError);
     }
     expect(() => assertRepository("Icarus")).toThrow(GithubGatewayError);
+  });
+
+  it("names the base reference the way core's github.base_ref.get subject spells it", () => {
+    // Core validates the subject's baseRef with assertFullHeadRef: a fully
+    // qualified refs/heads/ value, not a bare branch name. A gateway that took
+    // a bare name would silently disagree with every recorded subject.
+    expect(assertBaseRef("refs/heads/main")).toBe("refs/heads/main");
+    expect(assertBaseRef("refs/heads/release/2026-08")).toBe("refs/heads/release/2026-08");
+    for (const invalid of ["main", "refs/tags/v1", `${ICARUS_REF_NAMESPACE}${runId}`, ""]) {
+      expect(() => assertBaseRef(invalid)).toThrow(GithubGatewayError);
+    }
   });
 
   it("counts ceilings in UTF-8 bytes rather than UTF-16 code units", async () => {

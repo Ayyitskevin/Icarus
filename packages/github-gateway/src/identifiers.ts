@@ -183,6 +183,31 @@ export function assertBaseBranch(value: string): string {
   return value;
 }
 
+/**
+ * The base branch's fully qualified reference, as the record contract's
+ * `github.base_ref.get` subject spells it (`refs/heads/<branch>`).
+ *
+ * This is the only reference the gateway may name outside its own namespace,
+ * and it is readable only. It is deliberately a separate assertion from
+ * `assertIcarusRef` so that the create path keeps its exact namespace
+ * restriction: nothing that accepts a base reference can reach a mutation.
+ */
+export function assertBaseRef(value: string): string {
+  invariant(
+    value.startsWith("refs/heads/"),
+    "GITHUB_BASE_BRANCH_INVALID",
+    "A base reference must be a fully qualified refs/heads/ reference",
+  );
+  const branch = value.slice("refs/heads/".length);
+  invariant(
+    !value.startsWith(ICARUS_REF_NAMESPACE),
+    "GITHUB_BASE_BRANCH_INVALID",
+    "An Icarus-namespaced reference is never a base branch",
+  );
+  assertBaseBranch(branch);
+  return value;
+}
+
 export function assertCommitMessage(value: string): string {
   invariant(
     value.length > 0 && utf8Bytes(value) <= MAX_COMMIT_MESSAGE_BYTES,

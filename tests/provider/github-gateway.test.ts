@@ -611,4 +611,157 @@ describe("GithubGateway HTTP contract", () => {
     await expectCode(gatewayFor(server).readActor("ayyitskevin"), "GITHUB_ACTOR_MISMATCH");
     expect((server.requests[0] as CapturedProviderRequest).url).toBe("/user");
   });
+
+  it("reads the base branch the candidate commit parents from", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, {
+        ref: "refs/heads/main",
+        object: { sha: commitSha, type: "commit" },
+      });
+    });
+
+    const receipt = await gatewayFor(server).readBaseReference(coordinates, "refs/heads/main");
+
+    expect(receipt).toMatchObject({ ref: "refs/heads/main", sha: commitSha });
+    const request = server.requests[0] as CapturedProviderRequest;
+    expect(request.method).toBe("GET");
+    expect(request.url).toBe("/repos/ayyitskevin/icarus/git/ref/heads/main");
+  });
+
+  it("reports an absent base branch as null rather than an error", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 404, { message: "Not Found" });
+    });
+
+    await expect(
+      gatewayFor(server).readBaseReference(coordinates, "refs/heads/main"),
+    ).resolves.toBeNull();
+  });
+
+  it("refuses to read an Icarus-namespaced reference as a base branch", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, { ref, object: { sha: commitSha } });
+    });
+
+    // The base read is the only operation that may name a reference outside the
+    // Icarus namespace; it must not become a second way to observe the one the
+    // create path owns.
+    await expectCode(
+      gatewayFor(server).readBaseReference(coordinates, ref),
+      "GITHUB_BASE_BRANCH_INVALID",
+    );
+    expect(server.requests).toHaveLength(0);
+  });
+
+  it("refuses a base reference that is not fully qualified", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, {});
+    });
+
+    await expectCode(
+      gatewayFor(server).readBaseReference(coordinates, "main"),
+      "GITHUB_BASE_BRANCH_INVALID",
+    );
+    expect(server.requests).toHaveLength(0);
+  });
+
+  it("carries throttling signals as bounded integers beside a refusal", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      response.writeHead(403, {
+        "content-type": "application/json",
+        "retry-after": "60",
+        "x-ratelimit-remaining": "0",
+      });
+      response.end(JSON.stringify({ message: "rate limited" }));
+    });
+
+    const error = await expectCode(
+      gatewayFor(server).readBaseReference(coordinates, "refs/heads/main"),
+      "GITHUB_HTTP_ERROR",
+    );
+
+    // A secondary rate limit and an authorization failure are both 403, so the
+    // coordinator needs these to tell a wait-and-retry refusal from a terminal
+    // one.
+    expect(error.details).toMatchObject({ retryAfterSeconds: 60, rateLimitRemaining: 0 });
+  });
+
+  it("reduces unparsable throttling headers to null instead of carrying their text", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      response.writeHead(403, {
+        "content-type": "application/json",
+        "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT",
+        "x-ratelimit-remaining": "not-a-number",
+      });
+      response.end(JSON.stringify({ message: "rate limited" }));
+    });
+
+    const error = await expectCode(
+      gatewayFor(server).readBaseReference(coordinates, "refs/heads/main"),
+      "GITHUB_HTTP_ERROR",
+    );
+
+    expect(error.details).toMatchObject({ retryAfterSeconds: null, rateLimitRemaining: null });
+    expect(JSON.stringify(error.details)).not.toContain("Oct");
+    expect(JSON.stringify(error.details)).not.toContain("not-a-number");
+  });
+
+  it("refuses a tree with no entries before dispatching", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 201, { sha: treeSha });
+    });
+
+    await expectCode(
+      gatewayFor(server).createTree(coordinates, [], undefined),
+      "GITHUB_TREE_INVALID",
+    );
+    expect(server.requests).toHaveLength(0);
+  });
+
+  it("refuses a commit declaring more parents than a candidate can have", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 201, { sha: commitSha });
+    });
+
+    await expectCode(
+      gatewayFor(server).createCommit(coordinates, {
+        message: "candidate",
+        treeSha,
+        parentShas: [commitSha, blobSha, treeSha],
+      }),
+      "GITHUB_COMMIT_PARENTS_INVALID",
+    );
+    expect(server.requests).toHaveLength(0);
+  });
+
+  it("classifies a read that exceeds its timeout as a timeout, not an ambiguous outcome", async () => {
+    server = await startProviderHttpServer(() => {
+      // Never responds: the request outlives the gateway's timeout.
+    });
+    const gateway = new GithubGateway({
+      baseUrl: server.baseUrl,
+      token,
+      timeoutMs: 50,
+      allowLoopback: true,
+    });
+
+    const error = await expectCode(
+      gateway.readBaseReference(coordinates, "refs/heads/main"),
+      "GITHUB_TIMEOUT",
+    );
+
+    expect(error.details).toMatchObject({ reason: "timeout" });
+  });
+
+  it("names the loopback opt-in exactly when a local origin is not opted into", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, {});
+    });
+    const target = server.baseUrl;
+
+    await expectCode(
+      Promise.resolve().then(() => new GithubGateway({ baseUrl: target, token })),
+      "GITHUB_LOOPBACK_NOT_ALLOWED",
+    );
+  });
 });
