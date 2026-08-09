@@ -17,6 +17,7 @@ import {
   type PersistedGitHubObjectsEvidenceV1,
   validatePersistedGitHubObjectsOperationV1,
 } from "./landing-objects-persistence.js";
+import { validatePersistedGitHubObjectsReconciliationV1 } from "./landing-objects-reconciliation-persistence.js";
 import {
   type PersistedGitHubPreflightEvidenceV1,
   validatePersistedGitHubPreflightOperationV1,
@@ -1152,12 +1153,22 @@ function validatePacket3OperationSettlement(
   const subject = operations.find((entry) => entry.id === request.subjectOperationId);
   if (subject === undefined) invalid("Landing reconciliation subject is missing");
   if (subject.kind === "github.objects.upload") {
-    if (result.outcome !== "reconciliation_required") {
-      invalid("Completed object reconciliation is outside the loader slice");
+    if (result.outcome === "reconciliation_required") {
+      const value = result.value as ReconciliationRequiredValueV1;
+      if (value.subjectOperationId !== subject.id || value.remoteResidue !== "none") {
+        invalid("Unresolved object reconciliation changed its subject or residue");
+      }
+      return;
     }
-    const value = result.value as ReconciliationRequiredValueV1;
-    if (value.subjectOperationId !== subject.id || value.remoteResidue !== "none") {
-      invalid("Unresolved object reconciliation changed its subject or residue");
+    const value = result.value as ReconcileValueV1;
+    if (
+      result.boundary !== "retry_stage_proven" ||
+      value.subjectOperationId !== subject.id ||
+      value.nextState !== "local_ready" ||
+      value.remoteResidue !== "none" ||
+      value.stageValue !== null
+    ) {
+      invalid("Completed object reconciliation is not an exact retry-stage proof");
     }
     return;
   }
@@ -1215,6 +1226,7 @@ interface OperationStartAuthorityV1 {
 
 function validatePersistedGitHubAggregates(
   status: LandingStatusV1,
+  rawAttemptRows: readonly unknown[],
   rawOperationRows: readonly unknown[],
   rawHttpRows: readonly unknown[],
   rawEventRows: readonly unknown[],
@@ -1228,6 +1240,29 @@ function validatePersistedGitHubAggregates(
   const remoteOperationsById = new Map(
     [...preflights, ...objects].map((operation) => [operation.id, operation]),
   );
+  const reconciliations = status.operations.filter(
+    (operation) => operation.kind === "landing.reconcile",
+  );
+  const reconciliationOperationsById = new Map(
+    reconciliations.map((operation) => [operation.id, operation]),
+  );
+  const rawAttemptRowsByOrdinal = new Map<number, unknown>();
+  for (const rawAttemptRow of rawAttemptRows) {
+    const row = expectRow(rawAttemptRow, "landing attempt");
+    const ordinal = integer(
+      row.ordinal,
+      "landing_attempts.ordinal",
+      1,
+      LANDING_LOADER_MAX_ATTEMPTS,
+    );
+    if (rawAttemptRowsByOrdinal.has(ordinal)) {
+      invalid("Landing attempt query contains a duplicate ordinal");
+    }
+    rawAttemptRowsByOrdinal.set(ordinal, rawAttemptRow);
+  }
+  if (rawAttemptRowsByOrdinal.size !== status.attempts.length) {
+    invalid("Landing attempt rows and decoded attempts are not bijective");
+  }
   const rawOperationRowsById = new Map<string, unknown>();
   for (const rawOperationRow of rawOperationRows) {
     const row = expectRow(rawOperationRow, "landing operation");
@@ -1245,8 +1280,11 @@ function validatePersistedGitHubAggregates(
   for (const rawHttpRow of rawHttpRows) {
     const row = expectRow(rawHttpRow, "landing HTTP request");
     const operationId = assertUuid(row.operation_id, "landing_http_requests.operation_id");
-    if (!remoteOperationsById.has(operationId)) {
+    if (!remoteOperationsById.has(operationId) && !reconciliationOperationsById.has(operationId)) {
       invalid("Landing HTTP request belongs to an unsupported operation");
+    }
+    if (reconciliationOperationsById.has(operationId)) {
+      invalid("Loader-scope reconciliation cannot own a GitHub HTTP request");
     }
     const owned = httpRowsByOperation.get(operationId) ?? [];
     owned.push(rawHttpRow);
@@ -1264,8 +1302,14 @@ function validatePersistedGitHubAggregates(
       event.type === "landing.github.request.settled"
     ) {
       const operationId = (event.payload as { readonly operationId: string }).operationId;
-      if (!remoteOperationsById.has(operationId)) {
+      if (
+        !remoteOperationsById.has(operationId) &&
+        !reconciliationOperationsById.has(operationId)
+      ) {
         invalid("Landing GitHub request event belongs to an unsupported operation");
+      }
+      if (reconciliationOperationsById.has(operationId)) {
+        invalid("Loader-scope reconciliation cannot own a GitHub request event");
       }
       const owned = requestEventsByOperation.get(operationId) ?? [];
       owned.push(rawEvent);
@@ -1396,6 +1440,7 @@ function validatePersistedGitHubAggregates(
   if (objects.length !== 0 && objectMaterial === null) {
     invalid("GitHub object history has no reconstructed immutable material");
   }
+  const objectAggregatesById = new Map<string, Readonly<Record<string, unknown>>>();
   for (const operation of objects) {
     const immediatePreflights = status.operations.filter(
       (candidate) =>
@@ -1450,7 +1495,7 @@ function validatePersistedGitHubAggregates(
     ) {
       invalid("GitHub object upload is missing its preflight/action event bridge");
     }
-    const evidence: PersistedGitHubObjectsEvidenceV1 = validatePersistedGitHubObjectsOperationV1({
+    const objectAggregate = {
       material: objectMaterial,
       landingSha256: authority.sha256,
       operationStartState: operationStart.state,
@@ -1463,7 +1508,10 @@ function validatePersistedGitHubAggregates(
       httpRows: httpRowsByOperation.get(operation.id) ?? [],
       requestEvents: requestEventsByOperation.get(operation.id) ?? [],
       operationEvents: operationEventsByOperation.get(operation.id) ?? [],
-    });
+    };
+    const evidence: PersistedGitHubObjectsEvidenceV1 =
+      validatePersistedGitHubObjectsOperationV1(objectAggregate);
+    objectAggregatesById.set(operation.id, objectAggregate);
     const operationSettledEvent = status.events.find(
       (event) =>
         event.type === "landing.operation.settled" &&
@@ -1551,11 +1599,158 @@ function validatePersistedGitHubAggregates(
       }
     }
   }
+
+  let retrySubjectOperationId: string | null = null;
+  let retrySubjectRequestSha256: string | null = null;
+  for (const subject of objects) {
+    const subjectInput = subject.request.input as {
+      readonly retrySubjectOperationId: string | null;
+      readonly retrySubjectRequestSha256: string | null;
+    };
+    if (
+      subjectInput.retrySubjectOperationId !== retrySubjectOperationId ||
+      subjectInput.retrySubjectRequestSha256 !== retrySubjectRequestSha256
+    ) {
+      invalid("GitHub object retry changed or cleared its proved subject ancestry");
+    }
+    if (subject.status !== "interrupted" || subject.result?.outcome !== "reconciliation_required") {
+      continue;
+    }
+    const subjectStartSequence = status.events.find(
+      (event) =>
+        event.type === "landing.operation.started" &&
+        (event.payload as { readonly operationId: string }).operationId === subject.id,
+    )?.sequence;
+    if (subjectStartSequence === undefined) {
+      invalid("Object reconciliation subject has no chronological start authority");
+    }
+    const laterOperations = status.operations
+      .flatMap((operation) => {
+        const sequence = status.events.find(
+          (event) =>
+            event.type === "landing.operation.started" &&
+            (event.payload as { readonly operationId: string }).operationId === operation.id,
+        )?.sequence;
+        return sequence !== undefined && sequence > subjectStartSequence
+          ? [{ operation, sequence }]
+          : [];
+      })
+      .sort((left, right) => left.sequence - right.sequence);
+    const links: LandingOperationRecordV1[] = [];
+    for (const { operation } of laterOperations) {
+      if (
+        operation.kind !== "landing.reconcile" ||
+        (operation.request.input as { readonly subjectOperationId: string }).subjectOperationId !==
+          subject.id
+      ) {
+        invalid("Object reconciliation episode was bypassed by a competing later operation");
+      }
+      links.push(operation);
+      if (operation.status === "completed") break;
+    }
+    if (links.length === 0) {
+      if (
+        status.landing.state !== "reconciliation_required" ||
+        status.landing.resumeState !== "local_ready" ||
+        status.operations.at(-1)?.id !== subject.id
+      ) {
+        invalid("Unresolved object subject was bypassed by a competing later operation");
+      }
+      continue;
+    }
+    const subjectAggregate = objectAggregatesById.get(subject.id);
+    const subjectAttemptRow = rawAttemptRowsByOrdinal.get(subject.coordinatorAttempt);
+    const subjectSettlement = status.events.find(
+      (event) =>
+        event.type === "landing.operation.settled" &&
+        (event.payload as { readonly operationId: string }).operationId === subject.id,
+    );
+    const terminal = links.at(-1);
+    if (
+      subjectAggregate === undefined ||
+      subjectAttemptRow === undefined ||
+      subjectSettlement === undefined ||
+      terminal === undefined
+    ) {
+      invalid("Object reconciliation lost its subject or terminal source carrier");
+    }
+    const subjectAttemptSettlementEventRow = rawEventRows[subjectSettlement.sequence];
+    const subjectStateEventRow = rawEventRows[subjectSettlement.sequence + 1];
+    const terminalStart = status.events.find(
+      (event) =>
+        event.type === "landing.operation.started" &&
+        (event.payload as { readonly operationId: string }).operationId === terminal.id,
+    );
+    const terminalAttemptSettlement = status.events.find(
+      (event) =>
+        event.type === "landing.attempt.settled" &&
+        (event.payload as { readonly coordinatorAttempt: number }).coordinatorAttempt ===
+          terminal.coordinatorAttempt,
+    );
+    const terminalState = status.events.find(
+      (event) =>
+        event.type === "landing.state.changed" &&
+        (event.payload as LandingStateChangedEventV1).operationId === terminal.id,
+    );
+    const terminalEvent =
+      terminal.status === "started"
+        ? terminalStart
+        : terminal.status === "completed"
+          ? terminalState
+          : terminalAttemptSettlement;
+    if (
+      subjectAttemptSettlementEventRow === undefined ||
+      subjectStateEventRow === undefined ||
+      terminalEvent === undefined
+    ) {
+      invalid("Object reconciliation event suffix is incomplete");
+    }
+    const reconciliationAttemptRows = links.map((operation) => {
+      const row = rawAttemptRowsByOrdinal.get(operation.coordinatorAttempt);
+      return row ?? invalid("Object reconciliation attempt source row is missing");
+    });
+    const reconciliationOperationRows = links.map((operation) => {
+      const row = rawOperationRowsById.get(operation.id);
+      return row ?? invalid("Object reconciliation operation source row is missing");
+    });
+    const reconciliationOperationIds = new Set(links.map((operation) => operation.id));
+    const reconciliationHttpRows = rawHttpRows.filter((rawHttpRow) => {
+      const row = expectRow(rawHttpRow, "landing HTTP request");
+      return reconciliationOperationIds.has(
+        assertUuid(row.operation_id, "landing_http_requests.operation_id"),
+      );
+    });
+    const reconciliationEventRows = rawEventRows.slice(
+      subjectSettlement.sequence + 2,
+      terminalEvent.sequence,
+    );
+    const evidence = validatePersistedGitHubObjectsReconciliationV1({
+      subjectAggregate,
+      subjectAttemptRow,
+      subjectAttemptSettlementEventRow,
+      subjectStateEventRow,
+      reconciliationAttemptRows,
+      reconciliationOperationRows,
+      reconciliationHttpRows,
+      reconciliationEventRows,
+    });
+    if (evidence.status === "retry_stage_proven") {
+      retrySubjectOperationId = evidence.retrySubjectOperationId;
+      retrySubjectRequestSha256 = evidence.retrySubjectRequestSha256;
+    } else if (
+      status.landing.state !== "reconciliation_required" ||
+      status.landing.resumeState !== "local_ready" ||
+      status.operations.at(-1)?.id !== terminal.id
+    ) {
+      invalid("Open object reconciliation chain is not the current landing boundary");
+    }
+  }
   return requestEventCount;
 }
 
 function validateAggregate(
   status: LandingStatusV1,
+  rawAttemptRows: readonly unknown[],
   rawOperationRows: readonly unknown[],
   rawHttpRows: readonly unknown[],
   rawEventRows: readonly unknown[],
@@ -1674,9 +1869,6 @@ function validateAggregate(
         subject.resultSha256 !== input.subjectResultSha256
       ) {
         invalid("Landing reconciliation does not bind its settled original subject");
-      }
-      if (isObjectSubject && operation.status === "completed") {
-        invalid("Completed object reconciliation is outside the loader slice");
       }
       const resultValue = operation.result?.value;
       if (
@@ -1896,7 +2088,19 @@ function validateAggregate(
       }
       if (operation.kind === "landing.reconcile") {
         const value = operation.result.value;
-        return value !== null && "nextState" in value && value.nextState === "local_ready";
+        if (
+          operation.result.boundary !== "subject_settled" ||
+          value === null ||
+          !("nextState" in value) ||
+          value.nextState !== "local_ready"
+        ) {
+          return false;
+        }
+        const subjectId = (operation.request.input as { readonly subjectOperationId: string })
+          .subjectOperationId;
+        return operations.some(
+          (candidate) => candidate.id === subjectId && candidate.kind === "local_ref.create",
+        );
       }
       return false;
     });
@@ -2414,6 +2618,7 @@ function validateAggregate(
   }
   const remoteRequestEventCount = validatePersistedGitHubAggregates(
     status,
+    rawAttemptRows,
     rawOperationRows,
     rawHttpRows,
     rawEventRows,
@@ -3149,7 +3354,7 @@ export class LandingLedger {
         ? invalid("GitHub object history has no immutable landing authority")
         : reconstructGitHubLandingMaterial(status, this.#assertImmutableEvidence(status), authority)
       : null;
-    validateAggregate(status, operationRows, httpRows, eventRows, objectMaterial);
+    validateAggregate(status, attemptRows, operationRows, httpRows, eventRows, objectMaterial);
     return status;
   }
 

@@ -60,9 +60,18 @@ const fixtures: LandingGitHubMaterialFixture[] = [];
 const STARTED_AT = "2026-08-08T12:00:00.000Z";
 const FINISHED_AT = "2026-08-08T12:01:00.000Z";
 const OBJECT_OPERATION_ID = "90000000-0000-4000-8000-000000000001";
+const RETRY_OBJECT_OPERATION_ID = "90000000-0000-4000-8000-000000000002";
+const RECONCILIATION_OPERATION_IDS = Array.from(
+  { length: 5 },
+  (_, index) => `91000000-0000-4000-8000-${(index + 1).toString(16).padStart(12, "0")}`,
+);
 const OBJECT_REQUEST_IDS = Array.from(
   { length: 8 },
   (_, index) => `90000000-0000-4000-8000-${(index + 16).toString(16).padStart(12, "0")}`,
+);
+const RETRY_OBJECT_REQUEST_IDS = Array.from(
+  { length: 8 },
+  (_, index) => `92000000-0000-4000-8000-${(index + 16).toString(16).padStart(12, "0")}`,
 );
 
 afterEach(() => {
@@ -193,6 +202,12 @@ function appendEvent(
 function injectStartedObjects(
   fixture: LandingGitHubMaterialFixture,
   completedPreflight: LandingStatusV1,
+  options: {
+    readonly operationId?: string;
+    readonly kindAttempt?: number;
+    readonly retrySubjectOperationId?: string | null;
+    readonly retrySubjectRequestSha256?: string | null;
+  } = {},
 ): LandingOperationRequestV1 & { readonly kind: "github.objects.upload" } {
   const preflight = completedPreflight.operations.at(-1);
   const attempt = completedPreflight.attempts.at(-1);
@@ -205,12 +220,14 @@ function injectStartedObjects(
   ) {
     throw new Error("Fixture did not reach its completed-preflight boundary");
   }
+  const operationId = options.operationId ?? OBJECT_OPERATION_ID;
+  const kindAttempt = options.kindAttempt ?? 1;
   const operation: LandingOperationRequestV1 = {
     schemaVersion: 1,
-    operationId: OBJECT_OPERATION_ID,
+    operationId,
     landingId: fixture.landingId,
     coordinatorAttempt: attempt.ordinal,
-    kindAttempt: 1,
+    kindAttempt,
     kind: "github.objects.upload",
     expectedState: "local_ready",
     expectedVersion: completedPreflight.landing.version,
@@ -220,8 +237,8 @@ function injectStartedObjects(
       changedPathsSha256: completedPreflight.landing.changedPathsSha256,
       preflightOperationId: preflight.id,
       preflightResultSha256: preflight.resultSha256,
-      retrySubjectOperationId: null,
-      retrySubjectRequestSha256: null,
+      retrySubjectOperationId: options.retrySubjectOperationId ?? null,
+      retrySubjectRequestSha256: options.retrySubjectRequestSha256 ?? null,
     },
   };
   const operationJson = canonicalLandingJson(operation);
@@ -235,12 +252,13 @@ function injectStartedObjects(
             "(id, landing_id, coordinator_attempt, kind, kind_attempt, status, request_sha256, " +
             "request_json, observation_sha256, observation_json, result_sha256, result_json, " +
             "error_code, started_at, finished_at) " +
-            "VALUES (?, ?, ?, 'github.objects.upload', 1, 'started', ?, ?, NULL, NULL, NULL, NULL, NULL, ?, NULL)",
+            "VALUES (?, ?, ?, 'github.objects.upload', ?, 'started', ?, ?, NULL, NULL, NULL, NULL, NULL, ?, NULL)",
         )
         .run(
           operation.operationId,
           fixture.landingId,
           attempt.ordinal,
+          kindAttempt,
           requestSha256,
           operationJson,
           STARTED_AT,
@@ -252,7 +270,7 @@ function injectStartedObjects(
       operationId: operation.operationId,
       coordinatorAttempt: attempt.ordinal,
       kind: "github.objects.upload",
-      kindAttempt: 1,
+      kindAttempt,
       requestSha256,
     } satisfies LandingOperationStartedEventV1);
     expect(
@@ -373,14 +391,15 @@ function completeObjectExchanges(
   material: LandingGitHubMaterialSnapshotV1,
   preflightStatus: LandingStatusV1,
   operation: LandingOperationRequestV1 & { readonly kind: "github.objects.upload" },
+  requestIds: readonly string[] = OBJECT_REQUEST_IDS,
 ): PersistedObjectExchange[] {
   const exchanges: PersistedObjectExchange[] = [];
-  for (let index = 0; index < OBJECT_REQUEST_IDS.length; index += 1) {
+  for (let index = 0; index < requestIds.length; index += 1) {
     const projection = validateGitHubObjectsUploadHttpHistoryV1(
       objectHistoryInput(material, preflightStatus, operation, exchanges),
     );
     if (projection.status === "complete") return exchanges;
-    const requestId = OBJECT_REQUEST_IDS[index];
+    const requestId = requestIds[index];
     if (requestId === undefined) throw new Error("Object request ID fixture is exhausted");
     const request = { ...projection.nextRequest, requestId } as LandingHttpRequestV1;
     const result = successfulObjectResult(preflightStatus, request);
@@ -399,6 +418,7 @@ function terminalActorExchange(
   preflightStatus: LandingStatusV1,
   operation: LandingOperationRequestV1 & { readonly kind: "github.objects.upload" },
   outcome: "failed" | "ambiguous",
+  requestId = OBJECT_REQUEST_IDS[0] ?? "",
 ): PersistedObjectExchange {
   const projection = validateGitHubObjectsUploadHttpHistoryV1(
     objectHistoryInput(material, preflightStatus, operation, []),
@@ -408,7 +428,7 @@ function terminalActorExchange(
   }
   const request = {
     ...projection.nextRequest,
-    requestId: OBJECT_REQUEST_IDS[0] ?? "",
+    requestId,
   } as LandingHttpRequestV1;
   const result: LandingHttpResultV1 = {
     schemaVersion: 1,
@@ -425,6 +445,60 @@ function terminalActorExchange(
     result,
     resultSha256: digestLandingRecord(result),
   };
+}
+
+function effectfulAmbiguousExchanges(
+  material: LandingGitHubMaterialSnapshotV1,
+  preflightStatus: LandingStatusV1,
+  operation: LandingOperationRequestV1 & { readonly kind: "github.objects.upload" },
+  requestIds: readonly string[],
+): readonly PersistedObjectExchange[] {
+  const actorProjection = validateGitHubObjectsUploadHttpHistoryV1(
+    objectHistoryInput(material, preflightStatus, operation, []),
+  );
+  const actorRequestId = requestIds[0];
+  const postRequestId = requestIds[1];
+  if (
+    actorProjection.status !== "next_request" ||
+    actorProjection.nextRequest.kind !== "github.actor.get" ||
+    actorRequestId === undefined ||
+    postRequestId === undefined
+  ) {
+    throw new Error("Effectful object fixture lacks its bounded request identities");
+  }
+  const actorRequest = { ...actorProjection.nextRequest, requestId: actorRequestId };
+  const actorResult = successfulObjectResult(preflightStatus, actorRequest);
+  const actor = {
+    request: actorRequest,
+    requestSha256: digestLandingRecord(actorRequest),
+    result: actorResult,
+    resultSha256: digestLandingRecord(actorResult),
+  } satisfies PersistedObjectExchange;
+  const postProjection = validateGitHubObjectsUploadHttpHistoryV1(
+    objectHistoryInput(material, preflightStatus, operation, [actor]),
+  );
+  if (postProjection.status !== "next_request" || postProjection.nextRequest.method !== "POST") {
+    throw new Error("Effectful object fixture did not reach its first immutable-object POST");
+  }
+  const postRequest = { ...postProjection.nextRequest, requestId: postRequestId };
+  const postResult: LandingHttpResultV1 = {
+    schemaVersion: 1,
+    requestId: postRequest.requestId,
+    kind: postRequest.kind,
+    outcome: "ambiguous",
+    httpStatus: null,
+    projection: null,
+    errorCode: "GITHUB_OUTCOME_AMBIGUOUS",
+  };
+  return [
+    actor,
+    {
+      request: postRequest,
+      requestSha256: digestLandingRecord(postRequest),
+      result: postResult,
+      resultSha256: digestLandingRecord(postResult),
+    },
+  ];
 }
 
 function persistObjectExchange(
@@ -493,12 +567,15 @@ function settleObjects(
   material: LandingGitHubMaterialSnapshotV1,
   operation: LandingOperationRequestV1 & { readonly kind: "github.objects.upload" },
   startedStatus: LandingStatusV1,
-  mode: "complete" | "failed" | "ambiguous",
+  mode: "complete" | "failed" | "ambiguous" | "post_ambiguous",
+  requestIds: readonly string[] = OBJECT_REQUEST_IDS,
 ): void {
   const exchanges =
     mode === "complete"
-      ? completeObjectExchanges(material, preflightStatus, operation)
-      : [terminalActorExchange(material, preflightStatus, operation, mode)];
+      ? completeObjectExchanges(material, preflightStatus, operation, requestIds)
+      : mode === "post_ambiguous"
+        ? effectfulAmbiguousExchanges(material, preflightStatus, operation, requestIds)
+        : [terminalActorExchange(material, preflightStatus, operation, mode, requestIds[0])];
   const completed =
     mode === "complete"
       ? validateGitHubObjectsUploadHttpHistoryV1(
@@ -508,12 +585,29 @@ function settleObjects(
   if (mode === "complete" && completed?.status !== "complete") {
     throw new Error("Successful object exchanges did not complete");
   }
+  const actor = exchanges[0];
   const observation: LandingOperationObservationV1 | null =
-    completed?.status === "complete" ? completed.observation : null;
+    completed?.status === "complete"
+      ? completed.observation
+      : mode === "post_ambiguous" && actor !== undefined
+        ? {
+            schemaVersion: 1,
+            operationId: operation.operationId,
+            kind: "github.objects.upload",
+            phase: "pre_effect",
+            facts: [
+              {
+                fact: "actor",
+                requestId: actor.request.requestId,
+                resultSha256: actor.resultSha256,
+              },
+            ],
+          }
+        : null;
   const errorCode =
     mode === "failed"
       ? "GITHUB_PERMISSION_DENIED"
-      : mode === "ambiguous"
+      : mode === "ambiguous" || mode === "post_ambiguous"
         ? "GITHUB_OUTCOME_AMBIGUOUS"
         : null;
   const result: LandingOperationResultV1 =
@@ -719,6 +813,246 @@ function injectCompletedObjectTakeover(
   return successor;
 }
 
+function injectCompletedObjectRetryReconciliation(
+  fixture: LandingGitHubMaterialFixture,
+  unresolved: LandingStatusV1,
+  takeoverLinks = 0,
+  subjectOverride?: LandingStatusV1["operations"][number],
+  terminalSubjectOverride?: LandingStatusV1["operations"][number],
+): {
+  readonly operationIds: readonly string[];
+  readonly terminalOperationId: string;
+} {
+  const boundarySubject = unresolved.operations.at(-1);
+  const subject = subjectOverride ?? boundarySubject;
+  if (
+    boundarySubject?.kind !== "github.objects.upload" ||
+    boundarySubject.status !== "interrupted" ||
+    boundarySubject.result?.outcome !== "reconciliation_required" ||
+    subject?.kind !== "github.objects.upload" ||
+    subject.status !== "interrupted" ||
+    subject.result?.outcome !== "reconciliation_required" ||
+    subject.resultSha256 === null ||
+    (terminalSubjectOverride !== undefined &&
+      (terminalSubjectOverride.kind !== "github.objects.upload" ||
+        terminalSubjectOverride.status !== "interrupted" ||
+        terminalSubjectOverride.result?.outcome !== "reconciliation_required" ||
+        terminalSubjectOverride.resultSha256 === null)) ||
+    unresolved.landing.state !== "reconciliation_required" ||
+    unresolved.landing.resumeState !== "local_ready" ||
+    unresolved.landing.landingSha256 === null
+  ) {
+    throw new Error("Fixture did not reach an unresolved object reconciliation boundary");
+  }
+  const linkCount = takeoverLinks + 1;
+  const priorKindAttempts = unresolved.operations.filter(
+    (operation) => operation.kind === "landing.reconcile",
+  ).length;
+  const operationIds = RECONCILIATION_OPERATION_IDS.slice(
+    priorKindAttempts,
+    priorKindAttempts + linkCount,
+  );
+  if (operationIds.length !== linkCount || boundarySubject.coordinatorAttempt + linkCount > 8) {
+    throw new Error("Reconciliation fixture exceeds its bounded identities or attempts");
+  }
+  const database = new Database(fixture.databasePath);
+  try {
+    for (const [index, operationId] of operationIds.entries()) {
+      const coordinatorAttempt = boundarySubject.coordinatorAttempt + index + 1;
+      const kindAttempt = priorKindAttempts + index + 1;
+      const completed = index === operationIds.length - 1;
+      const linkSubject =
+        completed && terminalSubjectOverride !== undefined ? terminalSubjectOverride : subject;
+      const linkSubjectResultSha256 = linkSubject.resultSha256;
+      if (linkSubjectResultSha256 === null) {
+        throw new Error("Reconciliation link subject lost its settled result digest");
+      }
+      const subjectProjection = {
+        schemaVersion: 1,
+        operationId: linkSubject.id,
+        landingId: linkSubject.landingId,
+        coordinatorAttempt: linkSubject.coordinatorAttempt,
+        kind: linkSubject.kind,
+        kindAttempt: linkSubject.kindAttempt,
+        status: linkSubject.status,
+        requestSha256: linkSubject.requestSha256,
+        observationSha256: linkSubject.observationSha256,
+        resultSha256: linkSubject.resultSha256,
+        errorCode: linkSubject.errorCode,
+      };
+      const observation: LandingOperationObservationV1 = {
+        schemaVersion: 1,
+        operationId,
+        kind: "landing.reconcile",
+        phase: "reconciliation",
+        facts: [
+          {
+            fact: "subject_operation",
+            requestId: null,
+            resultSha256: digestLandingRecord(subjectProjection),
+          },
+        ],
+      };
+      const request: LandingOperationRequestV1 = {
+        schemaVersion: 1,
+        operationId,
+        landingId: fixture.landingId,
+        coordinatorAttempt,
+        kindAttempt,
+        kind: "landing.reconcile",
+        expectedState: "reconciliation_required",
+        expectedVersion: unresolved.landing.version,
+        input: {
+          landingSha256: unresolved.landing.landingSha256,
+          resumeState: "local_ready",
+          subjectOperationId: linkSubject.id,
+          subjectRequestSha256: linkSubject.requestSha256,
+          subjectResultSha256: linkSubjectResultSha256,
+        },
+      };
+      const result: LandingOperationResultV1 = completed
+        ? {
+            schemaVersion: 1,
+            operationId,
+            kind: "landing.reconcile",
+            outcome: "completed",
+            boundary: "retry_stage_proven",
+            evidence: observation.facts.map(({ requestId, resultSha256 }) => ({
+              requestId,
+              resultSha256,
+            })),
+            value: {
+              subjectOperationId: linkSubject.id,
+              nextState: "local_ready",
+              remoteResidue: "none",
+              stageValue: null,
+            },
+            errorCode: null,
+          }
+        : {
+            schemaVersion: 1,
+            operationId,
+            kind: "landing.reconcile",
+            outcome: "reconciliation_required",
+            boundary: "reconciliation_required",
+            evidence: observation.facts.map(({ requestId, resultSha256 }) => ({
+              requestId,
+              resultSha256,
+            })),
+            value: { subjectOperationId: linkSubject.id, remoteResidue: "none" },
+            errorCode: "LANDING_COORDINATOR_TAKEOVER",
+          };
+      const requestJson = canonicalLandingJson(request);
+      const observationJson = canonicalLandingJson(observation);
+      const resultJson = canonicalLandingJson(result);
+      expect(
+        database
+          .prepare(
+            "INSERT INTO landing_attempts " +
+              "(landing_id, ordinal, status, started_at, finished_at, error_code) " +
+              "VALUES (?, ?, ?, ?, ?, ?)",
+          )
+          .run(
+            fixture.landingId,
+            coordinatorAttempt,
+            completed ? "completed" : "interrupted",
+            STARTED_AT,
+            FINISHED_AT,
+            completed ? null : "LANDING_COORDINATOR_TAKEOVER",
+          ).changes,
+      ).toBe(1);
+      appendEvent(database, fixture.landingId, "landing.attempt.started", {
+        schemaVersion: 1,
+        landingId: fixture.landingId,
+        coordinatorAttempt,
+      });
+      expect(
+        database
+          .prepare(
+            "INSERT INTO landing_operations " +
+              "(id, landing_id, coordinator_attempt, kind, kind_attempt, status, request_sha256, " +
+              "request_json, observation_sha256, observation_json, result_sha256, result_json, " +
+              "error_code, started_at, finished_at) " +
+              "VALUES (?, ?, ?, 'landing.reconcile', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          )
+          .run(
+            operationId,
+            fixture.landingId,
+            coordinatorAttempt,
+            kindAttempt,
+            completed ? "completed" : "interrupted",
+            sha256(requestJson),
+            requestJson,
+            sha256(observationJson),
+            observationJson,
+            sha256(resultJson),
+            resultJson,
+            completed ? null : "LANDING_COORDINATOR_TAKEOVER",
+            STARTED_AT,
+            FINISHED_AT,
+          ).changes,
+      ).toBe(1);
+      appendEvent(database, fixture.landingId, "landing.operation.started", {
+        schemaVersion: 1,
+        landingId: fixture.landingId,
+        operationId,
+        coordinatorAttempt,
+        kind: "landing.reconcile",
+        kindAttempt,
+        requestSha256: sha256(requestJson),
+      } satisfies LandingOperationStartedEventV1);
+      appendEvent(database, fixture.landingId, "landing.operation.settled", {
+        schemaVersion: 1,
+        landingId: fixture.landingId,
+        operationId,
+        coordinatorAttempt,
+        kind: "landing.reconcile",
+        outcome: result.outcome,
+        resultSha256: sha256(resultJson),
+        errorCode: result.errorCode,
+      } satisfies LandingOperationSettledEventV1);
+      appendEvent(database, fixture.landingId, "landing.attempt.settled", {
+        schemaVersion: 1,
+        landingId: fixture.landingId,
+        coordinatorAttempt,
+        outcome: completed ? "completed" : "interrupted",
+        errorCode: completed ? null : "LANDING_COORDINATOR_TAKEOVER",
+      });
+      if (completed) {
+        expect(
+          database
+            .prepare(
+              "UPDATE landings SET state = 'local_ready', resume_state = NULL, error_code = NULL, " +
+                "attempt_count = ?, version = version + 1, updated_at = ? " +
+                "WHERE id = ? AND state = 'reconciliation_required' AND version = ?",
+            )
+            .run(coordinatorAttempt, FINISHED_AT, fixture.landingId, unresolved.landing.version)
+            .changes,
+        ).toBe(1);
+        appendEvent(database, fixture.landingId, "landing.state.changed", {
+          schemaVersion: 1,
+          landingId: fixture.landingId,
+          from: "reconciliation_required",
+          to: "local_ready",
+          version: unresolved.landing.version + 1,
+          operationId,
+        } satisfies LandingStateChangedEventV1);
+      } else {
+        expect(
+          database
+            .prepare("UPDATE landings SET attempt_count = ?, updated_at = ? WHERE id = ?")
+            .run(coordinatorAttempt, FINISHED_AT, fixture.landingId).changes,
+        ).toBe(1);
+      }
+    }
+  } finally {
+    database.close();
+  }
+  const terminalOperationId = operationIds.at(-1);
+  if (terminalOperationId === undefined) throw new Error("Reconciliation terminal vanished");
+  return { operationIds, terminalOperationId };
+}
+
 describe("landing ledger persisted GitHub object loader", () => {
   it("loads a started object upload immediately after its completed same-attempt preflight", async () => {
     const { fixture, preflightStatus, startedStatus } = await createStartedObjectFixture();
@@ -847,6 +1181,401 @@ describe("landing ledger persisted GitHub object loader", () => {
       status: "interrupted",
       result: { outcome: "reconciliation_required", boundary: "reconciliation_required" },
     });
+  });
+
+  it("restarts from a completed zero-HTTP object retry proof without inventing a second local-ready proof", async () => {
+    const scenario = await createStartedObjectFixture();
+    settleObjects(
+      scenario.fixture,
+      scenario.preflightStatus,
+      scenario.material,
+      scenario.operation,
+      scenario.startedStatus,
+      "ambiguous",
+    );
+    const unresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    const injected = injectCompletedObjectRetryReconciliation(scenario.fixture, unresolved);
+
+    const loaded = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    expect(loaded.landing).toMatchObject({
+      state: "local_ready",
+      resumeState: null,
+      errorCode: null,
+      version: unresolved.landing.version + 1,
+    });
+    expect(loaded.attempts.at(-1)).toMatchObject({ status: "completed", errorCode: null });
+    expect(loaded.operations.at(-1)).toMatchObject({
+      id: injected.terminalOperationId,
+      kind: "landing.reconcile",
+      status: "completed",
+      result: {
+        outcome: "completed",
+        boundary: "retry_stage_proven",
+        value: { nextState: "local_ready", stageValue: null },
+      },
+    });
+    expect(scenario.fixture.store.getLandingStatus(scenario.fixture.landingId)).toEqual(loaded);
+  });
+
+  it("truthfully reopens local-ready after reconciling an effectful ambiguous object POST", async () => {
+    const scenario = await createStartedObjectFixture();
+    settleObjects(
+      scenario.fixture,
+      scenario.preflightStatus,
+      scenario.material,
+      scenario.operation,
+      scenario.startedStatus,
+      "post_ambiguous",
+    );
+    const unresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    injectCompletedObjectRetryReconciliation(scenario.fixture, unresolved);
+
+    const loaded = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    expect(loaded.landing).toMatchObject({
+      state: "local_ready",
+      resumeState: null,
+      errorCode: null,
+    });
+    expect(loaded.operations.at(-1)?.result).toMatchObject({
+      outcome: "completed",
+      boundary: "retry_stage_proven",
+    });
+  });
+
+  it("inherits null retry authority across repeated zero-POST object reconciliation episodes", async () => {
+    const scenario = await createStartedObjectFixture();
+    settleObjects(
+      scenario.fixture,
+      scenario.preflightStatus,
+      scenario.material,
+      scenario.operation,
+      scenario.startedStatus,
+      "ambiguous",
+    );
+    const firstUnresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    injectCompletedObjectRetryReconciliation(scenario.fixture, firstUnresolved);
+    scenario.fixture.store.admitLandingResume(scenario.fixture.landingId);
+    let retryPreflight!: Awaited<ReturnType<typeof completePreflight>>;
+    await scenario.fixture.leases.withLease(UNIT_RUN_ID, async (guard) => {
+      retryPreflight = await completePreflight(scenario.fixture, guard);
+    });
+    const retryOperation = injectStartedObjects(scenario.fixture, retryPreflight.status, {
+      operationId: RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 2,
+    });
+    const retryStarted = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    expect(retryOperation.input).toMatchObject({
+      retrySubjectOperationId: null,
+      retrySubjectRequestSha256: null,
+    });
+    settleObjects(
+      scenario.fixture,
+      retryPreflight.status,
+      retryPreflight.material,
+      retryOperation,
+      retryStarted,
+      "ambiguous",
+      RETRY_OBJECT_REQUEST_IDS,
+    );
+    const secondUnresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    injectCompletedObjectRetryReconciliation(scenario.fixture, secondUnresolved);
+
+    const loaded = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    expect(loaded.landing.state).toBe("local_ready");
+    expect(
+      loaded.operations.filter(
+        (operation) => operation.kind === "landing.reconcile" && operation.status === "completed",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("uses event chronology through the bounded attempt-eight takeover chain, independent of rowid", async () => {
+    const scenario = await createStartedObjectFixture();
+    settleObjects(
+      scenario.fixture,
+      scenario.preflightStatus,
+      scenario.material,
+      scenario.operation,
+      scenario.startedStatus,
+      "ambiguous",
+    );
+    const unresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    const injected = injectCompletedObjectRetryReconciliation(scenario.fixture, unresolved, 4);
+    const firstReconciliationId = injected.operationIds[0];
+    if (firstReconciliationId === undefined) throw new Error("Bounded chain lost its first link");
+    const database = new Database(scenario.fixture.databasePath);
+    try {
+      expect(
+        database
+          .prepare(
+            "UPDATE landing_operations SET rowid = " +
+              "(SELECT MAX(rowid) + 100 FROM landing_operations WHERE landing_id = ?) " +
+              "WHERE id = ? AND landing_id = ?",
+          )
+          .run(scenario.fixture.landingId, firstReconciliationId, scenario.fixture.landingId)
+          .changes,
+      ).toBe(1);
+    } finally {
+      database.close();
+    }
+
+    const loaded = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    expect(loaded.landing).toMatchObject({ state: "local_ready", attemptCount: 8 });
+    expect(loaded.attempts.at(-1)).toMatchObject({ ordinal: 8, status: "completed" });
+    expect(
+      loaded.operations
+        .filter((operation) => operation.kind === "landing.reconcile")
+        .map((operation) => operation.id),
+    ).toEqual(injected.operationIds);
+  });
+
+  it("rejects reconciliation-owned HTTP and persisted-event order corruption", async () => {
+    const httpScenario = await createStartedObjectFixture();
+    settleObjects(
+      httpScenario.fixture,
+      httpScenario.preflightStatus,
+      httpScenario.material,
+      httpScenario.operation,
+      httpScenario.startedStatus,
+      "ambiguous",
+    );
+    const httpUnresolved = httpScenario.fixture.store.getLandingStatus(
+      httpScenario.fixture.landingId,
+    );
+    const httpReconciliation = injectCompletedObjectRetryReconciliation(
+      httpScenario.fixture,
+      httpUnresolved,
+    );
+    const httpTerminal = httpScenario.fixture.store
+      .getLandingStatus(httpScenario.fixture.landingId)
+      .operations.find((operation) => operation.id === httpReconciliation.terminalOperationId);
+    if (httpTerminal === undefined) throw new Error("HTTP corruption lost reconciliation link");
+    const httpDatabase = new Database(httpScenario.fixture.databasePath);
+    try {
+      const requestId = "93000000-0000-4000-8000-000000000001";
+      const requestJson = "{}";
+      expect(
+        httpDatabase
+          .prepare(
+            "INSERT INTO landing_http_requests " +
+              "(id, landing_id, operation_id, coordinator_attempt, operation_kind, " +
+              "request_ordinal, kind, method, request_sha256, request_json, status, outcome, " +
+              "http_status, result_sha256, result_json, error_code, admitted_at, settled_at) " +
+              "VALUES (?, ?, ?, ?, 'landing.reconcile', 1, 'github.actor.get', 'GET', ?, ?, " +
+              "'admitted', NULL, NULL, NULL, NULL, NULL, ?, NULL)",
+          )
+          .run(
+            requestId,
+            httpScenario.fixture.landingId,
+            httpTerminal.id,
+            httpTerminal.coordinatorAttempt,
+            sha256(requestJson),
+            requestJson,
+            FINISHED_AT,
+          ).changes,
+      ).toBe(1);
+    } finally {
+      httpDatabase.close();
+    }
+    expectRecordInvalid(() =>
+      httpScenario.fixture.store.getLandingStatus(httpScenario.fixture.landingId),
+    );
+
+    const eventScenario = await createStartedObjectFixture();
+    settleObjects(
+      eventScenario.fixture,
+      eventScenario.preflightStatus,
+      eventScenario.material,
+      eventScenario.operation,
+      eventScenario.startedStatus,
+      "ambiguous",
+    );
+    const eventUnresolved = eventScenario.fixture.store.getLandingStatus(
+      eventScenario.fixture.landingId,
+    );
+    injectCompletedObjectRetryReconciliation(eventScenario.fixture, eventUnresolved);
+    const eventDatabase = new Database(eventScenario.fixture.databasePath);
+    try {
+      expect(
+        eventDatabase
+          .prepare(
+            "UPDATE landing_events SET id = " +
+              "(SELECT MAX(id) + 100 FROM landing_events) " +
+              "WHERE landing_id = ? AND sequence = (" +
+              "SELECT MAX(sequence) FROM landing_events " +
+              "WHERE landing_id = ? AND type = 'landing.attempt.started')",
+          )
+          .run(eventScenario.fixture.landingId, eventScenario.fixture.landingId).changes,
+      ).toBe(1);
+    } finally {
+      eventDatabase.close();
+    }
+    expectRecordInvalid(() =>
+      eventScenario.fixture.store.getLandingStatus(eventScenario.fixture.landingId),
+    );
+  });
+
+  it("refuses to clear effectful retry ancestry on the next object operation", async () => {
+    const scenario = await createStartedObjectFixture();
+    settleObjects(
+      scenario.fixture,
+      scenario.preflightStatus,
+      scenario.material,
+      scenario.operation,
+      scenario.startedStatus,
+      "post_ambiguous",
+    );
+    const unresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    injectCompletedObjectRetryReconciliation(scenario.fixture, unresolved);
+    scenario.fixture.store.admitLandingResume(scenario.fixture.landingId);
+    let retryPreflight!: Awaited<ReturnType<typeof completePreflight>>;
+    await scenario.fixture.leases.withLease(UNIT_RUN_ID, async (guard) => {
+      retryPreflight = await completePreflight(scenario.fixture, guard);
+    });
+    injectStartedObjects(scenario.fixture, retryPreflight.status, {
+      operationId: RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 2,
+      retrySubjectOperationId: null,
+      retrySubjectRequestSha256: null,
+    });
+
+    expectRecordInvalid(() => scenario.fixture.store.getLandingStatus(scenario.fixture.landingId));
+  });
+
+  it("refuses an older-subject reconcile after an interrupted current-subject link", async () => {
+    const scenario = await createStartedObjectFixture();
+    settleObjects(
+      scenario.fixture,
+      scenario.preflightStatus,
+      scenario.material,
+      scenario.operation,
+      scenario.startedStatus,
+      "ambiguous",
+    );
+    const firstUnresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    const olderSubject = firstUnresolved.operations.at(-1);
+    if (olderSubject?.kind !== "github.objects.upload") {
+      throw new Error("Competing-subject fixture lost its first object subject");
+    }
+    injectCompletedObjectRetryReconciliation(scenario.fixture, firstUnresolved);
+    scenario.fixture.store.admitLandingResume(scenario.fixture.landingId);
+    let retryPreflight!: Awaited<ReturnType<typeof completePreflight>>;
+    await scenario.fixture.leases.withLease(UNIT_RUN_ID, async (guard) => {
+      retryPreflight = await completePreflight(scenario.fixture, guard);
+    });
+    const retryOperation = injectStartedObjects(scenario.fixture, retryPreflight.status, {
+      operationId: RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 2,
+    });
+    const retryStarted = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    settleObjects(
+      scenario.fixture,
+      retryPreflight.status,
+      retryPreflight.material,
+      retryOperation,
+      retryStarted,
+      "ambiguous",
+      RETRY_OBJECT_REQUEST_IDS,
+    );
+    const currentUnresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    injectCompletedObjectRetryReconciliation(
+      scenario.fixture,
+      currentUnresolved,
+      1,
+      undefined,
+      olderSubject,
+    );
+
+    expectRecordInvalid(() => scenario.fixture.store.getLandingStatus(scenario.fixture.landingId));
+  });
+
+  it("keeps object subject_settled reconciliation outside the loader authority slice", async () => {
+    const scenario = await createStartedObjectFixture();
+    settleObjects(
+      scenario.fixture,
+      scenario.preflightStatus,
+      scenario.material,
+      scenario.operation,
+      scenario.startedStatus,
+      "ambiguous",
+    );
+    const unresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    const injected = injectCompletedObjectRetryReconciliation(scenario.fixture, unresolved);
+    const settled = scenario.fixture.store
+      .getLandingStatus(scenario.fixture.landingId)
+      .operations.find((operation) => operation.id === injected.terminalOperationId);
+    const subjectId = (
+      settled?.request.input as { readonly subjectOperationId?: string } | undefined
+    )?.subjectOperationId;
+    if (
+      settled?.kind !== "landing.reconcile" ||
+      settled.observation === null ||
+      subjectId === undefined ||
+      unresolved.landing.candidateCommitSha1 === null
+    ) {
+      throw new Error("Subject-settled corruption lost its reconciliation evidence");
+    }
+    const result: LandingOperationResultV1 = {
+      schemaVersion: 1,
+      operationId: settled.id,
+      kind: "landing.reconcile",
+      outcome: "completed",
+      boundary: "subject_settled",
+      evidence: settled.observation.facts.map(({ requestId, resultSha256 }) => ({
+        requestId,
+        resultSha256,
+      })),
+      value: {
+        subjectOperationId: subjectId,
+        nextState: "local_ready",
+        remoteResidue: "none",
+        stageValue: {
+          headRef: unresolved.landing.headRef,
+          candidateCommitSha1: unresolved.landing.candidateCommitSha1,
+          localRefOutcome: "reconciled",
+          updateRefExitCode: null,
+        },
+      },
+      errorCode: null,
+    };
+    const resultJson = canonicalLandingJson(result);
+    const resultSha256 = sha256(resultJson);
+    const settledEvent = {
+      schemaVersion: 1,
+      landingId: scenario.fixture.landingId,
+      operationId: settled.id,
+      coordinatorAttempt: settled.coordinatorAttempt,
+      kind: "landing.reconcile",
+      outcome: "completed",
+      resultSha256,
+      errorCode: null,
+    } satisfies LandingOperationSettledEventV1;
+    const database = new Database(scenario.fixture.databasePath);
+    try {
+      expect(
+        database
+          .prepare("UPDATE landing_operations SET result_sha256 = ?, result_json = ? WHERE id = ?")
+          .run(resultSha256, resultJson, settled.id).changes,
+      ).toBe(1);
+      expect(
+        database
+          .prepare(
+            "UPDATE landing_events SET payload_json = ? WHERE landing_id = ? " +
+              "AND type = 'landing.operation.settled' AND sequence = (" +
+              "SELECT MAX(sequence) FROM landing_events WHERE landing_id = ? " +
+              "AND type = 'landing.operation.settled')",
+          )
+          .run(
+            canonicalLandingJson(settledEvent),
+            scenario.fixture.landingId,
+            scenario.fixture.landingId,
+          ).changes,
+      ).toBe(1);
+    } finally {
+      database.close();
+    }
+
+    expectRecordInvalid(() => scenario.fixture.store.getLandingStatus(scenario.fixture.landingId));
   });
 
   it("preserves completed object bytes across takeover into a zero-op objects-ready successor", async () => {
