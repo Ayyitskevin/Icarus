@@ -132,6 +132,7 @@ export type {
   GitHubLandingProfileV1,
   LandingDecisionV1,
   LandingDigestV1,
+  LandingReceiptV1,
   LocalRefFactV1,
 } from "./landing-records.js";
 export {

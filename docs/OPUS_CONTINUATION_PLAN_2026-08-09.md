@@ -338,6 +338,30 @@ S4 and S5 are parallel-safe by construction (new files only). S6 closes.
 - **Evidence:** crash-matrix results enumerated per phase; full
   `pnpm check`; honest environment-limited list.
 
+#### S2b execution note (added 2026-08-09 while executing)
+
+S2b is shipping in slices rather than one pull request, for a reason worth
+recording: several of its steps are *fences* rather than features. The
+`PACKET3_STATES` and `PACKET3_OPERATION_KINDS` allowlists, the
+no-HTTP/no-receipt refusal, and the operation-cardinality guard exist so that
+Packet 3 cannot silently half-implement Packet 4. Opening them in a slice that
+does not yet contain the coordinator stages producing those rows would weaken
+fail-closed decoding for no gain — a fence should come down in the same change
+that brings in the thing it was fencing.
+
+The slices are therefore:
+
+- **S2b-i — receipt record.** `LandingReceiptV1` encode/decode/digest, the one
+  ADR 0027 contract element with no implementation. Pure addition, no behavior
+  change, no gate opened. Unblocks everything below.
+- **S2b-ii — coordinator stages + gates.** The `@icarus/core` dependency edge on
+  the gateway, the four `#execute*` remote stages, the Packet 3 gates opened
+  alongside them, widened `resumeLanding` dispatch, and the extended
+  crash-kill matrix. This is the load-bearing review.
+- **S2b-iii — receipt presentation.** The four-file lockstep projection chain
+  (`types.ts` → `landing-presentation.ts` → `api/present.ts` → workspace
+  `api.ts` exact-key validators → `LandingPanel.tsx`), CLI coverage, and docs.
+
 ### S3 (Sun) — Packet 4c: live-evidence profile + Kevin's Monday runbook
 
 Unchanged in intent from the superseded plan's S3 (schema + refusing CLI
