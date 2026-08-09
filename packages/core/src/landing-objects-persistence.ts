@@ -218,8 +218,8 @@ export interface PersistedGitHubObjectsCompleteEvidenceV1 extends ProjectionBase
 
 export interface PersistedGitHubObjectsPreEffectTerminalEvidenceV1 extends ProjectionBaseV1 {
   readonly status: "pre_effect_terminal";
-  readonly httpOutcome: "failed";
-  readonly operationOutcome: "failed";
+  readonly httpOutcome: "failed" | "ambiguous";
+  readonly operationOutcome: "failed" | "interrupted";
   readonly errorCode: string;
   readonly result: LandingOperationResultV1;
   readonly resultSha256: string;
@@ -843,6 +843,23 @@ function failedResult(
   });
 }
 
+function interruptedResult(
+  operation: StoredObjectsOperationV1,
+  exchanges: readonly PersistedGitHubObjectsHttpExchangeV1[],
+  errorCode: string,
+): LandingOperationResultV1 {
+  return decodeLandingOperationResultV1({
+    schemaVersion: 1,
+    operationId: operation.id,
+    kind: "github.objects.upload",
+    outcome: "interrupted",
+    boundary: "operation_interrupted",
+    evidence: settledEvidence(exchanges),
+    value: null,
+    errorCode,
+  });
+}
+
 function reconciliationResult(
   operation: StoredObjectsOperationV1,
   exchanges: readonly PersistedGitHubObjectsHttpExchangeV1[],
@@ -1239,18 +1256,27 @@ export function validatePersistedGitHubObjectsOperationV1(
     }
     const errorCode =
       terminal.result.errorCode ?? invalid("Terminal object request has no safe error code");
-    if (
-      terminalIndex === 0 &&
-      terminal.request.kind === "github.actor.get" &&
-      terminal.result.outcome === "failed"
-    ) {
-      const expected = failedResult(operation, decodedExchanges, errorCode);
-      assertStoredResult(operation, "failed", expected);
+    if (terminalIndex === 0 && terminal.request.kind === "github.actor.get") {
+      if (terminal.result.outcome === "failed") {
+        const expected = failedResult(operation, decodedExchanges, errorCode);
+        assertStoredResult(operation, "failed", expected);
+        return {
+          ...base,
+          status: "pre_effect_terminal",
+          httpOutcome: "failed",
+          operationOutcome: "failed",
+          errorCode,
+          result: operation.result,
+          resultSha256: operation.resultSha256,
+        };
+      }
+      const expected = interruptedResult(operation, decodedExchanges, errorCode);
+      assertStoredResult(operation, "interrupted", expected);
       return {
         ...base,
         status: "pre_effect_terminal",
-        httpOutcome: "failed",
-        operationOutcome: "failed",
+        httpOutcome: "ambiguous",
+        operationOutcome: "interrupted",
         errorCode,
         result: operation.result,
         resultSha256: operation.resultSha256,

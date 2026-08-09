@@ -442,6 +442,23 @@ function failedOperationResult(
   });
 }
 
+function interruptedOperationResult(
+  exchanges: readonly GitHubObjectsHistoryExchangeV1[],
+): LandingOperationResultV1 {
+  const tail = exchanges.at(-1);
+  if (tail === undefined) throw new Error("missing interrupted tail");
+  return decodeLandingOperationResultV1({
+    schemaVersion: 1,
+    operationId: OPERATION_ID,
+    kind: "github.objects.upload",
+    outcome: "interrupted",
+    boundary: "operation_interrupted",
+    evidence: evidence(exchanges),
+    value: null,
+    errorCode: (tail.result as LandingHttpResultV1).errorCode,
+  });
+}
+
 function reconciliationOperationResult(
   exchanges: readonly GitHubObjectsHistoryExchangeV1[],
   errorCode: string,
@@ -763,7 +780,7 @@ describe("persisted ADR 0027 GitHub object-upload aggregate", () => {
     expect(projected.exchanges).toHaveLength(4);
   });
 
-  it("distinguishes failed actor refusal from ambiguous or post-effect reconciliation", () => {
+  it("keeps failed or ambiguous actor refusal retry-safe before POST reconciliation", () => {
     const failedActor = [terminalAfter([], "failed")];
     const failed = validatePersistedGitHubObjectsOperationV1(
       persisted({
@@ -773,21 +790,32 @@ describe("persisted ADR 0027 GitHub object-upload aggregate", () => {
       }),
     );
     expect(failed.status).toBe("pre_effect_terminal");
+    if (failed.status !== "pre_effect_terminal") throw new Error("expected failed terminal");
+    expect(failed.httpOutcome).toBe("failed");
+    expect(failed.operationOutcome).toBe("failed");
 
     const ambiguousActor = [terminalAfter([], "ambiguous")];
-    const actorRecon = reconciliationOperationResult(ambiguousActor, "GITHUB_OUTCOME_AMBIGUOUS");
     const ambiguous = validatePersistedGitHubObjectsOperationV1(
       persisted({
         exchanges: ambiguousActor,
         status: "interrupted",
-        result: actorRecon,
+        result: interruptedOperationResult(ambiguousActor),
       }),
     );
-    expect(ambiguous.status).toBe("reconciliation_required");
-    if (ambiguous.status !== "reconciliation_required") {
-      throw new Error("expected ambiguous reconciliation");
+    expect(ambiguous.status).toBe("pre_effect_terminal");
+    if (ambiguous.status !== "pre_effect_terminal") {
+      throw new Error("expected ambiguous pre-effect terminal");
     }
-    expect(ambiguous.trigger).toBe("ambiguous");
+    expect(ambiguous.httpOutcome).toBe("ambiguous");
+    expect(ambiguous.operationOutcome).toBe("interrupted");
+
+    expectInvalid(
+      persisted({
+        exchanges: ambiguousActor,
+        status: "interrupted",
+        result: reconciliationOperationResult(ambiguousActor, "GITHUB_OUTCOME_AMBIGUOUS"),
+      }),
+    );
 
     for (const outcome of ["failed", "ambiguous"] as const) {
       for (let position = 1; position < REQUEST_IDS.length; position += 1) {
