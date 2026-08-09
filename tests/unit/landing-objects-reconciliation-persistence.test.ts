@@ -317,10 +317,12 @@ function subjectRequest(
   };
 }
 
-function history(exchanges: readonly GitHubObjectsHistoryExchangeV1[]) {
+function history(
+  exchanges: readonly GitHubObjectsHistoryExchangeV1[],
+  operation: LandingOperationRequestV1 = subjectRequest(),
+) {
   const preflight = preflightRequest();
   const preflightProof = preflightResult();
-  const operation = subjectRequest();
   return {
     material: MATERIAL,
     landingSha256: digestLandingRecord(LANDING),
@@ -337,16 +339,19 @@ function history(exchanges: readonly GitHubObjectsHistoryExchangeV1[]) {
 
 function nextObjectRequest(
   successes: readonly GitHubObjectsHistoryExchangeV1[],
+  operation: LandingOperationRequestV1 = subjectRequest(),
 ): LandingHttpRequestV1 {
-  const projected = validateGitHubObjectsUploadHttpHistoryV1(history(successes));
+  const projected = validateGitHubObjectsUploadHttpHistoryV1(history(successes, operation));
   if (projected.status !== "next_request") throw new Error("expected next object request");
   const requestId = REQUEST_IDS[successes.length];
   if (requestId === undefined) throw new Error("missing request fixture identity");
   return { ...projected.nextRequest, requestId } as LandingHttpRequestV1;
 }
 
-function actorSuccess(): GitHubObjectsHistoryExchangeV1 {
-  const request = nextObjectRequest([]);
+function actorSuccess(
+  operation: LandingOperationRequestV1 = subjectRequest(),
+): GitHubObjectsHistoryExchangeV1 {
+  const request = nextObjectRequest([], operation);
   const result: LandingHttpResultV1 = {
     schemaVersion: 1,
     requestId: request.requestId,
@@ -366,8 +371,9 @@ function actorSuccess(): GitHubObjectsHistoryExchangeV1 {
 
 function ambiguousTail(
   successes: readonly GitHubObjectsHistoryExchangeV1[],
+  operation: LandingOperationRequestV1 = subjectRequest(),
 ): GitHubObjectsHistoryExchangeV1 {
-  const request = nextObjectRequest(successes);
+  const request = nextObjectRequest(successes, operation);
   const result: LandingHttpResultV1 = {
     schemaVersion: 1,
     requestId: request.requestId,
@@ -460,14 +466,26 @@ function resultEventPayload(
   };
 }
 
-function subjectAggregate(effectful: boolean, takeover = false): PersistedInput {
+interface RetrySubjectFixture {
+  readonly operationId: string;
+  readonly requestSha256: string;
+}
+
+function subjectAggregate(
+  effectful: boolean,
+  takeover = false,
+  retrySubject: RetrySubjectFixture | null = null,
+): PersistedInput {
   if (effectful && takeover) throw new Error("effectful takeover fixture is not implemented");
-  const successes = effectful ? [actorSuccess()] : [];
-  const exchanges = takeover ? [] : [...successes, ambiguousTail(successes)];
+  const request = subjectRequest(
+    retrySubject?.operationId ?? null,
+    retrySubject?.requestSha256 ?? null,
+  );
+  const successes = effectful ? [actorSuccess(request)] : [];
+  const exchanges = takeover ? [] : [...successes, ambiguousTail(successes, request)];
   const observation = subjectObservation(exchanges);
   const subjectError = takeover ? TAKEOVER_ERROR : "GITHUB_OUTCOME_AMBIGUOUS";
   const result = subjectResult(exchanges, subjectError);
-  const request = subjectRequest();
   const preflight = preflightRequest();
   const preflightProof = preflightResult();
   const preflightRow = operationRow(
@@ -787,8 +805,9 @@ function persistedReconciliation(
   statuses: readonly ("started" | "completed" | "interrupted")[] = ["completed"],
   firstObservation?: boolean,
   subjectTakeover = false,
+  retrySubject: RetrySubjectFixture | null = null,
 ): PersistedInput {
-  const subject = subjectAggregate(effectful, subjectTakeover);
+  const subject = subjectAggregate(effectful, subjectTakeover, retrySubject);
   const subjectOperationEvents = subject.operationEvents as MutableRow[];
   const subjectSettlement = subjectOperationEvents[1];
   if (subjectSettlement === undefined) throw new Error("subject settlement event missing");
@@ -858,6 +877,40 @@ describe("persisted ADR 0027 zero-HTTP object reconciliation", () => {
     expect(projected.links).toHaveLength(1);
   });
 
+  it("preserves inherited retry ancestry across a completed zero-POST subject", () => {
+    const inherited = {
+      operationId: RECONCILIATION_IDS[1] ?? "",
+      requestSha256: "d".repeat(64),
+    };
+    const projected = validatePersistedGitHubObjectsReconciliationV1(
+      persistedReconciliation(false, ["completed"], undefined, false, inherited),
+    );
+
+    expect(projected).toMatchObject({
+      status: "retry_stage_proven",
+      effectfulPostAdmitted: false,
+      retrySubjectOperationId: inherited.operationId,
+      retrySubjectRequestSha256: inherited.requestSha256,
+    });
+  });
+
+  it("supersedes inherited ancestry only after proving an effectful subject retry stage", () => {
+    const inherited = {
+      operationId: RECONCILIATION_IDS[1] ?? "",
+      requestSha256: "d".repeat(64),
+    };
+    const input = persistedReconciliation(true, ["completed"], undefined, false, inherited);
+    const projected = validatePersistedGitHubObjectsReconciliationV1(input);
+    const subjectRow = (input.subjectAggregate as PersistedInput).operationRow as MutableRow;
+
+    expect(projected).toMatchObject({
+      status: "retry_stage_proven",
+      effectfulPostAdmitted: true,
+      retrySubjectOperationId: SUBJECT_ID,
+      retrySubjectRequestSha256: subjectRow.request_sha256,
+    });
+  });
+
   it("accepts a zero-HTTP takeover subject without fabricating retry ancestry", () => {
     const projected = validatePersistedGitHubObjectsReconciliationV1(
       persistedReconciliation(false, ["completed"], true, true),
@@ -922,6 +975,18 @@ describe("persisted ADR 0027 zero-HTTP object reconciliation", () => {
       retrySubjectOperationId: null,
       retrySubjectRequestSha256: null,
     });
+
+    const inheritedPending = validatePersistedGitHubObjectsReconciliationV1(
+      persistedReconciliation(true, ["started"], true, false, {
+        operationId: RECONCILIATION_IDS[1] ?? "",
+        requestSha256: "d".repeat(64),
+      }),
+    );
+    expect(inheritedPending).toMatchObject({
+      status: "pending",
+      retrySubjectOperationId: null,
+      retrySubjectRequestSha256: null,
+    });
   });
 
   it("rejects any reconciliation-owned HTTP row and any event adjacency gap", () => {
@@ -968,7 +1033,7 @@ describe("persisted ADR 0027 zero-HTTP object reconciliation", () => {
     expectInvalid(input);
   });
 
-  it("rejects digest drift, subject switching, extra carriers, and inherited retry ancestry", () => {
+  it("rejects digest drift, subject switching, extra carriers, and half retry pairs", () => {
     const digestDrift = persistedReconciliation(false);
     const operation = (digestDrift.reconciliationOperationRows as MutableRow[])[0];
     if (operation === undefined) throw new Error("missing reconciliation row");
@@ -1010,23 +1075,34 @@ describe("persisted ADR 0027 zero-HTTP object reconciliation", () => {
     (extra as Record<string, unknown>).callerEffectful = false;
     expectInvalid(extra);
 
-    const inherited = persistedReconciliation(false);
-    const nestedSubject = inherited.subjectAggregate as PersistedInput;
+    const halfPair = persistedReconciliation(false);
+    const nestedSubject = halfPair.subjectAggregate as PersistedInput;
     const subjectRow = nestedSubject.operationRow as MutableRow;
-    const originalInheritedRequest = JSON.parse(
+    const originalRequest = JSON.parse(
       subjectRow.request_json as string,
     ) as LandingOperationRequestV1;
-    const inheritedRequest = {
-      ...originalInheritedRequest,
+    const halfPairRequest = {
+      ...originalRequest,
       input: {
-        ...(originalInheritedRequest.input as unknown as Record<string, unknown>),
+        ...(originalRequest.input as unknown as Record<string, unknown>),
         retrySubjectOperationId: RECONCILIATION_IDS[1],
-        retrySubjectRequestSha256: "d".repeat(64),
+        retrySubjectRequestSha256: null,
       },
     } as unknown as LandingOperationRequestV1;
-    subjectRow.request_json = canonical(inheritedRequest);
+    subjectRow.request_json = canonical(halfPairRequest);
     subjectRow.request_sha256 = sha256(subjectRow.request_json as string);
-    expectInvalid(inherited);
+    expectInvalid(halfPair);
+
+    const outputDrift = persistedReconciliation(false);
+    const outputRow = (outputDrift.reconciliationOperationRows as MutableRow[])[0];
+    if (outputRow === undefined) throw new Error("missing output row");
+    const outputResult = JSON.parse(outputRow.result_json as string) as {
+      value: Record<string, unknown>;
+    };
+    outputResult.value.nextState = "objects_ready";
+    outputRow.result_json = canonical(outputResult);
+    outputRow.result_sha256 = sha256(outputRow.result_json as string);
+    expectInvalid(outputDrift);
   });
 
   it("rejects duplicate reconciliation operation identities and unstable subject carriers", () => {

@@ -4,7 +4,10 @@
  * This module correlates supplied canonical SQLite-shaped records only. It
  * performs no database read, lease check, credential resolution, filesystem
  * access, or network operation. Its projection never authorizes a request,
- * retry, settlement, reconciliation, or provider effect.
+ * retry, settlement, reconciliation, or provider effect. In particular, a
+ * projected retry-subject pair proves only the canonical bytes carried by this
+ * operation request. This component does not prove that the referenced
+ * operation exists, precedes this operation, or earned retry authority.
  */
 import { sha256 } from "./digest.js";
 import { IcarusError } from "./errors.js";
@@ -156,10 +159,7 @@ interface StoredObjectsOperationV1 extends StoredOperationV1 {
   readonly request: LandingOperationRequestV1 & {
     readonly kind: "github.objects.upload";
     readonly expectedState: "local_ready";
-    readonly input: GitHubObjectsUploadInputV1 & {
-      readonly retrySubjectOperationId: null;
-      readonly retrySubjectRequestSha256: null;
-    };
+    readonly input: GitHubObjectsUploadInputV1;
   };
 }
 
@@ -187,6 +187,8 @@ interface DecodedEventV1 {
 interface ProjectionBaseV1 {
   readonly operationId: string;
   readonly operationRequestSha256: string;
+  readonly retrySubjectOperationId: string | null;
+  readonly retrySubjectRequestSha256: string | null;
   readonly preflightOperationId: string;
   readonly preflightResultSha256: string;
   readonly observation: LandingOperationObservationV1 | null;
@@ -584,8 +586,7 @@ function decodeObjectsOperation(
     input.changedPathsSha256 !== landing.changedPathsSha256 ||
     input.preflightOperationId !== preflight.id ||
     input.preflightResultSha256 !== preflight.resultSha256 ||
-    input.retrySubjectOperationId !== null ||
-    input.retrySubjectRequestSha256 !== null ||
+    (input.retrySubjectOperationId === null) !== (input.retrySubjectRequestSha256 === null) ||
     operation.startedAt < preflight.finishedAt
   ) {
     invalid("Persisted object operation is not bound to its immediate immutable preflight");
@@ -990,7 +991,8 @@ function assertEventTopology(
  * The caller must already have validated the immediate preflight's own HTTP
  * rows and must independently prove database query completeness, global
  * operation/kind/attempt ordering, attempt rows/events, final landing state and
- * resume/version suffix, SQLite transaction grouping, reconciliation successor
+ * resume/version suffix, SQLite transaction grouping, the existence and
+ * ancestry of any projected retry-subject pair, reconciliation successor
  * ancestry, and a continuously held run lease. `operationStartState` and
  * `operationStartVersion` are chronological replay inputs, not current-state
  * claims. Every returned discriminant is evidence only.
@@ -1193,6 +1195,8 @@ export function validatePersistedGitHubObjectsOperationV1(
   const base: ProjectionBaseV1 = {
     operationId: operation.id,
     operationRequestSha256: operation.requestSha256,
+    retrySubjectOperationId: operation.request.input.retrySubjectOperationId,
+    retrySubjectRequestSha256: operation.request.input.retrySubjectRequestSha256,
     preflightOperationId: preflight.id,
     preflightResultSha256: preflight.resultSha256,
     observation: operation.observation,

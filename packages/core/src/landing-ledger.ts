@@ -1441,6 +1441,7 @@ function validatePersistedGitHubAggregates(
     invalid("GitHub object history has no reconstructed immutable material");
   }
   const objectAggregatesById = new Map<string, Readonly<Record<string, unknown>>>();
+  const objectEvidenceById = new Map<string, PersistedGitHubObjectsEvidenceV1>();
   for (const operation of objects) {
     const immediatePreflights = status.operations.filter(
       (candidate) =>
@@ -1512,6 +1513,7 @@ function validatePersistedGitHubAggregates(
     const evidence: PersistedGitHubObjectsEvidenceV1 =
       validatePersistedGitHubObjectsOperationV1(objectAggregate);
     objectAggregatesById.set(operation.id, objectAggregate);
+    objectEvidenceById.set(operation.id, evidence);
     const operationSettledEvent = status.events.find(
       (event) =>
         event.type === "landing.operation.settled" &&
@@ -1659,6 +1661,7 @@ function validatePersistedGitHubAggregates(
       continue;
     }
     const subjectAggregate = objectAggregatesById.get(subject.id);
+    const subjectEvidence = objectEvidenceById.get(subject.id);
     const subjectAttemptRow = rawAttemptRowsByOrdinal.get(subject.coordinatorAttempt);
     const subjectSettlement = status.events.find(
       (event) =>
@@ -1668,6 +1671,7 @@ function validatePersistedGitHubAggregates(
     const terminal = links.at(-1);
     if (
       subjectAggregate === undefined ||
+      subjectEvidence === undefined ||
       subjectAttemptRow === undefined ||
       subjectSettlement === undefined ||
       terminal === undefined
@@ -1735,8 +1739,27 @@ function validatePersistedGitHubAggregates(
       reconciliationEventRows,
     });
     if (evidence.status === "retry_stage_proven") {
-      retrySubjectOperationId = evidence.retrySubjectOperationId;
-      retrySubjectRequestSha256 = evidence.retrySubjectRequestSha256;
+      const admittedImmutableObjectPost = subjectEvidence.exchanges.some(
+        (exchange) =>
+          exchange.request.method === "POST" &&
+          (exchange.request.kind === "github.blob.post" ||
+            exchange.request.kind === "github.tree.post" ||
+            exchange.request.kind === "github.commit.post"),
+      );
+      const expectedRetrySubjectOperationId = admittedImmutableObjectPost
+        ? subject.id
+        : subjectEvidence.retrySubjectOperationId;
+      const expectedRetrySubjectRequestSha256 = admittedImmutableObjectPost
+        ? subject.requestSha256
+        : subjectEvidence.retrySubjectRequestSha256;
+      if (
+        evidence.retrySubjectOperationId !== expectedRetrySubjectOperationId ||
+        evidence.retrySubjectRequestSha256 !== expectedRetrySubjectRequestSha256
+      ) {
+        invalid("Object reconciliation retry projection disagrees with validated subject evidence");
+      }
+      retrySubjectOperationId = expectedRetrySubjectOperationId;
+      retrySubjectRequestSha256 = expectedRetrySubjectRequestSha256;
     } else if (
       status.landing.state !== "reconciliation_required" ||
       status.landing.resumeState !== "local_ready" ||

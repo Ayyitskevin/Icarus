@@ -29,6 +29,7 @@ import {
   type LandingStateChangedEventV1,
 } from "../../packages/core/src/landing-records.js";
 import type { RunLeaseGuard } from "../../packages/core/src/lease.js";
+import { IcarusStore } from "../../packages/core/src/store.js";
 import {
   createLandingGitHubMaterialFixture,
   type LandingGitHubMaterialFixture,
@@ -61,6 +62,7 @@ const STARTED_AT = "2026-08-08T12:00:00.000Z";
 const FINISHED_AT = "2026-08-08T12:01:00.000Z";
 const OBJECT_OPERATION_ID = "90000000-0000-4000-8000-000000000001";
 const RETRY_OBJECT_OPERATION_ID = "90000000-0000-4000-8000-000000000002";
+const SECOND_RETRY_OBJECT_OPERATION_ID = "90000000-0000-4000-8000-000000000003";
 const RECONCILIATION_OPERATION_IDS = Array.from(
   { length: 5 },
   (_, index) => `91000000-0000-4000-8000-${(index + 1).toString(16).padStart(12, "0")}`,
@@ -73,7 +75,6 @@ const RETRY_OBJECT_REQUEST_IDS = Array.from(
   { length: 8 },
   (_, index) => `92000000-0000-4000-8000-${(index + 16).toString(16).padStart(12, "0")}`,
 );
-
 afterEach(() => {
   for (const fixture of fixtures.splice(0)) {
     fixture.store.close();
@@ -745,6 +746,50 @@ async function createStartedObjectFixture(): Promise<{
   };
 }
 
+async function createProvenEffectfulRetryFixture(): Promise<
+  Awaited<ReturnType<typeof createStartedObjectFixture>> & {
+    readonly retrySubjectOperationId: string;
+    readonly retrySubjectRequestSha256: string;
+  }
+> {
+  const scenario = await createStartedObjectFixture();
+  settleObjects(
+    scenario.fixture,
+    scenario.preflightStatus,
+    scenario.material,
+    scenario.operation,
+    scenario.startedStatus,
+    "post_ambiguous",
+  );
+  const unresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+  const subject = unresolved.operations.at(-1);
+  if (
+    subject?.kind !== "github.objects.upload" ||
+    subject.status !== "interrupted" ||
+    subject.result?.outcome !== "reconciliation_required"
+  ) {
+    throw new Error("Effectful retry fixture lost its unresolved object subject");
+  }
+  injectCompletedObjectRetryReconciliation(scenario.fixture, unresolved);
+  scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+  return {
+    ...scenario,
+    retrySubjectOperationId: subject.id,
+    retrySubjectRequestSha256: subject.requestSha256,
+  };
+}
+
+async function resumeAndCompletePreflight(
+  fixture: LandingGitHubMaterialFixture,
+): Promise<Awaited<ReturnType<typeof completePreflight>>> {
+  fixture.store.admitLandingResume(fixture.landingId);
+  let preflight!: Awaited<ReturnType<typeof completePreflight>>;
+  await fixture.leases.withLease(UNIT_RUN_ID, async (guard) => {
+    preflight = await completePreflight(fixture, guard);
+  });
+  return preflight;
+}
+
 function expectRecordInvalid(action: () => unknown): void {
   try {
     action();
@@ -1242,6 +1287,144 @@ describe("landing ledger persisted GitHub object loader", () => {
     });
   });
 
+  it("restarts with the exact effectful object subject bound into its next retry", async () => {
+    const scenario = await createProvenEffectfulRetryFixture();
+    const retryPreflight = await resumeAndCompletePreflight(scenario.fixture);
+    const retryOperation = injectStartedObjects(scenario.fixture, retryPreflight.status, {
+      operationId: RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 2,
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+
+    const restartedStore = new IcarusStore(scenario.fixture.databasePath);
+    let loaded: LandingStatusV1;
+    try {
+      loaded = restartedStore.getLandingStatus(scenario.fixture.landingId);
+    } finally {
+      restartedStore.close();
+    }
+    expect(loaded.landing.state).toBe("uploading_objects");
+    expect(retryOperation.input).toMatchObject({
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+    expect(loaded.operations.at(-1)?.request).toEqual(retryOperation);
+    expect(scenario.fixture.store.getLandingStatus(scenario.fixture.landingId)).toEqual(loaded);
+  });
+
+  it("preserves effectful ancestry through a zero-POST subject and its completed reconciliation", async () => {
+    const scenario = await createProvenEffectfulRetryFixture();
+    const retryPreflight = await resumeAndCompletePreflight(scenario.fixture);
+    const zeroPostSubject = injectStartedObjects(scenario.fixture, retryPreflight.status, {
+      operationId: RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 2,
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+    const retryStarted = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    settleObjects(
+      scenario.fixture,
+      retryPreflight.status,
+      retryPreflight.material,
+      zeroPostSubject,
+      retryStarted,
+      "ambiguous",
+      RETRY_OBJECT_REQUEST_IDS,
+    );
+    const unresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    injectCompletedObjectRetryReconciliation(scenario.fixture, unresolved);
+
+    const nextPreflight = await resumeAndCompletePreflight(scenario.fixture);
+    const nextRetry = injectStartedObjects(scenario.fixture, nextPreflight.status, {
+      operationId: SECOND_RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 3,
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+    const loaded = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+
+    expect(nextRetry.input).toMatchObject({
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+    expect(loaded.operations.at(-1)?.id).toBe(SECOND_RETRY_OBJECT_OPERATION_ID);
+  });
+
+  it("supersedes effectful ancestry only after the later effectful subject is reconciled", async () => {
+    const scenario = await createProvenEffectfulRetryFixture();
+    const retryPreflight = await resumeAndCompletePreflight(scenario.fixture);
+    const laterEffectfulSubject = injectStartedObjects(scenario.fixture, retryPreflight.status, {
+      operationId: RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 2,
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+    const retryStarted = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    settleObjects(
+      scenario.fixture,
+      retryPreflight.status,
+      retryPreflight.material,
+      laterEffectfulSubject,
+      retryStarted,
+      "post_ambiguous",
+      RETRY_OBJECT_REQUEST_IDS,
+    );
+    const unresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    injectCompletedObjectRetryReconciliation(scenario.fixture, unresolved);
+
+    const nextPreflight = await resumeAndCompletePreflight(scenario.fixture);
+    const nextRetry = injectStartedObjects(scenario.fixture, nextPreflight.status, {
+      operationId: SECOND_RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 3,
+      retrySubjectOperationId: laterEffectfulSubject.operationId,
+      retrySubjectRequestSha256: digestLandingRecord(laterEffectfulSubject),
+    });
+    const loaded = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+
+    expect(nextRetry.input).toMatchObject({
+      retrySubjectOperationId: laterEffectfulSubject.operationId,
+      retrySubjectRequestSha256: digestLandingRecord(laterEffectfulSubject),
+    });
+    expect(loaded.operations.at(-1)?.id).toBe(SECOND_RETRY_OBJECT_OPERATION_ID);
+  });
+
+  it("does not clear or replace proven ancestry after a deterministic actor failure", async () => {
+    const scenario = await createProvenEffectfulRetryFixture();
+    const retryPreflight = await resumeAndCompletePreflight(scenario.fixture);
+    const failedSubject = injectStartedObjects(scenario.fixture, retryPreflight.status, {
+      operationId: RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 2,
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+    const retryStarted = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    settleObjects(
+      scenario.fixture,
+      retryPreflight.status,
+      retryPreflight.material,
+      failedSubject,
+      retryStarted,
+      "failed",
+      RETRY_OBJECT_REQUEST_IDS,
+    );
+    scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+
+    const nextPreflight = await resumeAndCompletePreflight(scenario.fixture);
+    injectStartedObjects(scenario.fixture, nextPreflight.status, {
+      operationId: SECOND_RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 3,
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+    const loaded = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+
+    expect(loaded.operations.at(-1)?.request.input).toMatchObject({
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+  });
+
   it("inherits null retry authority across repeated zero-POST object reconciliation episodes", async () => {
     const scenario = await createStartedObjectFixture();
     settleObjects(
@@ -1416,28 +1599,154 @@ describe("landing ledger persisted GitHub object loader", () => {
   });
 
   it("refuses to clear effectful retry ancestry on the next object operation", async () => {
-    const scenario = await createStartedObjectFixture();
-    settleObjects(
-      scenario.fixture,
-      scenario.preflightStatus,
-      scenario.material,
-      scenario.operation,
-      scenario.startedStatus,
-      "post_ambiguous",
-    );
-    const unresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
-    injectCompletedObjectRetryReconciliation(scenario.fixture, unresolved);
-    scenario.fixture.store.admitLandingResume(scenario.fixture.landingId);
-    let retryPreflight!: Awaited<ReturnType<typeof completePreflight>>;
-    await scenario.fixture.leases.withLease(UNIT_RUN_ID, async (guard) => {
-      retryPreflight = await completePreflight(scenario.fixture, guard);
-    });
+    const scenario = await createProvenEffectfulRetryFixture();
+    const retryPreflight = await resumeAndCompletePreflight(scenario.fixture);
     injectStartedObjects(scenario.fixture, retryPreflight.status, {
       operationId: RETRY_OBJECT_OPERATION_ID,
       kindAttempt: 2,
       retrySubjectOperationId: null,
       retrySubjectRequestSha256: null,
     });
+
+    expectRecordInvalid(() => scenario.fixture.store.getLandingStatus(scenario.fixture.landingId));
+  });
+
+  it("refuses wrong-digest, self, future, and non-effectful retry substitutes", async () => {
+    for (const substitution of ["wrong_digest", "self", "future", "preflight"] as const) {
+      const scenario = await createProvenEffectfulRetryFixture();
+      const retryPreflight = await resumeAndCompletePreflight(scenario.fixture);
+      const immediatePreflight = retryPreflight.status.operations.at(-1);
+      if (immediatePreflight?.kind !== "github.preflight") {
+        throw new Error("Retry substitution fixture lost its immediate preflight");
+      }
+      const retrySubjectOperationId =
+        substitution === "wrong_digest"
+          ? scenario.retrySubjectOperationId
+          : substitution === "self"
+            ? RETRY_OBJECT_OPERATION_ID
+            : substitution === "future"
+              ? SECOND_RETRY_OBJECT_OPERATION_ID
+              : immediatePreflight.id;
+      const retrySubjectRequestSha256 =
+        substitution === "preflight"
+          ? immediatePreflight.requestSha256
+          : substitution === "wrong_digest"
+            ? sha256("wrong proved subject request")
+            : sha256(`${substitution} unproved retry subject`);
+      injectStartedObjects(scenario.fixture, retryPreflight.status, {
+        operationId: RETRY_OBJECT_OPERATION_ID,
+        kindAttempt: 2,
+        retrySubjectOperationId,
+        retrySubjectRequestSha256,
+      });
+
+      expectRecordInvalid(() =>
+        scenario.fixture.store.getLandingStatus(scenario.fixture.landingId),
+      );
+    }
+  });
+
+  it("refuses to substitute a reconciled zero-POST subject for older effectful ancestry", async () => {
+    const scenario = await createProvenEffectfulRetryFixture();
+    const retryPreflight = await resumeAndCompletePreflight(scenario.fixture);
+    const zeroPostSubject = injectStartedObjects(scenario.fixture, retryPreflight.status, {
+      operationId: RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 2,
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+    const retryStarted = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    settleObjects(
+      scenario.fixture,
+      retryPreflight.status,
+      retryPreflight.material,
+      zeroPostSubject,
+      retryStarted,
+      "ambiguous",
+      RETRY_OBJECT_REQUEST_IDS,
+    );
+    const unresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    injectCompletedObjectRetryReconciliation(scenario.fixture, unresolved);
+
+    const nextPreflight = await resumeAndCompletePreflight(scenario.fixture);
+    injectStartedObjects(scenario.fixture, nextPreflight.status, {
+      operationId: SECOND_RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 3,
+      retrySubjectOperationId: zeroPostSubject.operationId,
+      retrySubjectRequestSha256: digestLandingRecord(zeroPostSubject),
+    });
+
+    expectRecordInvalid(() => scenario.fixture.store.getLandingStatus(scenario.fixture.landingId));
+  });
+
+  it("refuses stale earlier ancestry after a later effectful subject earns authority", async () => {
+    const scenario = await createProvenEffectfulRetryFixture();
+    const retryPreflight = await resumeAndCompletePreflight(scenario.fixture);
+    const laterEffectfulSubject = injectStartedObjects(scenario.fixture, retryPreflight.status, {
+      operationId: RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 2,
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+    const retryStarted = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    settleObjects(
+      scenario.fixture,
+      retryPreflight.status,
+      retryPreflight.material,
+      laterEffectfulSubject,
+      retryStarted,
+      "post_ambiguous",
+      RETRY_OBJECT_REQUEST_IDS,
+    );
+    const unresolved = scenario.fixture.store.getLandingStatus(scenario.fixture.landingId);
+    injectCompletedObjectRetryReconciliation(scenario.fixture, unresolved);
+
+    const nextPreflight = await resumeAndCompletePreflight(scenario.fixture);
+    injectStartedObjects(scenario.fixture, nextPreflight.status, {
+      operationId: SECOND_RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 3,
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+
+    expectRecordInvalid(() => scenario.fixture.store.getLandingStatus(scenario.fixture.landingId));
+  });
+
+  it("rejects a persisted half-null retry pair before it can become ancestry", async () => {
+    const scenario = await createProvenEffectfulRetryFixture();
+    const retryPreflight = await resumeAndCompletePreflight(scenario.fixture);
+    const retryOperation = injectStartedObjects(scenario.fixture, retryPreflight.status, {
+      operationId: RETRY_OBJECT_OPERATION_ID,
+      kindAttempt: 2,
+      retrySubjectOperationId: scenario.retrySubjectOperationId,
+      retrySubjectRequestSha256: scenario.retrySubjectRequestSha256,
+    });
+    const database = new Database(scenario.fixture.databasePath);
+    try {
+      const halfPair = {
+        ...retryOperation,
+        input: {
+          ...retryOperation.input,
+          retrySubjectRequestSha256: null,
+        },
+      };
+      const requestJson = canonicalLandingJson(halfPair);
+      expect(
+        database
+          .prepare(
+            "UPDATE landing_operations SET request_json = ?, request_sha256 = ? " +
+              "WHERE landing_id = ? AND id = ?",
+          )
+          .run(
+            requestJson,
+            sha256(requestJson),
+            scenario.fixture.landingId,
+            retryOperation.operationId,
+          ).changes,
+      ).toBe(1);
+    } finally {
+      database.close();
+    }
 
     expectRecordInvalid(() => scenario.fixture.store.getLandingStatus(scenario.fixture.landingId));
   });

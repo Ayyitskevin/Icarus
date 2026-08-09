@@ -9,13 +9,6 @@
  * it never authorizes an HTTP request, object replay, retry, settlement, or
  * provider effect.
  *
- * This first composition slice inherits the current object aggregate's
- * deliberate scope fence: the subject operation's own retry-subject pair must
- * be null. Therefore a zero-POST subject projects a null retry pair only inside
- * that proved first/null-inherited scope. A later subject carrying inherited
- * non-null ancestry must be rejected until the object aggregate itself can
- * validate and preserve that ancestry; it must never be silently cleared.
- *
  * A durable caller must independently prove that every supplied row/event
  * carrier is the complete landing-scoped query result for this suffix, that
  * the object subject is the currently selected uninterrupted subject, that no
@@ -141,6 +134,8 @@ interface SubjectOperationV1 {
   readonly result: LandingOperationResultV1;
   readonly resultSha256: string;
   readonly errorCode: string;
+  readonly retrySubjectOperationId: string | null;
+  readonly retrySubjectRequestSha256: string | null;
   readonly effectfulPostAdmitted: boolean;
 }
 
@@ -464,8 +459,8 @@ function decodeSubject(rawAggregate: unknown): {
     request.operationId !== terminalEvidence.operationId ||
     requestSha256 !== terminalEvidence.operationRequestSha256 ||
     input.landingSha256 !== landingSha256 ||
-    input.retrySubjectOperationId !== null ||
-    input.retrySubjectRequestSha256 !== null ||
+    terminalEvidence.retrySubjectOperationId !== input.retrySubjectOperationId ||
+    terminalEvidence.retrySubjectRequestSha256 !== input.retrySubjectRequestSha256 ||
     operationRow.status !== "interrupted" ||
     terminalEvidence.result.outcome !== "reconciliation_required" ||
     terminalEvidence.result.value === null ||
@@ -544,8 +539,14 @@ function decodeSubject(rawAggregate: unknown): {
       result: terminalEvidence.result,
       resultSha256: terminalEvidence.resultSha256,
       errorCode,
+      retrySubjectOperationId: terminalEvidence.retrySubjectOperationId,
+      retrySubjectRequestSha256: terminalEvidence.retrySubjectRequestSha256,
       effectfulPostAdmitted: terminalEvidence.exchanges.some(
-        (exchange) => exchange.request.method === "POST",
+        (exchange) =>
+          exchange.request.method === "POST" &&
+          (exchange.request.kind === "github.blob.post" ||
+            exchange.request.kind === "github.tree.post" ||
+            exchange.request.kind === "github.commit.post"),
       ),
     },
     landingSha256,
@@ -963,12 +964,13 @@ function linkEvidence(
  * query result and must be empty. `reconciliationEventRows` begins with the
  * first reconciliation attempt-started event; the subject operation-settled,
  * subject attempt-settled, and subject state-change predecessors are validated
- * separately and must be exactly adjacent. The returned retry subject is null
- * unless the internally revalidated original object aggregate admitted at
- * least one immutable-object POST. It is present only after an exact completed
- * `retry_stage_proven -> local_ready` suffix. The nested subject validator
- * currently proves only null-inherited object subjects; non-null inherited
- * retry ancestry is a fail-closed future generalization, not a null result.
+ * separately and must be exactly adjacent. A completed
+ * `retry_stage_proven -> local_ready` suffix projects the original object
+ * subject when its validated exchange history admitted an immutable-object
+ * POST; otherwise it preserves the canonical retry-subject pair carried by the
+ * validated subject request. Pending and unresolved suffixes grant no retry
+ * authority. This component still does not prove the inherited pair's referent
+ * or ancestry; the durable caller must do so independently.
  * This suffix proves only consecutive `kindAttempt` values after its first
  * link; the durable caller must bind that first value to the greatest earlier
  * landing-wide `landing.reconcile` ordinal.
@@ -1112,7 +1114,11 @@ export function validatePersistedGitHubObjectsReconciliationV1(
     observationSha256: terminal.observationSha256,
     result: terminal.result,
     resultSha256: terminal.resultSha256,
-    retrySubjectOperationId: subject.effectfulPostAdmitted ? subject.id : null,
-    retrySubjectRequestSha256: subject.effectfulPostAdmitted ? subject.requestSha256 : null,
+    retrySubjectOperationId: subject.effectfulPostAdmitted
+      ? subject.id
+      : subject.retrySubjectOperationId,
+    retrySubjectRequestSha256: subject.effectfulPostAdmitted
+      ? subject.requestSha256
+      : subject.retrySubjectRequestSha256,
   };
 }

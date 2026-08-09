@@ -743,6 +743,22 @@ describe("persisted ADR 0027 GitHub object-upload aggregate", () => {
     }
   });
 
+  it("projects a canonical retry pair as request evidence without proving its referent", () => {
+    const retrySubjectRequestSha256 = sha256("syntactically valid but externally unproved");
+    const projected = validatePersistedGitHubObjectsOperationV1(
+      persisted({
+        exchanges: [],
+        request: objectsRequest(OPERATION_ID, retrySubjectRequestSha256),
+      }),
+    );
+
+    expect(projected).toMatchObject({
+      status: "next_request",
+      retrySubjectOperationId: OPERATION_ID,
+      retrySubjectRequestSha256,
+    });
+  });
+
   it("accepts one exact admitted tail at every grammar position", () => {
     for (let length = 0; length < REQUEST_IDS.length; length += 1) {
       const successes = settledSuccessPrefix(length);
@@ -872,7 +888,7 @@ describe("persisted ADR 0027 GitHub object-upload aggregate", () => {
     expectInvalid(input);
   });
 
-  it("rejects stale preflight, retry, action-state, adjacency, and ordinal authority", () => {
+  it("rejects stale preflight, half retry pairs, action-state, adjacency, and ordinal authority", () => {
     const stalePreflight = persisted({ exchanges: [] });
     const preflightRow = stalePreflight.preflightOperationRow as MutableRow;
     const preflightRequestValue = JSON.parse(preflightRow.request_json as string) as MutableRow;
@@ -881,11 +897,17 @@ describe("persisted ADR 0027 GitHub object-upload aggregate", () => {
     preflightRow.request_sha256 = sha256(preflightRow.request_json as string);
     expectInvalid(stalePreflight);
 
-    const retried = persisted({
+    const missingRetryDigest = persisted({
       exchanges: [],
-      request: objectsRequest(PREFLIGHT_ID, sha256("retry")),
+      request: objectsRequest(PREFLIGHT_ID, null),
     });
-    expectInvalid(retried);
+    expectInvalid(missingRetryDigest);
+
+    const missingRetryOperation = persisted({
+      exchanges: [],
+      request: objectsRequest(null, sha256("retry")),
+    });
+    expectInvalid(missingRetryOperation);
 
     const wrongAction = persisted({ exchanges: [] });
     const action = wrongAction.actionStateEventRow as MutableRow;
