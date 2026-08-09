@@ -23,7 +23,38 @@ export interface GithubHttpResponse {
    * boolean, so no upstream text is carried.
    */
   readonly hasNextPage: boolean;
+  /**
+   * GitHub's throttling signals, reduced to bounded non-negative integers. A
+   * refusal that is only a rate limit is recoverable by waiting, while an
+   * ordinary HTTP failure is not, and the coordinator cannot tell them apart
+   * from a status code alone: a secondary limit is reported as 403. Header text
+   * is never carried; an unparsable or out-of-range value becomes null.
+   */
+  readonly throttle: GithubThrottleSignals;
   readonly latencyMs: number;
+}
+
+export interface GithubThrottleSignals {
+  /** Seconds GitHub asked the caller to wait, from `Retry-After`. */
+  readonly retryAfterSeconds: number | null;
+  /** Requests left in the current window, from `X-RateLimit-Remaining`. */
+  readonly remaining: number | null;
+}
+
+const MAX_THROTTLE_SECONDS = 86_400;
+const MAX_THROTTLE_REMAINING = 1_000_000;
+
+/**
+ * Parses one header into a bounded non-negative integer. Anything else — text,
+ * a float, a negative, an out-of-range value, a missing header — is null, so no
+ * upstream string can reach an error detail through this path.
+ */
+function boundedHeaderInteger(value: string | null, ceiling: number): number | null {
+  if (value === null || !/^\d{1,9}$/.test(value)) {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= ceiling ? parsed : null;
 }
 
 export interface GithubRequest {
@@ -166,6 +197,16 @@ export async function sendGithubRequest(
       value,
       bodySha256,
       hasNextPage: /\brel="?next"?/.test(link),
+      throttle: {
+        retryAfterSeconds: boundedHeaderInteger(
+          response.headers.get("retry-after"),
+          MAX_THROTTLE_SECONDS,
+        ),
+        remaining: boundedHeaderInteger(
+          response.headers.get("x-ratelimit-remaining"),
+          MAX_THROTTLE_REMAINING,
+        ),
+      },
       latencyMs,
     };
   } finally {

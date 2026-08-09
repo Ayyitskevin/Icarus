@@ -21,7 +21,18 @@ without a cycle.
 | `create_absent_ref` | POST | `repos/{owner}/{repo}/git/refs` |
 | `create_draft_pull_request` | POST | `repos/{owner}/{repo}/pulls` |
 | `read_reference` | GET | `repos/{owner}/{repo}/git/ref/{ref}` |
+| `read_base_reference` | GET | `repos/{owner}/{repo}/git/ref/heads/{base}` |
 | `read_pull_requests` | GET | `repos/{owner}/{repo}/pulls?head=…&base=…` |
+
+`read_base_reference` is the only operation that may name a reference outside
+`refs/heads/icarus/`, and it is read-only: `assertBaseRef` refuses an
+Icarus-namespaced value, so it cannot become a second path to the reference the
+create path owns.
+
+The authority boundary, its two security corrections, and two open
+contract-level questions are recorded in
+[ADR 0043](../../docs/adr/0043-github-gateway-boundary.md). Read its open
+questions before wiring a coordinator against this surface.
 
 ## What cannot be expressed
 

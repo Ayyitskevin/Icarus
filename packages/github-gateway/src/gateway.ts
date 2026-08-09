@@ -2,6 +2,7 @@ import { GithubGatewayError, invariant } from "./errors.js";
 import { type GithubHttpResponse, sendGithubRequest } from "./http.js";
 import {
   assertBaseBranch,
+  assertBaseRef,
   assertBody,
   assertCommitMessage,
   assertFileMode,
@@ -256,10 +257,16 @@ export class GithubGateway {
     if (response.status === expected) {
       return;
     }
+    // Throttling is carried as bounded integers beside the status. A secondary
+    // rate limit arrives as 403 and an ordinary authorization failure arrives as
+    // 403, so without these the coordinator cannot tell a wait-and-reconcile
+    // refusal from a terminal one.
     throw new GithubGatewayError("GITHUB_HTTP_ERROR", `GitHub rejected the ${kind} operation`, {
       status: response.status,
       operation: kind,
       responseSha256: response.bodySha256,
+      retryAfterSeconds: response.throttle.retryAfterSeconds,
+      rateLimitRemaining: response.throttle.remaining,
     });
   }
 
@@ -517,6 +524,45 @@ export class GithubGateway {
   }
 
   /**
+   * Reads the base branch's current commit, which the candidate commit parents
+   * from. Returns null when the base branch is absent.
+   *
+   * This is the only reference the gateway reads outside its own namespace, and
+   * it is read-only: `assertBaseRef` refuses an Icarus-namespaced value, so this
+   * path can never be used to observe or reach a reference the create path
+   * owns.
+   */
+  async readBaseReference(
+    coordinates: GithubRepositoryCoordinates,
+    baseRef: string,
+    options: GithubCallOptions = {},
+  ): Promise<GithubReferenceReceipt | null> {
+    const validatedRef = assertBaseRef(baseRef);
+    const response = await this.#call("read_base_reference", coordinates, {
+      trailingSegments: validatedRef.slice("refs/".length).split("/"),
+      signal: options.signal,
+    });
+    if (response.status === 404) {
+      return null;
+    }
+    this.#expectStatus(response, 200, "read_base_reference");
+    const object = asObject(response, "GitHub reference response");
+    invariant(
+      object.ref === validatedRef,
+      "GITHUB_PROTOCOL_ERROR",
+      "GitHub returned a different reference than the one requested",
+      { status: response.status, responseSha256: response.bodySha256 },
+    );
+    const target = asNestedObject(object.object, response, "GitHub reference target");
+    return {
+      ref: validatedRef,
+      sha: readSha(target, response, "GitHub reference target"),
+      responseSha256: response.bodySha256,
+      latencyMs: response.latencyMs,
+    };
+  }
+
+  /**
    * Finds an existing pull request for one Icarus head reference. The
    * coordinator uses this after an interrupted attempt so a retry reconciles
    * instead of opening a second pull request.
@@ -658,7 +704,10 @@ function selectReconciledPullRequest(response: GithubHttpResponse): unknown {
   if (open.length > 1) {
     return ambiguous("GitHub reported more than one open pull request for this head and base");
   }
-  const merged = entries.filter((entry) => readStringMember(entry, "merged_at") !== null);
+  // A non-empty timestamp, matching the `isMerged` reduction the receipt
+  // reports. Treating `""` as merged here while the receipt reported it as not
+  // merged would let one response produce two contradictory verdicts.
+  const merged = entries.filter((entry) => (readStringMember(entry, "merged_at") ?? "").length > 0);
   if (merged.length === 1) {
     return merged[0];
   }

@@ -11,7 +11,10 @@ import {
   ICARUS_REF_NAMESPACE,
   icarusRefForRun,
 } from "../../packages/github-gateway/src/identifiers.js";
-import { GITHUB_OPERATIONS } from "../../packages/github-gateway/src/operations.js";
+import {
+  buildOperationUrl,
+  GITHUB_OPERATIONS,
+} from "../../packages/github-gateway/src/operations.js";
 import { resolveGithubOrigin } from "../../packages/github-gateway/src/origin.js";
 
 const token = "ghp-test-only-token-value-0123456789";
@@ -69,7 +72,7 @@ function expectCode(call: () => unknown, code: string): GithubGatewayError {
 }
 
 describe("GitHub gateway authority boundary", () => {
-  it("exposes exactly the eight operations Packet 4 authorizes", () => {
+  it("exposes exactly the nine operations Packet 4 authorizes", () => {
     expect(Object.keys(GITHUB_OPERATIONS).toSorted()).toEqual([
       "create_absent_ref",
       "create_blob",
@@ -77,9 +80,18 @@ describe("GitHub gateway authority boundary", () => {
       "create_draft_pull_request",
       "create_tree",
       "read_actor",
+      "read_base_reference",
       "read_pull_requests",
       "read_reference",
     ]);
+  });
+
+  it("keeps every operation that names a reference outside the Icarus namespace read-only", () => {
+    // The base-branch read is the one operation allowed to name an ordinary
+    // branch. If it were ever mutating, the namespace restriction that keeps
+    // Icarus off operator branches would be bypassable.
+    expect(GITHUB_OPERATIONS.read_base_reference.mutating).toBe(false);
+    expect(GITHUB_OPERATIONS.read_base_reference.method).toBe("GET");
   });
 
   it("emits no method other than GET and POST, so updates and deletions are inexpressible", () => {
@@ -416,5 +428,35 @@ describe("GitHub gateway input validation", () => {
         baseBranch: "main",
       }),
     ).rejects.toMatchObject({ code: "GITHUB_TITLE_INVALID" });
+  });
+
+  it("throws rather than dropping the repository prefix when coordinates are absent", () => {
+    // Silently building `/git/blobs` instead of `/repos/{owner}/{repo}/git/blobs`
+    // would send a credentialed mutation to an unintended path.
+    const base = new URL("https://api.github.com");
+    for (const kind of ["create_blob", "read_reference", "read_base_reference"] as const) {
+      expect(() => buildOperationUrl(base, kind, null)).toThrow(GithubGatewayError);
+    }
+    // The one unscoped kind is the mirror case: coordinates must be absent.
+    expect(() => buildOperationUrl(base, "read_actor", coordinates)).toThrow(GithubGatewayError);
+  });
+
+  it("treats an opaque response as a denied redirect rather than a readable answer", async () => {
+    // A `status: 0` response is opaque: the body cannot be trusted to belong to
+    // the pinned origin, so it must never be parsed as an answer.
+    const opaque = {
+      status: 0,
+      headers: new Headers(),
+      body: null,
+    } as unknown as Response;
+    const opaqueGateway = new GithubGateway({
+      baseUrl: "https://api.github.com",
+      token,
+      fetchImplementation: async () => opaque,
+    });
+
+    await expect(
+      opaqueGateway.readBaseReference(coordinates, "refs/heads/main"),
+    ).rejects.toMatchObject({ code: "GITHUB_REDIRECT_DENIED" });
   });
 });
