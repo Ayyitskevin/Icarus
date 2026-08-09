@@ -12,6 +12,7 @@
     }
   },
   "dependencies": {
+    "@icarus/github-gateway": "workspace:*",
     "better-sqlite3": "12.11.1"
   }
 }

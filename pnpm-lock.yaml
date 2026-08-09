@@ -38,6 +38,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@icarus/github-gateway':
+        specifier: workspace:*
+        version: link:../github-gateway
       better-sqlite3:
         specifier: 12.11.1
         version: 12.11.1

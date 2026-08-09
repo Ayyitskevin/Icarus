@@ -338,6 +338,129 @@ S4 and S5 are parallel-safe by construction (new files only). S6 closes.
 - **Evidence:** crash-matrix results enumerated per phase; full
   `pnpm check`; honest environment-limited list.
 
+#### S2b execution note (added 2026-08-09 while executing)
+
+S2b is shipping in slices rather than one pull request, for a reason worth
+recording: several of its steps are *fences* rather than features. The
+`PACKET3_STATES` and `PACKET3_OPERATION_KINDS` allowlists, the
+no-HTTP/no-receipt refusal, and the operation-cardinality guard exist so that
+Packet 3 cannot silently half-implement Packet 4. Opening them in a slice that
+does not yet contain the coordinator stages producing those rows would weaken
+fail-closed decoding for no gain — a fence should come down in the same change
+that brings in the thing it was fencing.
+
+The slices are therefore:
+
+- **S2b-i — receipt record.** `LandingReceiptV1` encode/decode/digest, the one
+  ADR 0027 contract element with no implementation. Pure addition, no behavior
+  change, no gate opened. Unblocks everything below.
+- **S2b-ii — coordinator stages + gates.** The `@icarus/core` dependency edge on
+  the gateway, the four `#execute*` remote stages, the Packet 3 gates opened
+  alongside them, widened `resumeLanding` dispatch, and the extended
+  crash-kill matrix. This is the load-bearing review. See the ledger survey
+  below before starting: it is larger than "open the fences".
+- **S2b-iii — receipt presentation.** The four-file lockstep projection chain
+  (`types.ts` → `landing-presentation.ts` → `api/present.ts` → workspace
+  `api.ts` exact-key validators → `LandingPanel.tsx`), CLI coverage, and docs.
+
+#### S2b-ii ledger survey (2026-08-09) — read this before writing code
+
+Surveyed at `landing-ledger.ts` (3,165 lines) while starting S2b-ii. Three
+facts make the work smaller than feared, and one makes it larger.
+
+Smaller than feared — **none of these need changes**:
+
+- **The SQL schema is already complete and already a fence.** Every remote
+  state, operation kind, and HTTP kind is permitted by the DDL, and
+  `landing_http_requests` carries a CHECK enumerating the exact
+  operation-kind × method × HTTP-kind matrix, so the database rejects an
+  out-of-contract row independently of the code. `landing_receipts` keys on
+  `landing_id`, so at most one receipt per landing is structural.
+- **The state machine is complete.** `landing-state.ts` already declares every
+  remote state, transition, resume target, expected-state map, action-state
+  map, and operation→HTTP-kind map. No edits.
+- **The record layer is complete** after S2b-i. `LandingHttpRequestV1`,
+  the GitHub POST bodies, every stage result value, both
+  `landing.github.request.*` event payloads, and now `LandingReceiptV1` all
+  decode today; the ledger simply never calls them.
+- **`kindAttempt` machinery is already kind-generic** (ceiling 9, contiguity
+  re-derived at load and during replay). Reuse `#startOperation` verbatim once
+  its `kind` parameter is widened.
+
+Larger than feared — **the fences are not the work.** Widening
+`PACKET3_STATES` / `PACKET3_OPERATION_KINDS` is four lines, but thirteen
+nearby invariants encode Packet 3's shape and will silently mis-fire or
+hard-fail. Each must be handled deliberately:
+
+1. `decodeOperationRow`'s observation-shape check (`:736-762`) implicitly
+   means "`landing.reconcile`" and demands exactly two facts
+   `[subject_operation, local_ref]` with null `requestId`. A remote reconcile
+   observes `actor`/`base_ref`/`head_ref`/`pull_requests` facts with
+   **non-null** `requestId`.
+2. `validatePacket3OperationSettlement` (`:903-985`) falls through to
+   local-ref reconciliation rules; any `github.*` operation is rejected.
+3. `validateAggregate`'s per-kind input binding (`:1023-1116`) has the same
+   fall-through, and its `else` requires `resumeState !== "approved"`.
+   Remote reconciles carry `local_ready`/`objects_ready`/`remote_ready`.
+4. `localReconciliationSubject` (`:843-884`) filters `local_ref.create` only
+   and is called for **every** `reconciliation_required` load (`:1180`), plus
+   `admitResume` and reconciliation settlement. Remote subjects are invisible
+   to it.
+5. `decodeLandingRow`'s candidate-column required-state set (`:508-520`) omits
+   the remote states, so a `landed` row would not be required to carry
+   candidate columns — a silent weakening rather than an error.
+6. `validateAggregate` active-state matching (`:1152-1166`) hardcodes three
+   kind→state pairs; needs the three remote effect states, and
+   `github.preflight` maps to **no** action state.
+7. Decision-consistency (`:1167-1182`) enumerates the permitted states for an
+   approved landing; every remote state and resume state must be added or an
+   approved landing that reaches `uploading_objects` fails to load.
+8. The event-replay transition arms (`:1497-1568`) cover Packet 3 only and end
+   in `invalid("… non-Packet-3 transition")`; every remote arm of
+   `DIRECT_TRANSITIONS` needs one.
+9. The replay admission-state gate (`:1358-1362`) must admit `local_ready`,
+   `objects_ready`, `remote_ready`.
+10. `expectedEventCount` (`:1583-1591`) must add
+    `httpRequests.length + settled httpRequests`, or every landing with an
+    HTTP row reports an omitted/extra event.
+11. The attempt-cardinality guard (`:1142-1150`) asserts **at most one
+    operation per attempt**. Packet 4 legitimately runs `github.preflight`
+    then an effect operation in one attempt. This cannot be relaxed to
+    "any number" — it must become an ordered-sequence rule (at most one
+    preflight, then at most one effect, attempt status equals the last
+    operation's).
+12. `admitResume`'s `expectedActiveKind` ternary (`:2885-2903`) and its
+    `resumable` set (`:2968-2972`) both enumerate Packet 3 states.
+13. `remoteResidue: "none"` is pinned in five settlement sites (`:2758`,
+    `:2917`, `:2929`, `:3054/:3079`, `:3103`) and asserted at load in two
+    (`:931`, `:953/:963`).
+
+Also note: the ledger admits only **6** of the 8 event types
+(`:247-254`, `:806-815`) — the two `landing.github.request.*` types are
+absent; `LandingOperationRecordV1.kind` is a 3-kind literal union (`:231`)
+with a matching cast at `:763`; and `one_create_pr_post_per_landing` (the
+strongest at-most-once guarantee in the schema) has **no** TypeScript
+counterpart today.
+
+**Recommended sub-slicing of S2b-ii.** Do the read-only stage first:
+
+- **S2b-ii-a — `github.preflight` only.** Its expected state `local_ready` is
+  *already* a permitted Packet 3 state, so this slice widens the operation
+  kind but **not** the state set: the mutation states stay fenced and the
+  slice is structurally incapable of a remote mutation. It nonetheless builds
+  the entire HTTP admission/settlement machinery (`requestOrdinal` per
+  `(landing, attempt)` under the `2 * changedPaths + 32` charge, the
+  admitted-before-I/O event, settlement, and the status/`validateAggregate`
+  threading) that every later stage reuses. Invariants 1, 2, 3, 6, 10, 11, 12
+  are in scope here; 4, 5, 7, 8, 9, 13 are not yet reachable.
+- **S2b-ii-b — object upload and remote ref** (the first mutations, and the
+  remote-reconciliation subject work: invariants 4, 8, 9, 13).
+- **S2b-ii-c — draft PR and receipt** (invariants 5, 7, plus a TypeScript
+  counterpart for `one_create_pr_post_per_landing`).
+
+The crash-kill matrix extends per slice rather than at the end: each slice
+adds its own `CrashPhase` values through the loopback transport.
+
 ### S3 (Sun) — Packet 4c: live-evidence profile + Kevin's Monday runbook
 
 Unchanged in intent from the superseded plan's S3 (schema + refusing CLI
