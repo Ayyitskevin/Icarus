@@ -240,6 +240,27 @@ hostile same-user process. A copied valid file still has no proven author and no
 authority. Future authentication or Athena import requires a separate accepted
 decision and threat model.
 
+## GitHub gateway threats (Packet 4a package; no runtime path yet)
+
+`packages/github-gateway` is merged and imported by no runtime module. These
+rows describe the package's own boundary. They are not evidence that remote
+landing exists, and the coordinator that will call this surface carries its own
+intent-before-effect and reconciliation obligations under ADR 0027.
+
+| Threat | Required control | Required evidence and limits |
+| --- | --- | --- |
+| An uploaded object executes in the repository before a human reviews the draft PR | deny repository-automation paths before any object upload: six automation roots and ten root-level automation filenames are refused with `GITHUB_AUTOMATION_PATH_DENIED`; executable and non-regular file modes are refused | creating the head ref or opening a same-repo draft PR fires repository automation with repository secrets, so a shape-only path allowlist is a remote code-execution path; tests assert refusal for GitHub Actions, CircleCI, GitLab, Jenkins, and Azure Pipelines definitions and non-regression for ordinary source paths that merely contain the word |
+| The credential leaves the process to a non-GitHub or local listener | pin the origin to `api.github.com` at parse time and again at dispatch; refuse scheme-relative and opaque-status escapes; `redirect: "manual"` so no redirect is followed; a loopback origin requires an explicit `allowLoopback` construction opt-in because it would receive the token in cleartext | origin matrices assert no host was contacted on refusal; production wiring never passes the opt-in; the token is read from the environment at call time, never persisted, and is absent from serialization, own-keys enumeration, error paths, and decoded blob content |
+| A refused mutation is recorded as benign idempotency | GitHub returns 422 for existing-ref, missing-object, unusable-name, and ruleset/branch-protection refusal alike, and the gateway reads no upstream bytes, so it reports `GITHUB_REF_CREATE_REFUSED` and `GITHUB_PULL_REQUEST_CREATE_REFUSED` rather than claiming "already exists" | a protection refusal recorded as benign existence would persist forever; tests assert the refusal codes and the absence of any `GITHUB_REF_EXISTS` classification |
+| An interrupted mutation is settled as a known outcome | an interrupted mutating request raises `GITHUB_OUTCOME_AMBIGUOUS`; only reads degrade to timeout, cancellation, or transport errors; no mutating request is retried inside the package, because ADR 0027 places retry with the coordinator's durable intent and reconciliation | the coordinator, not the gateway, decides what an ambiguous effect means; tests separate the mutating and read classifications at the same interruption point |
+| Reconciliation reads deadlock or silently truncate | a paged list is accepted only when `Link: rel="next"` is absent; a single open, single merged, or single closed pull request is selected in that order and anything else fails closed | a run-id-pinned head that cannot reconcile can never land, so an ordinary close-and-reopen must resolve rather than jam; the response ceiling interaction with page size is an open interface item recorded in the continuation plan |
+| Forbidden authority becomes expressible later | the HTTP method union admits `GET` and `POST` only and the operation table is a frozen closed enumeration, so force update, reference deletion, merge, and deployment endpoints are inexpressible rather than unused | static release-gate assertions scan for method literals and forbidden endpoint shapes; treat them as a smoke alarm rather than a proof, since they match source text |
+
+Upstream bytes do not reach errors, and receipts carry digests, latency, and a
+bounded status token only. Rate-limit responses currently collapse to a bare
+HTTP error; surfacing bounded retry integers is an open interface item. No
+independent review record was filed with PRs #25–27.
+
 ## Inherited repository automation, hardened
 
 

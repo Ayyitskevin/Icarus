@@ -620,6 +620,35 @@ preserve the state and require explicit operator recovery.
   rejects remote, LAN, Tailscale, public, OpenAI, and other cloud endpoints
   before persisting the draft; the broader CLI provider contract is unchanged.
 
+## GitHub gateway (Packet 4a package; not reachable at runtime)
+
+`packages/github-gateway` is merged but imported by no runtime module. There is
+no operator procedure for it yet, and no Icarus command can perform a GitHub
+effect. This section records its operating boundary so that the procedure
+written for Packet 4b does not have to reconstruct it.
+
+- The gateway pins `https://api.github.com` and follows no redirect. A loopback
+  origin requires an explicit construction opt-in, used only by tests, because
+  such an origin would receive the credential in cleartext.
+- A token is read from the process environment at call time under the existing
+  landing credential-name allowlist. It is never written to the database, a
+  receipt, an error, or a log, and it never reaches the browser.
+- The expressible authority is exactly: read the authenticated actor, upload
+  blob/tree/commit objects, create an absent reference, create a draft pull
+  request, and read a reference or pull request back for reconciliation. Force
+  update, reference deletion, merge, and deployment are inexpressible.
+- Objects under repository-automation paths are refused before upload. Creating
+  a head reference or opening a same-repo draft pull request causes the head
+  branch's own automation to run with repository secrets, so those paths are a
+  code-execution boundary rather than a style preference.
+- No mutating request is retried inside the package. An interrupted mutation is
+  reported as an ambiguous outcome and must be settled by the coordinator's
+  durable intent and a reconciliation read, never by a blind repeat.
+- A 422 on reference or pull-request creation is reported as a refusal, not as
+  benign prior existence; branch protection and rulesets refuse the same way an
+  existing reference does, and the gateway reads no upstream bytes to tell them
+  apart.
+
 ## Runbook
 
 - `run list [--project <name>]` rediscovers persisted runs without exposing
