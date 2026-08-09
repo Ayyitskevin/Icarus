@@ -6,5 +6,6 @@
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
+  "references": [{ "path": "../github-gateway" }],
   "include": ["src/**/*.ts"]
 }
