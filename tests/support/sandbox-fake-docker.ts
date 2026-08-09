@@ -63,7 +63,7 @@ export async function createRecordingDocker(
   await writeFile(callsPath, "", { mode: 0o600 });
 
   const source = `#!${process.execPath}
-import { appendFileSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 
 const controlPath = ${JSON.stringify(controlPath)};
 const statePath = ${JSON.stringify(statePath)};
@@ -71,7 +71,17 @@ const callsPath = ${JSON.stringify(callsPath)};
 const scenario = JSON.parse(readFileSync(controlPath, "utf8"));
 const argv = process.argv.slice(2);
 const readState = () => JSON.parse(readFileSync(statePath, "utf8"));
-const writeState = (state) => writeFileSync(statePath, JSON.stringify(state) + "\\n", { mode: 0o600 });
+// Written atomically. A direct write truncates before it writes, so a signal
+// landing in that window leaves an empty state file, and the next
+// "container inspect" dies parsing it instead of reporting "No such
+// container" -- which the runner correctly reads as unconfirmed cleanup and
+// downgrades a cancelled check to unavailable. The cancellation tests kill
+// this process at exactly that moment, so the window is reachable under load.
+const writeState = (state) => {
+  const pending = statePath + "." + process.pid + ".pending";
+  writeFileSync(pending, JSON.stringify(state) + "\\n", { mode: 0o600 });
+  renameSync(pending, statePath);
+};
 const valueAfter = (flag) => {
   const index = argv.indexOf(flag);
   return index >= 0 ? argv[index + 1] : undefined;
