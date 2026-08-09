@@ -30,9 +30,9 @@ Decision records for the current milestone:
 | [0024](adr/0024-bounded-repair-loop.md) | Bounded repair loop with a plan-carried repair grant | Superseded by ADR 0026's failed-verification session loop; plan-bound authority, durable accounting, same-target validation, exhaustion semantics, and human review remain in force |
 | [0025](adr/0025-hardened-inherited-opencode-workflow.md) | Hardened inherited OpenCode workflow with a repository-owned actor gate, resolving ADR 0010 | Accepted — third-party review and secret rotation outstanding |
 | [0026](adr/0026-agent-session-loop-and-tool-registry.md) | AgentSession loop, host-owned tool registry, and manifest-bound capability grants | Accepted and released through 2b at Gate 0 release head `802b91e6`; browser authority is separate Gate 1 work |
-| [0027](adr/0027-git-landing-authority.md) | Separate proof-bound landing ledger, deterministic candidate commit, create-only GitHub branch, and exact draft PR | Accepted — independent P0/P1 authority reviews passed 2026-07-31; Packet 3's durable local path through `local_ready` is implemented, while the GitHub gateway, remote receipts, live-state migration, and credential-gated live evidence remain incomplete |
+| [0027](adr/0027-git-landing-authority.md) | Separate proof-bound landing ledger, deterministic candidate commit, create-only GitHub branch, and exact draft PR | Accepted — independent P0/P1 authority reviews passed 2026-07-31; Packet 3's durable local path through `local_ready` is implemented and Packet 4a's gateway package is merged but wired to no runtime path, while remote landing coordination, remote receipts, live-state migration, and credential-gated live evidence remain incomplete |
 | [0029](adr/0029-browser-approval-authority.md) | Fresh-origin browser mutation session and fenced Linux run actions | Accepted — partially superseded by accepted ADR 0040 for the interim origin contract; Packet 2's closed eight-action dispatcher, receipts, cancellation binding, restart reconciler, API integration, and real-Chrome acceptance are release-accepted at implementation head `3683087`, now preserved in `main` history (hosted run `30761189188`; native run `30761192370`) |
-| [0036](adr/0036-proof-carrying-software-factory-product-direction.md) | Proof-carrying software factory product direction and gated competitive roadmap | Accepted product direction — Gate 0 release head `802b91e6`; Gate 1 active with PR #20 foundations, PR #22 browser authority, and Packet 3 durable local landing implemented; Packet 4 remote landing/receipts, credential-gated live evidence, and Gate 1 completion remain open |
+| [0036](adr/0036-proof-carrying-software-factory-product-direction.md) | Proof-carrying software factory product direction and gated competitive roadmap | Accepted product direction — Gate 0 release head `802b91e6`; Gate 1 active with PR #20 foundations, PR #22 browser authority, Packet 3 durable local landing implemented, and Packet 4a's gateway package merged but unwired; Packet 4 remote landing/receipts, credential-gated live evidence, and Gate 1 completion remain open |
 | [0039](adr/0039-portable-numeric-loopback-origins.md) | Portable CSPRNG-selected numeric-loopback mutation origins | Rejected — native run `30613980911` passed Windows and failed macOS |
 | [0040](adr/0040-chromium-resolved-localhost-origins.md) | Chromium-resolved 128-bit `.localhost` mutation origins over exact `127.0.0.1` | Accepted — exact-head evidence complete at `eb01b6406c12126c60add7ac83800f8eba8ffdc9` (native run `30618043377`); interim operator browser/resolver/proxy risk accepted 2026-07-31; not a Gate 1 release |
 | [0041](adr/0041-change-rooms-evidence-projections.md) | Change Rooms are evidence projections, not a chat system, workflow engine, or execution authority | Proposed |
@@ -40,3 +40,10 @@ Decision records for the current milestone:
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.
+
+Reserved but unwritten: ADR numbers 0028, 0030–0035, 0037, and 0038 are cited
+as gate dependencies in
+[`ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md`](ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md)
+and have no files yet. A citation to one of them names future work, never an
+accepted decision. ADR 0027 is deliberately two files: the authority decision
+and its normative v1 record contract companion.

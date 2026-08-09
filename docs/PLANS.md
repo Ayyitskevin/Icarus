@@ -56,7 +56,12 @@ Packet 2's separate browser-authority record appears below.
       receipts, restart/reconciliation evidence, and exact candidate/live
       identities
 
-### Current-tree verification — exact-tree verified
+### Slice 1 candidate-tree verification (recorded 2026-08-02 at `9c5ba19`)
+
+These boxes record the verification run at the Slice 1 candidate head. They are
+a historical record, not a claim about the current tree; four merges and one new
+package have landed since. The most recent whole-tree verification appears under
+"Current-tree verification" below.
 
 - [x] `pnpm exec vitest run tests/security/gate1-benchmark-contract.test.ts`
 - [x] `pnpm exec vitest run tests/security/gate1-benchmark-fixture-boundary.test.ts`
@@ -75,6 +80,29 @@ Packet 2's separate browser-authority record appears below.
 - [x] production and full dependency audits
 - [x] `git diff --check`
 - [x] independent review has no remaining blocker, high, or medium finding
+
+### Current-tree verification (2026-08-09, docs-only tree over `396a804`)
+
+The complete local gate passed on Linux with Node 22.23.2, pnpm 9.15.4, and
+Docker 29.1.3. `pnpm check` exited 0 with unit 815/815, integration 117/117,
+security 158/158, `Gate 1 benchmark contract: 3 passed, 0 failed, 3
+live-evidence not run`, and a successful build.
+
+- [x] `pnpm check` (workflow lint, format, lint, typecheck, test,
+      test:integration, eval, security, build)
+
+Environment prerequisite, recorded because its absence looks like a test
+failure rather than a missing dependency: the integration and eval suites need
+both digest-pinned sandbox images present locally
+(`python:3.12-slim@sha256:c3d81d25…` and `node@sha256:d9f85009…`). Without them
+the sandbox correctly fails closed and verification outcomes report
+`unavailable`.
+
+Not run in this session, and therefore not claimed: native macOS and Windows
+acceptance, the real-browser workspace smoke (needs
+`ICARUS_CHROMIUM_EXECUTABLE`), and the production/full dependency audits. This
+change is documentation only and alters no runtime behavior, but the omission
+is listed rather than implied.
 
 ## Accepted implementation record: Change Handoff Pack v1 (ADR 0042)
 
@@ -490,18 +518,86 @@ ADR 0027 and its normative v1 record companion are accepted after independent
 P0/P1 authority reviews. PR #20 implements the exact landing schema and
 migration gates, closed records and state tables, deterministic local candidate
 construction, and an absent-only local `refs/heads/icarus/<run-id>` reference.
-Durable landing persistence and service coordination, the digest-bound decision
-transaction, CLI/browser presentation, interruption reconciliation and full
-crash matrix, the provider gateway, remote branch, and pull request remain
-incomplete. No live state migration was run.
+PR #23 completes Packet 3's durable landing persistence, service coordination,
+digest-bound decision transaction, CLI/browser presentation, interruption
+reconciliation, and real-process crash matrix on that foundation; its record
+appears below. The provider gateway package merged separately as Packet 4a and
+is imported by nothing. Remote landing coordination, the remote branch, the
+draft pull request, the metadata-only receipt, credential-gated live evidence,
+and Gate 1 completion remain incomplete. No live state migration was run.
 
 The local server now closes mutation admission, drains registered handlers, and
 closes SQLite last. Fresh handler, API, and real-browser suites prove action
 admission, stale confirmation, disconnect, shutdown, receipt, and settlement
 boundaries against the wired route. Those local suites support the separately
-accepted exact-head record above. Neither evidence set satisfies durable landing,
-landing/GitHub receipts, the credential-gated live profile, deployment,
-migration, or Gate 1 completion.
+accepted exact-head record above. Neither evidence set satisfies durable
+landing, landing/GitHub receipts, the credential-gated live profile,
+deployment, migration, or Gate 1 completion; Packet 3's separate acceptance
+matrix below supplies durable local landing only.
+
+### Packet 3 acceptance record — durable local landing (completed 2026-08-02)
+
+Status: **COMPLETE AND MERGED** as
+[PR #23](https://github.com/Ayyitskevin/Icarus/pull/23), published on `main` as
+`f2fd48b`. A reviewed, passing run can prepare an exact candidate commit,
+receive a digest-bound landing decision, and create one local private branch
+without touching the source checkout or any network.
+
+The durable ledger binds immutable run/profile evidence, a canonical landing
+digest, a one-shot decision, ten-minute active attempts, an eight-attempt
+ceiling, operation intent/observation/settlement, and explicit resume. Candidate
+replay is deterministic. Private-ref creation uses an absent-only
+compare-and-swap and reconciles an exact direct ref only from this landing's
+durable prior-absence and intent. CLI, API, and browser expose the same bounded
+authority/evidence projection; non-Linux mutation refuses before persistence,
+Git, credential, or network effects. Real child-process termination covers
+candidate construction, approval, local-ref ambiguity, cold reopen, explicit
+resume, cross-process landing/rollback exclusion, and exhausted-attempt truth.
+
+Packet 3 performs no credential lookup, network request, GitHub mutation,
+live-state migration, source-checkout mutation, merge, or deployment. Those
+boundaries remain with Packet 4 and the Gate 1 exit gate.
+
+### Packet 4a record — bounded GitHub gateway (merged, unwired)
+
+Status: **PACKAGE MERGED; WIRED TO NOTHING**. `packages/github-gateway` merged
+as [PR #25](https://github.com/Ayyitskevin/Icarus/pull/25) with two subsequent
+security corrections,
+[PR #26](https://github.com/Ayyitskevin/Icarus/pull/26) and
+[PR #27](https://github.com/Ayyitskevin/Icarus/pull/27). This closes Packet 4a's
+package deliverable only. It is not Packet 4, and it is not Gate 1 item 5:
+no runtime path reaches it.
+
+The package supplies a dependency-free, injectable-transport gateway over a
+closed operation table: actor read, blob/tree/commit object upload, absent-only
+reference creation, draft pull-request creation, and reference/pull-request
+read-back for reconciliation. Authority is bounded by construction — the HTTP
+method union is `GET | POST` only, so force update, reference deletion, and
+merge are inexpressible rather than merely unused; the origin is pinned to
+`api.github.com` at parse time and again at dispatch; a loopback origin requires
+an explicit construction opt-in because it would receive the credential in
+cleartext; repository-automation paths are denied before any object upload; and
+no mutating request is ever retried inside the package, because ADR 0027 places
+retry with the coordinator's durable intent. Tokens are read from the
+environment at call time, never persisted, and redaction is asserted on every
+error path.
+
+PR #26 closed a remote code-execution path: a shape-only path allowlist
+accepted `.github/workflows/*`, `.circleci/config.yml`, `Jenkinsfile`, and
+similar files, and creating the head ref or opening a same-repo draft PR would
+have executed those definitions with repository secrets before any human review.
+PR #27 corrected a reconciliation deadlock in which an ordinary
+close-and-reopen made a run permanently unreconcilable, and added the loopback
+opt-in above.
+
+Not done, and required before Gate 1 item 5 can be claimed: coordinator wiring,
+remote landing states, the metadata-only receipt, and the interface
+reconciliation recorded in
+[`OPUS_CONTINUATION_PLAN_2026-08-09.md`](OPUS_CONTINUATION_PLAN_2026-08-09.md)
+§3 — mixed-case owner handling, a base-reference read, and the reconciliation
+page ceiling. No independent review record was filed with PRs #25–27; that debt
+is carried forward with the ADR that records this package's authority
+decisions.
 
 ## Released Gate 0 baseline: ADR 0026 slice 2b production wiring
 

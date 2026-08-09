@@ -43,9 +43,11 @@ that later roadmap features already exist.
 > exact completed run, binds one landing decision to the canonical digest,
 > deterministically builds the reviewed candidate in the private cache, and
 > creates or reconciles the exact private `refs/heads/icarus/<run-id>` ref only
-> under durable prior-absence and intent evidence. Packet 4's GitHub gateway,
-> remote landing/PR receipts, credential-gated live-evidence profile, live-state
-> migration, deployment, and Gate 1 completion remain incomplete. No GitHub or
+> under durable prior-absence and intent evidence. Packet 4a's bounded GitHub
+> gateway package is merged but imported by no runtime module, so it supplies no
+> remote capability. Packet 4's remote landing coordination, PR receipts,
+> credential-gated live-evidence profile, live-state migration, deployment, and
+> Gate 1 completion remain incomplete. No GitHub or
 > other external landing, migration, deployment, or public-release authority was
 > authorized by this local acceptance.
 

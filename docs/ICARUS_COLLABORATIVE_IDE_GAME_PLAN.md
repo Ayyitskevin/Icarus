@@ -1,7 +1,7 @@
 # Icarus collaborative IDE game plan
 
 - Status: Product and execution plan; Gate 0 released, Gate 1 active
-- Date: 2026-07-31; last updated 2026-08-02
+- Date: 2026-07-31; last updated 2026-08-09
 - Planning horizon: 12–18 months, reviewed at every exit gate
 - Governing direction:
   [ADR 0036](adr/0036-proof-carrying-software-factory-product-direction.md)
@@ -14,8 +14,9 @@
   `eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI `30618041483` and
   native real-Chrome run `30618043377`; explicit human acceptance of the
   interim operator-controlled browser/resolver/proxy residual risk was recorded
-  on 2026-07-31; Packet 3 durable local landing is complete, while Packet 4's
-  GitHub/receipt/live-evidence work and Gate 1 completion remain open
+  on 2026-07-31; Packet 3 durable local landing is complete; Packet 4a's bounded
+  GitHub gateway package is merged but wired to no runtime path, while Packet 4's
+  remote landing/receipt/live-evidence work and Gate 1 completion remain open
 
 This plan turns the product direction in ADR 0036 into a dependency-ordered
 build program. It incorporates the requested Buzz-style experience where
@@ -352,7 +353,8 @@ locally; items 5–7 remain:
    absent-only private `refs/heads/icarus/<run-id>` reference;
 5. provider-specific, bounded GitHub REST object upload, absent-only reference
    creation, and draft-PR gateway without weakening the existing file-only
-   `GitController`;
+   `GitController` — the gateway package exists (Packet 4a) but no runtime
+   module imports it, so this item stays open until the coordinator calls it;
 6. redacted metadata/digest-only evidence receipt; and
 7. a separate versioned, human-approved, credential-gated live-evidence profile
    bound to the offline manifest digest and immutable case pins; it must pin the
@@ -489,7 +491,7 @@ remains source-collaboration truth; Icarus preserves the proof and rationale.
 | Durable state | `packages/core/src/store.ts`, `state-machine.ts`, `gate1-schema.ts`, `landing-records.ts`, `landing-state.ts`, `landing-ledger.ts` | Packet 3 local landing persistence and coordination complete; later collaboration ledgers and append-only room events |
 | Orchestration | `packages/core/src/service.ts`, `session-loop.ts` | Packet 3 local landing coordinator complete; later room scheduler and child-run integration |
 | Git isolation | `packages/core/src/git.ts`, `landing-git.ts` | Packet 3 deterministic candidate and absent-only private-ref integration complete; retain the file-only boundary when adding Packet 4 |
-| Provider landing | new provider-specific package | bounded object-upload/create-ref/draft-PR gateway, receipt, idempotent reconciliation |
+| Provider landing | `packages/github-gateway` (Packet 4a, merged, unwired) | coordinator wiring, receipt, idempotent reconciliation; interface reconciliation first |
 | Browser boundary | `packages/api/src/server.ts`, `contracts.ts`, `present.ts` | Packet 2 action routes and Packet 3 bounded landing projection complete; shared client remains later work |
 | Browser UI | `packages/workspace/src/api.ts`, `App.tsx`, `LandingPanel.tsx` | Packet 3 landing authority/evidence presentation complete; mission-room pane follows the shared client |
 | Shared client | new `packages/client` | versioned contracts for browser and VS Code |
@@ -587,9 +589,9 @@ browser reload or foreground-server restart and does not prove durable landing
 coordination.
 
 Packet 3's separate acceptance matrix now supplies durable local landing
-coordination through `local_ready`. Packet 4's GitHub gateway/remote receipt
-runtime and a separate versioned human-approved credential-gated live-evidence
-profile remain outstanding. That profile must bind the offline
+coordination through `local_ready`. Packet 4a's gateway package is merged and
+unwired; Packet 4's remote receipt runtime and a separate versioned
+human-approved credential-gated live-evidence profile remain outstanding. That profile must bind the offline
 manifest digest and immutable case/task/check/source/expected-change/candidate
 pins; pin the real provider/model and adapter version, captured pricing and
 budgets, and an operator-produced repository-automation assessment/disposition/
@@ -671,6 +673,16 @@ and receipt effects needed for 3/3 evidence. No force-push, merge, branch
 deletion, direct deployment endpoint, arbitrary URL, arbitrary Git arguments,
 or browser-held credentials. The default benchmark command remains
 credential-free and cannot perform this live acceptance.
+
+Checkpoint: Packet 4a only. `packages/github-gateway` merged as PRs #25–27
+with a closed GET/POST operation table, `api.github.com` origin pinning, an
+explicit loopback opt-in, repository-automation path denial, and no internal
+retry of a mutating request. It is imported by no runtime module — a merged
+package is not a landing path. Packet 4b (coordinator wiring, remote states,
+metadata-only receipt) and Packet 4c (the credential-gated live-evidence
+profile) are not started, and the gateway's interface gaps recorded in
+[`OPUS_CONTINUATION_PLAN_2026-08-09.md`](OPUS_CONTINUATION_PLAN_2026-08-09.md)
+§3 must close before the coordinator is written against this surface.
 
 ### Packet 5 — context, IDE, then Council
 

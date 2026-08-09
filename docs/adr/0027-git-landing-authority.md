@@ -17,9 +17,11 @@
   durable local path through `local_ready`, including bounded attempts,
   digest-bound decision, deterministic candidate construction, absent-only
   private-ref creation/reconciliation, shared presentation, and explicit crash
-  recovery. The GitHub gateway, remote receipts, credential-gated live evidence,
-  and any existing/live database migration remain Packet 4 or operator-gated
-  work; this checkpoint does not complete Gate 1.
+  recovery. Packet 4a's bounded GitHub gateway package has since merged and is
+  imported by no runtime module, so no code path in this ADR's lifecycle reaches
+  it. Coordinator wiring, remote receipts, credential-gated live evidence, and
+  any existing/live database migration remain Packet 4 or operator-gated work;
+  this checkpoint does not complete Gate 1.
 
 - Supersedes: only the unaccepted landing-state proposal in
   [`FABLE_ICARUS_VISION.md`](../FABLE_ICARUS_VISION.md), specifically its

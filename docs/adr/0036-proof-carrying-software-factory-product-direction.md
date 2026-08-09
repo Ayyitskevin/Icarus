@@ -3,9 +3,10 @@
 - Status: Accepted product direction — Gate 0 release/evidence head
   `802b91e6f6c9b392f56c9ee3660be818a0f74a62`; Gate 1 is active with PR #20's
   repository-only foundations, PR #22's browser-authority slice, and Packet 3's
-  durable local landing path through `local_ready` implemented; Packet 4's
-  GitHub gateway, remote landing/PR receipts, credential-gated live evidence,
-  and Gate 1 completion remain incomplete
+  durable local landing path through `local_ready` implemented, and Packet 4a's
+  bounded GitHub gateway package merged but imported by no runtime module;
+  Packet 4's remote landing coordination, PR receipts, credential-gated live
+  evidence, and Gate 1 completion remain incomplete
 - Date: 2026-07-30
 - Supersedes: the current product positioning and roadmap sequencing in
   [`FABLE_ICARUS_VISION.md`](../FABLE_ICARUS_VISION.md) sections 1, 11, and 13.
@@ -257,9 +258,10 @@ the Packet 2 implementation head published on `main` as
 run `30761192370` succeeded there. Packet 3 now completes the durable local
 portion through `local_ready`: persistence, bounded coordination, digest-bound
 decision, deterministic candidate/private-ref creation, presentation, and local
-crash recovery. The list below names the complete Gate 1 outcome; remaining
-work is the GitHub gateway, remote landing/PR receipts, credential-gated live
-benchmark evidence, and the Gate 1 exit gate.
+crash recovery. Packet 4a's bounded GitHub gateway package is merged and wired
+to no runtime path. The list below names the complete Gate 1 outcome; remaining
+work is the coordinator wiring that reaches that gateway, remote landing/PR
+receipts, credential-gated live benchmark evidence, and the Gate 1 exit gate.
 
 Slice 1 adds the populated closed benchmark input at
 `fixtures/evals/gate1/manifest.v1.json`. Its focused `pnpm benchmark:gate1`
