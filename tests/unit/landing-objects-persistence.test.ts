@@ -780,7 +780,7 @@ describe("persisted ADR 0027 GitHub object-upload aggregate", () => {
     expect(projected.exchanges).toHaveLength(4);
   });
 
-  it("keeps failed or ambiguous actor refusal retry-safe before POST reconciliation", () => {
+  it("distinguishes failed actor refusal from ambiguous or post-effect reconciliation", () => {
     const failedActor = [terminalAfter([], "failed")];
     const failed = validatePersistedGitHubObjectsOperationV1(
       persisted({
@@ -795,25 +795,25 @@ describe("persisted ADR 0027 GitHub object-upload aggregate", () => {
     expect(failed.operationOutcome).toBe("failed");
 
     const ambiguousActor = [terminalAfter([], "ambiguous")];
+    const actorRecon = reconciliationOperationResult(ambiguousActor, "GITHUB_OUTCOME_AMBIGUOUS");
     const ambiguous = validatePersistedGitHubObjectsOperationV1(
       persisted({
         exchanges: ambiguousActor,
         status: "interrupted",
-        result: interruptedOperationResult(ambiguousActor),
+        result: actorRecon,
       }),
     );
-    expect(ambiguous.status).toBe("pre_effect_terminal");
-    if (ambiguous.status !== "pre_effect_terminal") {
-      throw new Error("expected ambiguous pre-effect terminal");
+    expect(ambiguous.status).toBe("reconciliation_required");
+    if (ambiguous.status !== "reconciliation_required") {
+      throw new Error("expected ambiguous reconciliation");
     }
-    expect(ambiguous.httpOutcome).toBe("ambiguous");
-    expect(ambiguous.operationOutcome).toBe("interrupted");
+    expect(ambiguous.trigger).toBe("ambiguous");
 
     expectInvalid(
       persisted({
         exchanges: ambiguousActor,
         status: "interrupted",
-        result: reconciliationOperationResult(ambiguousActor, "GITHUB_OUTCOME_AMBIGUOUS"),
+        result: interruptedOperationResult(ambiguousActor),
       }),
     );
 
