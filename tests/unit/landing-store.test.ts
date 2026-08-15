@@ -25,7 +25,11 @@ import {
 } from "../../packages/core/src/landing-records.js";
 import { planApprovalDigest, treeCheckpointDigest } from "../../packages/core/src/policy.js";
 import type { CheckRunner } from "../../packages/core/src/sandbox.js";
-import { IcarusService, type LandingGitService } from "../../packages/core/src/service.js";
+import {
+  IcarusService,
+  type LandingGitService,
+  type LandingGithubGatewayReads,
+} from "../../packages/core/src/service.js";
 import type { IcarusStore } from "../../packages/core/src/store.js";
 import type {
   CheckpointFile,
@@ -352,6 +356,10 @@ async function landingService(
   fixture: ReturnType<typeof seedEligibleRun>,
   landingGit: LandingGitService,
   platform: NodeJS.Platform = "linux",
+  landing?: {
+    readonly gateway?: (credential: string) => LandingGithubGatewayReads;
+    readonly credentialEnvironment?: (name: string) => string | undefined;
+  },
 ): Promise<IcarusService> {
   const stateRoot = path.join(fixture.root, "landing-service-state");
   mkdirSync(stateRoot, { mode: 0o700 });
@@ -379,6 +387,10 @@ async function landingService(
     landingGit,
     landingCredentialEnvironmentNames: [...ALLOWED_CREDENTIAL_ENVIRONMENT_NAMES],
     checks,
+    ...(landing?.gateway === undefined ? {} : { landingGithubGateway: landing.gateway }),
+    ...(landing?.credentialEnvironment === undefined
+      ? {}
+      : { landingCredentialEnvironment: landing.credentialEnvironment }),
     gatewayFactory: () => {
       throw new Error("Unexpected provider gateway construction");
     },
@@ -1178,6 +1190,8 @@ describe.runIf(process.platform === "linux")("landing service coordinator", () =
           };
         },
       }),
+      "linux",
+      { credentialEnvironment: () => undefined },
     );
 
     const ready = await service.resumeLanding(UNIT_RUN_ID);
@@ -1189,7 +1203,20 @@ describe.runIf(process.platform === "linux")("landing service coordinator", () =
       boundary: "local_ref_ready",
       value: { localRefOutcome: "created", updateRefExitCode: 0 },
     });
-    await expect(service.resumeLanding(UNIT_RUN_ID)).resolves.toEqual(ready);
+    // A further resume at local_ready runs the read-only GitHub preflight.
+    // This service has no credential configured, so the attempt fails before
+    // any HTTPS request is admitted and without touching the local ref.
+    const replay = await service.resumeLanding(UNIT_RUN_ID);
+    expect(replay.landing).toMatchObject({
+      state: "failed",
+      resumeState: "local_ready",
+      errorCode: "LANDING_CREDENTIAL_MISSING",
+    });
+    expect(replay.operations.at(-1)).toMatchObject({
+      kind: "github.preflight",
+      status: "failed",
+    });
+    expect(replay.httpRequests).toEqual([]);
     expect(calls).toEqual(["observe", "create", "observe"]);
     fixture.store.close();
   });

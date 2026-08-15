@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { GithubGateway } from "@icarus/github-gateway";
+
 import { containsSecretShapedContent } from "./context.js";
 import { sha256 } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
@@ -31,6 +33,7 @@ import {
   decodeGitHubLandingProfileV1,
   decodeLandingDigestV1,
   digestLandingRecord,
+  GITHUB_API_ORIGIN,
   GITHUB_API_VERSION,
   type GitHubLandingProfileV1,
   type LandingDigestV1,
@@ -48,9 +51,13 @@ import type { CheckpointFile } from "./types.js";
  * local-ref creation, and reconciliation; the service delegates its landing
  * methods here and keeps the public surface unchanged.
  *
- * Every remote effect remains Packet 4 work. Nothing in this module performs a
- * credential lookup, network request, GitHub effect, migration, merge, or
- * deployment.
+ * The S2b-ii-a slice adds the read-only `github.preflight` stage at
+ * `local_ready`: bounded actor/base/head GETs through the injectable gateway
+ * seam, each admitted to the durable ledger before its I/O and settled after,
+ * with the credential resolved env-only at call time and never persisted. The
+ * mutating remote stages (object upload, remote ref, draft PR, receipt) remain
+ * fenced in their own slices; nothing here performs a remote mutation,
+ * migration, merge, or deployment.
  */
 
 const LANDING_ATTEMPT_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -58,6 +65,17 @@ const LANDING_ATTEMPT_TIMEOUT_MS = 10 * 60 * 1_000;
 export type LandingGitService = Pick<
   LandingGitController,
   "inspectBase" | "prepareCandidate" | "observeLocalRef" | "createAbsentLocalRef"
+>;
+
+/**
+ * The read-only slice of the GitHub gateway the landing coordinator drives.
+ * The gateway owns one validated call at a time; the coordinator owns durable
+ * admission, settlement, and recovery (ADR 0043's argument-shape decision: the
+ * coordinator translates records to values at this boundary).
+ */
+export type LandingGithubGatewayReads = Pick<
+  GithubGateway,
+  "readActor" | "readBaseReference" | "readReference" | "readPullRequestByHead"
 >;
 
 export interface PrepareLandingInput {
@@ -73,6 +91,19 @@ export interface LandingCoordinatorOptions {
   readonly leases: RunLeaseManager;
   readonly landingGit?: LandingGitService;
   readonly landingCredentialEnvironmentNames?: readonly string[];
+  /**
+   * Builds the bounded gateway for one attempt from the just-resolved
+   * credential. Production wires the pinned `api.github.com` origin; tests
+   * inject a deterministic fake or an explicit loopback transport. Never
+   * persisted: the credential exists only inside one attempt's scope.
+   */
+  readonly landingGithubGateway?: (credential: string) => LandingGithubGatewayReads;
+  /**
+   * Resolves one allowlisted environment value at call time. Defaults to the
+   * process environment; tests inject a fixed map so no real environment is
+   * read.
+   */
+  readonly landingCredentialEnvironment?: (name: string) => string | undefined;
   readonly now: () => string;
   readonly platform: NodeJS.Platform;
 }
@@ -230,6 +261,43 @@ function durableLocalRefFact(fact: LandingLocalRefFact): LocalRefFactV1 {
   return { schemaVersion: 1, ...fact };
 }
 
+const SAFE_CODE_PATTERN = /^[A-Z][A-Z0-9_]*$/;
+
+/**
+ * Maps any thrown value to a bounded host safe code. Both `IcarusError` and
+ * the gateway's structurally compatible `GithubGatewayError` carry a `code`;
+ * anything else collapses to the fallback so no foreign text is persisted.
+ */
+function githubErrorCode(error: unknown, fallback: string): string {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? (error as { readonly code?: unknown }).code
+      : undefined;
+  return typeof code === "string" && SAFE_CODE_PATTERN.test(code) ? code : fallback;
+}
+
+/**
+ * Extracts the HTTP status an error carries, reduced to the bounded integer
+ * the record contract admits. Anything else — including header text or an
+ * out-of-range value — becomes null, the "null transport refusal" shape.
+ */
+function githubErrorStatus(error: unknown): number | null {
+  const details =
+    typeof error === "object" && error !== null && "details" in error
+      ? (error as { readonly details?: unknown }).details
+      : undefined;
+  const status =
+    typeof details === "object" && details !== null && "status" in details
+      ? (details as { readonly status?: unknown }).status
+      : undefined;
+  return typeof status === "number" &&
+    Number.isSafeInteger(status) &&
+    status >= 100 &&
+    status <= 599
+    ? status
+    : null;
+}
+
 function assertLocalRefObservationBinding(
   observation: LandingLocalRefObservation,
   landing: LandingRecordV1,
@@ -277,6 +345,8 @@ export class LandingCoordinator {
   readonly #store: IcarusStore;
   readonly #landingGit: LandingGitService;
   readonly #landingCredentialEnvironmentNames: ReadonlySet<string>;
+  readonly #landingGithubGateway: (credential: string) => LandingGithubGatewayReads;
+  readonly #landingCredentialEnvironment: (name: string) => string | undefined;
   readonly #leases: RunLeaseManager;
   readonly #now: () => string;
   readonly #platform: NodeJS.Platform;
@@ -301,6 +371,11 @@ export class LandingCoordinator {
       "Landing credential environment allowlist names must be unique",
     );
     this.#landingCredentialEnvironmentNames = new Set(landingCredentialEnvironmentNames);
+    this.#landingGithubGateway =
+      options.landingGithubGateway ??
+      ((credential) => new GithubGateway({ baseUrl: GITHUB_API_ORIGIN, token: credential }));
+    this.#landingCredentialEnvironment =
+      options.landingCredentialEnvironment ?? ((name) => process.env[name]);
     this.#now = options.now;
     this.#platform = options.platform;
   }
@@ -609,6 +684,180 @@ export class LandingCoordinator {
     });
   }
 
+  /**
+   * The read-only remote stage (S2b-ii-a): admit the preflight intent, then
+   * perform the contract's bounded reads — actor, base ref, head-ref absence —
+   * each admitted to the ledger before its I/O and settled after. No mutating
+   * request exists in this slice, so every failure is retry-safe: definitive
+   * refusals enter `failed` with the stable `local_ready` resume marker, and
+   * interruptions leave the landing in `local_ready` for explicit resume.
+   */
+  async #executeGithubPreflight(landingId: string, signal?: AbortSignal): Promise<LandingStatusV1> {
+    const status = this.#store.getLandingStatus(landingId);
+    const landing = status.landing;
+    invariant(
+      landing.state === "local_ready" &&
+        status.decision?.decision === "approve" &&
+        landing.landingSha256 !== null &&
+        landing.candidateCommitSha1 !== null,
+      "INVALID_LANDING_STATE",
+      "Landing is not local-ready with a complete approved candidate",
+    );
+    assertLandingCredentialEnvironmentAllowed(
+      landing.profile,
+      this.#landingCredentialEnvironmentNames,
+    );
+    this.#landingEligibilityFor(landing);
+    const admitted = this.#store.startGithubPreflight(landing.id);
+    const operationId = admitted.operationId;
+
+    // The credential resolves env-only at call time, immediately before the
+    // bounded reads, and is dropped when the attempt completes or fails. A
+    // missing credential fails before any HTTPS request is admitted.
+    const credential = this.#landingCredentialEnvironment(landing.profile.credentialRef.name);
+    if (credential === undefined || credential.length === 0) {
+      return this.#store.settleGithubPreflight(landing.id, {
+        outcome: "failed",
+        errorCode: "LANDING_CREDENTIAL_MISSING",
+      });
+    }
+    let gateway: LandingGithubGatewayReads;
+    try {
+      gateway = this.#landingGithubGateway(credential);
+    } catch (error) {
+      return this.#store.settleGithubPreflight(landing.id, {
+        outcome: "failed",
+        errorCode: githubErrorCode(error, "LANDING_GITHUB_GATEWAY_INVALID"),
+      });
+    }
+
+    const coordinates = { owner: landing.profile.owner, repository: landing.profile.repository };
+    const baseRef = `refs/heads/${landing.profile.baseBranch}`;
+
+    const actorAdmission = this.#store.admitGithubRequest(
+      landing.id,
+      operationId,
+      "github.actor.get",
+    );
+    try {
+      const receipt = await gateway.readActor(landing.profile.expectedActor, { signal });
+      this.#store.settleGithubRequest(landing.id, actorAdmission.requestId, {
+        outcome: "succeeded",
+        httpStatus: 200,
+        projection: { type: "actor", login: receipt.login },
+        errorCode: null,
+      });
+    } catch (error) {
+      return this.#failPreflightRead(landing.id, actorAdmission.requestId, error, signal);
+    }
+
+    const baseAdmission = this.#store.admitGithubRequest(
+      landing.id,
+      operationId,
+      "github.base_ref.get",
+    );
+    let baseSha1: string;
+    try {
+      const receipt = await gateway.readBaseReference(coordinates, baseRef, { signal });
+      if (receipt === null) {
+        // A missing base ref is a failure, never a provable absence: only the
+        // exact head-ref GET may carry the absent projection.
+        this.#store.settleGithubRequest(landing.id, baseAdmission.requestId, {
+          outcome: "failed",
+          httpStatus: 404,
+          projection: null,
+          errorCode: "LANDING_REMOTE_BASE_MISSING",
+        });
+        return this.#store.settleGithubPreflight(landing.id, {
+          outcome: "failed",
+          errorCode: "LANDING_REMOTE_BASE_MISSING",
+        });
+      }
+      baseSha1 = receipt.sha;
+      this.#store.settleGithubRequest(landing.id, baseAdmission.requestId, {
+        outcome: "succeeded",
+        httpStatus: 200,
+        projection: { type: "ref", state: "direct", ref: baseRef, sha1: receipt.sha },
+        errorCode: null,
+      });
+    } catch (error) {
+      return this.#failPreflightRead(landing.id, baseAdmission.requestId, error, signal);
+    }
+    if (baseSha1 !== landing.baseCommitSha1) {
+      // The read was truthful and its settled row records the drift; the
+      // operation refuses before any later grammar member is admitted.
+      return this.#store.settleGithubPreflight(landing.id, {
+        outcome: "failed",
+        errorCode: "LANDING_REMOTE_BASE_CHANGED",
+      });
+    }
+
+    const headAdmission = this.#store.admitGithubRequest(
+      landing.id,
+      operationId,
+      "github.head_ref.get",
+    );
+    try {
+      const receipt = await gateway.readReference(coordinates, landing.headRef, { signal });
+      if (receipt === null) {
+        this.#store.settleGithubRequest(landing.id, headAdmission.requestId, {
+          outcome: "succeeded",
+          httpStatus: 404,
+          projection: { type: "ref", state: "absent", ref: landing.headRef, sha1: null },
+          errorCode: null,
+        });
+      } else {
+        this.#store.settleGithubRequest(landing.id, headAdmission.requestId, {
+          outcome: "succeeded",
+          httpStatus: 200,
+          projection: { type: "ref", state: "direct", ref: landing.headRef, sha1: receipt.sha },
+          errorCode: null,
+        });
+        // A pre-existing head is a conflict even when it points at the
+        // candidate: without this landing's durable prior-absence proof the
+        // remote branch is never adopted.
+        return this.#store.settleGithubPreflight(landing.id, {
+          outcome: "failed",
+          errorCode: "LANDING_REMOTE_HEAD_CONFLICT",
+        });
+      }
+    } catch (error) {
+      return this.#failPreflightRead(landing.id, headAdmission.requestId, error, signal);
+    }
+
+    return this.#store.settleGithubPreflight(landing.id, {
+      outcome: "completed",
+      errorCode: null,
+    });
+  }
+
+  /**
+   * Settles the just-admitted read as failed with the bounded host code, then
+   * settles the operation. Cancellation closes the attempt as interrupted —
+   * the landing keeps its retry-safe stable state — while a definitive refusal
+   * enters `failed` with the `local_ready` resume marker.
+   */
+  #failPreflightRead(
+    landingId: string,
+    requestId: string,
+    error: unknown,
+    signal?: AbortSignal,
+  ): LandingStatusV1 {
+    const errorCode = githubErrorCode(error, "LANDING_GITHUB_READ_FAILED");
+    this.#store.settleGithubRequest(landingId, requestId, {
+      outcome: "failed",
+      httpStatus: githubErrorStatus(error),
+      projection: null,
+      errorCode,
+    });
+    const cancelled =
+      signal?.aborted === true || errorCode === "GITHUB_CANCELLED" || errorCode === "CANCELLED";
+    return this.#store.settleGithubPreflight(
+      landingId,
+      cancelled ? { outcome: "interrupted", errorCode } : { outcome: "failed", errorCode },
+    );
+  }
+
   setLandingProfile(
     projectName: string,
     profileInput: GitHubLandingProfileV1,
@@ -714,17 +963,18 @@ export class LandingCoordinator {
         current.landing.profile,
         this.#landingCredentialEnvironmentNames,
       );
-      if (current.landing.state === "local_ready") {
-        return current;
-      }
+      // `local_ready` is resumable in this slice: resume runs the read-only
+      // GitHub preflight. The later mutation-stage resume markers stay fenced
+      // until their own slices land.
       invariant(
         !(
           current.landing.state === "failed" &&
           current.landing.resumeState !== "preparing_candidate" &&
-          current.landing.resumeState !== "approved"
+          current.landing.resumeState !== "approved" &&
+          current.landing.resumeState !== "local_ready"
         ),
         "INVALID_LANDING_STATE",
-        "Packet 3 cannot resume this later landing stage",
+        "This landing stage cannot resume before its remote slice lands",
       );
 
       const admission = this.#store.admitLandingResume(current.landing.id);
@@ -748,6 +998,13 @@ export class LandingCoordinator {
             "Approved resume unexpectedly pre-admitted an operation",
           );
           return this.#executeLocalRefCreation(current.landing.id, attemptSignal);
+        case "local_ready":
+          invariant(
+            admission.operationId === null,
+            "LANDING_RECORD_INVALID",
+            "Local-ready resume unexpectedly pre-admitted an operation",
+          );
+          return this.#executeGithubPreflight(current.landing.id, attemptSignal);
         case "reconciliation_required":
           invariant(
             admission.operationId !== null,
@@ -762,7 +1019,7 @@ export class LandingCoordinator {
         default:
           throw new IcarusError(
             "INVALID_LANDING_STATE",
-            "Landing resume reached an unsupported Packet 3 state",
+            "Landing resume reached an unsupported state for this slice",
           );
       }
     });

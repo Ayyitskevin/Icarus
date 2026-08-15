@@ -2350,6 +2350,226 @@ export function canonicalGitHubPostBodyV1(
   return { value: decoded, body, sha256: sha256(body) };
 }
 
+export interface ActorProjectionV1 {
+  readonly type: "actor";
+  readonly login: string;
+}
+
+export interface RefProjectionV1 {
+  readonly type: "ref";
+  readonly state: "absent" | "direct";
+  readonly ref: string;
+  readonly sha1: string | null;
+}
+
+export interface ObjectProjectionV1 {
+  readonly type: "object";
+  readonly objectKind: "blob" | "tree" | "commit" | "ref";
+  readonly sha1: string;
+}
+
+export interface PullRequestListProjectionV1 {
+  readonly type: "pull_request_list";
+  readonly complete: boolean;
+  readonly count: number;
+  readonly objects: readonly PullRequestProjectionV1[];
+}
+
+export type LandingHttpProjectionV1 =
+  | ActorProjectionV1
+  | RefProjectionV1
+  | ObjectProjectionV1
+  | PullRequestProjectionV1
+  | PullRequestListProjectionV1;
+
+/**
+ * The canonical settled result of one admitted HTTPS request (ADR 0027 record
+ * contract, "HTTPS results"). A succeeded outcome carries the exact projection
+ * its kind requires; failure and ambiguity carry no projection at all, so a
+ * provider observation can never be smuggled into evidence through a request
+ * that did not prove it.
+ */
+export interface LandingHttpResultV1 {
+  readonly schemaVersion: 1;
+  readonly requestId: string;
+  readonly kind: LandingHttpKindV1;
+  readonly outcome: "succeeded" | "failed" | "ambiguous";
+  readonly httpStatus: number | null;
+  readonly projection: LandingHttpProjectionV1 | null;
+  readonly errorCode: string | null;
+}
+
+function decodeActorProjectionV1(value: unknown, field: string): ActorProjectionV1 {
+  const decoded = record(value, ["type", "login"], field);
+  return {
+    type: literal(decoded.type, "actor", `${field}.type`),
+    login: assertGitHubIdentityPart(decoded.login, `${field}.login`, true),
+  };
+}
+
+function decodeRefProjectionV1(value: unknown, field: string): RefProjectionV1 {
+  const decoded = record(value, ["type", "state", "ref", "sha1"], field);
+  const state = oneOf(decoded.state, ["absent", "direct"] as const, `${field}.state`);
+  return {
+    type: literal(decoded.type, "ref", `${field}.type`),
+    state,
+    ref: assertFullHeadRef(decoded.ref, `${field}.ref`),
+    sha1:
+      state === "absent"
+        ? literal(decoded.sha1, null, `${field}.sha1`)
+        : assertSha1(decoded.sha1, `${field}.sha1`),
+  };
+}
+
+function decodeObjectProjectionV1(
+  value: unknown,
+  field: string,
+  objectKind: "blob" | "tree" | "commit" | "ref",
+): ObjectProjectionV1 {
+  const decoded = record(value, ["type", "objectKind", "sha1"], field);
+  return {
+    type: literal(decoded.type, "object", `${field}.type`),
+    objectKind: literal(decoded.objectKind, objectKind, `${field}.objectKind`),
+    sha1: assertSha1(decoded.sha1, `${field}.sha1`),
+  };
+}
+
+function decodePullRequestListProjectionV1(
+  value: unknown,
+  field: string,
+): PullRequestListProjectionV1 {
+  const decoded = record(value, ["type", "complete", "count", "objects"], field);
+  const objects = array(decoded.objects, `${field}.objects`).map((entry) =>
+    decodePullRequestProjectionV1(entry),
+  );
+  const count = safeInteger(decoded.count, `${field}.count`);
+  if (count !== objects.length) {
+    invalid("Pull-request list count does not equal its object count");
+  }
+  const numbers = objects.map((entry) => entry.number);
+  if (new Set(numbers).size !== numbers.length) {
+    invalid("Pull-request list contains a duplicate number");
+  }
+  for (let index = 1; index < numbers.length; index += 1) {
+    const previous = numbers[index - 1];
+    const current = numbers[index];
+    if (previous === undefined || current === undefined || previous >= current) {
+      invalid("Pull-request list is not sorted by number");
+    }
+  }
+  const complete = decoded.complete;
+  if (typeof complete !== "boolean") invalid(`${field}.complete must be boolean`);
+  // The record contract pins one page of at most 100 entries: a list marked
+  // complete at page size could be hiding a next page, so it can never prove
+  // absence or uniqueness.
+  if (complete && count >= 100) {
+    invalid("A complete pull-request list must be shorter than one page");
+  }
+  return {
+    type: literal(decoded.type, "pull_request_list", `${field}.type`),
+    complete,
+    count,
+    objects,
+  };
+}
+
+function decodeHttpResultProjectionV1(
+  kind: LandingHttpKindV1,
+  value: unknown,
+  httpStatus: number,
+): LandingHttpProjectionV1 {
+  const field = "httpResult.projection";
+  switch (kind) {
+    case "github.actor.get":
+      return decodeActorProjectionV1(value, field);
+    case "github.base_ref.get": {
+      const projection = decodeRefProjectionV1(value, field);
+      // A missing base ref is a failure, never a successful absence: only the
+      // exact head-ref GET may report `absent` (from its documented 404).
+      if (projection.state !== "direct") {
+        invalid("Base-ref success requires a direct ref projection");
+      }
+      return projection;
+    }
+    case "github.head_ref.get": {
+      const projection = decodeRefProjectionV1(value, field);
+      if ((httpStatus === 404) !== (projection.state === "absent")) {
+        invalid("Head-ref absence is provable only by its exact 404 response");
+      }
+      return projection;
+    }
+    case "github.pull_requests.get":
+      return decodePullRequestListProjectionV1(value, field);
+    case "github.blob.post":
+      return decodeObjectProjectionV1(value, field, "blob");
+    case "github.tree.post":
+      return decodeObjectProjectionV1(value, field, "tree");
+    case "github.commit.post":
+      return decodeObjectProjectionV1(value, field, "commit");
+    case "github.ref.post":
+      return decodeObjectProjectionV1(value, field, "ref");
+    case "github.pull_request.post":
+      return decodePullRequestProjectionV1(value);
+  }
+}
+
+export function decodeLandingHttpResultV1(value: unknown): LandingHttpResultV1 {
+  const decoded = record(
+    value,
+    ["schemaVersion", "requestId", "kind", "outcome", "httpStatus", "projection", "errorCode"],
+    "httpResult",
+  );
+  if (!isLandingHttpKindV1(decoded.kind)) {
+    invalid("HTTP result kind is unsupported");
+  }
+  const outcome = oneOf(
+    decoded.outcome,
+    ["succeeded", "failed", "ambiguous"] as const,
+    "httpResult.outcome",
+  );
+  let httpStatus: number | null;
+  let projection: LandingHttpProjectionV1 | null;
+  let errorCode: string | null;
+  if (outcome === "succeeded") {
+    const status = safeInteger(decoded.httpStatus, "httpResult.httpStatus", 100, 599);
+    const successEnvelope =
+      (status >= 200 && status <= 299) ||
+      (decoded.kind === "github.head_ref.get" && status === 404);
+    if (!successEnvelope) {
+      invalid("HTTP result success status is outside its kind's envelope");
+    }
+    errorCode = literal(decoded.errorCode, null, "httpResult.errorCode");
+    projection = decodeHttpResultProjectionV1(decoded.kind, decoded.projection, status);
+    httpStatus = status;
+  } else if (outcome === "failed") {
+    httpStatus =
+      decoded.httpStatus === null
+        ? null
+        : safeInteger(decoded.httpStatus, "httpResult.httpStatus", 100, 599);
+    projection = literal(decoded.projection, null, "httpResult.projection");
+    errorCode = assertSafeCode(decoded.errorCode, "httpResult.errorCode");
+  } else {
+    // An interrupted request never infers failure from an absent response: it
+    // carries no status, no projection, and the one honest ambiguity code.
+    httpStatus = literal(decoded.httpStatus, null, "httpResult.httpStatus");
+    projection = literal(decoded.projection, null, "httpResult.projection");
+    errorCode = literal(decoded.errorCode, "GITHUB_OUTCOME_AMBIGUOUS", "httpResult.errorCode");
+  }
+  return {
+    schemaVersion: literal(decoded.schemaVersion, 1, "httpResult.schemaVersion"),
+    requestId: assertUuid(decoded.requestId, "httpResult.requestId"),
+    kind: decoded.kind,
+    outcome,
+    httpStatus,
+    projection,
+    errorCode,
+  };
+}
+
+export function decodeCanonicalLandingHttpResultJsonV1(encoded: string): LandingHttpResultV1 {
+  return decodeCanonicalLandingJson(encoded, decodeLandingHttpResultV1);
+}
+
 export interface LandingDecisionV1 {
   readonly id: string;
   readonly landingId: string;

@@ -240,12 +240,21 @@ hostile same-user process. A copied valid file still has no proven author and no
 authority. Future authentication or Athena import requires a separate accepted
 decision and threat model.
 
-## GitHub gateway threats (Packet 4a package; no runtime path yet)
+## GitHub gateway threats (Packet 4a package; S2b-ii-a wires the read-only preflight)
 
-`packages/github-gateway` is merged and imported by no runtime module. These
-rows describe the package's own boundary. They are not evidence that remote
-landing exists, and the coordinator that will call this surface carries its own
-intent-before-effect and reconciliation obligations under ADR 0027.
+`packages/github-gateway` is now imported by `@icarus/core`'s landing
+coordinator, which drives exactly its read-only surface: the `github.preflight`
+stage at `local_ready` performs the actor, base-ref, and head-ref-absence GETs.
+No mutating operation is reachable — the mutation kinds stay fenced at the
+ledger — and no pull-request list read occurs yet, so ADR 0043's two open
+contract questions are not relied upon. Coordinator-side controls for this
+wiring: every request is admitted to the durable ledger with its bounded charge
+and event before any network I/O and settled with its canonical result after; a
+process interruption leaves takeover to settle an open admission as
+`GITHUB_OUTCOME_AMBIGUOUS` rather than inferring failure; and the token resolves
+env-only at call time through the profile's allowlisted name, never persisted.
+These rows describe the package's own boundary; the coordinator's
+intent-before-effect and reconciliation obligations remain under ADR 0027.
 
 | Threat | Required control | Required evidence and limits |
 | --- | --- | --- |

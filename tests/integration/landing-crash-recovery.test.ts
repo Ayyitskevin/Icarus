@@ -27,14 +27,25 @@ import {
 import { canonicalLandingJson } from "../../packages/core/src/landing-records.js";
 import { planApprovalDigest, treeCheckpointDigest } from "../../packages/core/src/policy.js";
 import type { CheckRunner } from "../../packages/core/src/sandbox.js";
-import { IcarusService, type LandingGitService } from "../../packages/core/src/service.js";
+import {
+  IcarusService,
+  type LandingGitService,
+  type LandingGithubGatewayReads,
+} from "../../packages/core/src/service.js";
 import { IcarusStore } from "../../packages/core/src/store.js";
 import type {
   CheckpointFile,
   PatchSet,
   VerificationEvidence,
 } from "../../packages/core/src/types.js";
+import { GithubGateway } from "../../packages/github-gateway/src/gateway.js";
 import { repositoryFingerprint } from "../support/integration-cli.js";
+import {
+  type CapturedProviderRequest,
+  type ProviderHttpServer,
+  sendProviderJson,
+  startProviderHttpServer,
+} from "../support/provider-http.js";
 import {
   seedUnitProject,
   UNIT_BASE_COMMIT,
@@ -84,6 +95,17 @@ enum CrashPhase {
   BlockObservation = "block-observation",
   InspectOnce = "inspect-once",
   RollbackOnce = "rollback-once",
+  PreflightBeforeActorGet = "preflight-before-actor-get",
+  PreflightDuringActorGet = "preflight-during-actor-get",
+  PreflightAfterActorGet = "preflight-after-actor-get",
+  PreflightBeforeBaseGet = "preflight-before-base-get",
+  PreflightDuringBaseGet = "preflight-during-base-get",
+  PreflightAfterBaseGet = "preflight-after-base-get",
+  PreflightBeforeHeadGet = "preflight-before-head-get",
+  PreflightDuringHeadGet = "preflight-during-head-get",
+  PreflightAfterHeadGet = "preflight-after-head-get",
+  PreflightBeforeSettlement = "preflight-before-settlement",
+  PreflightAfterSettlement = "preflight-after-settlement",
 }
 
 interface Paths {
@@ -494,10 +516,16 @@ function fakeLandingGit(): LandingGitService {
   };
 }
 
+interface LandingSeams {
+  readonly gateway?: (credential: string) => LandingGithubGatewayReads;
+  readonly credentialEnvironment?: (name: string) => string | undefined;
+}
+
 async function serviceFor(
   fixture: Paths,
   store: IcarusStore,
   landingGit: LandingGitService = fakeLandingGit(),
+  landing: LandingSeams = {},
 ): Promise<IcarusService> {
   const ordinaryGit = new Proxy(
     {},
@@ -522,6 +550,16 @@ async function serviceFor(
     git: ordinaryGit,
     landingGit,
     landingCredentialEnvironmentNames: [CREDENTIAL_ENV],
+    // Fail closed by default: no test in this file may construct a real
+    // provider-bound gateway. Preflight phases inject the loopback transport.
+    landingGithubGateway:
+      landing.gateway ??
+      (() => {
+        throw new Error("Unexpected GitHub gateway construction");
+      }),
+    ...(landing.credentialEnvironment === undefined
+      ? {}
+      : { landingCredentialEnvironment: landing.credentialEnvironment }),
     checks,
     now: () => NOW,
   });
@@ -546,11 +584,12 @@ async function openRealRuntime(
   root: string,
   factory?: (controller: LandingGitController) => LandingGitService,
   executable = "git",
+  landing: LandingSeams = {},
 ): Promise<Runtime> {
   const fixture = paths(root);
   const store = new IcarusStore(fixture.databasePath, { now: () => NOW });
   const landingGit = new LandingGitController(fixture.controllerHome, fixture.runsRoot, executable);
-  const service = await serviceFor(fixture, store, factory?.(landingGit) ?? landingGit);
+  const service = await serviceFor(fixture, store, factory?.(landingGit) ?? landingGit, landing);
   return {
     metadata: fixture,
     store,
@@ -558,6 +597,28 @@ async function openRealRuntime(
     landingGit,
     close: () => store.close(),
   };
+}
+
+/** Reopens the crashed fixture with the loopback GitHub transport wired in. */
+async function reopenPreflightWithLoopback(fixture: RealFixture): Promise<{
+  readonly runtime: Runtime;
+  readonly loopback: GithubLoopback;
+}> {
+  const loopback = await startGithubLoopback({
+    expectedActor: "crash-test-github-actor",
+    baseCommitSha1: () => fixture.baseCommitSha1,
+    headRef: fixture.headRef,
+  });
+  const runtime = await openRealRuntime(fixture.root, undefined, "git", {
+    gateway: (credential) =>
+      new GithubGateway({
+        baseUrl: loopback.server.baseUrl,
+        token: credential,
+        allowLoopback: true,
+      }),
+    credentialEnvironment: (name) => (name === CREDENTIAL_ENV ? PREFLIGHT_TOKEN : undefined),
+  });
+  return { runtime, loopback };
 }
 
 function prepareInput() {
@@ -617,6 +678,169 @@ function pause(markerPath: string, phase: CrashPhase, detail?: unknown): never {
   });
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
   throw new Error("Crash pause returned");
+}
+
+const PREFLIGHT_TOKEN = "ghp-crash-preflight-token-sentinel-do-not-persist";
+
+type PreflightReadClass = "actor" | "base" | "head";
+
+interface GithubLoopback {
+  readonly server: ProviderHttpServer;
+  readonly requests: readonly CapturedProviderRequest[];
+  /** One entry per request: whether the exact expected credential was presented. */
+  readonly authorizationChecks: readonly boolean[];
+}
+
+/**
+ * The deterministic loopback GitHub transport for preflight crash phases. It
+ * serves the exact three read shapes the contract's grammar admits, and for a
+ * "during" phase it parks the response mid-exchange so the kill lands while
+ * the request is in flight. The credential value is only ever compared, never
+ * recorded.
+ */
+async function startGithubLoopback(options: {
+  readonly expectedActor: string;
+  readonly baseCommitSha1: () => string;
+  readonly headRef: string;
+  readonly pauseOnRead?: PreflightReadClass;
+  readonly pausePhase?: CrashPhase;
+  readonly markerPath?: string;
+}): Promise<GithubLoopback> {
+  const authorizationChecks: boolean[] = [];
+  const server = await startProviderHttpServer((request, response) => {
+    authorizationChecks.push(request.headers.authorization === `Bearer ${PREFLIGHT_TOKEN}`);
+    const read: PreflightReadClass | null =
+      request.url === "/user"
+        ? "actor"
+        : request.url === "/repos/icarus-crash-test/landing-crash-recovery/git/ref/heads/main"
+          ? "base"
+          : request.url ===
+              `/repos/icarus-crash-test/landing-crash-recovery/git/ref/heads/icarus/${RUN_ID}`
+            ? "head"
+            : null;
+    if (read === null) {
+      sendProviderJson(response, 404, { message: "Not Found" });
+      return;
+    }
+    if (options.pauseOnRead === read) {
+      pause(options.markerPath ?? "", options.pausePhase ?? CrashPhase.InspectOnce, {
+        boundary: "github-read-in-flight",
+        read,
+        authorized: authorizationChecks.at(-1) ?? false,
+      });
+    }
+    if (read === "actor") {
+      sendProviderJson(response, 200, { login: options.expectedActor });
+    } else if (read === "base") {
+      sendProviderJson(response, 200, {
+        ref: "refs/heads/main",
+        object: { sha: options.baseCommitSha1(), type: "commit" },
+      });
+    } else {
+      sendProviderJson(response, 404, { message: "Not Found" });
+    }
+  });
+  return { server, requests: server.requests, authorizationChecks };
+}
+
+function isPreflightPhase(phase: CrashPhase): boolean {
+  return phase.startsWith("preflight-");
+}
+
+function preflightBeforeGetKind(phase: CrashPhase): string | null {
+  switch (phase) {
+    case CrashPhase.PreflightBeforeActorGet:
+      return "github.actor.get";
+    case CrashPhase.PreflightBeforeBaseGet:
+      return "github.base_ref.get";
+    case CrashPhase.PreflightBeforeHeadGet:
+      return "github.head_ref.get";
+    default:
+      return null;
+  }
+}
+
+function preflightDuringRead(phase: CrashPhase): PreflightReadClass | null {
+  switch (phase) {
+    case CrashPhase.PreflightDuringActorGet:
+      return "actor";
+    case CrashPhase.PreflightDuringBaseGet:
+      return "base";
+    case CrashPhase.PreflightDuringHeadGet:
+      return "head";
+    default:
+      return null;
+  }
+}
+
+function preflightAfterGetOrdinal(phase: CrashPhase): number | null {
+  switch (phase) {
+    case CrashPhase.PreflightAfterActorGet:
+      return 1;
+    case CrashPhase.PreflightAfterBaseGet:
+      return 2;
+    case CrashPhase.PreflightAfterHeadGet:
+      return 3;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Arms the preflight crash boundary in the worker: admission and settlement
+ * wrappers pause before/after their durable commit; the in-flight boundary is
+ * parked by the loopback handler itself.
+ */
+function armPreflightWrappers(store: IcarusStore, phase: CrashPhase, markerPath: string): void {
+  const beforeKind = preflightBeforeGetKind(phase);
+  if (beforeKind !== null) {
+    const original = store.admitGithubRequest.bind(store);
+    Object.defineProperty(store, "admitGithubRequest", {
+      configurable: true,
+      value: (...args: Parameters<typeof original>) => {
+        if (args[2] === beforeKind) {
+          pause(markerPath, phase, { boundary: "before-request-admission", kind: beforeKind });
+        }
+        return original(...args);
+      },
+    });
+  }
+  const afterOrdinal = preflightAfterGetOrdinal(phase);
+  if (afterOrdinal !== null) {
+    const original = store.settleGithubRequest.bind(store);
+    let settled = 0;
+    Object.defineProperty(store, "settleGithubRequest", {
+      configurable: true,
+      value: (...args: Parameters<typeof original>) => {
+        const result = original(...args);
+        settled += 1;
+        if (settled === afterOrdinal) {
+          pause(markerPath, phase, {
+            boundary: "after-request-settlement",
+            requestOrdinal: afterOrdinal,
+          });
+        }
+        return result;
+      },
+    });
+  }
+  if (
+    phase === CrashPhase.PreflightBeforeSettlement ||
+    phase === CrashPhase.PreflightAfterSettlement
+  ) {
+    const original = store.settleGithubPreflight.bind(store);
+    Object.defineProperty(store, "settleGithubPreflight", {
+      configurable: true,
+      value: (...args: Parameters<typeof original>) => {
+        if (phase === CrashPhase.PreflightBeforeSettlement) {
+          pause(markerPath, phase, { boundary: "before-preflight-settlement" });
+        }
+        const result = original(...args);
+        pause(markerPath, phase, { boundary: "after-preflight-settlement" });
+        return result;
+      },
+    });
+  }
 }
 
 function gitPauseWrapper(
@@ -731,6 +955,48 @@ function gitPauseWrapper(
   return wrapperPath;
 }
 
+/**
+ * The preflight crash worker: resume the approved landing to `local_ready`
+ * with the real Git controller, then arm the phase's boundary and run the
+ * read-only preflight through the loopback transport. The credential lives
+ * only in the worker's environment and is presented only to the loopback.
+ */
+async function preflightWorkerMain(
+  fixture: Paths,
+  phase: CrashPhase,
+  markerPath: string,
+): Promise<void> {
+  process.env[CREDENTIAL_ENV] = PREFLIGHT_TOKEN;
+  let baseCommitSha1 = "";
+  const duringRead = preflightDuringRead(phase);
+  const loopback = await startGithubLoopback({
+    expectedActor: "crash-test-github-actor",
+    baseCommitSha1: () => baseCommitSha1,
+    headRef: fixture.headRef,
+    ...(duringRead === null ? {} : { pauseOnRead: duringRead, pausePhase: phase, markerPath }),
+  });
+  const runtime = await openRealRuntime(fixture.root, undefined, "git", {
+    gateway: (credential) =>
+      new GithubGateway({
+        baseUrl: loopback.server.baseUrl,
+        token: credential,
+        allowLoopback: true,
+      }),
+  });
+  try {
+    baseCommitSha1 = runtime.store.getLandingStatusForRun(RUN_ID)?.landing.baseCommitSha1 ?? "";
+    if (baseCommitSha1 === "") throw new Error("Landing base commit is missing");
+    const ready = await runtime.service.resumeLanding(RUN_ID);
+    if (ready.landing.state !== "local_ready") {
+      throw new Error("Landing did not reach local_ready before the preflight phase");
+    }
+    armPreflightWrappers(runtime.store, phase, markerPath);
+    await runtime.service.resumeLanding(RUN_ID);
+  } finally {
+    runtime.close();
+  }
+}
+
 async function workerMain(
   root: string,
   phase: CrashPhase,
@@ -738,6 +1004,10 @@ async function workerMain(
   resultPath: string,
 ): Promise<void> {
   const fixture = paths(root);
+  if (isPreflightPhase(phase)) {
+    await preflightWorkerMain(fixture, phase, markerPath);
+    return;
+  }
   if (phase === CrashPhase.BeforeLandingRow) {
     const store = seedEligibleRun(fixture);
     const calls = {
@@ -1212,9 +1482,17 @@ if (workerPhase !== undefined) {
           expect(ready.landing.state).toBe("local_ready");
           expect(refValue(fixture)).toBe(ready.landing.candidateCommitSha1);
           expect(privateRefs(fixture)).toEqual([fixture.headRef]);
-          const beforeReplay = canonicalLandingJson(ready);
+          // A further resume at local_ready admits the read-only GitHub
+          // preflight. The worker has no credential in its environment, so the
+          // attempt fails before any HTTPS request is admitted — the crash
+          // matrix's credential-missing row — and the local ref is untouched.
           const replay = await runtime.service.resumeLanding(RUN_ID);
-          expect(canonicalLandingJson(replay)).toBe(beforeReplay);
+          expect(replay.landing).toMatchObject({
+            state: "failed",
+            resumeState: "local_ready",
+            errorCode: "LANDING_CREDENTIAL_MISSING",
+          });
+          expect(replay.httpRequests).toEqual([]);
           expect(privateRefs(fixture)).toEqual([fixture.headRef]);
           expect(fixture.requests()).toBe(0);
         } finally {
@@ -1461,6 +1739,242 @@ if (workerPhase !== undefined) {
           runtime.close();
         }
       }, 180_000);
+
+      test.each([
+        [
+          CrashPhase.PreflightBeforeActorGet,
+          { boundary: "before-request-admission", kind: "github.actor.get" },
+          0,
+          0,
+        ],
+        [
+          CrashPhase.PreflightDuringActorGet,
+          { boundary: "github-read-in-flight", read: "actor", authorized: true },
+          1,
+          1,
+        ],
+        [
+          CrashPhase.PreflightAfterActorGet,
+          { boundary: "after-request-settlement", requestOrdinal: 1 },
+          1,
+          0,
+        ],
+        [
+          CrashPhase.PreflightBeforeBaseGet,
+          { boundary: "before-request-admission", kind: "github.base_ref.get" },
+          1,
+          0,
+        ],
+        [
+          CrashPhase.PreflightDuringBaseGet,
+          { boundary: "github-read-in-flight", read: "base", authorized: true },
+          2,
+          1,
+        ],
+        [
+          CrashPhase.PreflightAfterBaseGet,
+          { boundary: "after-request-settlement", requestOrdinal: 2 },
+          2,
+          0,
+        ],
+        [
+          CrashPhase.PreflightBeforeHeadGet,
+          { boundary: "before-request-admission", kind: "github.head_ref.get" },
+          2,
+          0,
+        ],
+        [
+          CrashPhase.PreflightDuringHeadGet,
+          { boundary: "github-read-in-flight", read: "head", authorized: true },
+          3,
+          1,
+        ],
+        [
+          CrashPhase.PreflightAfterHeadGet,
+          { boundary: "after-request-settlement", requestOrdinal: 3 },
+          3,
+          0,
+        ],
+        [CrashPhase.PreflightBeforeSettlement, { boundary: "before-preflight-settlement" }, 3, 0],
+      ] as const)(
+        "crash at %s replays the read-only preflight without duplicate or ambiguous effects",
+        async (phase, markerExpectation, crashedRows, ambiguousRows) => {
+          const fixture = await createRealFixture();
+          await approveLanding(fixture);
+          const marker = await crashAt(fixture, phase);
+          expect(marker.phase).toBe(phase);
+          expect(marker.detail).toMatchObject(markerExpectation);
+
+          // Reopen cold: the durable state tells the truth before any resume.
+          const inspection = new IcarusStore(fixture.databasePath, { now: () => NOW });
+          try {
+            const interrupted = inspection.getLandingStatusForRun(RUN_ID);
+            expect(interrupted?.landing).toMatchObject({
+              state: "local_ready",
+              errorCode: null,
+            });
+            expect(interrupted?.attempts.map((attempt) => attempt.status)).toEqual([
+              "completed",
+              "completed",
+              "started",
+            ]);
+            expect(
+              interrupted?.operations.map((operation) => [operation.kind, operation.status]),
+            ).toEqual([
+              ["candidate.prepare", "completed"],
+              ["local_ref.create", "completed"],
+              ["github.preflight", "started"],
+            ]);
+            expect(interrupted?.httpRequests).toHaveLength(crashedRows);
+            if (ambiguousRows === 1) {
+              expect(interrupted?.httpRequests.at(-1)).toMatchObject({ status: "admitted" });
+            }
+          } finally {
+            inspection.close();
+          }
+
+          const { runtime, loopback } = await reopenPreflightWithLoopback(fixture);
+          try {
+            const resumed = await runtime.service.resumeLanding(RUN_ID);
+            expect(resumed.landing).toMatchObject({ state: "local_ready", errorCode: null });
+            expect(resumed.attempts.map((attempt) => attempt.status)).toEqual([
+              "completed",
+              "completed",
+              "interrupted",
+              "completed",
+            ]);
+            expect(
+              resumed.operations
+                .filter((operation) => operation.kind === "github.preflight")
+                .map((operation) => [operation.kindAttempt, operation.status]),
+            ).toEqual([
+              [1, "interrupted"],
+              [2, "completed"],
+            ]);
+            // No read is ever duplicated: the crashed attempt's rows stay
+            // settled, and the replay's three reads are fresh identities.
+            expect(resumed.httpRequests).toHaveLength(crashedRows + 3);
+            expect(new Set(resumed.httpRequests.map((row) => row.id)).size).toBe(crashedRows + 3);
+            expect(
+              resumed.httpRequests.filter(
+                (row) => row.coordinatorAttempt === 3 && row.outcome === "ambiguous",
+              ),
+            ).toHaveLength(ambiguousRows);
+            for (const ambiguous of resumed.httpRequests.filter(
+              (row) => row.outcome === "ambiguous",
+            )) {
+              expect(ambiguous).toMatchObject({
+                httpStatus: null,
+                errorCode: "GITHUB_OUTCOME_AMBIGUOUS",
+              });
+            }
+            expect(
+              resumed.httpRequests
+                .filter((row) => row.coordinatorAttempt === 4)
+                .map((row) => row.requestOrdinal),
+            ).toEqual([1, 2, 3]);
+            const interrupted = resumed.operations.find(
+              (operation) =>
+                operation.kind === "github.preflight" && operation.status === "interrupted",
+            );
+            expect(interrupted?.errorCode).toBe("LANDING_COORDINATOR_TAKEOVER");
+            expect(interrupted?.result?.evidence).toHaveLength(crashedRows);
+            // Takeover of the GET-only preflight emits no false state-change
+            // event: the landing kept its retry-safe stable state throughout.
+            expect(
+              resumed.events
+                .filter((event) => event.type === "landing.state.changed")
+                .map((event) => {
+                  const payload = event.payload as {
+                    readonly from: string;
+                    readonly to: string;
+                  };
+                  return `${payload.from}->${payload.to}`;
+                }),
+            ).toEqual([
+              "preparing_candidate->awaiting_approval",
+              "awaiting_approval->approved",
+              "approved->creating_local_ref",
+              "creating_local_ref->local_ready",
+            ]);
+            // The replay presented the credential to the loopback exactly
+            // three times, and the token value is never persisted.
+            expect(loopback.requests).toHaveLength(3);
+            expect([...loopback.authorizationChecks]).toEqual([true, true, true]);
+            expect(readFileSync(fixture.databasePath).includes(Buffer.from(PREFLIGHT_TOKEN))).toBe(
+              false,
+            );
+            expect(refValue(fixture)).toBe(resumed.landing.candidateCommitSha1);
+            expect(privateRefs(fixture)).toEqual([fixture.headRef]);
+            expect(fixture.requests()).toBe(0);
+          } finally {
+            runtime.close();
+            await loopback.server.close();
+          }
+        },
+        60_000,
+      );
+
+      test("crash after the preflight settlement commit replays read-only without duplication", async () => {
+        const fixture = await createRealFixture();
+        await approveLanding(fixture);
+        const marker = await crashAt(fixture, CrashPhase.PreflightAfterSettlement);
+        expect(marker.detail).toMatchObject({ boundary: "after-preflight-settlement" });
+
+        const inspection = new IcarusStore(fixture.databasePath, { now: () => NOW });
+        try {
+          const completed = inspection.getLandingStatusForRun(RUN_ID);
+          expect(completed?.landing).toMatchObject({ state: "local_ready", errorCode: null });
+          expect(completed?.attempts.map((attempt) => attempt.status)).toEqual([
+            "completed",
+            "completed",
+            "completed",
+          ]);
+          expect(completed?.operations.at(-1)).toMatchObject({
+            kind: "github.preflight",
+            status: "completed",
+          });
+          expect(completed?.httpRequests.map((row) => row.outcome)).toEqual([
+            "succeeded",
+            "succeeded",
+            "succeeded",
+          ]);
+        } finally {
+          inspection.close();
+        }
+
+        const { runtime, loopback } = await reopenPreflightWithLoopback(fixture);
+        try {
+          // A completed preflight never blocks replay: the next explicit
+          // resume performs one fresh read-only preflight and nothing else.
+          const resumed = await runtime.service.resumeLanding(RUN_ID);
+          expect(resumed.landing).toMatchObject({ state: "local_ready", errorCode: null });
+          expect(
+            resumed.operations
+              .filter((operation) => operation.kind === "github.preflight")
+              .map((operation) => [operation.kindAttempt, operation.status]),
+          ).toEqual([
+            [1, "completed"],
+            [2, "completed"],
+          ]);
+          expect(resumed.httpRequests).toHaveLength(6);
+          expect(new Set(resumed.httpRequests.map((row) => row.id)).size).toBe(6);
+          expect(
+            resumed.httpRequests
+              .filter((row) => row.coordinatorAttempt === 4)
+              .map((row) => row.requestOrdinal),
+          ).toEqual([1, 2, 3]);
+          expect(loopback.requests).toHaveLength(3);
+          expect([...loopback.authorizationChecks]).toEqual([true, true, true]);
+          expect(readFileSync(fixture.databasePath).includes(Buffer.from(PREFLIGHT_TOKEN))).toBe(
+            false,
+          );
+          expect(fixture.requests()).toBe(0);
+        } finally {
+          runtime.close();
+          await loopback.server.close();
+        }
+      }, 60_000);
     },
   );
 }
