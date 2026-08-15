@@ -44,8 +44,10 @@ that later roadmap features already exist.
 > deterministically builds the reviewed candidate in the private cache, and
 > creates or reconciles the exact private `refs/heads/icarus/<run-id>` ref only
 > under durable prior-absence and intent evidence. Packet 4a's bounded GitHub
-> gateway package is merged but imported by no runtime module, so it supplies no
-> remote capability. Packet 4's remote landing coordination, PR receipts,
+> gateway package is merged; as of the S2b-ii-a slice the landing coordinator
+> drives its read-only preflight surface (actor, base-ref, and head-absence
+> reads) at `local_ready`, while every mutating operation remains fenced. Packet
+> 4's remote landing mutations, PR receipts,
 > credential-gated live-evidence profile, live-state migration, deployment, and
 > Gate 1 completion remain incomplete. No GitHub or
 > other external landing, migration, deployment, or public-release authority was

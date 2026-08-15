@@ -41,7 +41,10 @@ import { assertGate1SchemasForStartup, createGate1Schemas } from "./gate1-schema
 import {
   type CandidateSettlementInputV1,
   type CreateLandingInputV1,
+  type GithubPreflightSettlementInputV1,
   type LandingEligibilityV1,
+  type LandingHttpRequestAdmissionV1,
+  type LandingHttpSettlementInputV1,
   LandingLedger,
   type LandingOperationAdmissionV1,
   type LandingProfileRecordV1,
@@ -59,6 +62,7 @@ import {
   type GitHubLandingProfileV1,
   type LocalRefFactV1,
 } from "./landing-records.js";
+import type { LandingHttpKindV1 } from "./landing-state.js";
 import {
   assertCheckProfiles,
   assertOperatorActor,
@@ -1628,6 +1632,33 @@ export class IcarusStore {
     input: LocalRefReconciliationSettlementInputV1,
   ): LandingStatusV1 {
     return this.#landingLedger.settleLocalRefReconciliation(landingId, input);
+  }
+
+  startGithubPreflight(landingId: string): LandingOperationAdmissionV1 {
+    return this.#landingLedger.startGithubPreflight(landingId);
+  }
+
+  admitGithubRequest(
+    landingId: string,
+    operationId: string,
+    kind: LandingHttpKindV1,
+  ): LandingHttpRequestAdmissionV1 {
+    return this.#landingLedger.admitGithubRequest(landingId, operationId, kind);
+  }
+
+  settleGithubRequest(
+    landingId: string,
+    requestId: string,
+    input: LandingHttpSettlementInputV1,
+  ): LandingStatusV1 {
+    return this.#landingLedger.settleGithubRequest(landingId, requestId, input);
+  }
+
+  settleGithubPreflight(
+    landingId: string,
+    input: GithubPreflightSettlementInputV1,
+  ): LandingStatusV1 {
+    return this.#landingLedger.settleGithubPreflight(landingId, input);
   }
 
   getLandingStatus(landingId: string): LandingStatusV1 {

@@ -56,6 +56,7 @@ import {
 } from "./landing-records.js";
 import {
   LandingCoordinator,
+  type LandingGithubGatewayReads,
   type LandingGitService,
   type PrepareLandingInput,
 } from "./landing-coordinator.js";
@@ -552,7 +553,11 @@ interface PreparedSessionChecks extends RunChecksOutcome {
 export type GatewayFactory = (config: ProviderConfig) => ModelGateway;
 
 // Re-exported from their new home so every existing import path keeps working.
-export type { LandingGitService, PrepareLandingInput } from "./landing-coordinator.js";
+export type {
+  LandingGithubGatewayReads,
+  LandingGitService,
+  PrepareLandingInput,
+} from "./landing-coordinator.js";
 
 export interface IcarusServiceOptions {
   readonly stateRoot: string;
@@ -561,6 +566,10 @@ export interface IcarusServiceOptions {
   readonly git: GitController;
   readonly landingGit?: LandingGitService;
   readonly landingCredentialEnvironmentNames?: readonly string[];
+  /** Test seam only; production constructs the pinned-origin gateway. */
+  readonly landingGithubGateway?: (credential: string) => LandingGithubGatewayReads;
+  /** Test seam only; production reads the process environment at call time. */
+  readonly landingCredentialEnvironment?: (name: string) => string | undefined;
   readonly checks: CheckRunner;
   readonly gatewayFactory?: GatewayFactory;
   readonly id?: () => string;
@@ -645,6 +654,12 @@ export class IcarusService {
       ...(options.landingCredentialEnvironmentNames === undefined
         ? {}
         : { landingCredentialEnvironmentNames: options.landingCredentialEnvironmentNames }),
+      ...(options.landingGithubGateway === undefined
+        ? {}
+        : { landingGithubGateway: options.landingGithubGateway }),
+      ...(options.landingCredentialEnvironment === undefined
+        ? {}
+        : { landingCredentialEnvironment: options.landingCredentialEnvironment }),
       now: this.#now,
       platform: this.#platform,
     });

@@ -599,6 +599,52 @@ page ceiling. No independent review record was filed with PRs #25–27; that deb
 is carried forward with the ADR that records this package's authority
 decisions.
 
+### Packet 4b sub-slice record — S2b-ii-a read-only remote preflight
+
+Status: **IMPLEMENTED (read-only preflight only); the mutation stages remain
+fenced.** This is the first sub-slice of Packet 4b's coordinator work, per the
+sub-slicing recommended in the continuation plan's S2b-ii ledger survey.
+
+What exists now: from an approved `local_ready` landing, an explicit
+`landing resume` runs the read-only `github.preflight` stage — the actor read,
+the base-reference read, and the head-ref absence read — through the Packet 4a
+gateway, against the pinned origin. Every request is admitted to the durable
+ledger with its conservative per-attempt charge (`2 * changedPaths + 32`) and
+its `landing.github.request.admitted` event in one transaction **before** any
+network I/O, then settled with its canonical result. The credential resolves
+env-only at call time through the existing allowlist and is never persisted; a
+missing credential fails before any HTTPS request is admitted. Preflight maps
+to no action state: it completes without a landing transition, and its
+deterministic failures enter `failed` with the retry-safe `local_ready` resume
+marker while interruptions leave the landing in `local_ready`. Takeover of an
+interrupted preflight settles an admitted-but-unsettled read as
+`ambiguous`/`GITHUB_OUTCOME_AMBIGUOUS` before interrupting the operation —
+never inferring failure from an absent response — and emits no false
+state-change event. The operation-kind fence widened by exactly one kind
+(`github.preflight`); the state fence did not move, so this slice is
+structurally incapable of a remote mutation. `landing_receipts` stays
+write-fenced, and the `github.objects.upload`, `github.ref.create`, and
+`github.pull_request.create` kinds remain inadmissible.
+
+What remains: S2b-ii-b (object upload and the absent-only remote ref — the
+first mutations, plus remote-reconciliation subjects), S2b-ii-c (draft PR and
+the receipt), and S2b-iii (receipt presentation through the four-file
+lockstep chain). The gateway's two open contract-level questions in ADR 0043
+(head-filter identity case; page size versus the response ceiling) remain
+open and unrelied-upon: this slice's reads do not include the reconciliation
+list read.
+
+Evidence: unit suites assert the admission-before-I/O ordering, grammar and
+cardinality fences, derived-not-proposed settlement, fail-closed row/event
+decoding, takeover ambiguity, and credential non-persistence (sentinel scans
+of persisted state on success and hostile-error paths). The real-process
+crash matrix adds twelve preflight phases — before, during, and after each
+GET class through the loopback transport, plus both sides of the settlement
+commit — each reopened and resumed with duplicate-effect and
+ambiguous-outcome assertions and zero real-network proof. No live GitHub call
+exists anywhere in tests; no schema or migration change was required (the
+merged DDL already carries `landing_http_requests`).
+
 ## Released Gate 0 baseline: ADR 0026 slice 2b production wiring
 
 Status: **MERGED AND RELEASED AT THE GATE 0 RELEASE HEAD**. The corrected ADR 0026
