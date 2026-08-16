@@ -240,21 +240,21 @@ hostile same-user process. A copied valid file still has no proven author and no
 authority. Future authentication or Athena import requires a separate accepted
 decision and threat model.
 
-## GitHub gateway threats (Packet 4a package; S2b-ii-a wires the read-only preflight)
+## GitHub gateway threats (Packet 4a package; S2b-ii wires the coordinator surface)
 
-`packages/github-gateway` is now imported by `@icarus/core`'s landing
-coordinator, which drives exactly its read-only surface: the `github.preflight`
-stage at `local_ready` performs the actor, base-ref, and head-ref-absence GETs.
-No mutating operation is reachable — the mutation kinds stay fenced at the
-ledger — and no pull-request list read occurs yet, so ADR 0043's two open
-contract questions are not relied upon. Coordinator-side controls for this
-wiring: every request is admitted to the durable ledger with its bounded charge
-and event before any network I/O and settled with its canonical result after; a
-process interruption leaves takeover to settle an open admission as
-`GITHUB_OUTCOME_AMBIGUOUS` rather than inferring failure; and the token resolves
-env-only at call time through the profile's allowlisted name, never persisted.
-These rows describe the package's own boundary; the coordinator's
-intent-before-effect and reconciliation obligations remain under ADR 0027.
+`packages/github-gateway` is imported by `@icarus/core`'s landing coordinator.
+As of S2b-ii-b the coordinator drives the read-only preflight plus the first
+two mutations: immutable object upload and the absent-only reference creation.
+The draft-PR POST, the pull-request list read, and the receipt stay fenced, so
+ADR 0043's two open contract questions are not relied upon. Coordinator-side
+controls for this wiring: every request is admitted to the durable ledger with
+its bounded charge and event before any network I/O and settled with its
+canonical result after; a process interruption leaves takeover to settle an
+open admission as `GITHUB_OUTCOME_AMBIGUOUS` rather than inferring failure; and
+the token resolves env-only at call time through the profile's allowlisted
+name, never persisted. These rows describe the package's own boundary; the
+coordinator's intent-before-effect and reconciliation obligations remain under
+ADR 0027.
 
 | Threat | Required control | Required evidence and limits |
 | --- | --- | --- |
@@ -262,6 +262,8 @@ intent-before-effect and reconciliation obligations remain under ADR 0027.
 | The credential leaves the process to a non-GitHub or local listener | pin the origin to `api.github.com` at parse time and again at dispatch; refuse scheme-relative and opaque-status escapes; `redirect: "manual"` so no redirect is followed; a loopback origin requires an explicit `allowLoopback` construction opt-in because it would receive the token in cleartext | origin matrices assert no host was contacted on refusal; production wiring never passes the opt-in; the token is read from the environment at call time, never persisted, and is absent from serialization, own-keys enumeration, error paths, and decoded blob content |
 | A refused mutation is recorded as benign idempotency | GitHub returns 422 for existing-ref, missing-object, unusable-name, and ruleset/branch-protection refusal alike, and the gateway reads no upstream bytes, so it reports `GITHUB_REF_CREATE_REFUSED` and `GITHUB_PULL_REQUEST_CREATE_REFUSED` rather than claiming "already exists" | a protection refusal recorded as benign existence would persist forever; tests assert the refusal codes and the absence of any `GITHUB_REF_EXISTS` classification |
 | An interrupted mutation is settled as a known outcome | an interrupted mutating request raises `GITHUB_OUTCOME_AMBIGUOUS`; only reads degrade to timeout, cancellation, or transport errors; no mutating request is retried inside the package, because ADR 0027 places retry with the coordinator's durable intent and reconciliation | the coordinator, not the gateway, decides what an ambiguous effect means; tests separate the mutating and read classifications at the same interruption point |
+| A remote mutation repeats, widens, or is recorded as more than the evidence proves | the durable operation intent commits before any POST; each effect binds its immediately preceding completed preflight; the upload's blobs/tree/commit are content-addressed with every returned name required to equal the locally computed one; the ref creation is one absent-only POST per operation with the post-read suffix proving the outcome; `created`/`reconciled` and `remoteResidue` are derived from durable rows, never caller-chosen; a replayed upload POSTs byte-identical bodies bound to its interrupted subject and reconciliation grant | the crash matrix covers before/during/after every POST class and both settlement commits with duplicate-effect assertions on reopen; unit suites pin byte-identical replay digests, the one-POST-per-operation rule, the never-adopt-an-existing-head rule, and residue derivation including the ambiguous-visibility case |
+| A commit uploaded under a substituted identity diverges from the reviewed candidate | the commit POST carries the exact profile author/committer name, email, and stored whole-second instant, and the coordinator requires the returned commit name to equal the locally computed `candidateCommitSha1` before the stage can complete | a provider-substituted identity would change the object name; the equality check fails the stage closed before any reference creation |
 | Reconciliation reads deadlock or silently truncate | a paged list is accepted only when `Link: rel="next"` is absent; a single open, single merged, or single closed pull request is selected in that order and anything else fails closed | a run-id-pinned head that cannot reconcile can never land, so an ordinary close-and-reopen must resolve rather than jam; the response ceiling interaction with page size is an open interface item recorded in the continuation plan |
 | Forbidden authority becomes expressible later | the HTTP method union admits `GET` and `POST` only and the operation table is a frozen closed enumeration, so force update, reference deletion, merge, and deployment endpoints are inexpressible rather than unused | static release-gate assertions scan for method literals and forbidden endpoint shapes; treat them as a smoke alarm rather than a proof, since they match source text |
 

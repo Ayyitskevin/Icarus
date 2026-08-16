@@ -620,19 +620,23 @@ preserve the state and require explicit operator recovery.
   rejects remote, LAN, Tailscale, public, OpenAI, and other cloud endpoints
   before persisting the draft; the broader CLI provider contract is unchanged.
 
-## GitHub gateway (Packet 4a package; S2b-ii-a read-only preflight wiring)
+## GitHub gateway (Packet 4a package; S2b-ii coordinator wiring)
 
-`packages/github-gateway` is imported by `@icarus/core`'s landing coordinator
-for exactly one read-only stage: an explicit `landing resume` at `local_ready`
-runs the `github.preflight` operation (actor, base-ref, and head-ref-absence
-GETs) against the pinned origin, each request admitted to the durable ledger
-before its I/O and settled after. No mutating gateway operation is reachable
-from any command, and no receipt exists. The operator-visible requirement this
-adds is the profile's allowlisted `ICARUS_GITHUB_TOKEN_*` environment variable:
-it is read at call time, presented only to the pinned origin, and never
-persisted; if it is absent the preflight fails before any HTTPS request. This
-section's remaining notes record the package boundary the later mutation slices
-will build on.
+`packages/github-gateway` is imported by `@icarus/core`'s landing coordinator.
+An explicit `landing resume` now runs remote stages through it: at
+`local_ready` the read-only preflight plus the immutable object upload (blobs,
+tree, commit), and at `objects_ready` the preflight plus the absent-only
+remote-ref creation. These are the first remote mutations any Icarus command
+can perform. The draft-PR POST, pull-request reads, and the receipt stay
+fenced for the next slices; a landing parked at `remote_ready` refuses a
+resume truthfully until then. Each request is admitted to the durable ledger
+before its I/O and settled after; an interruption reconciles through fresh
+reads or byte-identical immutable replays, never a blind repeat. The
+operator-visible requirement is the profile's allowlisted
+`ICARUS_GITHUB_TOKEN_*` environment variable: it is read at call time,
+presented only to the pinned origin, and never persisted; if it is absent the
+stage fails before any HTTPS request. This section's remaining notes record
+the package boundary.
 
 - The gateway pins `https://api.github.com` and follows no redirect. A loopback
   origin requires an explicit construction opt-in, used only by tests, because

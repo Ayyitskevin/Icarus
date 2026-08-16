@@ -32,6 +32,7 @@ import {
   decodeCandidateCredentialAuditV1,
   decodeGitHubLandingProfileV1,
   decodeLandingDigestV1,
+  deriveCandidateObjectManifestV1,
   digestLandingRecord,
   GITHUB_API_ORIGIN,
   GITHUB_API_VERSION,
@@ -68,14 +69,21 @@ export type LandingGitService = Pick<
 >;
 
 /**
- * The read-only slice of the GitHub gateway the landing coordinator drives.
- * The gateway owns one validated call at a time; the coordinator owns durable
+ * The bounded slice of the GitHub gateway the landing coordinator drives. The
+ * gateway owns one validated call at a time; the coordinator owns durable
  * admission, settlement, and recovery (ADR 0043's argument-shape decision: the
  * coordinator translates records to values at this boundary).
  */
-export type LandingGithubGatewayReads = Pick<
+export type LandingGithubGateway = Pick<
   GithubGateway,
-  "readActor" | "readBaseReference" | "readReference" | "readPullRequestByHead"
+  | "readActor"
+  | "readBaseReference"
+  | "readReference"
+  | "readPullRequestByHead"
+  | "createBlob"
+  | "createTree"
+  | "createCommit"
+  | "createAbsentRef"
 >;
 
 export interface PrepareLandingInput {
@@ -97,7 +105,7 @@ export interface LandingCoordinatorOptions {
    * inject a deterministic fake or an explicit loopback transport. Never
    * persisted: the credential exists only inside one attempt's scope.
    */
-  readonly landingGithubGateway?: (credential: string) => LandingGithubGatewayReads;
+  readonly landingGithubGateway?: (credential: string) => LandingGithubGateway;
   /**
    * Resolves one allowlisted environment value at call time. Defaults to the
    * process environment; tests inject a fixed map so no real environment is
@@ -345,7 +353,7 @@ export class LandingCoordinator {
   readonly #store: IcarusStore;
   readonly #landingGit: LandingGitService;
   readonly #landingCredentialEnvironmentNames: ReadonlySet<string>;
-  readonly #landingGithubGateway: (credential: string) => LandingGithubGatewayReads;
+  readonly #landingGithubGateway: (credential: string) => LandingGithubGateway;
   readonly #landingCredentialEnvironment: (name: string) => string | undefined;
   readonly #leases: RunLeaseManager;
   readonly #now: () => string;
@@ -691,17 +699,25 @@ export class LandingCoordinator {
    * request exists in this slice, so every failure is retry-safe: definitive
    * refusals enter `failed` with the stable `local_ready` resume marker, and
    * interruptions leave the landing in `local_ready` for explicit resume.
+   *
+   * S2b-ii-b generalizes the stage to `objects_ready` and, when the attempt
+   * chains its effect operation (`chainEffect`), a completed preflight leaves
+   * the attempt open for it.
    */
-  async #executeGithubPreflight(landingId: string, signal?: AbortSignal): Promise<LandingStatusV1> {
+  async #executeGithubPreflight(
+    landingId: string,
+    signal: AbortSignal | undefined,
+    chainEffect: boolean,
+  ): Promise<LandingStatusV1> {
     const status = this.#store.getLandingStatus(landingId);
     const landing = status.landing;
     invariant(
-      landing.state === "local_ready" &&
+      (landing.state === "local_ready" || landing.state === "objects_ready") &&
         status.decision?.decision === "approve" &&
         landing.landingSha256 !== null &&
         landing.candidateCommitSha1 !== null,
       "INVALID_LANDING_STATE",
-      "Landing is not local-ready with a complete approved candidate",
+      "Landing is not at a stable delivery state with a complete approved candidate",
     );
     assertLandingCredentialEnvironmentAllowed(
       landing.profile,
@@ -719,15 +735,17 @@ export class LandingCoordinator {
       return this.#store.settleGithubPreflight(landing.id, {
         outcome: "failed",
         errorCode: "LANDING_CREDENTIAL_MISSING",
+        closeAttempt: true,
       });
     }
-    let gateway: LandingGithubGatewayReads;
+    let gateway: LandingGithubGateway;
     try {
       gateway = this.#landingGithubGateway(credential);
     } catch (error) {
       return this.#store.settleGithubPreflight(landing.id, {
         outcome: "failed",
         errorCode: githubErrorCode(error, "LANDING_GITHUB_GATEWAY_INVALID"),
+        closeAttempt: true,
       });
     }
 
@@ -771,6 +789,7 @@ export class LandingCoordinator {
         return this.#store.settleGithubPreflight(landing.id, {
           outcome: "failed",
           errorCode: "LANDING_REMOTE_BASE_MISSING",
+          closeAttempt: true,
         });
       }
       baseSha1 = receipt.sha;
@@ -789,6 +808,7 @@ export class LandingCoordinator {
       return this.#store.settleGithubPreflight(landing.id, {
         outcome: "failed",
         errorCode: "LANDING_REMOTE_BASE_CHANGED",
+        closeAttempt: true,
       });
     }
 
@@ -819,6 +839,7 @@ export class LandingCoordinator {
         return this.#store.settleGithubPreflight(landing.id, {
           outcome: "failed",
           errorCode: "LANDING_REMOTE_HEAD_CONFLICT",
+          closeAttempt: true,
         });
       }
     } catch (error) {
@@ -828,6 +849,803 @@ export class LandingCoordinator {
     return this.#store.settleGithubPreflight(landing.id, {
       outcome: "completed",
       errorCode: null,
+      closeAttempt: !chainEffect,
+    });
+  }
+
+  /**
+   * Settles the just-admitted pre-POST read of an effect operation as failed
+   * with the bounded host code, then settles the operation. No mutating POST
+   * has been admitted on this path, so the operation definitively had no
+   * remote effect and fails back to its stable retry-safe stage.
+   */
+  #failGithubEffectRead(
+    landingId: string,
+    requestId: string,
+    error: unknown,
+    stage: "github.objects.upload" | "github.ref.create",
+  ): LandingStatusV1 {
+    const errorCode = githubErrorCode(error, "LANDING_GITHUB_READ_FAILED");
+    this.#store.settleGithubRequest(landingId, requestId, {
+      outcome: "failed",
+      httpStatus: githubErrorStatus(error),
+      projection: null,
+      errorCode,
+    });
+    const settlement = { outcome: "failed" as const, errorCode };
+    return stage === "github.objects.upload"
+      ? this.#store.settleGithubObjectsUpload(landingId, settlement)
+      : this.#store.settleGithubRemoteRef(landingId, settlement);
+  }
+
+  /**
+   * Performs one mutating object POST for the upload stage: admit, dispatch,
+   * settle. A returned object name equal to the locally computed identity is
+   * the only success; a contradicting response never proves the effect state,
+   * so the row is ambiguous and the operation holds for reconciliation.
+   */
+  async #performObjectPost(
+    landingId: string,
+    operationId: string,
+    kind: "github.blob.post" | "github.tree.post" | "github.commit.post",
+    objectKind: "blob" | "tree" | "commit",
+    expectedSha1: string,
+    call: (signal?: AbortSignal) => Promise<{ readonly sha: string }>,
+    signal?: AbortSignal,
+  ): Promise<LandingStatusV1 | null> {
+    const admission = this.#store.admitGithubRequest(landingId, operationId, kind);
+    try {
+      const receipt = await call(signal);
+      if (receipt.sha === expectedSha1) {
+        this.#store.settleGithubRequest(landingId, admission.requestId, {
+          outcome: "succeeded",
+          httpStatus: 201,
+          projection: { type: "object", objectKind, sha1: receipt.sha },
+          errorCode: null,
+        });
+        return null;
+      }
+      this.#store.settleGithubRequest(landingId, admission.requestId, {
+        outcome: "ambiguous",
+        httpStatus: null,
+        projection: null,
+        errorCode: "GITHUB_OUTCOME_AMBIGUOUS",
+      });
+      return this.#store.settleGithubObjectsUpload(landingId, {
+        outcome: "reconciliation_required",
+        errorCode: "GITHUB_PROTOCOL_ERROR",
+      });
+    } catch (error) {
+      const errorCode = githubErrorCode(error, "LANDING_GITHUB_POST_FAILED");
+      const ambiguous = errorCode === "GITHUB_OUTCOME_AMBIGUOUS";
+      this.#store.settleGithubRequest(landingId, admission.requestId, {
+        outcome: ambiguous ? "ambiguous" : "failed",
+        httpStatus: ambiguous ? null : githubErrorStatus(error),
+        projection: null,
+        errorCode: ambiguous ? "GITHUB_OUTCOME_AMBIGUOUS" : errorCode,
+      });
+      return this.#store.settleGithubObjectsUpload(landingId, {
+        outcome: "reconciliation_required",
+        errorCode: ambiguous ? "GITHUB_OUTCOME_AMBIGUOUS" : errorCode,
+      });
+    }
+  }
+
+  /**
+   * Object upload (S2b-ii-b) — the first remote mutation. The actor read and
+   * the durable observation commit before any POST; each blob, the tree, and
+   * the commit are admitted with their byte-exact bodies before dispatch and
+   * settled with the returned object name after. Content addressing makes a
+   * proven interruption replayable byte-identically, and no object ever
+   * becomes reachable as a side effect.
+   */
+  async #executeGithubObjectsUpload(
+    landingId: string,
+    signal?: AbortSignal,
+  ): Promise<LandingStatusV1> {
+    const status = this.#store.getLandingStatus(landingId);
+    const landing = status.landing;
+    invariant(
+      landing.state === "local_ready" &&
+        status.decision?.decision === "approve" &&
+        landing.landingSha256 !== null &&
+        landing.candidateTreeSha1 !== null &&
+        landing.candidateCommitSha1 !== null &&
+        landing.candidateCommitPayloadSha256 !== null,
+      "INVALID_LANDING_STATE",
+      "Landing is not local-ready with a complete approved candidate",
+    );
+    assertLandingCredentialEnvironmentAllowed(
+      landing.profile,
+      this.#landingCredentialEnvironmentNames,
+    );
+    const eligibility = this.#landingEligibilityFor(landing);
+    const candidateOperation = status.operations.find(
+      (operation) =>
+        operation.kind === "candidate.prepare" &&
+        operation.status === "completed" &&
+        operation.result?.outcome === "completed",
+    );
+    const recordedManifest =
+      candidateOperation?.result?.value !== null &&
+      candidateOperation?.result?.value !== undefined &&
+      "candidateObjectManifestSha256" in candidateOperation.result.value
+        ? candidateOperation.result.value.candidateObjectManifestSha256
+        : undefined;
+    const manifest = deriveCandidateObjectManifestV1({
+      baseCommitSha1: landing.baseCommitSha1,
+      baseTreeSha1: landing.baseTreeSha1,
+      candidateTreeSha1: landing.candidateTreeSha1,
+      candidateCommitSha1: landing.candidateCommitSha1,
+      candidateCommitPayloadSha256: landing.candidateCommitPayloadSha256,
+      changedPaths: landing.changedPaths,
+      checkpointFiles: eligibility.checkpointFiles,
+    });
+    invariant(
+      typeof recordedManifest === "string" && digestLandingRecord(manifest) === recordedManifest,
+      "LANDING_CANDIDATE_MISMATCH",
+      "Landing candidate manifest does not match its durable authority",
+    );
+    const admitted = this.#store.startGithubObjectsUpload(landing.id);
+    const operationId = admitted.operationId;
+
+    const credential = this.#landingCredentialEnvironment(landing.profile.credentialRef.name);
+    if (credential === undefined || credential.length === 0) {
+      return this.#store.settleGithubObjectsUpload(landing.id, {
+        outcome: "failed",
+        errorCode: "LANDING_CREDENTIAL_MISSING",
+      });
+    }
+    let gateway: LandingGithubGateway;
+    try {
+      gateway = this.#landingGithubGateway(credential);
+    } catch (error) {
+      return this.#store.settleGithubObjectsUpload(landing.id, {
+        outcome: "failed",
+        errorCode: githubErrorCode(error, "LANDING_GITHUB_GATEWAY_INVALID"),
+      });
+    }
+    const coordinates = { owner: landing.profile.owner, repository: landing.profile.repository };
+
+    const actorAdmission = this.#store.admitGithubRequest(
+      landing.id,
+      operationId,
+      "github.actor.get",
+    );
+    try {
+      const receipt = await gateway.readActor(landing.profile.expectedActor, { signal });
+      this.#store.settleGithubRequest(landing.id, actorAdmission.requestId, {
+        outcome: "succeeded",
+        httpStatus: 200,
+        projection: { type: "actor", login: receipt.login },
+        errorCode: null,
+      });
+    } catch (error) {
+      return this.#failGithubEffectRead(
+        landing.id,
+        actorAdmission.requestId,
+        error,
+        "github.objects.upload",
+      );
+    }
+    // The pre-effect observation — the one actor fact — commits before the
+    // first mutating POST is admitted.
+    this.#store.recordGithubOperationObservation(landing.id, operationId);
+
+    for (const entry of manifest.entries) {
+      if (entry.op === "delete") continue;
+      const file = eligibility.checkpointFiles.find((candidate) => candidate.path === entry.path);
+      invariant(
+        file !== undefined && file.approvedBase64 !== null && entry.blobSha1 !== null,
+        "LANDING_CANDIDATE_MISMATCH",
+        "Checkpoint bytes are missing for a non-deleted manifest entry",
+      );
+      const expectedBlobSha1 = entry.blobSha1;
+      const held = await this.#performObjectPost(
+        landing.id,
+        operationId,
+        "github.blob.post",
+        "blob",
+        expectedBlobSha1,
+        (postSignal) =>
+          gateway.createBlob(coordinates, file.approvedBase64 ?? "", {
+            signal: postSignal,
+          }),
+        signal,
+      );
+      if (held !== null) return held;
+    }
+
+    const treeEntries = manifest.entries.map((entry) => ({
+      path: entry.path,
+      mode: "100644",
+      blobSha: entry.blobSha1,
+    }));
+    const candidateTreeSha1 = landing.candidateTreeSha1;
+    const heldAtTree = await this.#performObjectPost(
+      landing.id,
+      operationId,
+      "github.tree.post",
+      "tree",
+      candidateTreeSha1,
+      (postSignal) =>
+        gateway.createTree(coordinates, treeEntries, landing.baseTreeSha1, {
+          signal: postSignal,
+        }),
+      signal,
+    );
+    if (heldAtTree !== null) return heldAtTree;
+
+    const candidateCommitSha1 = landing.candidateCommitSha1;
+    const party = {
+      name: landing.profile.commitIdentity.name,
+      email: landing.profile.commitIdentity.email,
+      date: landing.commitIso8601,
+    };
+    const heldAtCommit = await this.#performObjectPost(
+      landing.id,
+      operationId,
+      "github.commit.post",
+      "commit",
+      candidateCommitSha1,
+      (postSignal) =>
+        gateway.createCommit(
+          coordinates,
+          {
+            message: landing.commitMessage,
+            treeSha: candidateTreeSha1,
+            parentShas: [landing.baseCommitSha1],
+            author: party,
+            committer: party,
+          },
+          { signal: postSignal },
+        ),
+      signal,
+    );
+    if (heldAtCommit !== null) return heldAtCommit;
+
+    return this.#store.settleGithubObjectsUpload(landing.id, {
+      outcome: "completed",
+      errorCode: null,
+    });
+  }
+
+  /**
+   * The absent-only remote-ref creation (S2b-ii-b), mirroring the local CAS
+   * discipline: the three pre-effect reads and the durable observation commit
+   * before the one POST; the fixed post-read suffix then proves the outcome.
+   * `created` and `reconciled` are evidence-derived; a definitive no-effect
+   * suffix (absent head, unchanged base) fails back to `objects_ready` for an
+   * explicit retry; drift or conflict holds `reconciliation_required`.
+   */
+  async #executeGithubRemoteRefCreation(
+    landingId: string,
+    signal?: AbortSignal,
+  ): Promise<LandingStatusV1> {
+    const status = this.#store.getLandingStatus(landingId);
+    const landing = status.landing;
+    invariant(
+      landing.state === "objects_ready" &&
+        status.decision?.decision === "approve" &&
+        landing.landingSha256 !== null &&
+        landing.candidateCommitSha1 !== null,
+      "INVALID_LANDING_STATE",
+      "Landing is not objects-ready with a complete approved candidate",
+    );
+    assertLandingCredentialEnvironmentAllowed(
+      landing.profile,
+      this.#landingCredentialEnvironmentNames,
+    );
+    this.#landingEligibilityFor(landing);
+    const admitted = this.#store.startGithubRemoteRef(landing.id);
+    const operationId = admitted.operationId;
+
+    const credential = this.#landingCredentialEnvironment(landing.profile.credentialRef.name);
+    if (credential === undefined || credential.length === 0) {
+      return this.#store.settleGithubRemoteRef(landing.id, {
+        outcome: "failed",
+        errorCode: "LANDING_CREDENTIAL_MISSING",
+      });
+    }
+    let gateway: LandingGithubGateway;
+    try {
+      gateway = this.#landingGithubGateway(credential);
+    } catch (error) {
+      return this.#store.settleGithubRemoteRef(landing.id, {
+        outcome: "failed",
+        errorCode: githubErrorCode(error, "LANDING_GITHUB_GATEWAY_INVALID"),
+      });
+    }
+    const coordinates = { owner: landing.profile.owner, repository: landing.profile.repository };
+    const baseRef = `refs/heads/${landing.profile.baseBranch}`;
+
+    const actorAdmission = this.#store.admitGithubRequest(
+      landing.id,
+      operationId,
+      "github.actor.get",
+    );
+    try {
+      const receipt = await gateway.readActor(landing.profile.expectedActor, { signal });
+      this.#store.settleGithubRequest(landing.id, actorAdmission.requestId, {
+        outcome: "succeeded",
+        httpStatus: 200,
+        projection: { type: "actor", login: receipt.login },
+        errorCode: null,
+      });
+    } catch (error) {
+      return this.#failGithubEffectRead(
+        landing.id,
+        actorAdmission.requestId,
+        error,
+        "github.ref.create",
+      );
+    }
+
+    const baseAdmission = this.#store.admitGithubRequest(
+      landing.id,
+      operationId,
+      "github.base_ref.get",
+    );
+    try {
+      const receipt = await gateway.readBaseReference(coordinates, baseRef, { signal });
+      if (receipt === null) {
+        this.#store.settleGithubRequest(landing.id, baseAdmission.requestId, {
+          outcome: "failed",
+          httpStatus: 404,
+          projection: null,
+          errorCode: "LANDING_REMOTE_BASE_MISSING",
+        });
+        return this.#store.settleGithubRemoteRef(landing.id, {
+          outcome: "failed",
+          errorCode: "LANDING_REMOTE_BASE_MISSING",
+        });
+      }
+      this.#store.settleGithubRequest(landing.id, baseAdmission.requestId, {
+        outcome: "succeeded",
+        httpStatus: 200,
+        projection: { type: "ref", state: "direct", ref: baseRef, sha1: receipt.sha },
+        errorCode: null,
+      });
+      if (receipt.sha !== landing.baseCommitSha1) {
+        return this.#store.settleGithubRemoteRef(landing.id, {
+          outcome: "failed",
+          errorCode: "LANDING_REMOTE_BASE_CHANGED",
+        });
+      }
+    } catch (error) {
+      return this.#failGithubEffectRead(
+        landing.id,
+        baseAdmission.requestId,
+        error,
+        "github.ref.create",
+      );
+    }
+
+    const headAdmission = this.#store.admitGithubRequest(
+      landing.id,
+      operationId,
+      "github.head_ref.get",
+    );
+    try {
+      const receipt = await gateway.readReference(coordinates, landing.headRef, { signal });
+      if (receipt === null) {
+        this.#store.settleGithubRequest(landing.id, headAdmission.requestId, {
+          outcome: "succeeded",
+          httpStatus: 404,
+          projection: { type: "ref", state: "absent", ref: landing.headRef, sha1: null },
+          errorCode: null,
+        });
+      } else {
+        this.#store.settleGithubRequest(landing.id, headAdmission.requestId, {
+          outcome: "succeeded",
+          httpStatus: 200,
+          projection: { type: "ref", state: "direct", ref: landing.headRef, sha1: receipt.sha },
+          errorCode: null,
+        });
+        // A pre-existing head is a conflict even at the candidate: without
+        // this landing's durable prior-absence proof it is never adopted.
+        return this.#store.settleGithubRemoteRef(landing.id, {
+          outcome: "failed",
+          errorCode: "LANDING_REMOTE_HEAD_CONFLICT",
+        });
+      }
+    } catch (error) {
+      return this.#failGithubEffectRead(
+        landing.id,
+        headAdmission.requestId,
+        error,
+        "github.ref.create",
+      );
+    }
+    // The exact observations and the absent-only intent are durable before the
+    // compare-and-swap POST.
+    this.#store.recordGithubOperationObservation(landing.id, operationId);
+
+    const postAdmission = this.#store.admitGithubRequest(
+      landing.id,
+      operationId,
+      "github.ref.post",
+    );
+    try {
+      const receipt = await gateway.createAbsentRef(
+        coordinates,
+        landing.headRef,
+        landing.candidateCommitSha1,
+        { signal },
+      );
+      if (receipt.ref === landing.headRef && receipt.sha === landing.candidateCommitSha1) {
+        this.#store.settleGithubRequest(landing.id, postAdmission.requestId, {
+          outcome: "succeeded",
+          httpStatus: 201,
+          projection: { type: "object", objectKind: "ref", sha1: receipt.sha },
+          errorCode: null,
+        });
+      } else {
+        this.#store.settleGithubRequest(landing.id, postAdmission.requestId, {
+          outcome: "ambiguous",
+          httpStatus: null,
+          projection: null,
+          errorCode: "GITHUB_OUTCOME_AMBIGUOUS",
+        });
+      }
+    } catch (error) {
+      const errorCode = githubErrorCode(error, "LANDING_GITHUB_POST_FAILED");
+      const ambiguous = errorCode === "GITHUB_OUTCOME_AMBIGUOUS";
+      this.#store.settleGithubRequest(landing.id, postAdmission.requestId, {
+        outcome: ambiguous ? "ambiguous" : "failed",
+        httpStatus: ambiguous ? null : githubErrorStatus(error),
+        projection: null,
+        errorCode: ambiguous ? "GITHUB_OUTCOME_AMBIGUOUS" : errorCode,
+      });
+    }
+
+    // The fixed post-read suffix always runs after the settled POST: only its
+    // proof decides created, reconciled, retryable failure, or the hold.
+    const suffixHeadAdmission = this.#store.admitGithubRequest(
+      landing.id,
+      operationId,
+      "github.head_ref.get",
+    );
+    try {
+      const receipt = await gateway.readReference(coordinates, landing.headRef, { signal });
+      this.#store.settleGithubRequest(landing.id, suffixHeadAdmission.requestId, {
+        outcome: "succeeded",
+        httpStatus: receipt === null ? 404 : 200,
+        projection:
+          receipt === null
+            ? { type: "ref", state: "absent", ref: landing.headRef, sha1: null }
+            : { type: "ref", state: "direct", ref: landing.headRef, sha1: receipt.sha },
+        errorCode: null,
+      });
+    } catch (error) {
+      const errorCode = githubErrorCode(error, "LANDING_GITHUB_READ_FAILED");
+      this.#store.settleGithubRequest(landing.id, suffixHeadAdmission.requestId, {
+        outcome: "failed",
+        httpStatus: githubErrorStatus(error),
+        projection: null,
+        errorCode,
+      });
+      return this.#store.settleGithubRemoteRef(landing.id, {
+        outcome: "reconciliation_required",
+        errorCode,
+      });
+    }
+    const suffixBaseAdmission = this.#store.admitGithubRequest(
+      landing.id,
+      operationId,
+      "github.base_ref.get",
+    );
+    try {
+      const receipt = await gateway.readBaseReference(coordinates, baseRef, { signal });
+      if (receipt === null) {
+        this.#store.settleGithubRequest(landing.id, suffixBaseAdmission.requestId, {
+          outcome: "failed",
+          httpStatus: 404,
+          projection: null,
+          errorCode: "LANDING_REMOTE_BASE_MISSING",
+        });
+        return this.#store.settleGithubRemoteRef(landing.id, {
+          outcome: "reconciliation_required",
+          errorCode: "LANDING_REMOTE_BASE_MISSING",
+        });
+      }
+      this.#store.settleGithubRequest(landing.id, suffixBaseAdmission.requestId, {
+        outcome: "succeeded",
+        httpStatus: 200,
+        projection: { type: "ref", state: "direct", ref: baseRef, sha1: receipt.sha },
+        errorCode: null,
+      });
+    } catch (error) {
+      const errorCode = githubErrorCode(error, "LANDING_GITHUB_READ_FAILED");
+      this.#store.settleGithubRequest(landing.id, suffixBaseAdmission.requestId, {
+        outcome: "failed",
+        httpStatus: githubErrorStatus(error),
+        projection: null,
+        errorCode,
+      });
+      return this.#store.settleGithubRemoteRef(landing.id, {
+        outcome: "reconciliation_required",
+        errorCode,
+      });
+    }
+
+    return this.#settleRemoteRefFromRows(landing.id);
+  }
+
+  /**
+   * Derives the remote-ref operation outcome from its durable settled rows —
+   * the store re-derives legality and the residue when it settles, so a
+   * coordinator mis-derivation fails closed rather than persisting.
+   */
+  #settleRemoteRefFromRows(landingId: string): LandingStatusV1 {
+    const status = this.#store.getLandingStatus(landingId);
+    const landing = status.landing;
+    const operation = status.operations.find(
+      (entry) => entry.kind === "github.ref.create" && entry.status === "started",
+    );
+    invariant(
+      operation !== undefined && landing.candidateCommitSha1 !== null,
+      "LANDING_RECORD_INVALID",
+      "Remote-ref settlement lacks its active operation",
+    );
+    const rows = status.httpRequests
+      .filter((entry) => entry.operationId === operation.id)
+      .sort((left, right) => left.requestOrdinal - right.requestOrdinal);
+    const post = rows.find((entry) => entry.kind === "github.ref.post");
+    const suffixHead = rows.filter((entry) => entry.kind === "github.head_ref.get").at(-1);
+    const suffixBase = rows.filter((entry) => entry.kind === "github.base_ref.get").at(-1);
+    const headProjection =
+      suffixHead?.result?.projection?.type === "ref" ? suffixHead.result.projection : null;
+    const baseProjection =
+      suffixBase?.result?.projection?.type === "ref" ? suffixBase.result.projection : null;
+    const baseUnchanged =
+      baseProjection?.state === "direct" && baseProjection.sha1 === landing.baseCommitSha1;
+    const headAbsent = headProjection?.state === "absent";
+    const headExact =
+      headProjection?.state === "direct" && headProjection.sha1 === landing.candidateCommitSha1;
+    if (
+      (post?.outcome === "succeeded" || post?.outcome === "ambiguous") &&
+      headExact &&
+      baseUnchanged
+    ) {
+      return this.#store.settleGithubRemoteRef(landingId, {
+        outcome: "completed",
+        errorCode: null,
+      });
+    }
+    if (headAbsent && baseUnchanged) {
+      // The suffix definitively proves the POST had no effect, so the landing
+      // fails back to `objects_ready` and an explicit resume retries.
+      return this.#store.settleGithubRemoteRef(landingId, {
+        outcome: "failed",
+        errorCode: post?.errorCode ?? "LANDING_REMOTE_REF_OUTCOME_UNPROVEN",
+      });
+    }
+    const errorCode = !baseUnchanged
+      ? "LANDING_REMOTE_BASE_CHANGED"
+      : headProjection?.state === "direct"
+        ? "LANDING_REMOTE_HEAD_CONFLICT"
+        : (suffixHead?.errorCode ?? "LANDING_REMOTE_REF_OUTCOME_AMBIGUOUS");
+    return this.#store.settleGithubRemoteRef(landingId, {
+      outcome: "reconciliation_required",
+      errorCode,
+    });
+  }
+
+  /**
+   * Object-upload reconciliation performs no fresh reads: the immutable
+   * subject's durable rows either prove every object landed (advancing to
+   * `objects_ready`) or authorize the byte-identical retry at `local_ready`.
+   */
+  async #executeObjectUploadReconciliation(
+    landingId: string,
+    operationId: string,
+  ): Promise<LandingStatusV1> {
+    const status = this.#store.getLandingStatus(landingId);
+    const landing = status.landing;
+    invariant(
+      landing.state === "reconciliation_required" &&
+        landing.resumeState === "local_ready" &&
+        status.operations.some(
+          (operation) =>
+            operation.id === operationId &&
+            operation.kind === "landing.reconcile" &&
+            operation.status === "started",
+        ),
+      "INVALID_LANDING_STATE",
+      "Landing is not reconciling the admitted object-upload subject",
+    );
+    assertLandingCredentialEnvironmentAllowed(
+      landing.profile,
+      this.#landingCredentialEnvironmentNames,
+    );
+    this.#landingEligibilityFor(landing);
+    // The subject-binding observation is durable before the outcome is settled.
+    this.#store.recordGithubOperationObservation(landing.id, operationId);
+    const observed = this.#store.getLandingStatus(landingId);
+    const input = observed.operations.find((operation) => operation.id === operationId)?.request
+      .input;
+    invariant(
+      input !== undefined && "subjectOperationId" in input,
+      "LANDING_RECORD_INVALID",
+      "Object-upload reconciliation lacks its subject binding",
+    );
+    const subject = observed.operations.find(
+      (operation) => operation.id === input.subjectOperationId,
+    );
+    invariant(
+      subject !== undefined,
+      "LANDING_RECORD_INVALID",
+      "Object-upload reconciliation subject is missing",
+    );
+    const subjectRows = observed.httpRequests.filter(
+      (row) => row.operationId === subject.id && row.status === "settled",
+    );
+    const posts = subjectRows.filter((row) => row.method === "POST");
+    const complete =
+      posts.length > 0 &&
+      posts.every((row) => row.outcome === "succeeded") &&
+      subjectRows.some((row) => row.kind === "github.commit.post" && row.outcome === "succeeded");
+    return this.#store.settleObjectUploadReconciliation(landing.id, {
+      outcome: complete ? "objects_ready" : "retry_local_ready",
+      errorCode: null,
+    });
+  }
+
+  /**
+   * Remote-ref reconciliation re-reads the actor, the exact base, and the head
+   * through the durable machinery: unchanged base + freshly absent head permits
+   * one more absent-only POST from `objects_ready`; unchanged base + the exact
+   * candidate head reconciles to `remote_ready`; drift, conflict, or uncertain
+   * visibility holds with the honestly derived residue.
+   */
+  async #executeRemoteRefReconciliation(
+    landingId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<LandingStatusV1> {
+    const status = this.#store.getLandingStatus(landingId);
+    const landing = status.landing;
+    invariant(
+      landing.state === "reconciliation_required" &&
+        landing.resumeState === "objects_ready" &&
+        landing.candidateCommitSha1 !== null &&
+        status.operations.some(
+          (operation) =>
+            operation.id === operationId &&
+            operation.kind === "landing.reconcile" &&
+            operation.status === "started",
+        ),
+      "INVALID_LANDING_STATE",
+      "Landing is not reconciling the admitted remote-ref subject",
+    );
+    assertLandingCredentialEnvironmentAllowed(
+      landing.profile,
+      this.#landingCredentialEnvironmentNames,
+    );
+    this.#landingEligibilityFor(landing);
+    const credential = this.#landingCredentialEnvironment(landing.profile.credentialRef.name);
+    if (credential === undefined || credential.length === 0) {
+      return this.#store.settleRemoteRefReconciliation(landing.id, {
+        outcome: "reconciliation_required",
+        errorCode: "LANDING_CREDENTIAL_MISSING",
+      });
+    }
+    let gateway: LandingGithubGateway;
+    try {
+      gateway = this.#landingGithubGateway(credential);
+    } catch (error) {
+      return this.#store.settleRemoteRefReconciliation(landing.id, {
+        outcome: "reconciliation_required",
+        errorCode: githubErrorCode(error, "LANDING_GITHUB_GATEWAY_INVALID"),
+      });
+    }
+    const coordinates = { owner: landing.profile.owner, repository: landing.profile.repository };
+    const baseRef = `refs/heads/${landing.profile.baseBranch}`;
+
+    const reads: {
+      readonly kind: "github.actor.get" | "github.base_ref.get" | "github.head_ref.get";
+    }[] = [
+      { kind: "github.actor.get" },
+      { kind: "github.base_ref.get" },
+      { kind: "github.head_ref.get" },
+    ];
+    for (const { kind } of reads) {
+      const admission = this.#store.admitGithubRequest(landing.id, operationId, kind);
+      try {
+        if (kind === "github.actor.get") {
+          const receipt = await gateway.readActor(landing.profile.expectedActor, { signal });
+          this.#store.settleGithubRequest(landing.id, admission.requestId, {
+            outcome: "succeeded",
+            httpStatus: 200,
+            projection: { type: "actor", login: receipt.login },
+            errorCode: null,
+          });
+        } else if (kind === "github.base_ref.get") {
+          const receipt = await gateway.readBaseReference(coordinates, baseRef, { signal });
+          if (receipt === null) {
+            this.#store.settleGithubRequest(landing.id, admission.requestId, {
+              outcome: "failed",
+              httpStatus: 404,
+              projection: null,
+              errorCode: "LANDING_REMOTE_BASE_MISSING",
+            });
+            return this.#store.settleRemoteRefReconciliation(landing.id, {
+              outcome: "reconciliation_required",
+              errorCode: "LANDING_REMOTE_BASE_MISSING",
+            });
+          }
+          this.#store.settleGithubRequest(landing.id, admission.requestId, {
+            outcome: "succeeded",
+            httpStatus: 200,
+            projection: { type: "ref", state: "direct", ref: baseRef, sha1: receipt.sha },
+            errorCode: null,
+          });
+        } else {
+          const receipt = await gateway.readReference(coordinates, landing.headRef, { signal });
+          this.#store.settleGithubRequest(landing.id, admission.requestId, {
+            outcome: "succeeded",
+            httpStatus: receipt === null ? 404 : 200,
+            projection:
+              receipt === null
+                ? { type: "ref", state: "absent", ref: landing.headRef, sha1: null }
+                : { type: "ref", state: "direct", ref: landing.headRef, sha1: receipt.sha },
+            errorCode: null,
+          });
+        }
+      } catch (error) {
+        const errorCode = githubErrorCode(error, "LANDING_GITHUB_READ_FAILED");
+        this.#store.settleGithubRequest(landing.id, admission.requestId, {
+          outcome: "failed",
+          httpStatus: githubErrorStatus(error),
+          projection: null,
+          errorCode,
+        });
+        return this.#store.settleRemoteRefReconciliation(landing.id, {
+          outcome: "reconciliation_required",
+          errorCode,
+        });
+      }
+    }
+    this.#store.recordGithubOperationObservation(landing.id, operationId);
+
+    const observed = this.#store.getLandingStatus(landingId);
+    const rows = observed.httpRequests.filter(
+      (row) => row.operationId === operationId && row.status === "settled",
+    );
+    const baseProjection = rows.find((row) => row.kind === "github.base_ref.get")?.result
+      ?.projection;
+    const headProjection = rows.find((row) => row.kind === "github.head_ref.get")?.result
+      ?.projection;
+    const baseUnchanged =
+      baseProjection?.type === "ref" &&
+      baseProjection.state === "direct" &&
+      baseProjection.sha1 === landing.baseCommitSha1;
+    const headAbsent = headProjection?.type === "ref" && headProjection.state === "absent";
+    const headExact =
+      headProjection?.type === "ref" &&
+      headProjection.state === "direct" &&
+      headProjection.sha1 === landing.candidateCommitSha1;
+    if (baseUnchanged && headExact) {
+      return this.#store.settleRemoteRefReconciliation(landing.id, {
+        outcome: "remote_ready",
+        errorCode: null,
+      });
+    }
+    if (baseUnchanged && headAbsent) {
+      return this.#store.settleRemoteRefReconciliation(landing.id, {
+        outcome: "retry_objects_ready",
+        errorCode: null,
+      });
+    }
+    const errorCode = !baseUnchanged
+      ? "LANDING_REMOTE_BASE_CHANGED"
+      : headProjection?.type === "ref" && headProjection.state === "direct"
+        ? "LANDING_REMOTE_HEAD_CONFLICT"
+        : "LANDING_REMOTE_REF_OUTCOME_AMBIGUOUS";
+    return this.#store.settleRemoteRefReconciliation(landing.id, {
+      outcome: "reconciliation_required",
+      errorCode,
     });
   }
 
@@ -854,7 +1672,9 @@ export class LandingCoordinator {
       signal?.aborted === true || errorCode === "GITHUB_CANCELLED" || errorCode === "CANCELLED";
     return this.#store.settleGithubPreflight(
       landingId,
-      cancelled ? { outcome: "interrupted", errorCode } : { outcome: "failed", errorCode },
+      cancelled
+        ? { outcome: "interrupted", errorCode, closeAttempt: true }
+        : { outcome: "failed", errorCode, closeAttempt: true },
     );
   }
 
@@ -963,15 +1783,18 @@ export class LandingCoordinator {
         current.landing.profile,
         this.#landingCredentialEnvironmentNames,
       );
-      // `local_ready` is resumable in this slice: resume runs the read-only
-      // GitHub preflight. The later mutation-stage resume markers stay fenced
-      // until their own slices land.
+      // `local_ready` and `objects_ready` each run the read-only preflight and
+      // then chain their effect stage in the same attempt (the contract
+      // requires the effect's input to bind the immediately preceding
+      // completed preflight of that attempt). `remote_ready` stays parked
+      // until the draft-PR slice admits it.
       invariant(
         !(
           current.landing.state === "failed" &&
           current.landing.resumeState !== "preparing_candidate" &&
           current.landing.resumeState !== "approved" &&
-          current.landing.resumeState !== "local_ready"
+          current.landing.resumeState !== "local_ready" &&
+          current.landing.resumeState !== "objects_ready"
         ),
         "INVALID_LANDING_STATE",
         "This landing stage cannot resume before its remote slice lands",
@@ -999,23 +1822,62 @@ export class LandingCoordinator {
           );
           return this.#executeLocalRefCreation(current.landing.id, attemptSignal);
         case "local_ready":
+        case "objects_ready": {
           invariant(
             admission.operationId === null,
             "LANDING_RECORD_INVALID",
-            "Local-ready resume unexpectedly pre-admitted an operation",
+            "Stable-state resume unexpectedly pre-admitted an operation",
           );
-          return this.#executeGithubPreflight(current.landing.id, attemptSignal);
-        case "reconciliation_required":
+          const stage = admission.status.landing.state;
+          const preflighted = await this.#executeGithubPreflight(
+            current.landing.id,
+            attemptSignal,
+            true,
+          );
+          const preflightOperation = preflighted.operations.at(-1);
+          if (
+            preflighted.landing.state !== stage ||
+            preflightOperation?.kind !== "github.preflight" ||
+            preflightOperation.status !== "completed"
+          ) {
+            return preflighted;
+          }
+          return stage === "local_ready"
+            ? this.#executeGithubObjectsUpload(current.landing.id, attemptSignal)
+            : this.#executeGithubRemoteRefCreation(current.landing.id, attemptSignal);
+        }
+        case "reconciliation_required": {
           invariant(
             admission.operationId !== null,
             "LANDING_RECORD_INVALID",
             "Reconciliation resume has no durable operation intent",
           );
-          return this.#executeLocalRefReconciliation(
-            current.landing.id,
-            admission.operationId,
-            attemptSignal,
+          const resumeState = admission.status.landing.resumeState;
+          if (resumeState === "approved") {
+            return this.#executeLocalRefReconciliation(
+              current.landing.id,
+              admission.operationId,
+              attemptSignal,
+            );
+          }
+          if (resumeState === "local_ready") {
+            return this.#executeObjectUploadReconciliation(
+              current.landing.id,
+              admission.operationId,
+            );
+          }
+          if (resumeState === "objects_ready") {
+            return this.#executeRemoteRefReconciliation(
+              current.landing.id,
+              admission.operationId,
+              attemptSignal,
+            );
+          }
+          throw new IcarusError(
+            "INVALID_LANDING_STATE",
+            "Landing reconciliation is not in an implemented slice",
           );
+        }
         default:
           throw new IcarusError(
             "INVALID_LANDING_STATE",

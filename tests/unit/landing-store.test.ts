@@ -16,9 +16,11 @@ import {
   DERIVATIVE_GITHUB_EVENTS,
   DIRECT_ICARUS_EFFECTS,
   decodeLandingDigestV1,
+  deriveCandidateObjectManifestV1,
   digestLandingRecord,
   GITHUB_API_VERSION,
   type GitHubLandingProfileV1,
+  gitObjectSha1,
   type LandingDigestV1,
   type LocalRefFactV1,
   renderPullRequestBodyV1,
@@ -28,7 +30,7 @@ import type { CheckRunner } from "../../packages/core/src/sandbox.js";
 import {
   IcarusService,
   type LandingGitService,
-  type LandingGithubGatewayReads,
+  type LandingGithubGateway,
 } from "../../packages/core/src/service.js";
 import type { IcarusStore } from "../../packages/core/src/store.js";
 import type {
@@ -68,7 +70,6 @@ const BASE_TREE_SHA1 = "1".repeat(40);
 const CANDIDATE_TREE_SHA1 = "2".repeat(40);
 const CANDIDATE_COMMIT_SHA1 = "3".repeat(40);
 const CANDIDATE_PAYLOAD_SHA256 = "4".repeat(64);
-const CANDIDATE_MANIFEST_SHA256 = "5".repeat(64);
 const CANDIDATE_AUDIT_SHA256 = "6".repeat(64);
 const COMMIT_EPOCH_SECONDS = 0;
 const COMMIT_MESSAGE = "Apply the reviewed greeting change\n";
@@ -77,6 +78,29 @@ const PULL_REQUEST_BODY_PREFIX = "This draft was prepared from an approved Icaru
 const ALLOWED_CREDENTIAL_ENVIRONMENT_NAMES: ReadonlySet<string> = new Set([
   "ICARUS_GITHUB_TOKEN_UNIT",
 ]);
+
+const UNIT_CHECKPOINT_FILES: readonly CheckpointFile[] = [
+  {
+    path: UNIT_PLAN.target,
+    op: "modify",
+    baselineBase64: Buffer.from("hello\n").toString("base64"),
+    approvedBase64: Buffer.from("goodbye\n").toString("base64"),
+  },
+];
+
+// The manifest digest is the store-derived one: the ledger re-derives it from
+// durable evidence at every load and refuses a drifted constant.
+const CANDIDATE_MANIFEST_SHA256 = digestLandingRecord(
+  deriveCandidateObjectManifestV1({
+    baseCommitSha1: UNIT_BASE_COMMIT,
+    baseTreeSha1: BASE_TREE_SHA1,
+    candidateTreeSha1: CANDIDATE_TREE_SHA1,
+    candidateCommitSha1: CANDIDATE_COMMIT_SHA1,
+    candidateCommitPayloadSha256: CANDIDATE_PAYLOAD_SHA256,
+    changedPaths: [UNIT_PLAN.target],
+    checkpointFiles: UNIT_CHECKPOINT_FILES,
+  }),
+);
 
 const PROFILE: GitHubLandingProfileV1 = {
   version: 1,
@@ -166,14 +190,7 @@ function seedEligibleRun(): {
   fixture.store.recordPlanAndAwaitApproval(UNIT_RUN_ID, UNIT_PLAN, planSha256);
   fixture.store.approvePlan(UNIT_RUN_ID, planSha256, "unit-operator");
   fixture.store.recordWorkspace(UNIT_RUN_ID, "/tmp/unit-cache.git", "/tmp/unit-worktree", null);
-  const checkpointFiles: readonly CheckpointFile[] = [
-    {
-      path: UNIT_PLAN.target,
-      op: "modify",
-      baselineBase64: Buffer.from("hello\n").toString("base64"),
-      approvedBase64: Buffer.from("goodbye\n").toString("base64"),
-    },
-  ];
+  const checkpointFiles = UNIT_CHECKPOINT_FILES;
   const patchSet: PatchSet = {
     summary: "Update the fixture greeting.",
     edits: [
@@ -357,7 +374,7 @@ async function landingService(
   landingGit: LandingGitService,
   platform: NodeJS.Platform = "linux",
   landing?: {
-    readonly gateway?: (credential: string) => LandingGithubGatewayReads;
+    readonly gateway?: (credential: string) => LandingGithubGateway;
     readonly credentialEnvironment?: (name: string) => string | undefined;
   },
 ): Promise<IcarusService> {
@@ -1439,7 +1456,7 @@ describe.runIf(process.platform === "linux")("landing service coordinator", () =
           path: UNIT_PLAN.target,
           op: "modify" as const,
           mode: "100644" as const,
-          blobSha1: "8".repeat(40),
+          blobSha1: gitObjectSha1("blob", Buffer.from("goodbye\n", "utf8")),
           contentBytes: Buffer.byteLength("goodbye\n"),
           contentSha256: sha256("goodbye\n"),
         },

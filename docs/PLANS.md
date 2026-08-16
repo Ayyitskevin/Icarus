@@ -645,6 +645,54 @@ ambiguous-outcome assertions and zero real-network proof. No live GitHub call
 exists anywhere in tests; no schema or migration change was required (the
 merged DDL already carries `landing_http_requests`).
 
+### Packet 4b sub-slice record — S2b-ii-b object upload + absent-only remote ref
+
+Status: **IMPLEMENTED (object upload and remote-ref creation; the draft PR and
+receipt remain fenced).** This is the second sub-slice of Packet 4b, per the
+continuation plan's recommended sub-slicing. It contains the first remote
+**mutation** authority in the system: bounded GitHub object writes and one
+absent-only reference creation.
+
+What exists now: an explicit `landing resume` at `local_ready` runs the
+read-only preflight and then the `github.objects.upload` stage in the same
+attempt — one blob per non-deleted manifest path in canonical order, then the
+tree, then the commit — with the effect's durable intent binding the
+immediately preceding completed preflight (`preflightOperationId`/
+`preflightResultSha256`) before any POST is admitted. A further resume at
+`objects_ready` runs preflight and then `github.ref.create`: the three
+pre-effect reads and the observation commit before exactly one absent-only
+`POST /git/refs`, then the fixed post-read suffix proves the outcome.
+`created` versus `reconciled` is evidence-derived, never caller-chosen; a
+definitive no-effect suffix (absent head, unchanged base) fails back to
+`objects_ready` for an explicit retry; drift or conflict holds
+`reconciliation_required` with the honestly derived `remoteResidue`
+(`none`/`branch`/`ambiguous` from the freshest durable head proof). An
+interrupted upload reconciles without new reads and either proves the stage
+or authorizes the byte-identical retry; the retry binds the interrupted
+subject and its reconciliation grant. Two gateway gaps found while wiring are
+closed in the same change: `createCommit` now sends the exact author/
+committer identity the landing digest binds (GitHub's substitution would
+never reproduce the candidate commit name), and `createTree` carries
+null-sha deletion entries; every gateway mutation body serializes in the
+record contract's canonical ascending-ASCII key order, so the durable
+`bodySha256` binds the actual wire bytes.
+
+What remains: S2b-ii-c (draft-PR creation with its one-POST-ever discipline,
+the pull-request reconciliation reads, and the metadata-only receipt — the
+`github.pull_request.create` kind, `opening_draft_pr`, `landed`, and
+`landing_receipts` all stay fenced) and S2b-iii (receipt presentation).
+`remote_ready` currently parks: a resume there refuses truthfully until ii-c.
+
+Evidence: the store-level suite pins the exact attempt shapes, subject/body
+derivation, outcome and residue mappings, and fail-closed loads; the
+coordinator suite drives refusal, ambiguity, drift, conflict, and redaction
+paths through a fake gateway. The crash matrix adds sixteen phases — before,
+during, and after each POST class and both settlement commits — through the
+loopback transport, including the mid-flight ref-POST loss reconciled under
+both remote answers (absent and exact) and the proof that an interrupted
+upload replays byte-identically with no second ref creation. No live GitHub
+call exists anywhere in tests.
+
 ## Released Gate 0 baseline: ADR 0026 slice 2b production wiring
 
 Status: **MERGED AND RELEASED AT THE GATE 0 RELEASE HEAD**. The corrected ADR 0026

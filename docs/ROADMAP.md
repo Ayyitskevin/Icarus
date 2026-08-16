@@ -322,10 +322,10 @@ landing through `local_ready`: the existing SQLite ledger, ten-minute/eight-
 attempt coordinator, digest-bound decision, deterministic candidate, absent-only
 private ref, shared CLI/browser projection, and explicit crash recovery operate
 without network or source-checkout mutation. Packet 4a's bounded GitHub gateway
-package is merged; the S2b-ii-a slice wires its read-only preflight surface
-(actor, base-ref, and head-absence reads at `local_ready`) into the landing
-coordinator, with every mutating operation still fenced. Packet 4's remote
-landing/PR receipt runtime, credential-gated live
+package is merged; the S2b-ii slices wire the landing coordinator to it through
+`remote_ready`: read-only preflight, immutable object upload, and one
+absent-only remote reference, with the draft PR and receipt still fenced.
+Packet 4's pull-request stage, PR receipt runtime, credential-gated live
 evidence, live-state migration, and Gate 1 completion remain incomplete.
 
 Slice 1 adds the populated closed input contract at

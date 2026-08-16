@@ -17,7 +17,7 @@ import {
   type LandingStateV1,
 } from "./landing-state.js";
 import { assertAllowedTarget } from "./policy.js";
-import type { CheckProfile, JsonValue, VerificationEvidence } from "./types.js";
+import type { CheckProfile, CheckpointFile, JsonValue, VerificationEvidence } from "./types.js";
 
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SHA1_PATTERN = /^[a-f0-9]{40}$/;
@@ -1097,6 +1097,68 @@ export function decodeCandidateObjectManifestV1(value: unknown): CandidateObject
     ),
     entries,
   };
+}
+
+/**
+ * Recomputes the candidate object manifest from the landing's immutable columns
+ * and the checkpoint's approved bytes. Every entry's blob identity is the Git
+ * SHA-1 of the exact approved content, so the recomputed record must digest to
+ * the candidate operation's `candidateObjectManifestSha256` — a mismatch means
+ * the durable evidence and the landing disagree and fails closed before any
+ * remote admission.
+ */
+export function deriveCandidateObjectManifestV1(input: {
+  readonly baseCommitSha1: string;
+  readonly baseTreeSha1: string;
+  readonly candidateTreeSha1: string;
+  readonly candidateCommitSha1: string;
+  readonly candidateCommitPayloadSha256: string;
+  readonly changedPaths: readonly string[];
+  readonly checkpointFiles: readonly CheckpointFile[];
+}): CandidateObjectManifestV1 {
+  const entries = input.changedPaths.map((path) => {
+    const file = input.checkpointFiles.find((entry) => entry.path === path);
+    if (file === undefined) {
+      invalid(`Checkpoint is missing the changed path ${path}`);
+    }
+    if (file.approvedBase64 === null) {
+      if (file.op !== "delete") {
+        invalid(`Checkpoint for ${path} lacks approved bytes without a deletion`);
+      }
+      return {
+        path,
+        op: "delete" as const,
+        mode: "100644" as const,
+        blobSha1: null,
+        contentBytes: null,
+        contentSha256: null,
+      };
+    }
+    const bytes = Buffer.from(file.approvedBase64, "base64");
+    if (bytes.toString("base64") !== file.approvedBase64) {
+      invalid(`Checkpoint for ${path} is not canonical base64`);
+    }
+    if (file.op !== "modify" && file.op !== "create") {
+      invalid(`Checkpoint for ${path} has an unsupported operation`);
+    }
+    return {
+      path,
+      op: file.op,
+      mode: "100644" as const,
+      blobSha1: gitObjectSha1("blob", bytes),
+      contentBytes: bytes.byteLength,
+      contentSha256: sha256(bytes),
+    };
+  });
+  return decodeCandidateObjectManifestV1({
+    schemaVersion: 1,
+    baseCommitSha1: input.baseCommitSha1,
+    baseTreeSha1: input.baseTreeSha1,
+    candidateTreeSha1: input.candidateTreeSha1,
+    candidateCommitSha1: input.candidateCommitSha1,
+    candidateCommitPayloadSha256: input.candidateCommitPayloadSha256,
+    entries,
+  });
 }
 
 function exactLiteralArray<const T extends readonly string[]>(
