@@ -74,6 +74,10 @@ The wire format is fixed by the accepted ADR 0027 record contract, implemented
 in `@icarus/core`'s `landing-records.ts`: `X-GitHub-Api-Version: 2026-03-10`,
 lowercase-only owner and repository identities, and UTF-8 byte ceilings of 4 KiB
 for a commit message, 256 B for a pull request title, and 40 KiB for a body.
+Every POST body serializes with the contract's canonical ascending-ASCII key
+order, so the ledger's admitted `bodySha256` binds the exact wire bytes; the
+commit body carries the explicit author/committer identity the landing digest
+pins, and a tree entry's null SHA is the deletion form.
 
 This package cannot import those constants without inverting the dependency
 direction the landing coordinator needs, so it duplicates them and

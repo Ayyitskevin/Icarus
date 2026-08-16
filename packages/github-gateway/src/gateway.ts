@@ -5,6 +5,7 @@ import {
   assertBaseRef,
   assertBody,
   assertCommitMessage,
+  assertCommitParty,
   assertFileMode,
   assertIcarusRef,
   assertObjectSha,
@@ -12,6 +13,7 @@ import {
   assertTitle,
   assertTreePath,
   branchNameForRef,
+  type GithubCommitParty,
 } from "./identifiers.js";
 import {
   buildOperationUrl,
@@ -97,13 +99,16 @@ export interface GithubPullRequestReceipt extends GithubReceipt {
 export interface GithubTreeEntryInput {
   readonly path: string;
   readonly mode: string;
-  readonly blobSha: string;
+  /** The uploaded blob's object name, or null for a deletion entry. */
+  readonly blobSha: string | null;
 }
 
 export interface GithubCommitInput {
   readonly message: string;
   readonly treeSha: string;
   readonly parentShas: readonly string[];
+  readonly author: GithubCommitParty;
+  readonly committer: GithubCommitParty;
 }
 
 export interface GithubDraftPullRequestInput {
@@ -337,7 +342,7 @@ export class GithubGateway {
     };
   }
 
-  /** Creates one tree. Every entry is a regular file blob. */
+  /** Creates one tree. Every entry is a regular file blob or a deletion. */
   async createTree(
     coordinates: GithubRepositoryCoordinates,
     entries: readonly GithubTreeEntryInput[],
@@ -349,18 +354,21 @@ export class GithubGateway {
       "GITHUB_TREE_INVALID",
       "A tree must carry between one entry and the entry ceiling",
     );
+    // Every body this gateway emits serializes with ascending-ASCII keys, so
+    // the wire bytes are exactly the canonical bytes the landing ledger binds
+    // with `bodySha256` — this includes each entry's own key order.
     const tree = entries.map((entry) => ({
-      path: assertTreePath(entry.path),
       mode: assertFileMode(entry.mode),
+      path: assertTreePath(entry.path),
+      sha: entry.blobSha === null ? null : assertObjectSha(entry.blobSha, "Tree entry blob"),
       type: "blob",
-      sha: assertObjectSha(entry.blobSha, "Tree entry blob"),
     }));
     const response = await this.#call("create_tree", coordinates, {
       body: {
-        tree,
         ...(baseTreeSha === undefined
           ? {}
           : { base_tree: assertObjectSha(baseTreeSha, "Base tree") }),
+        tree,
       },
       signal: options.signal,
     });
@@ -373,7 +381,12 @@ export class GithubGateway {
     };
   }
 
-  /** Creates one commit object. It is not referenced until a reference is created. */
+  /**
+   * Creates one commit object. It is not referenced until a reference is
+   * created. The author and committer are explicit: omitting them would let
+   * GitHub substitute the token's user and the current time, and the returned
+   * commit name could never equal the landing's locally computed identity.
+   */
   async createCommit(
     coordinates: GithubRepositoryCoordinates,
     input: GithubCommitInput,
@@ -384,11 +397,15 @@ export class GithubGateway {
       "GITHUB_COMMIT_PARENTS_INVALID",
       "A candidate commit may declare at most two parents",
     );
+    const author = assertCommitParty(input.author, "Commit author");
+    const committer = assertCommitParty(input.committer, "Commit committer");
     const response = await this.#call("create_commit", coordinates, {
       body: {
+        author: { date: author.date, email: author.email, name: author.name },
+        committer: { date: committer.date, email: committer.email, name: committer.name },
         message: assertCommitMessage(input.message),
-        tree: assertObjectSha(input.treeSha, "Commit tree"),
         parents: input.parentShas.map((sha) => assertObjectSha(sha, "Commit parent")),
+        tree: assertObjectSha(input.treeSha, "Commit tree"),
       },
       signal: options.signal,
     });
@@ -458,15 +475,17 @@ export class GithubGateway {
     const headBranch = branchNameForRef(input.headRef);
     const baseBranch = assertBaseBranch(input.baseBranch);
     const response = await this.#call("create_draft_pull_request", coordinates, {
+      // Ascending-ASCII key order: the wire bytes must equal the canonical
+      // serialization the landing ledger binds with `bodySha256`.
       body: {
-        title: assertTitle(input.title),
-        body: assertBody(input.body),
-        head: headBranch,
         base: baseBranch,
+        body: assertBody(input.body),
         // A literal, never a parameter: this gateway cannot open a ready pull
         // request.
         draft: true,
+        head: headBranch,
         maintainer_can_modify: false,
+        title: assertTitle(input.title),
       },
       signal: options.signal,
     });

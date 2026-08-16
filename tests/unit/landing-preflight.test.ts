@@ -17,9 +17,11 @@ import {
   DERIVATIVE_GITHUB_EVENTS,
   DIRECT_ICARUS_EFFECTS,
   decodeLandingDigestV1,
+  deriveCandidateObjectManifestV1,
   digestLandingRecord,
   GITHUB_API_VERSION,
   type GitHubLandingProfileV1,
+  gitObjectSha1,
   type LandingDigestV1,
   type LocalRefFactV1,
   renderPullRequestBodyV1,
@@ -29,7 +31,7 @@ import type { CheckRunner } from "../../packages/core/src/sandbox.js";
 import {
   IcarusService,
   type LandingGitService,
-  type LandingGithubGatewayReads,
+  type LandingGithubGateway,
 } from "../../packages/core/src/service.js";
 import type { IcarusStore } from "../../packages/core/src/store.js";
 import type {
@@ -68,7 +70,6 @@ const BASE_TREE_SHA1 = "1".repeat(40);
 const CANDIDATE_TREE_SHA1 = "2".repeat(40);
 const CANDIDATE_COMMIT_SHA1 = "3".repeat(40);
 const CANDIDATE_PAYLOAD_SHA256 = "4".repeat(64);
-const CANDIDATE_MANIFEST_SHA256 = "5".repeat(64);
 const CANDIDATE_AUDIT_SHA256 = "6".repeat(64);
 const COMMIT_EPOCH_SECONDS = 0;
 const COMMIT_MESSAGE = "Apply the reviewed greeting change\n";
@@ -78,6 +79,29 @@ const CREDENTIAL_ENV = "ICARUS_GITHUB_TOKEN_PREFLIGHT";
 const TOKEN_SENTINEL = "ghp_PREFLIGHT_SENTINEL_MUST_NOT_LEAK";
 const LANDING_HEAD_REF = `refs/heads/icarus/${UNIT_RUN_ID}`;
 const BASE_REF = "refs/heads/main";
+
+const UNIT_CHECKPOINT_FILES: readonly CheckpointFile[] = [
+  {
+    path: UNIT_PLAN.target,
+    op: "modify",
+    baselineBase64: Buffer.from("hello\n").toString("base64"),
+    approvedBase64: Buffer.from("goodbye\n").toString("base64"),
+  },
+];
+
+// The manifest digest the store derives from durable evidence: no longer a
+// fixture constant, since the upload admission re-derives and compares it.
+const CANDIDATE_MANIFEST_SHA256 = digestLandingRecord(
+  deriveCandidateObjectManifestV1({
+    baseCommitSha1: UNIT_BASE_COMMIT,
+    baseTreeSha1: BASE_TREE_SHA1,
+    candidateTreeSha1: CANDIDATE_TREE_SHA1,
+    candidateCommitSha1: CANDIDATE_COMMIT_SHA1,
+    candidateCommitPayloadSha256: CANDIDATE_PAYLOAD_SHA256,
+    changedPaths: [UNIT_PLAN.target],
+    checkpointFiles: UNIT_CHECKPOINT_FILES,
+  }),
+);
 
 const PROFILE: GitHubLandingProfileV1 = {
   version: 1,
@@ -192,14 +216,7 @@ function seedEligibleRun(): {
   fixture.store.recordPlanAndAwaitApproval(UNIT_RUN_ID, UNIT_PLAN, planSha256);
   fixture.store.approvePlan(UNIT_RUN_ID, planSha256, "unit-operator");
   fixture.store.recordWorkspace(UNIT_RUN_ID, "/tmp/unit-cache.git", "/tmp/unit-worktree", null);
-  const checkpointFiles: readonly CheckpointFile[] = [
-    {
-      path: UNIT_PLAN.target,
-      op: "modify",
-      baselineBase64: Buffer.from("hello\n").toString("base64"),
-      approvedBase64: Buffer.from("goodbye\n").toString("base64"),
-    },
-  ];
+  const checkpointFiles = UNIT_CHECKPOINT_FILES;
   const patchSet: PatchSet = {
     summary: "Update the fixture greeting.",
     edits: [
@@ -411,7 +428,11 @@ function completeStorePreflight(store: IcarusStore, landingId: string): LandingS
   store.admitLandingResume(landingId);
   const started = store.startGithubPreflight(landingId);
   settlePreflightReads(store, landingId, started.operationId);
-  return store.settleGithubPreflight(landingId, { outcome: "completed", errorCode: null });
+  return store.settleGithubPreflight(landingId, {
+    outcome: "completed",
+    errorCode: null,
+    closeAttempt: true,
+  });
 }
 
 describe("durable GitHub preflight store slice", () => {
@@ -465,6 +486,7 @@ describe("durable GitHub preflight store slice", () => {
     const settled = fixture.store.settleGithubPreflight(ready.landing.id, {
       outcome: "completed",
       errorCode: null,
+      closeAttempt: true,
     });
     expect(settled.landing).toMatchObject({
       state: "local_ready",
@@ -624,6 +646,7 @@ describe("durable GitHub preflight store slice", () => {
     fixture.store.settleGithubPreflight(ready.landing.id, {
       outcome: "failed",
       errorCode: "LANDING_GITHUB_READ_FAILED",
+      closeAttempt: true,
     });
     fixture.store.close();
   });
@@ -740,6 +763,7 @@ describe("durable GitHub preflight store slice", () => {
     fixture.store.settleGithubPreflight(ready.landing.id, {
       outcome: "failed",
       errorCode: "LANDING_GITHUB_READ_FAILED",
+      closeAttempt: true,
     });
     fixture.store.close();
   });
@@ -778,6 +802,7 @@ describe("durable GitHub preflight store slice", () => {
         drifted.store.settleGithubPreflight(driftedReady.landing.id, {
           outcome: "completed",
           errorCode: null,
+          closeAttempt: true,
         }),
       "LANDING_RECORD_INVALID",
     );
@@ -802,16 +827,19 @@ describe("durable GitHub preflight store slice", () => {
         incomplete.store.settleGithubPreflight(incompleteReady.landing.id, {
           outcome: "completed",
           errorCode: null,
+          closeAttempt: true,
         }),
       "LANDING_RECORD_INVALID",
     );
     drifted.store.settleGithubPreflight(driftedReady.landing.id, {
       outcome: "failed",
       errorCode: "LANDING_REMOTE_BASE_CHANGED",
+      closeAttempt: true,
     });
     incomplete.store.settleGithubPreflight(incompleteReady.landing.id, {
       outcome: "failed",
       errorCode: "LANDING_GITHUB_READ_FAILED",
+      closeAttempt: true,
     });
     drifted.store.close();
     incomplete.store.close();
@@ -836,6 +864,7 @@ describe("durable GitHub preflight store slice", () => {
     const failed = fixture.store.settleGithubPreflight(ready.landing.id, {
       outcome: "failed",
       errorCode: "GITHUB_HTTP_ERROR",
+      closeAttempt: true,
     });
     expect(failed.landing).toMatchObject({
       state: "failed",
@@ -902,6 +931,7 @@ describe("durable GitHub preflight store slice", () => {
     const interrupted = fixture.store.settleGithubPreflight(ready.landing.id, {
       outcome: "interrupted",
       errorCode: "GITHUB_TIMEOUT",
+      closeAttempt: true,
     });
     expect(interrupted.landing).toMatchObject({
       state: "local_ready",
@@ -980,6 +1010,7 @@ describe("durable GitHub preflight store slice", () => {
     const replayed = fixture.store.settleGithubPreflight(ready.landing.id, {
       outcome: "completed",
       errorCode: null,
+      closeAttempt: true,
     });
     expect(replayed.landing.state).toBe("local_ready");
     expect(replayed.httpRequests).toHaveLength(4);
@@ -1158,9 +1189,13 @@ describe("durable GitHub preflight store slice", () => {
 // ---------------------------------------------------------------------------
 
 type GatewayBehavior = {
-  readonly readActor?: LandingGithubGatewayReads["readActor"];
-  readonly readBaseReference?: LandingGithubGatewayReads["readBaseReference"];
-  readonly readReference?: LandingGithubGatewayReads["readReference"];
+  readonly readActor?: LandingGithubGateway["readActor"];
+  readonly readBaseReference?: LandingGithubGateway["readBaseReference"];
+  readonly readReference?: LandingGithubGateway["readReference"];
+  readonly createBlob?: LandingGithubGateway["createBlob"];
+  readonly createTree?: LandingGithubGateway["createTree"];
+  readonly createCommit?: LandingGithubGateway["createCommit"];
+  readonly createAbsentRef?: LandingGithubGateway["createAbsentRef"];
 };
 
 function fakeLandingGit(): LandingGitService {
@@ -1179,7 +1214,7 @@ function fakeGithubGateway(
   behavior: GatewayBehavior = {},
   onCall?: (kind: string) => void,
 ): {
-  readonly factory: (credential: string) => LandingGithubGatewayReads;
+  readonly factory: (credential: string) => LandingGithubGateway;
   readonly calls: string[];
   readonly credentials: readonly string[];
 } {
@@ -1200,8 +1235,40 @@ function fakeGithubGateway(
       responseSha256: sha256("base-bytes"),
       latencyMs: 1,
     }));
-  const head = behavior.readReference ?? (async () => null);
-  const factory = (credential: string): LandingGithubGatewayReads => {
+  const head = behavior.readReference ?? undefined;
+  const blob =
+    behavior.createBlob ??
+    (async (_coordinates, contentBase64) => ({
+      // The faithful content-addressed answer: the object name of the bytes.
+      sha: gitObjectSha1("blob", Buffer.from(contentBase64, "base64")),
+      responseSha256: sha256("blob-bytes"),
+      latencyMs: 1,
+    }));
+  const tree =
+    behavior.createTree ??
+    (async () => ({
+      sha: CANDIDATE_TREE_SHA1,
+      responseSha256: sha256("tree-bytes"),
+      latencyMs: 1,
+    }));
+  const commit =
+    behavior.createCommit ??
+    (async () => ({
+      sha: CANDIDATE_COMMIT_SHA1,
+      responseSha256: sha256("commit-bytes"),
+      latencyMs: 1,
+    }));
+  const createRef =
+    behavior.createAbsentRef ??
+    (async (_coordinates, ref, sha) => ({
+      ref,
+      sha,
+      responseSha256: sha256("ref-bytes"),
+      latencyMs: 1,
+    }));
+  // The fake remote's refs: a created head is visible to later head reads.
+  const remoteRefs = new Map<string, string>();
+  const factory = (credential: string): LandingGithubGateway => {
     credentials.push(credential);
     return {
       readActor: async (...args) => {
@@ -1217,10 +1284,37 @@ function fakeGithubGateway(
       readReference: async (...args) => {
         calls.push("head");
         onCall?.("head");
-        return head(...args);
+        if (head !== undefined) return head(...args);
+        const [, ref] = args;
+        const sha = remoteRefs.get(ref);
+        return sha === undefined
+          ? null
+          : { ref, sha, responseSha256: sha256("head-bytes"), latencyMs: 1 };
       },
       readPullRequestByHead: async () => {
-        throw new Error("Pull-request reads are not part of this preflight");
+        throw new Error("Pull-request reads are not part of this slice");
+      },
+      createBlob: async (...args) => {
+        calls.push("blob");
+        onCall?.("blob");
+        return blob(...args);
+      },
+      createTree: async (...args) => {
+        calls.push("tree");
+        onCall?.("tree");
+        return tree(...args);
+      },
+      createCommit: async (...args) => {
+        calls.push("commit");
+        onCall?.("commit");
+        return commit(...args);
+      },
+      createAbsentRef: async (...args) => {
+        calls.push("ref");
+        onCall?.("ref");
+        const receipt = await createRef(...args);
+        if (receipt.ref !== undefined) remoteRefs.set(receipt.ref, receipt.sha);
+        return receipt;
       },
     };
   };
@@ -1230,7 +1324,7 @@ function fakeGithubGateway(
 async function preflightService(
   fixture: ReturnType<typeof seedEligibleRun>,
   options: {
-    readonly gateway?: (credential: string) => LandingGithubGatewayReads;
+    readonly gateway?: (credential: string) => LandingGithubGateway;
     readonly credentialEnvironment?: (name: string) => string | undefined;
     readonly platform?: NodeJS.Platform;
   } = {},
@@ -1292,23 +1386,25 @@ describe("landing service GitHub preflight stage", () => {
     });
     const service = await preflightService(fixture, { gateway: gateway.factory });
 
+    // The whole attempt: preflight, then the object upload it authorizes.
     const status = await service.resumeLanding(UNIT_RUN_ID);
     expect(status.landing).toMatchObject({
-      state: "local_ready",
+      state: "objects_ready",
       errorCode: null,
     });
-    expect(gateway.calls).toEqual(["actor", "base", "head"]);
+    expect(gateway.calls).toEqual(["actor", "base", "head", "actor", "blob", "tree", "commit"]);
     expect(admissionProofs).toEqual([
       "actor:1:admitted:landing.github.request.admitted",
       "base:2:admitted:landing.github.request.admitted",
       "head:3:admitted:landing.github.request.admitted",
+      "actor:4:admitted:landing.github.request.admitted",
+      "blob:5:admitted:landing.github.request.admitted",
+      "tree:6:admitted:landing.github.request.admitted",
+      "commit:7:admitted:landing.github.request.admitted",
     ]);
-    expect(gateway.credentials).toEqual([TOKEN_SENTINEL]);
-    expect(status.operations.at(-1)).toMatchObject({
-      kind: "github.preflight",
-      status: "completed",
-    });
-    expect(status.operations.at(-1)?.result).toMatchObject({
+    expect(gateway.credentials).toEqual([TOKEN_SENTINEL, TOKEN_SENTINEL]);
+    const preflight = status.operations.find((operation) => operation.kind === "github.preflight");
+    expect(preflight?.result).toMatchObject({
       outcome: "completed",
       boundary: "preflight_exact",
       value: {
@@ -1318,7 +1414,31 @@ describe("landing service GitHub preflight stage", () => {
         pullRequestCount: null,
       },
     });
+    const upload = status.operations.at(-1);
+    expect(upload).toMatchObject({
+      kind: "github.objects.upload",
+      status: "completed",
+    });
+    expect(upload?.result).toMatchObject({
+      outcome: "completed",
+      boundary: "objects_exact",
+      value: {
+        candidateObjectManifestSha256: CANDIDATE_MANIFEST_SHA256,
+        remoteObjectOutcome: "created_or_exact",
+      },
+    });
+    // The upload binds the immediately preceding completed preflight exactly.
+    expect(upload?.request.input).toMatchObject({
+      preflightOperationId: preflight?.id,
+      preflightResultSha256: preflight?.resultSha256,
+      retrySubjectOperationId: null,
+      retrySubjectRequestSha256: null,
+    });
     expect(status.httpRequests.map((row) => row.outcome)).toEqual([
+      "succeeded",
+      "succeeded",
+      "succeeded",
+      "succeeded",
       "succeeded",
       "succeeded",
       "succeeded",
@@ -1327,15 +1447,16 @@ describe("landing service GitHub preflight stage", () => {
     fixture.store.close();
   });
 
-  test("a further explicit resume performs a fresh preflight with new request identities", async () => {
+  test("a further explicit resume performs the ref stage with fresh request identities", async () => {
     const fixture = seedEligibleRun();
     localReadyLanding(fixture.store);
     const gateway = fakeGithubGateway();
     const service = await preflightService(fixture, { gateway: gateway.factory });
 
     const first = await service.resumeLanding(UNIT_RUN_ID);
+    expect(first.landing.state).toBe("objects_ready");
     const second = await service.resumeLanding(UNIT_RUN_ID);
-    expect(second.landing.state).toBe("local_ready");
+    expect(second.landing.state).toBe("remote_ready");
     expect(
       second.operations
         .filter((operation) => operation.kind === "github.preflight")
@@ -1344,14 +1465,26 @@ describe("landing service GitHub preflight stage", () => {
       [1, "completed"],
       [2, "completed"],
     ]);
-    expect(second.httpRequests).toHaveLength(6);
-    expect(new Set(second.httpRequests.map((row) => row.id)).size).toBe(6);
+    const refCreate = second.operations.at(-1);
+    expect(refCreate).toMatchObject({ kind: "github.ref.create", status: "completed" });
+    expect(refCreate?.result).toMatchObject({
+      outcome: "completed",
+      boundary: "remote_ref_ready",
+      value: {
+        baseSha1: UNIT_BASE_COMMIT,
+        headSha1: CANDIDATE_COMMIT_SHA1,
+        remoteRefOutcome: "created",
+      },
+    });
+    expect(second.httpRequests).toHaveLength(16);
+    expect(new Set(second.httpRequests.map((row) => row.id)).size).toBe(16);
     expect(
       second.httpRequests
-        .filter((row) => row.coordinatorAttempt === first.attempts.at(-1)?.ordinal)
+        .filter((row) => row.coordinatorAttempt === second.attempts.at(-1)?.ordinal)
         .map((row) => row.requestOrdinal),
-    ).toEqual([1, 2, 3]);
-    expect(gateway.calls).toHaveLength(6);
+    ).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(gateway.calls).toHaveLength(16);
+    expectNoPersistedToken(fixture.root);
     fixture.store.close();
   });
 
@@ -1390,8 +1523,8 @@ describe("landing service GitHub preflight stage", () => {
 
     failActor = false;
     const replayed = await service.resumeLanding(UNIT_RUN_ID);
-    expect(replayed.landing).toMatchObject({ state: "local_ready", errorCode: null });
-    expect(replayed.httpRequests).toHaveLength(4);
+    expect(replayed.landing).toMatchObject({ state: "objects_ready", errorCode: null });
+    expect(replayed.httpRequests).toHaveLength(8);
     fixture.store.close();
   });
 
@@ -1511,7 +1644,7 @@ describe("landing service GitHub preflight stage", () => {
 
     failTransport = false;
     const replayed = await service.resumeLanding(UNIT_RUN_ID);
-    expect(replayed.landing).toMatchObject({ state: "local_ready", errorCode: null });
+    expect(replayed.landing).toMatchObject({ state: "objects_ready", errorCode: null });
     fixture.store.close();
   });
 
@@ -1520,13 +1653,18 @@ describe("landing service GitHub preflight stage", () => {
     localReadyLanding(fixture.store);
     const before = fixture.store.getLandingStatusForRun(UNIT_RUN_ID);
     const attempt = new AbortController();
+    let cancelled = false;
     const gateway = fakeGithubGateway({
-      readActor: async () => {
-        attempt.abort(new Error("operator cancelled"));
-        throw new GithubGatewayError("GITHUB_CANCELLED", "A GitHub read did not complete", {
-          reason: "cancelled",
-          cause: "AbortError",
-        });
+      readActor: async (expectedActor: string) => {
+        if (!cancelled) {
+          cancelled = true;
+          attempt.abort(new Error("operator cancelled"));
+          throw new GithubGatewayError("GITHUB_CANCELLED", "A GitHub read did not complete", {
+            reason: "cancelled",
+            cause: "AbortError",
+          });
+        }
+        return { login: expectedActor, responseSha256: sha256("actor-bytes"), latencyMs: 1 };
       },
     });
     const service = await preflightService(fixture, { gateway: gateway.factory });
@@ -1553,7 +1691,7 @@ describe("landing service GitHub preflight stage", () => {
     );
 
     const replayed = await service.resumeLanding(UNIT_RUN_ID);
-    expect(replayed.landing).toMatchObject({ state: "local_ready", errorCode: null });
+    expect(replayed.landing).toMatchObject({ state: "objects_ready", errorCode: null });
     fixture.store.close();
   });
 

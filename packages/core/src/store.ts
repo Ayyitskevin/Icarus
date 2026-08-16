@@ -41,7 +41,9 @@ import { assertGate1SchemasForStartup, createGate1Schemas } from "./gate1-schema
 import {
   type CandidateSettlementInputV1,
   type CreateLandingInputV1,
+  type GithubEffectSettlementInputV1,
   type GithubPreflightSettlementInputV1,
+  type GithubReconciliationSettlementInputV1,
   type LandingEligibilityV1,
   type LandingHttpRequestAdmissionV1,
   type LandingHttpSettlementInputV1,
@@ -1638,6 +1640,14 @@ export class IcarusStore {
     return this.#landingLedger.startGithubPreflight(landingId);
   }
 
+  startGithubObjectsUpload(landingId: string): LandingOperationAdmissionV1 {
+    return this.#landingLedger.startGithubObjectsUpload(landingId);
+  }
+
+  startGithubRemoteRef(landingId: string): LandingOperationAdmissionV1 {
+    return this.#landingLedger.startGithubRemoteRef(landingId);
+  }
+
   admitGithubRequest(
     landingId: string,
     operationId: string,
@@ -1654,11 +1664,40 @@ export class IcarusStore {
     return this.#landingLedger.settleGithubRequest(landingId, requestId, input);
   }
 
+  recordGithubOperationObservation(landingId: string, operationId: string): LandingStatusV1 {
+    return this.#landingLedger.recordGithubOperationObservation(landingId, operationId);
+  }
+
   settleGithubPreflight(
     landingId: string,
     input: GithubPreflightSettlementInputV1,
   ): LandingStatusV1 {
     return this.#landingLedger.settleGithubPreflight(landingId, input);
+  }
+
+  settleGithubObjectsUpload(
+    landingId: string,
+    input: GithubEffectSettlementInputV1,
+  ): LandingStatusV1 {
+    return this.#landingLedger.settleGithubObjectsUpload(landingId, input);
+  }
+
+  settleGithubRemoteRef(landingId: string, input: GithubEffectSettlementInputV1): LandingStatusV1 {
+    return this.#landingLedger.settleGithubRemoteRef(landingId, input);
+  }
+
+  settleObjectUploadReconciliation(
+    landingId: string,
+    input: GithubReconciliationSettlementInputV1,
+  ): LandingStatusV1 {
+    return this.#landingLedger.settleObjectUploadReconciliation(landingId, input);
+  }
+
+  settleRemoteRefReconciliation(
+    landingId: string,
+    input: GithubReconciliationSettlementInputV1,
+  ): LandingStatusV1 {
+    return this.#landingLedger.settleRemoteRefReconciliation(landingId, input);
   }
 
   getLandingStatus(landingId: string): LandingStatusV1 {

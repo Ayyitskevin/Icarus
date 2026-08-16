@@ -20,6 +20,7 @@ const coordinates = { owner: "ayyitskevin", repository: "icarus" } as const;
 const commitSha = "1".repeat(40);
 const treeSha = "2".repeat(40);
 const blobSha = "3".repeat(40);
+const GIT_INSTANT = "2026-07-19T12:00:00Z";
 
 async function expectCode(promise: Promise<unknown>, code: string): Promise<GithubGatewayError> {
   try {
@@ -88,19 +89,25 @@ describe("GithubGateway HTTP contract", () => {
 
     await gatewayFor(server).createTree(
       coordinates,
-      [{ path: "src/greeting.txt", mode: "100644", blobSha }],
+      [
+        { path: "src/greeting.txt", mode: "100644", blobSha },
+        { path: "src/removed.txt", mode: "100644", blobSha: null },
+      ],
       treeSha,
     );
 
     const request = server.requests[0] as CapturedProviderRequest;
     expect(request.url).toBe("/repos/ayyitskevin/icarus/git/trees");
     expect(parseProviderRequestBody(request)).toEqual({
-      tree: [{ path: "src/greeting.txt", mode: "100644", type: "blob", sha: blobSha }],
+      tree: [
+        { path: "src/greeting.txt", mode: "100644", type: "blob", sha: blobSha },
+        { path: "src/removed.txt", mode: "100644", type: "blob", sha: null },
+      ],
       base_tree: treeSha,
     });
   });
 
-  it("creates a commit with its declared parents", async () => {
+  it("creates a commit with its declared parents and exact landing identity", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 201, { sha: commitSha });
     });
@@ -109,6 +116,8 @@ describe("GithubGateway HTTP contract", () => {
       message: "Icarus candidate",
       treeSha,
       parentShas: [blobSha],
+      author: { name: "Icarus Landing", email: "landing@example.invalid", date: GIT_INSTANT },
+      committer: { name: "Icarus Landing", email: "landing@example.invalid", date: GIT_INSTANT },
     });
 
     expect(receipt.sha).toBe(commitSha);
@@ -116,7 +125,55 @@ describe("GithubGateway HTTP contract", () => {
       message: "Icarus candidate",
       tree: treeSha,
       parents: [blobSha],
+      author: { name: "Icarus Landing", email: "landing@example.invalid", date: GIT_INSTANT },
+      committer: { name: "Icarus Landing", email: "landing@example.invalid", date: GIT_INSTANT },
     });
+  });
+
+  it("serializes every mutation body in the record contract's canonical key order", async () => {
+    // The landing ledger binds each admitted body with a SHA-256 over the
+    // canonical ascending-ASCII serialization. If the gateway's wire bytes ever
+    // drift from that byte order, the durable digest stops binding the actual
+    // effect — so the raw captured body is compared, not a parsed value.
+    const expected = new Map<string, string>([
+      ["blobs", `{"content":"aGVsbG8=","encoding":"base64"}`],
+      [
+        "trees",
+        `{"base_tree":"${treeSha}","tree":[{"mode":"100644","path":"src/greeting.txt","sha":"${blobSha}","type":"blob"}]}`,
+      ],
+      [
+        "commits",
+        `{"author":{"date":"${GIT_INSTANT}","email":"landing@example.invalid","name":"Icarus Landing"},"committer":{"date":"${GIT_INSTANT}","email":"landing@example.invalid","name":"Icarus Landing"},"message":"Icarus candidate","parents":["${blobSha}"],"tree":"${treeSha}"}`,
+      ],
+      ["refs", `{"ref":"${ref}","sha":"${commitSha}"}`],
+    ]);
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 201, {
+        sha: commitSha,
+        ref,
+        object: { sha: commitSha, type: "commit" },
+      });
+    });
+
+    await gatewayFor(server).createBlob(coordinates, "aGVsbG8=");
+    await gatewayFor(server).createTree(
+      coordinates,
+      [{ path: "src/greeting.txt", mode: "100644", blobSha }],
+      treeSha,
+    );
+    await gatewayFor(server).createCommit(coordinates, {
+      message: "Icarus candidate",
+      treeSha,
+      parentShas: [blobSha],
+      author: { name: "Icarus Landing", email: "landing@example.invalid", date: GIT_INSTANT },
+      committer: { name: "Icarus Landing", email: "landing@example.invalid", date: GIT_INSTANT },
+    });
+    await gatewayFor(server).createAbsentRef(coordinates, ref, commitSha);
+
+    for (const request of server.requests) {
+      const endpoint = request.url?.split("/").at(-1) ?? "";
+      expect(request.body, endpoint).toBe(expected.get(endpoint));
+    }
   });
 
   it("creates the reference with POST so an existing reference cannot be overwritten", async () => {
@@ -728,6 +785,8 @@ describe("GithubGateway HTTP contract", () => {
         message: "candidate",
         treeSha,
         parentShas: [commitSha, blobSha, treeSha],
+        author: { name: "Icarus Landing", email: "landing@example.invalid", date: GIT_INSTANT },
+        committer: { name: "Icarus Landing", email: "landing@example.invalid", date: GIT_INSTANT },
       }),
       "GITHUB_COMMIT_PARENTS_INVALID",
     );

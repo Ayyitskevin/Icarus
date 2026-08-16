@@ -93,6 +93,16 @@ describe("gateway agreement with the ADR 0027 record contract", () => {
         message: overByBytes,
         treeSha: "a".repeat(40),
         parentShas: [],
+        author: {
+          name: "Icarus Landing",
+          email: "landing@example.invalid",
+          date: "2026-07-19T12:00:00Z",
+        },
+        committer: {
+          name: "Icarus Landing",
+          email: "landing@example.invalid",
+          date: "2026-07-19T12:00:00Z",
+        },
       }),
     ).rejects.toMatchObject({ code: "GITHUB_COMMIT_MESSAGE_INVALID" });
 

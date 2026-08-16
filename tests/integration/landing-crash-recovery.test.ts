@@ -24,13 +24,13 @@ import {
   type LandingCandidateResult,
   LandingGitController,
 } from "../../packages/core/src/landing-git.js";
-import { canonicalLandingJson } from "../../packages/core/src/landing-records.js";
+import { canonicalLandingJson, gitObjectSha1 } from "../../packages/core/src/landing-records.js";
 import { planApprovalDigest, treeCheckpointDigest } from "../../packages/core/src/policy.js";
 import type { CheckRunner } from "../../packages/core/src/sandbox.js";
 import {
   IcarusService,
   type LandingGitService,
-  type LandingGithubGatewayReads,
+  type LandingGithubGateway,
 } from "../../packages/core/src/service.js";
 import { IcarusStore } from "../../packages/core/src/store.js";
 import type {
@@ -43,6 +43,7 @@ import { repositoryFingerprint } from "../support/integration-cli.js";
 import {
   type CapturedProviderRequest,
   type ProviderHttpServer,
+  parseProviderRequestBody,
   sendProviderJson,
   startProviderHttpServer,
 } from "../support/provider-http.js";
@@ -106,6 +107,22 @@ enum CrashPhase {
   PreflightAfterHeadGet = "preflight-after-head-get",
   PreflightBeforeSettlement = "preflight-before-settlement",
   PreflightAfterSettlement = "preflight-after-settlement",
+  UploadBeforeBlobPost = "upload-before-blob-post",
+  UploadDuringBlobPost = "upload-during-blob-post",
+  UploadAfterBlobPost = "upload-after-blob-post",
+  UploadBeforeTreePost = "upload-before-tree-post",
+  UploadDuringTreePost = "upload-during-tree-post",
+  UploadAfterTreePost = "upload-after-tree-post",
+  UploadBeforeCommitPost = "upload-before-commit-post",
+  UploadDuringCommitPost = "upload-during-commit-post",
+  UploadAfterCommitPost = "upload-after-commit-post",
+  UploadBeforeSettlement = "upload-before-settlement",
+  UploadAfterSettlement = "upload-after-settlement",
+  RemoteRefBeforePost = "remote-ref-before-post",
+  RemoteRefDuringPost = "remote-ref-during-post",
+  RemoteRefAfterPost = "remote-ref-after-post",
+  RemoteRefBeforeSettlement = "remote-ref-before-settlement",
+  RemoteRefAfterSettlement = "remote-ref-after-settlement",
 }
 
 interface Paths {
@@ -517,7 +534,7 @@ function fakeLandingGit(): LandingGitService {
 }
 
 interface LandingSeams {
-  readonly gateway?: (credential: string) => LandingGithubGatewayReads;
+  readonly gateway?: (credential: string) => LandingGithubGateway;
   readonly credentialEnvironment?: (name: string) => string | undefined;
 }
 
@@ -600,14 +617,30 @@ async function openRealRuntime(
 }
 
 /** Reopens the crashed fixture with the loopback GitHub transport wired in. */
-async function reopenPreflightWithLoopback(fixture: RealFixture): Promise<{
+async function reopenPreflightWithLoopback(
+  fixture: RealFixture,
+  options: { readonly remoteRefs?: Readonly<Record<string, string>> } = {},
+): Promise<{
   readonly runtime: Runtime;
   readonly loopback: GithubLoopback;
 }> {
+  const probe = new IcarusStore(fixture.databasePath, { now: () => NOW });
+  let candidateTreeSha1 = "";
+  let candidateCommitSha1 = "";
+  try {
+    const landing = probe.getLandingStatusForRun(RUN_ID)?.landing;
+    candidateTreeSha1 = landing?.candidateTreeSha1 ?? "";
+    candidateCommitSha1 = landing?.candidateCommitSha1 ?? "";
+  } finally {
+    probe.close();
+  }
   const loopback = await startGithubLoopback({
     expectedActor: "crash-test-github-actor",
     baseCommitSha1: () => fixture.baseCommitSha1,
     headRef: fixture.headRef,
+    candidateTreeSha1: () => candidateTreeSha1,
+    candidateCommitSha1: () => candidateCommitSha1,
+    ...(options.remoteRefs === undefined ? {} : { initialRefs: options.remoteRefs }),
   });
   const runtime = await openRealRuntime(fixture.root, undefined, "git", {
     gateway: (credential) =>
@@ -683,6 +716,7 @@ function pause(markerPath: string, phase: CrashPhase, detail?: unknown): never {
 const PREFLIGHT_TOKEN = "ghp-crash-preflight-token-sentinel-do-not-persist";
 
 type PreflightReadClass = "actor" | "base" | "head";
+type GithubPostClass = "blob" | "tree" | "commit" | "ref";
 
 interface GithubLoopback {
   readonly server: ProviderHttpServer;
@@ -692,30 +726,83 @@ interface GithubLoopback {
 }
 
 /**
- * The deterministic loopback GitHub transport for preflight crash phases. It
- * serves the exact three read shapes the contract's grammar admits, and for a
- * "during" phase it parks the response mid-exchange so the kill lands while
- * the request is in flight. The credential value is only ever compared, never
- * recorded.
+ * The deterministic loopback GitHub transport for remote-stage crash phases.
+ * It serves the exact read and mutation shapes the contract's grammars admit —
+ * blobs are answered with their content-addressed name, refs are stateful —
+ * and for a "during" phase it parks the response mid-exchange so the kill
+ * lands while the request is in flight. The credential value is only ever
+ * compared, never recorded.
  */
 async function startGithubLoopback(options: {
   readonly expectedActor: string;
   readonly baseCommitSha1: () => string;
   readonly headRef: string;
+  readonly candidateTreeSha1?: () => string;
+  readonly candidateCommitSha1?: () => string;
+  readonly initialRefs?: Readonly<Record<string, string>>;
   readonly pauseOnRead?: PreflightReadClass;
+  readonly pauseOnPost?: GithubPostClass;
   readonly pausePhase?: CrashPhase;
   readonly markerPath?: string;
 }): Promise<GithubLoopback> {
   const authorizationChecks: boolean[] = [];
+  const remoteRefs = new Map<string, string>(Object.entries(options.initialRefs ?? {}));
+  const prefix = "/repos/icarus-crash-test/landing-crash-recovery";
   const server = await startProviderHttpServer((request, response) => {
     authorizationChecks.push(request.headers.authorization === `Bearer ${PREFLIGHT_TOKEN}`);
+    const url = request.url ?? "";
+    const pauseHere = (boundary: string, extra: Record<string, unknown> = {}): void => {
+      pause(options.markerPath ?? "", options.pausePhase ?? CrashPhase.InspectOnce, {
+        boundary,
+        authorized: authorizationChecks.at(-1) ?? false,
+        ...extra,
+      });
+    };
+    if (request.method === "POST") {
+      const post: GithubPostClass | null =
+        url === `${prefix}/git/blobs`
+          ? "blob"
+          : url === `${prefix}/git/trees`
+            ? "tree"
+            : url === `${prefix}/git/commits`
+              ? "commit"
+              : url === `${prefix}/git/refs`
+                ? "ref"
+                : null;
+      if (post === null) {
+        sendProviderJson(response, 404, { message: "Not Found" });
+        return;
+      }
+      if (options.pauseOnPost === post) {
+        pauseHere("github-post-in-flight", { post });
+      }
+      const body = parseProviderRequestBody(request) as Record<string, unknown>;
+      if (post === "blob") {
+        const content = typeof body.content === "string" ? body.content : "";
+        const sha = gitObjectSha1("blob", Buffer.from(content, "base64"));
+        sendProviderJson(response, 201, { sha });
+        return;
+      }
+      if (post === "tree") {
+        sendProviderJson(response, 201, { sha: options.candidateTreeSha1?.() ?? "" });
+        return;
+      }
+      if (post === "commit") {
+        sendProviderJson(response, 201, { sha: options.candidateCommitSha1?.() ?? "" });
+        return;
+      }
+      const ref = typeof body.ref === "string" ? body.ref : "";
+      const sha = typeof body.sha === "string" ? body.sha : "";
+      remoteRefs.set(ref, sha);
+      sendProviderJson(response, 201, { ref, object: { sha, type: "commit" } });
+      return;
+    }
     const read: PreflightReadClass | null =
-      request.url === "/user"
+      url === "/user"
         ? "actor"
-        : request.url === "/repos/icarus-crash-test/landing-crash-recovery/git/ref/heads/main"
+        : url === `${prefix}/git/ref/heads/main`
           ? "base"
-          : request.url ===
-              `/repos/icarus-crash-test/landing-crash-recovery/git/ref/heads/icarus/${RUN_ID}`
+          : url === `${prefix}/git/ref/heads/icarus/${RUN_ID}`
             ? "head"
             : null;
     if (read === null) {
@@ -723,11 +810,7 @@ async function startGithubLoopback(options: {
       return;
     }
     if (options.pauseOnRead === read) {
-      pause(options.markerPath ?? "", options.pausePhase ?? CrashPhase.InspectOnce, {
-        boundary: "github-read-in-flight",
-        read,
-        authorized: authorizationChecks.at(-1) ?? false,
-      });
+      pauseHere("github-read-in-flight", { read });
     }
     if (read === "actor") {
       sendProviderJson(response, 200, { login: options.expectedActor });
@@ -737,14 +820,24 @@ async function startGithubLoopback(options: {
         object: { sha: options.baseCommitSha1(), type: "commit" },
       });
     } else {
-      sendProviderJson(response, 404, { message: "Not Found" });
+      const existing = remoteRefs.get(options.headRef);
+      if (existing === undefined) {
+        sendProviderJson(response, 404, { message: "Not Found" });
+      } else {
+        sendProviderJson(response, 200, {
+          ref: options.headRef,
+          object: { sha: existing, type: "commit" },
+        });
+      }
     }
   });
   return { server, requests: server.requests, authorizationChecks };
 }
 
-function isPreflightPhase(phase: CrashPhase): boolean {
-  return phase.startsWith("preflight-");
+function isRemotePhase(phase: CrashPhase): boolean {
+  return (
+    phase.startsWith("preflight-") || phase.startsWith("upload-") || phase.startsWith("remote-ref-")
+  );
 }
 
 function preflightBeforeGetKind(phase: CrashPhase): string | null {
@@ -755,6 +848,14 @@ function preflightBeforeGetKind(phase: CrashPhase): string | null {
       return "github.base_ref.get";
     case CrashPhase.PreflightBeforeHeadGet:
       return "github.head_ref.get";
+    case CrashPhase.UploadBeforeBlobPost:
+      return "github.blob.post";
+    case CrashPhase.UploadBeforeTreePost:
+      return "github.tree.post";
+    case CrashPhase.UploadBeforeCommitPost:
+      return "github.commit.post";
+    case CrashPhase.RemoteRefBeforePost:
+      return "github.ref.post";
     default:
       return null;
   }
@@ -773,6 +874,21 @@ function preflightDuringRead(phase: CrashPhase): PreflightReadClass | null {
   }
 }
 
+function duringPostClass(phase: CrashPhase): GithubPostClass | null {
+  switch (phase) {
+    case CrashPhase.UploadDuringBlobPost:
+      return "blob";
+    case CrashPhase.UploadDuringTreePost:
+      return "tree";
+    case CrashPhase.UploadDuringCommitPost:
+      return "commit";
+    case CrashPhase.RemoteRefDuringPost:
+      return "ref";
+    default:
+      return null;
+  }
+}
+
 function preflightAfterGetOrdinal(phase: CrashPhase): number | null {
   switch (phase) {
     case CrashPhase.PreflightAfterActorGet:
@@ -786,10 +902,51 @@ function preflightAfterGetOrdinal(phase: CrashPhase): number | null {
   }
 }
 
+function afterPostObjectKind(phase: CrashPhase): GithubPostClass | null {
+  switch (phase) {
+    case CrashPhase.UploadAfterBlobPost:
+      return "blob";
+    case CrashPhase.UploadAfterTreePost:
+      return "tree";
+    case CrashPhase.UploadAfterCommitPost:
+      return "commit";
+    case CrashPhase.RemoteRefAfterPost:
+      return "ref";
+    default:
+      return null;
+  }
+}
+
+function settlementOperationKind(
+  phase: CrashPhase,
+): "github.preflight" | "github.objects.upload" | "github.ref.create" | null {
+  switch (phase) {
+    case CrashPhase.PreflightBeforeSettlement:
+    case CrashPhase.PreflightAfterSettlement:
+      return "github.preflight";
+    case CrashPhase.UploadBeforeSettlement:
+    case CrashPhase.UploadAfterSettlement:
+      return "github.objects.upload";
+    case CrashPhase.RemoteRefBeforeSettlement:
+    case CrashPhase.RemoteRefAfterSettlement:
+      return "github.ref.create";
+    default:
+      return null;
+  }
+}
+
+function isBeforeSettlementPhase(phase: CrashPhase): boolean {
+  return (
+    phase === CrashPhase.PreflightBeforeSettlement ||
+    phase === CrashPhase.UploadBeforeSettlement ||
+    phase === CrashPhase.RemoteRefBeforeSettlement
+  );
+}
+
 /**
- * Arms the preflight crash boundary in the worker: admission and settlement
- * wrappers pause before/after their durable commit; the in-flight boundary is
- * parked by the loopback handler itself.
+ * Arms the crash boundary in the worker: admission and settlement wrappers
+ * pause before/after their durable commit; the in-flight boundary is parked by
+ * the loopback handler itself.
  */
 function armPreflightWrappers(store: IcarusStore, phase: CrashPhase, markerPath: string): void {
   const beforeKind = preflightBeforeGetKind(phase);
@@ -806,7 +963,8 @@ function armPreflightWrappers(store: IcarusStore, phase: CrashPhase, markerPath:
     });
   }
   const afterOrdinal = preflightAfterGetOrdinal(phase);
-  if (afterOrdinal !== null) {
+  const afterObjectKind = afterPostObjectKind(phase);
+  if (afterOrdinal !== null || afterObjectKind !== null) {
     const original = store.settleGithubRequest.bind(store);
     let settled = 0;
     Object.defineProperty(store, "settleGithubRequest", {
@@ -814,29 +972,47 @@ function armPreflightWrappers(store: IcarusStore, phase: CrashPhase, markerPath:
       value: (...args: Parameters<typeof original>) => {
         const result = original(...args);
         settled += 1;
-        if (settled === afterOrdinal) {
+        const projection = args[2]?.projection;
+        if (afterOrdinal !== null && settled === afterOrdinal) {
           pause(markerPath, phase, {
             boundary: "after-request-settlement",
             requestOrdinal: afterOrdinal,
+          });
+        }
+        if (
+          afterObjectKind !== null &&
+          projection?.type === "object" &&
+          projection.objectKind === afterObjectKind
+        ) {
+          pause(markerPath, phase, {
+            boundary: "after-request-settlement",
+            kind: `github.${afterObjectKind}.post`,
           });
         }
         return result;
       },
     });
   }
-  if (
-    phase === CrashPhase.PreflightBeforeSettlement ||
-    phase === CrashPhase.PreflightAfterSettlement
-  ) {
-    const original = store.settleGithubPreflight.bind(store);
-    Object.defineProperty(store, "settleGithubPreflight", {
+  const operationKind = settlementOperationKind(phase);
+  if (operationKind !== null) {
+    const method =
+      operationKind === "github.preflight"
+        ? "settleGithubPreflight"
+        : operationKind === "github.objects.upload"
+          ? "settleGithubObjectsUpload"
+          : "settleGithubRemoteRef";
+    const original = store[method].bind(store) as (...args: unknown[]) => unknown;
+    Object.defineProperty(store, method, {
       configurable: true,
-      value: (...args: Parameters<typeof original>) => {
-        if (phase === CrashPhase.PreflightBeforeSettlement) {
-          pause(markerPath, phase, { boundary: "before-preflight-settlement" });
+      value: (...args: unknown[]): unknown => {
+        if (isBeforeSettlementPhase(phase)) {
+          pause(markerPath, phase, {
+            boundary: "before-operation-settlement",
+            kind: operationKind,
+          });
         }
         const result = original(...args);
-        pause(markerPath, phase, { boundary: "after-preflight-settlement" });
+        pause(markerPath, phase, { boundary: "after-operation-settlement", kind: operationKind });
         return result;
       },
     });
@@ -968,12 +1144,20 @@ async function preflightWorkerMain(
 ): Promise<void> {
   process.env[CREDENTIAL_ENV] = PREFLIGHT_TOKEN;
   let baseCommitSha1 = "";
+  let candidateTreeSha1 = "";
+  let candidateCommitSha1 = "";
   const duringRead = preflightDuringRead(phase);
+  const duringPost = duringPostClass(phase);
   const loopback = await startGithubLoopback({
     expectedActor: "crash-test-github-actor",
     baseCommitSha1: () => baseCommitSha1,
     headRef: fixture.headRef,
-    ...(duringRead === null ? {} : { pauseOnRead: duringRead, pausePhase: phase, markerPath }),
+    candidateTreeSha1: () => candidateTreeSha1,
+    candidateCommitSha1: () => candidateCommitSha1,
+    ...(duringRead === null ? {} : { pauseOnRead: duringRead }),
+    ...(duringPost === null ? {} : { pauseOnPost: duringPost }),
+    pausePhase: phase,
+    markerPath,
   });
   const runtime = await openRealRuntime(fixture.root, undefined, "git", {
     gateway: (credential) =>
@@ -984,11 +1168,26 @@ async function preflightWorkerMain(
       }),
   });
   try {
-    baseCommitSha1 = runtime.store.getLandingStatusForRun(RUN_ID)?.landing.baseCommitSha1 ?? "";
-    if (baseCommitSha1 === "") throw new Error("Landing base commit is missing");
+    const landing = runtime.store.getLandingStatusForRun(RUN_ID)?.landing;
+    baseCommitSha1 = landing?.baseCommitSha1 ?? "";
+    candidateTreeSha1 = landing?.candidateTreeSha1 ?? "";
+    candidateCommitSha1 = landing?.candidateCommitSha1 ?? "";
+    if (baseCommitSha1 === "" || candidateTreeSha1 === "" || candidateCommitSha1 === "") {
+      throw new Error("Landing authority is incomplete");
+    }
     const ready = await runtime.service.resumeLanding(RUN_ID);
     if (ready.landing.state !== "local_ready") {
-      throw new Error("Landing did not reach local_ready before the preflight phase");
+      throw new Error("Landing did not reach local_ready before the remote phase");
+    }
+    if (phase.startsWith("remote-ref-")) {
+      // Remote-ref phases crash the third resume: first finish the upload.
+      const objectsReady = await runtime.service.resumeLanding(RUN_ID);
+      if (objectsReady.landing.state !== "objects_ready") {
+        throw new Error("Landing did not reach objects_ready before the remote-ref phase");
+      }
+      armPreflightWrappers(runtime.store, phase, markerPath);
+      await runtime.service.resumeLanding(RUN_ID);
+      return;
     }
     armPreflightWrappers(runtime.store, phase, markerPath);
     await runtime.service.resumeLanding(RUN_ID);
@@ -1004,7 +1203,7 @@ async function workerMain(
   resultPath: string,
 ): Promise<void> {
   const fixture = paths(root);
-  if (isPreflightPhase(phase)) {
+  if (isRemotePhase(phase)) {
     await preflightWorkerMain(fixture, phase, markerPath);
     return;
   }
@@ -1740,6 +1939,9 @@ if (workerPhase !== undefined) {
         }
       }, 180_000);
 
+      const REMOTE_STAGE_FIXTURE_NOTE =
+        "remote stage crash phases reopen through the deterministic loopback transport";
+
       test.each([
         [
           CrashPhase.PreflightBeforeActorGet,
@@ -1795,9 +1997,9 @@ if (workerPhase !== undefined) {
           3,
           0,
         ],
-        [CrashPhase.PreflightBeforeSettlement, { boundary: "before-preflight-settlement" }, 3, 0],
+        [CrashPhase.PreflightBeforeSettlement, { boundary: "before-operation-settlement" }, 3, 0],
       ] as const)(
-        "crash at %s replays the read-only preflight without duplicate or ambiguous effects",
+        "crash at %s replays the preflight-then-upload chain without duplicate or ambiguous effects",
         async (phase, markerExpectation, crashedRows, ambiguousRows) => {
           const fixture = await createRealFixture();
           await approveLanding(fixture);
@@ -1836,7 +2038,7 @@ if (workerPhase !== undefined) {
           const { runtime, loopback } = await reopenPreflightWithLoopback(fixture);
           try {
             const resumed = await runtime.service.resumeLanding(RUN_ID);
-            expect(resumed.landing).toMatchObject({ state: "local_ready", errorCode: null });
+            expect(resumed.landing).toMatchObject({ state: "objects_ready", errorCode: null });
             expect(resumed.attempts.map((attempt) => attempt.status)).toEqual([
               "completed",
               "completed",
@@ -1851,10 +2053,14 @@ if (workerPhase !== undefined) {
               [1, "interrupted"],
               [2, "completed"],
             ]);
+            expect(resumed.operations.at(-1)).toMatchObject({
+              kind: "github.objects.upload",
+              status: "completed",
+            });
             // No read is ever duplicated: the crashed attempt's rows stay
-            // settled, and the replay's three reads are fresh identities.
-            expect(resumed.httpRequests).toHaveLength(crashedRows + 3);
-            expect(new Set(resumed.httpRequests.map((row) => row.id)).size).toBe(crashedRows + 3);
+            // settled, and the replay's seven reads are fresh identities.
+            expect(resumed.httpRequests).toHaveLength(crashedRows + 7);
+            expect(new Set(resumed.httpRequests.map((row) => row.id)).size).toBe(crashedRows + 7);
             expect(
               resumed.httpRequests.filter(
                 (row) => row.coordinatorAttempt === 3 && row.outcome === "ambiguous",
@@ -1872,15 +2078,13 @@ if (workerPhase !== undefined) {
               resumed.httpRequests
                 .filter((row) => row.coordinatorAttempt === 4)
                 .map((row) => row.requestOrdinal),
-            ).toEqual([1, 2, 3]);
+            ).toEqual([1, 2, 3, 4, 5, 6, 7]);
             const interrupted = resumed.operations.find(
               (operation) =>
                 operation.kind === "github.preflight" && operation.status === "interrupted",
             );
             expect(interrupted?.errorCode).toBe("LANDING_COORDINATOR_TAKEOVER");
             expect(interrupted?.result?.evidence).toHaveLength(crashedRows);
-            // Takeover of the GET-only preflight emits no false state-change
-            // event: the landing kept its retry-safe stable state throughout.
             expect(
               resumed.events
                 .filter((event) => event.type === "landing.state.changed")
@@ -1896,11 +2100,13 @@ if (workerPhase !== undefined) {
               "awaiting_approval->approved",
               "approved->creating_local_ref",
               "creating_local_ref->local_ready",
+              "local_ready->uploading_objects",
+              "uploading_objects->objects_ready",
             ]);
-            // The replay presented the credential to the loopback exactly
-            // three times, and the token value is never persisted.
-            expect(loopback.requests).toHaveLength(3);
-            expect([...loopback.authorizationChecks]).toEqual([true, true, true]);
+            expect(loopback.requests).toHaveLength(7);
+            expect([...loopback.authorizationChecks]).toEqual(
+              Array.from({ length: 7 }, () => true),
+            );
             expect(readFileSync(fixture.databasePath).includes(Buffer.from(PREFLIGHT_TOKEN))).toBe(
               false,
             );
@@ -1915,12 +2121,14 @@ if (workerPhase !== undefined) {
         60_000,
       );
 
-      test("crash after the preflight settlement commit replays read-only without duplication", async () => {
+      test("crash after the preflight settlement commit replays the chain without duplication", async () => {
         const fixture = await createRealFixture();
         await approveLanding(fixture);
         const marker = await crashAt(fixture, CrashPhase.PreflightAfterSettlement);
-        expect(marker.detail).toMatchObject({ boundary: "after-preflight-settlement" });
+        expect(marker.detail).toMatchObject({ boundary: "after-operation-settlement" });
 
+        // The preflight completed but its attempt never closed: the crash
+        // landed in the between-operations window.
         const inspection = new IcarusStore(fixture.databasePath, { now: () => NOW });
         try {
           const completed = inspection.getLandingStatusForRun(RUN_ID);
@@ -1928,7 +2136,7 @@ if (workerPhase !== undefined) {
           expect(completed?.attempts.map((attempt) => attempt.status)).toEqual([
             "completed",
             "completed",
-            "completed",
+            "started",
           ]);
           expect(completed?.operations.at(-1)).toMatchObject({
             kind: "github.preflight",
@@ -1945,10 +2153,14 @@ if (workerPhase !== undefined) {
 
         const { runtime, loopback } = await reopenPreflightWithLoopback(fixture);
         try {
-          // A completed preflight never blocks replay: the next explicit
-          // resume performs one fresh read-only preflight and nothing else.
           const resumed = await runtime.service.resumeLanding(RUN_ID);
-          expect(resumed.landing).toMatchObject({ state: "local_ready", errorCode: null });
+          expect(resumed.landing).toMatchObject({ state: "objects_ready", errorCode: null });
+          expect(resumed.attempts.map((attempt) => attempt.status)).toEqual([
+            "completed",
+            "completed",
+            "interrupted",
+            "completed",
+          ]);
           expect(
             resumed.operations
               .filter((operation) => operation.kind === "github.preflight")
@@ -1957,15 +2169,15 @@ if (workerPhase !== undefined) {
             [1, "completed"],
             [2, "completed"],
           ]);
-          expect(resumed.httpRequests).toHaveLength(6);
-          expect(new Set(resumed.httpRequests.map((row) => row.id)).size).toBe(6);
+          expect(resumed.httpRequests).toHaveLength(10);
+          expect(new Set(resumed.httpRequests.map((row) => row.id)).size).toBe(10);
           expect(
             resumed.httpRequests
               .filter((row) => row.coordinatorAttempt === 4)
               .map((row) => row.requestOrdinal),
-          ).toEqual([1, 2, 3]);
-          expect(loopback.requests).toHaveLength(3);
-          expect([...loopback.authorizationChecks]).toEqual([true, true, true]);
+          ).toEqual([1, 2, 3, 4, 5, 6, 7]);
+          expect(loopback.requests).toHaveLength(7);
+          expect([...loopback.authorizationChecks]).toEqual(Array.from({ length: 7 }, () => true));
           expect(readFileSync(fixture.databasePath).includes(Buffer.from(PREFLIGHT_TOKEN))).toBe(
             false,
           );
@@ -1975,6 +2187,344 @@ if (workerPhase !== undefined) {
           await loopback.server.close();
         }
       }, 60_000);
+
+      const UPLOAD_PHASES: ReadonlyArray<readonly [CrashPhase, number, number, boolean]> = [
+        [CrashPhase.UploadBeforeBlobPost, 4, 0, false],
+        [CrashPhase.UploadDuringBlobPost, 5, 0, true],
+        [CrashPhase.UploadAfterBlobPost, 5, 1, false],
+        [CrashPhase.UploadBeforeTreePost, 5, 1, false],
+        [CrashPhase.UploadDuringTreePost, 6, 1, true],
+        [CrashPhase.UploadAfterTreePost, 6, 2, false],
+        [CrashPhase.UploadBeforeCommitPost, 6, 2, false],
+        [CrashPhase.UploadDuringCommitPost, 7, 2, true],
+        [CrashPhase.UploadAfterCommitPost, 7, 3, false],
+        [CrashPhase.UploadBeforeSettlement, 7, 3, false],
+      ];
+
+      for (const [phase, crashedRows, settledPosts, inFlight] of UPLOAD_PHASES) {
+        test(`crash at ${phase} proves the object upload replay-safe`, async () => {
+          const fixture = await createRealFixture();
+          await approveLanding(fixture);
+          const marker = await crashAt(fixture, phase);
+          expect(marker.phase).toBe(phase);
+
+          const completeAtCrash = settledPosts === 3;
+          const inspection = new IcarusStore(fixture.databasePath, { now: () => NOW });
+          try {
+            const interrupted = inspection.getLandingStatusForRun(RUN_ID);
+            expect(interrupted?.landing).toMatchObject({
+              state: "uploading_objects",
+              errorCode: null,
+            });
+            expect(interrupted?.attempts.map((attempt) => attempt.status)).toEqual([
+              "completed",
+              "completed",
+              "started",
+            ]);
+            expect(interrupted?.operations.at(-1)).toMatchObject({
+              kind: "github.objects.upload",
+              status: "started",
+            });
+            expect(interrupted?.httpRequests).toHaveLength(crashedRows);
+            expect(interrupted?.httpRequests.filter((row) => row.method === "POST")).toHaveLength(
+              settledPosts + (inFlight ? 1 : 0),
+            );
+            if (inFlight) {
+              expect(interrupted?.httpRequests.at(-1)).toMatchObject({ status: "admitted" });
+            }
+          } finally {
+            inspection.close();
+          }
+
+          const { runtime, loopback } = await reopenPreflightWithLoopback(fixture);
+          try {
+            let resumed = await runtime.service.resumeLanding(RUN_ID);
+            if (completeAtCrash) {
+              // Every object landed before the crash: reconciliation proves
+              // the stage with zero new remote requests.
+              expect(resumed.landing).toMatchObject({
+                state: "objects_ready",
+                errorCode: null,
+              });
+              expect(resumed.httpRequests).toHaveLength(crashedRows);
+              const reconcile = resumed.operations.at(-1);
+              expect(reconcile).toMatchObject({
+                kind: "landing.reconcile",
+                status: "completed",
+              });
+              expect(reconcile?.result).toMatchObject({
+                boundary: "subject_settled",
+                value: { nextState: "objects_ready", remoteResidue: "none" },
+              });
+              expect(loopback.requests).toHaveLength(0);
+              return;
+            }
+            // An incomplete upload reconciles to the byte-identical retry at
+            // local_ready, then one fresh attempt replays the exact bodies.
+            expect(resumed.landing).toMatchObject({
+              state: "local_ready",
+              errorCode: null,
+            });
+            expect(resumed.operations.at(-1)?.result).toMatchObject({
+              boundary: "retry_stage_proven",
+              value: { nextState: "local_ready", remoteResidue: "none" },
+            });
+            resumed = await runtime.service.resumeLanding(RUN_ID);
+            expect(resumed.landing).toMatchObject({ state: "objects_ready", errorCode: null });
+            const uploads = resumed.operations.filter(
+              (operation) => operation.kind === "github.objects.upload",
+            );
+            expect(uploads.map((operation) => [operation.kindAttempt, operation.status])).toEqual([
+              [1, "interrupted"],
+              [2, "completed"],
+            ]);
+            // Byte-identical replay: the retried upload's POST rows carry the
+            // same subjects and body digests wherever the first attempt
+            // reached, never new content.
+            const firstPosts = resumed.httpRequests.filter(
+              (row) => row.operationId === uploads[0]?.id && row.method === "POST",
+            );
+            const secondPosts = resumed.httpRequests.filter(
+              (row) => row.operationId === uploads[1]?.id && row.method === "POST",
+            );
+            expect(secondPosts).toHaveLength(3);
+            for (const [index, row] of secondPosts.entries()) {
+              const prior = firstPosts[index];
+              expect(row.request.bodySha256).not.toBeNull();
+              if (prior !== undefined) {
+                expect(row.request.bodySha256).toBe(prior.request.bodySha256);
+                expect(canonicalLandingJson(row.request.subject)).toBe(
+                  canonicalLandingJson(prior.request.subject),
+                );
+              }
+              expect(row.outcome).toBe("succeeded");
+            }
+            expect(new Set(resumed.httpRequests.map((row) => row.id)).size).toBe(
+              resumed.httpRequests.length,
+            );
+            // The remote ref is never created as a side effect of an upload.
+            expect(resumed.httpRequests.some((row) => row.kind === "github.ref.post")).toBe(false);
+            expect(readFileSync(fixture.databasePath).includes(Buffer.from(PREFLIGHT_TOKEN))).toBe(
+              false,
+            );
+            expect(fixture.requests()).toBe(0);
+          } finally {
+            runtime.close();
+            await loopback.server.close();
+          }
+        }, 60_000);
+      }
+
+      test("crash after the upload settlement commit continues at the ref stage", async () => {
+        const fixture = await createRealFixture();
+        await approveLanding(fixture);
+        const marker = await crashAt(fixture, CrashPhase.UploadAfterSettlement);
+        expect(marker.detail).toMatchObject({ boundary: "after-operation-settlement" });
+
+        const inspection = new IcarusStore(fixture.databasePath, { now: () => NOW });
+        try {
+          const completed = inspection.getLandingStatusForRun(RUN_ID);
+          expect(completed?.landing).toMatchObject({ state: "objects_ready", errorCode: null });
+          expect(completed?.operations.at(-1)).toMatchObject({
+            kind: "github.objects.upload",
+            status: "completed",
+          });
+        } finally {
+          inspection.close();
+        }
+
+        const { runtime, loopback } = await reopenPreflightWithLoopback(fixture);
+        try {
+          const resumed = await runtime.service.resumeLanding(RUN_ID);
+          expect(resumed.landing).toMatchObject({ state: "remote_ready", errorCode: null });
+          expect(
+            resumed.operations.filter((operation) => operation.kind === "github.objects.upload"),
+          ).toHaveLength(1);
+          expect(resumed.operations.at(-1)?.result).toMatchObject({
+            boundary: "remote_ref_ready",
+            value: { remoteRefOutcome: "created" },
+          });
+          expect(resumed.httpRequests.filter((row) => row.kind === "github.ref.post")).toHaveLength(
+            1,
+          );
+          expect(fixture.requests()).toBe(0);
+        } finally {
+          runtime.close();
+          await loopback.server.close();
+        }
+      }, 60_000);
+
+      test("crash before the remote-ref POST admission replays the absent-only create once", async () => {
+        const fixture = await createRealFixture();
+        await approveLanding(fixture);
+        const marker = await crashAt(fixture, CrashPhase.RemoteRefBeforePost);
+        expect(marker.detail).toMatchObject({
+          boundary: "before-request-admission",
+          kind: "github.ref.post",
+        });
+
+        const { runtime, loopback } = await reopenPreflightWithLoopback(fixture);
+        try {
+          let resumed = await runtime.service.resumeLanding(RUN_ID);
+          // No POST was admitted, so nothing can have happened remotely: the
+          // reconciliation authorizes the retry from the durable rows alone.
+          expect(resumed.landing).toMatchObject({
+            state: "objects_ready",
+            errorCode: null,
+          });
+          resumed = await runtime.service.resumeLanding(RUN_ID);
+          expect(resumed.landing).toMatchObject({ state: "remote_ready", errorCode: null });
+          // Exactly one absent-only create exists over the whole recovery:
+          // the crashed operation never admitted its POST.
+          const refPosts = resumed.httpRequests.filter((row) => row.kind === "github.ref.post");
+          expect(refPosts).toHaveLength(1);
+          expect(refPosts[0]?.outcome).toBe("succeeded");
+          expect(
+            resumed.operations
+              .filter((operation) => operation.kind === "github.ref.create")
+              .map((operation) => [operation.kindAttempt, operation.status]),
+          ).toEqual([
+            [1, "interrupted"],
+            [2, "completed"],
+          ]);
+          expect(fixture.requests()).toBe(0);
+        } finally {
+          runtime.close();
+          await loopback.server.close();
+        }
+      }, 60_000);
+
+      for (const remoteState of ["absent", "exact"] as const) {
+        test(`crash during the remote-ref POST with the remote ${remoteState} follows only the proved recovery`, async () => {
+          const fixture = await createRealFixture();
+          await approveLanding(fixture);
+          const marker = await crashAt(fixture, CrashPhase.RemoteRefDuringPost);
+          expect(marker.detail).toMatchObject({
+            boundary: "github-post-in-flight",
+            post: "ref",
+            authorized: true,
+          });
+          const candidateCommitSha1 = (() => {
+            const probe = new IcarusStore(fixture.databasePath, { now: () => NOW });
+            try {
+              return probe.getLandingStatusForRun(RUN_ID)?.landing.candidateCommitSha1 ?? "";
+            } finally {
+              probe.close();
+            }
+          })();
+
+          const inspection = new IcarusStore(fixture.databasePath, { now: () => NOW });
+          try {
+            const interrupted = inspection.getLandingStatusForRun(RUN_ID);
+            expect(interrupted?.landing).toMatchObject({
+              state: "creating_remote_ref",
+              errorCode: null,
+            });
+            expect(interrupted?.operations.at(-1)).toMatchObject({
+              kind: "github.ref.create",
+              status: "started",
+            });
+            expect(interrupted?.httpRequests.at(-1)).toMatchObject({
+              kind: "github.ref.post",
+              status: "admitted",
+            });
+          } finally {
+            inspection.close();
+          }
+
+          const { runtime, loopback } = await reopenPreflightWithLoopback(fixture, {
+            remoteRefs: remoteState === "exact" ? { [fixture.headRef]: candidateCommitSha1 } : {},
+          });
+          try {
+            let resumed = await runtime.service.resumeLanding(RUN_ID);
+            if (remoteState === "exact") {
+              // The lost POST actually landed: one exact branch is proven and
+              // reconciled — never a second create, never an adopted mystery.
+              expect(resumed.landing).toMatchObject({
+                state: "remote_ready",
+                errorCode: null,
+              });
+              expect(
+                resumed.httpRequests.filter((row) => row.kind === "github.ref.post"),
+              ).toHaveLength(1);
+              const reconcile = resumed.operations.at(-1);
+              expect(reconcile?.result).toMatchObject({
+                boundary: "subject_settled",
+                value: {
+                  nextState: "remote_ready",
+                  remoteResidue: "branch",
+                  stageValue: { remoteRefOutcome: "reconciled" },
+                },
+              });
+              return;
+            }
+            // An absent head proves the POST had no effect: the same
+            // absent-only POST runs again in a fresh operation, byte-identical.
+            expect(resumed.landing).toMatchObject({
+              state: "objects_ready",
+              errorCode: null,
+            });
+            expect(resumed.operations.at(-1)?.result).toMatchObject({
+              boundary: "retry_stage_proven",
+              value: { nextState: "objects_ready", remoteResidue: "none" },
+            });
+            resumed = await runtime.service.resumeLanding(RUN_ID);
+            expect(resumed.landing).toMatchObject({ state: "remote_ready", errorCode: null });
+            const refCreates = resumed.operations.filter(
+              (operation) => operation.kind === "github.ref.create",
+            );
+            expect(
+              refCreates.map((operation) => [operation.kindAttempt, operation.status]),
+            ).toEqual([
+              [1, "interrupted"],
+              [2, "completed"],
+            ]);
+            const refPosts = resumed.httpRequests.filter((row) => row.kind === "github.ref.post");
+            expect(refPosts).toHaveLength(2);
+            expect(refPosts[1]?.request.bodySha256).toBe(refPosts[0]?.request.bodySha256);
+            expect(refPosts[1]?.id).not.toBe(refPosts[0]?.id);
+            expect(resumed.operations.at(-1)?.result).toMatchObject({
+              boundary: "remote_ref_ready",
+              value: { remoteRefOutcome: "created" },
+            });
+            expect(fixture.requests()).toBe(0);
+          } finally {
+            runtime.close();
+            await loopback.server.close();
+          }
+        }, 60_000);
+      }
+
+      test("crash after the remote-ref settlement commit parks at remote_ready", async () => {
+        const fixture = await createRealFixture();
+        await approveLanding(fixture);
+        const marker = await crashAt(fixture, CrashPhase.RemoteRefAfterSettlement);
+        expect(marker.detail).toMatchObject({ boundary: "after-operation-settlement" });
+
+        const { runtime, loopback } = await reopenPreflightWithLoopback(fixture, {
+          remoteRefs: {},
+        });
+        try {
+          const inspection = runtime.service.getLandingStatus(RUN_ID);
+          expect(inspection?.landing).toMatchObject({ state: "remote_ready", errorCode: null });
+          expect(inspection?.operations.at(-1)).toMatchObject({
+            kind: "github.ref.create",
+            status: "completed",
+          });
+          // The draft-PR slice is fenced: resume refuses truthfully without
+          // any new admission or remote call.
+          await expect(runtime.service.resumeLanding(RUN_ID)).rejects.toMatchObject({
+            code: "INVALID_LANDING_STATE",
+          });
+          expect(loopback.requests).toHaveLength(0);
+          expect(fixture.requests()).toBe(0);
+        } finally {
+          runtime.close();
+          await loopback.server.close();
+        }
+      }, 60_000);
+
+      void REMOTE_STAGE_FIXTURE_NOTE;
     },
   );
 }

@@ -19,7 +19,9 @@ import {
   assertSha1,
   assertSha256,
   assertUuid,
+  type CandidateObjectManifestV1,
   type CandidateReadyValueV1,
+  canonicalGitHubPostBodyV1,
   canonicalizeCommitMessage,
   canonicalizePullRequestBodyPrefix,
   canonicalizePullRequestTitle,
@@ -41,10 +43,13 @@ import {
   decodeLandingOperationResultV1,
   decodeLocalRefFactV1,
   decodeReviewDecisionDigestV1,
+  deriveCandidateObjectManifestV1,
   digestLandingRecord,
   GITHUB_API_VERSION,
   type GitHubLandingProfileV1,
+  type GitHubObjectsUploadInputV1,
   type GitHubPreflightInputV1,
+  type GitHubRefCreateInputV1,
   type LandingDecisionV1,
   type LandingDigestV1,
   type LandingEventPayloadV1,
@@ -54,12 +59,15 @@ import {
   type LandingOperationObservationV1,
   type LandingOperationRequestV1,
   type LandingOperationResultV1,
+  type LandingReconcileInputV1,
   type LandingStateChangedEventV1,
   type LocalRefFactV1,
   type LocalRefReadyValueV1,
+  type ObjectsExactValueV1,
   type PreflightExactValueV1,
   type ReconcileValueV1,
   type ReconciliationRequiredValueV1,
+  type RemoteRefReadyValueV1,
   renderPullRequestBodyV1,
 } from "./landing-records.js";
 import {
@@ -84,26 +92,31 @@ type Row = Record<string, unknown>;
 type JsonRecord = Record<string, unknown>;
 
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
+// S2b-ii-b admits the first remote mutations: object upload and the
+// absent-only remote ref. The states and kinds below now cover the path
+// through `remote_ready`. `github.pull_request.create`, `opening_draft_pr`,
+// `landed`, and the receipt table stay fenced until the ii-c slice.
 const PACKET3_STATES: ReadonlySet<LandingStateV1> = new Set([
   "preparing_candidate",
   "awaiting_approval",
   "approved",
   "creating_local_ref",
   "local_ready",
+  "uploading_objects",
+  "objects_ready",
+  "creating_remote_ref",
+  "remote_ready",
   "reconciliation_required",
   "rejected",
   "abandoned",
   "failed",
 ]);
-// S2b-ii-a admits exactly one remote operation kind: the read-only
-// `github.preflight`. Its expected state (`local_ready`) is already a Packet 3
-// state, so the state fence above does not move, and this slice remains
-// structurally incapable of a remote mutation: the mutation operation kinds
-// and their action states stay fenced until their own slices land.
 const PACKET3_OPERATION_KINDS: ReadonlySet<LandingOperationKindV1> = new Set([
   "candidate.prepare",
   "local_ref.create",
   "github.preflight",
+  "github.objects.upload",
+  "github.ref.create",
   "landing.reconcile",
 ]);
 const ABSENT_LOCAL_REF_FACT_SHA256 = digestLandingRecord({
@@ -261,6 +274,8 @@ export interface LandingOperationRecordV1 {
     | "candidate.prepare"
     | "local_ref.create"
     | "github.preflight"
+    | "github.objects.upload"
+    | "github.ref.create"
     | "landing.reconcile";
   readonly kindAttempt: number;
   readonly status: "started" | "completed" | "failed" | "interrupted";
@@ -284,6 +299,8 @@ export interface LandingHttpRequestRecordV1 {
     | "candidate.prepare"
     | "local_ref.create"
     | "github.preflight"
+    | "github.objects.upload"
+    | "github.ref.create"
     | "landing.reconcile";
   readonly requestOrdinal: number;
   readonly kind: LandingHttpKindV1;
@@ -396,9 +413,28 @@ export interface LandingHttpSettlementInputV1 {
  * Coordinator-proposed settlement of the read-only preflight operation. A
  * completed outcome derives its exact value from the durable settled reads;
  * failed and interrupted outcomes carry the bounded host error code.
+ * `closeAttempt` is true exactly when the coordinator chains no effect
+ * operation into the attempt; a chained attempt stays open for it.
  */
 export interface GithubPreflightSettlementInputV1 {
   readonly outcome: "completed" | "failed" | "interrupted";
+  readonly errorCode: string | null;
+  readonly closeAttempt: boolean;
+}
+
+/**
+ * Coordinator-proposed settlement of one effect operation. The store re-derives
+ * the outcome's legality, the stage value, and the remote residue from the
+ * durable rows — none of them are caller-chosen.
+ */
+export interface GithubEffectSettlementInputV1 {
+  readonly outcome: "completed" | "failed" | "reconciliation_required";
+  readonly errorCode: string | null;
+}
+
+/** Coordinator-proposed settlement of one reconciliation operation. */
+export interface GithubReconciliationSettlementInputV1 {
+  readonly outcome: string;
   readonly errorCode: string | null;
 }
 
@@ -596,6 +632,10 @@ function decodeLandingRow(entry: unknown): LandingRecordV1 {
     "approved",
     "creating_local_ref",
     "local_ready",
+    "uploading_objects",
+    "objects_ready",
+    "creating_remote_ref",
+    "remote_ready",
     "reconciliation_required",
     "rejected",
   ]);
@@ -841,13 +881,29 @@ function decodeOperationRow(entry: unknown, landing: LandingRecordV1): LandingOp
             !preflightObservationFactNames(request).every(
               (name, index) => observation.facts[index]?.fact === name,
             ))) ||
+        (request.kind === "github.objects.upload" &&
+          (observation.phase !== "pre_effect" ||
+            observation.facts.length !== 1 ||
+            observation.facts[0]?.fact !== "actor" ||
+            observation.facts[0].requestId === null)) ||
+        (request.kind === "github.ref.create" &&
+          (observation.phase !== "pre_effect" ||
+            observation.facts.length !== 3 ||
+            observation.facts[0]?.fact !== "actor" ||
+            observation.facts[1]?.fact !== "base_ref" ||
+            observation.facts[2]?.fact !== "head_ref" ||
+            observation.facts.some((fact) => fact.requestId === null))) ||
         (request.kind === "landing.reconcile" &&
           (observation.phase !== "reconciliation" ||
-            observation.facts.length !== 2 ||
             observation.facts[0]?.fact !== "subject_operation" ||
             observation.facts[0].requestId !== null ||
-            observation.facts[1]?.fact !== "local_ref" ||
-            observation.facts[1].requestId !== null))))
+            observation.facts
+              .slice(1)
+              .some(
+                (fact) =>
+                  (fact.fact === "local_ref" && fact.requestId !== null) ||
+                  (fact.fact !== "local_ref" && fact.requestId === null),
+              )))))
   ) {
     invalid("Landing observation does not match its operation request");
   }
@@ -870,6 +926,8 @@ function decodeOperationRow(entry: unknown, landing: LandingRecordV1): LandingOp
       | "candidate.prepare"
       | "local_ref.create"
       | "github.preflight"
+      | "github.objects.upload"
+      | "github.ref.create"
       | "landing.reconcile",
     kindAttempt: integer(value.kind_attempt, "landing_operations.kind_attempt", 1, 9),
     status,
@@ -971,57 +1029,407 @@ const FACT_NAME_BY_HTTP_GET_KIND = {
 } as const;
 
 /**
- * The request grammar an operation owns in this slice. Candidate, local-ref,
- * and (local-ref-subject) reconciliation operations admit no HTTP at all; the
- * remote-mutation grammars stay unreachable behind the operation-kind fence.
+ * One grammar member's fully derived descriptor. Subjects and POST body
+ * digests are recomputed from immutable landing records (and, for object
+ * uploads, the re-derived candidate manifest), never from caller input — a
+ * caller proposes only the HTTP kind, and any drift fails closed.
  */
-function httpGrammarFor(operation: LandingOperationRecordV1): readonly LandingHttpKindV1[] {
+interface HttpDescriptorV1 {
+  readonly kind: LandingHttpKindV1;
+  readonly method: "GET" | "POST";
+  readonly subject: JsonRecord;
+  readonly bodySha256: string | null;
+}
+
+const REMOTE_REF_HTTP_GRAMMAR = [
+  "github.actor.get",
+  "github.base_ref.get",
+  "github.head_ref.get",
+  "github.ref.post",
+  "github.head_ref.get",
+  "github.base_ref.get",
+] as const satisfies readonly LandingHttpKindV1[];
+
+function reconciliationSubjectKind(
+  operation: LandingOperationRecordV1,
+  operations: readonly LandingOperationRecordV1[],
+): "local_ref.create" | "github.objects.upload" | "github.ref.create" {
+  const input = operation.request.input;
+  if (operation.kind !== "landing.reconcile" || !("subjectOperationId" in input)) {
+    invalid("Landing operation request is not a reconciliation");
+  }
+  const subject = operations.find((entry) => entry.id === input.subjectOperationId);
+  if (
+    subject === undefined ||
+    (subject.kind !== "local_ref.create" &&
+      subject.kind !== "github.objects.upload" &&
+      subject.kind !== "github.ref.create")
+  ) {
+    invalid("Landing reconciliation subject is outside the implemented slice");
+  }
+  return subject.kind;
+}
+
+/**
+ * The exact relative HTTP-kind grammar one operation owns. Candidate and
+ * local-ref operations admit no HTTP; object upload owns the actor read plus
+ * one blob per non-deleted manifest path in canonical order, then the tree and
+ * commit; remote-ref creation owns its three pre-effect reads, at most one
+ * absent-only POST, and the fixed post-read suffix; reconciliation is GET-only
+ * and derives from its subject kind. `github.pull_request.create` stays fenced.
+ */
+function httpGrammarFor(
+  operation: LandingOperationRecordV1,
+  operations: readonly LandingOperationRecordV1[],
+  manifest: CandidateObjectManifestV1 | null,
+): readonly LandingHttpKindV1[] {
   switch (operation.kind) {
     case "github.preflight":
       return preflightHttpGrammar(operation.request);
+    case "github.objects.upload": {
+      if (manifest === null) {
+        invalid("Object upload requires the derived candidate object manifest");
+      }
+      return [
+        "github.actor.get",
+        ...manifest.entries
+          .filter((entry) => entry.op !== "delete")
+          .map(() => "github.blob.post" as const),
+        "github.tree.post",
+        "github.commit.post",
+      ];
+    }
+    case "github.ref.create":
+      return REMOTE_REF_HTTP_GRAMMAR;
+    case "landing.reconcile":
+      return reconciliationSubjectKind(operation, operations) === "github.ref.create"
+        ? ["github.actor.get", "github.base_ref.get", "github.head_ref.get"]
+        : [];
     case "candidate.prepare":
     case "local_ref.create":
-    case "landing.reconcile":
       return [];
   }
 }
 
-/** The subject of one grammar member, derived from immutable landing records. */
-function httpSubjectFor(kind: LandingHttpKindV1, landing: LandingRecordV1): JsonRecord {
+function httpGetDescriptor(kind: LandingHttpKindV1, landing: LandingRecordV1): HttpDescriptorV1 {
   const { profile } = landing;
   switch (kind) {
     case "github.actor.get":
-      return { expectedActor: profile.expectedActor };
+      return {
+        kind,
+        method: "GET",
+        subject: { expectedActor: profile.expectedActor },
+        bodySha256: null,
+      };
     case "github.base_ref.get":
       return {
-        owner: profile.owner,
-        repository: profile.repository,
-        baseRef: `refs/heads/${profile.baseBranch}`,
-        expectedSha1: landing.baseCommitSha1,
+        kind,
+        method: "GET",
+        subject: {
+          owner: profile.owner,
+          repository: profile.repository,
+          baseRef: `refs/heads/${profile.baseBranch}`,
+          expectedSha1: landing.baseCommitSha1,
+        },
+        bodySha256: null,
       };
     case "github.head_ref.get":
       return {
-        owner: profile.owner,
-        repository: profile.repository,
-        headRef: landing.headRef,
-        expectedSha1:
-          landing.candidateCommitSha1 ??
-          invalid("Landing head-ref subject lacks its candidate commit"),
+        kind,
+        method: "GET",
+        subject: {
+          owner: profile.owner,
+          repository: profile.repository,
+          headRef: landing.headRef,
+          expectedSha1:
+            landing.candidateCommitSha1 ??
+            invalid("Landing head-ref subject lacks its candidate commit"),
+        },
+        bodySha256: null,
       };
     case "github.pull_requests.get":
       return {
-        owner: profile.owner,
-        repository: profile.repository,
-        headOwner: profile.owner,
-        headRef: `icarus/${landing.runId}`,
-        baseBranch: profile.baseBranch,
-        state: "all",
-        page: 1,
-        perPage: 100,
+        kind,
+        method: "GET",
+        subject: {
+          owner: profile.owner,
+          repository: profile.repository,
+          headOwner: profile.owner,
+          headRef: `icarus/${landing.runId}`,
+          baseBranch: profile.baseBranch,
+          state: "all",
+          page: 1,
+          perPage: 100,
+        },
+        bodySha256: null,
       };
     default:
-      return invalid("Landing HTTP subject is not derivable for a mutation kind in this slice");
+      return invalid("Landing HTTP descriptor kind is not a read");
   }
+}
+
+function httpDescriptorFor(
+  kind: LandingHttpKindV1,
+  position: number,
+  landing: LandingRecordV1,
+  manifest: CandidateObjectManifestV1 | null,
+  checkpointFiles: readonly CheckpointFile[],
+): HttpDescriptorV1 {
+  if (HTTP_GET_KINDS.has(kind)) {
+    return httpGetDescriptor(kind, landing);
+  }
+  if (manifest === null) {
+    invalid("Landing HTTP mutation descriptor requires the candidate object manifest");
+  }
+  switch (kind) {
+    case "github.blob.post": {
+      const nonDeleted = manifest.entries.filter((entry) => entry.op !== "delete");
+      const entry = nonDeleted[position - 1];
+      if (entry === undefined) {
+        invalid("Landing blob grammar position has no manifest entry");
+      }
+      const file = checkpointFiles.find((candidate) => candidate.path === entry.path);
+      if (file === undefined || file.approvedBase64 === null) {
+        invalid("Landing blob descriptor lacks its checkpoint bytes");
+      }
+      const body = canonicalGitHubPostBodyV1("github.blob.post", {
+        content: file.approvedBase64,
+        encoding: "base64",
+      });
+      return {
+        kind,
+        method: "POST",
+        subject: {
+          pathSha256: sha256(Buffer.from(entry.path, "utf8")),
+          contentBytes: entry.contentBytes ?? invalid("Blob manifest entry lacks its byte count"),
+          contentSha256:
+            entry.contentSha256 ?? invalid("Blob manifest entry lacks its content digest"),
+          expectedBlobSha1: entry.blobSha1 ?? invalid("Blob manifest entry lacks its object name"),
+        },
+        bodySha256: body.sha256,
+      };
+    }
+    case "github.tree.post": {
+      const treeEntries = manifest.entries.map((entry) => ({
+        path: entry.path,
+        mode: "100644" as const,
+        type: "blob" as const,
+        sha: entry.blobSha1,
+      }));
+      const body = canonicalGitHubPostBodyV1("github.tree.post", {
+        base_tree: landing.baseTreeSha1,
+        tree: treeEntries,
+      });
+      return {
+        kind,
+        method: "POST",
+        subject: {
+          baseTreeSha1: landing.baseTreeSha1,
+          entriesSha256: digestLandingRecord(treeEntries),
+          expectedTreeSha1:
+            landing.candidateTreeSha1 ?? invalid("Landing tree subject lacks its candidate tree"),
+        },
+        bodySha256: body.sha256,
+      };
+    }
+    case "github.commit.post": {
+      const party = {
+        name: landing.profile.commitIdentity.name,
+        email: landing.profile.commitIdentity.email,
+        date: landing.commitIso8601,
+      };
+      const body = canonicalGitHubPostBodyV1("github.commit.post", {
+        message: landing.commitMessage,
+        tree:
+          landing.candidateTreeSha1 ?? invalid("Landing commit subject lacks its candidate tree"),
+        parents: [landing.baseCommitSha1],
+        author: party,
+        committer: party,
+      });
+      return {
+        kind,
+        method: "POST",
+        subject: {
+          candidateTreeSha1: landing.candidateTreeSha1,
+          baseCommitSha1: landing.baseCommitSha1,
+          candidateCommitPayloadSha256: landing.candidateCommitPayloadSha256,
+          expectedCommitSha1: landing.candidateCommitSha1,
+          commitIso8601: landing.commitIso8601,
+        },
+        bodySha256: body.sha256,
+      };
+    }
+    case "github.ref.post": {
+      const body = canonicalGitHubPostBodyV1("github.ref.post", {
+        ref: landing.headRef,
+        sha:
+          landing.candidateCommitSha1 ?? invalid("Landing ref subject lacks its candidate commit"),
+      });
+      return {
+        kind,
+        method: "POST",
+        subject: {
+          baseRef: `refs/heads/${landing.profile.baseBranch}`,
+          expectedRemoteBaseSha1: landing.baseCommitSha1,
+          headRef: landing.headRef,
+          candidateCommitSha1: landing.candidateCommitSha1,
+        },
+        bodySha256: body.sha256,
+      };
+    }
+    default:
+      return invalid("Landing HTTP descriptor kind is not derivable in this slice");
+  }
+}
+
+function httpDescriptorsFor(
+  operation: LandingOperationRecordV1,
+  landing: LandingRecordV1,
+  manifest: CandidateObjectManifestV1 | null,
+  checkpointFiles: readonly CheckpointFile[],
+  operations: readonly LandingOperationRecordV1[],
+): readonly HttpDescriptorV1[] {
+  const grammar = httpGrammarFor(operation, operations, manifest);
+  return grammar.map((kind, index) =>
+    httpDescriptorFor(kind, index, landing, manifest, checkpointFiles),
+  );
+}
+
+/** Whether a settled request's projection restates the admitted subject. */
+function httpProjectionRestatesSubject(
+  request: LandingHttpRequestV1,
+  projection: LandingHttpProjectionV1,
+): boolean {
+  const subject = request.subject;
+  switch (request.kind) {
+    case "github.actor.get":
+      return projection.type === "actor" && projection.login === subject.expectedActor;
+    case "github.base_ref.get":
+      return projection.type === "ref" && projection.ref === subject.baseRef;
+    case "github.head_ref.get":
+      return projection.type === "ref" && projection.ref === subject.headRef;
+    case "github.blob.post":
+      return projection.type === "object" && projection.sha1 === subject.expectedBlobSha1;
+    case "github.tree.post":
+      return projection.type === "object" && projection.sha1 === subject.expectedTreeSha1;
+    case "github.commit.post":
+      return projection.type === "object" && projection.sha1 === subject.expectedCommitSha1;
+    case "github.ref.post":
+      return projection.type === "object" && projection.sha1 === subject.candidateCommitSha1;
+    case "github.pull_requests.get":
+      // Reachable only from the draft-PR slice; the list projection carries no
+      // single subject value to restate.
+      return projection.type === "pull_request_list";
+    case "github.pull_request.post":
+      return invalid("Pull-request creation is not admitted in this slice");
+  }
+}
+
+/** The settled interrupted subject projection a reconciliation fact hashes. */
+function subjectOperationProjectionSha256(subject: LandingOperationRecordV1): string {
+  if (
+    subject.status !== "interrupted" ||
+    subject.resultSha256 === null ||
+    subject.errorCode === null
+  ) {
+    invalid("Landing reconciliation subject is not durably interrupted");
+  }
+  return digestLandingRecord({
+    schemaVersion: 1,
+    operationId: subject.id,
+    landingId: subject.landingId,
+    coordinatorAttempt: subject.coordinatorAttempt,
+    kind: subject.kind,
+    kindAttempt: subject.kindAttempt,
+    status: subject.status,
+    requestSha256: subject.requestSha256,
+    observationSha256: subject.observationSha256,
+    resultSha256: subject.resultSha256,
+    errorCode: subject.errorCode,
+  });
+}
+
+/**
+ * The honest remote residue of a remote-ref result, derived from the freshest
+ * durable head proof. A head read taken after the mutation row supersedes the
+ * pre-mutation absence: a proven direct head is a `branch`, a proven absent
+ * head is `none`. Without a post-mutation read, a succeeded POST proves the
+ * branch, an admitted or ambiguous POST leaves visibility unresolved, and a
+ * failed POST fell back to the pre-mutation proof. Never a caller choice.
+ */
+function remoteRefResidueFromRows(
+  rows: readonly LandingHttpRequestRecordV1[],
+): "none" | "branch" | "ambiguous" {
+  const ordered = [...rows].sort((left, right) => left.requestOrdinal - right.requestOrdinal);
+  const postIndex = ordered.findLastIndex((row) => row.kind === "github.ref.post");
+  const post = postIndex === -1 ? undefined : ordered[postIndex];
+  const headAfter = ordered.filter(
+    (row, index) =>
+      index > postIndex && row.kind === "github.head_ref.get" && row.status === "settled",
+  );
+  const freshHead = headAfter.at(-1)?.result?.projection;
+  if (freshHead !== undefined && freshHead !== null) {
+    return freshHead.type === "ref" && freshHead.state === "direct" ? "branch" : "none";
+  }
+  if (post !== undefined && post.outcome === "succeeded") {
+    return "branch";
+  }
+  if (post !== undefined && (post.status === "admitted" || post.outcome === "ambiguous")) {
+    // The mutation was dispatched (or may have been) and no later read proves
+    // the head either way: visibility is unresolved.
+    return "ambiguous";
+  }
+  const headRows = ordered.filter(
+    (row) => row.kind === "github.head_ref.get" && row.status === "settled",
+  );
+  const projection = headRows.at(-1)?.result?.projection;
+  if (projection === undefined || projection === null || projection.type !== "ref") {
+    return "ambiguous";
+  }
+  return projection.state === "direct" ? "branch" : "none";
+}
+
+/**
+ * Whether the interrupted upload subject's durable rows prove every immutable
+ * object landed: all rows settled, every mutating POST succeeded with an
+ * object projection (which already restated its admitted subject at
+ * settlement), and the grammar's final commit write among them.
+ */
+function objectUploadRowsProveCompletion(
+  subject: LandingOperationRecordV1,
+  httpRequests: readonly LandingHttpRequestRecordV1[],
+): boolean {
+  const rows = httpRequests.filter((row) => row.operationId === subject.id);
+  const posts = rows.filter((row) => row.method === "POST");
+  const commit = rows.find((row) => row.kind === "github.commit.post");
+  return (
+    rows.length > 0 &&
+    rows.every((row) => row.status === "settled") &&
+    posts.length > 0 &&
+    posts.every(
+      (row) => row.outcome === "succeeded" && row.result?.projection?.type === "object",
+    ) &&
+    commit?.outcome === "succeeded"
+  );
+}
+
+/**
+ * Whether the interrupted remote-ref subject durably recorded the head's
+ * absence before its mutation: the observation's head fact must reference the
+ * subject's own settled absent-head read, so an exact head can never be
+ * adopted from pre-existing provider state.
+ */
+function hasRemoteRefAbsentIntent(
+  subject: LandingOperationRecordV1,
+  httpRequests: readonly LandingHttpRequestRecordV1[],
+): boolean {
+  const fact = subject.observation?.facts.find((entry) => entry.fact === "head_ref");
+  if (fact === undefined || fact.requestId === null) return false;
+  const row = httpRequests.find(
+    (entry) => entry.id === fact.requestId && entry.operationId === subject.id,
+  );
+  const projection = row?.result?.projection;
+  return row?.status === "settled" && projection?.type === "ref" && projection.state === "absent";
 }
 
 function decodeHttpRequestRow(
@@ -1137,6 +1545,8 @@ function decodeHttpRequestRow(
       | "candidate.prepare"
       | "local_ref.create"
       | "github.preflight"
+      | "github.objects.upload"
+      | "github.ref.create"
       | "landing.reconcile",
     requestOrdinal: integer(value.request_ordinal, "landing_http_requests.request_ordinal", 1),
     kind: request.kind,
@@ -1171,10 +1581,20 @@ function decodeHttpRequestRow(
   return record;
 }
 
-function localReconciliationSubject(status: LandingStatusV1): LandingOperationRecordV1 {
+/**
+ * The current reconciliation subject, selected without caller input: the
+ * newest atomically settled effect operation that named itself
+ * `reconciliation_required`, followed by an unbroken chain of
+ * subject-preserving reconciliation links. Remote effect kinds are subjects
+ * exactly like the local ref; the caller-visible stage (resume state) pins
+ * which subject kind is legal, enforced by every caller of this helper.
+ */
+function reconciliationSubject(status: LandingStatusV1): LandingOperationRecordV1 {
   const subjects = status.operations.filter(
     (operation) =>
-      operation.kind === "local_ref.create" &&
+      (operation.kind === "local_ref.create" ||
+        operation.kind === "github.objects.upload" ||
+        operation.kind === "github.ref.create") &&
       operation.status === "interrupted" &&
       operation.result?.outcome === "reconciliation_required" &&
       operation.result.value !== null &&
@@ -1183,7 +1603,7 @@ function localReconciliationSubject(status: LandingStatusV1): LandingOperationRe
   );
   const subject = subjects.at(-1);
   if (subject === undefined || subject.resultSha256 === null) {
-    invalid("Landing does not have a current unresolved local-ref subject");
+    invalid("Landing does not have a current unresolved reconciliation subject");
   }
   const chain = status.operations.filter(
     (operation) =>
@@ -1200,14 +1620,14 @@ function localReconciliationSubject(status: LandingStatusV1): LandingOperationRe
         "subjectOperationId" in value &&
         value.subjectOperationId !== subject.id)
     ) {
-      invalid("Local-ref reconciliation chain changed its original subject");
+      invalid("Landing reconciliation chain changed its original subject");
     }
     if (
       (link.status === "interrupted" && link.result?.outcome !== "reconciliation_required") ||
       (link.status === "started" && index !== chain.length - 1) ||
       !(link.status === "interrupted" || link.status === "started")
     ) {
-      invalid("Current local-ref reconciliation chain already terminated or is broken");
+      invalid("Current landing reconciliation chain already terminated or is broken");
     }
   }
   return subject;
@@ -1233,9 +1653,9 @@ function directLocalRefFactSha256(candidateCommitSha1: string): string {
 
 function validatePacket3OperationSettlement(
   operation: LandingOperationRecordV1,
-  landing: LandingRecordV1,
-  operations: readonly LandingOperationRecordV1[],
+  status: LandingStatusV1,
 ): void {
+  const { landing, operations, httpRequests } = status;
   const result = operation.result;
   if (result === null) return;
   if (operation.kind === "candidate.prepare") {
@@ -1289,16 +1709,82 @@ function validatePacket3OperationSettlement(
     }
     return;
   }
-  if (!(result.outcome === "completed" || result.outcome === "reconciliation_required")) {
-    invalid("Local-ref reconciliation has an illegal settlement outcome");
+  if (operation.kind === "github.objects.upload") {
+    if (result.outcome === "interrupted") {
+      invalid("Object-upload interruption must create a reconciliation subject");
+    }
+    if (result.outcome === "completed") {
+      const input = operation.request.input as GitHubObjectsUploadInputV1;
+      const value = result.value as ObjectsExactValueV1;
+      if (
+        operation.observation === null ||
+        value.candidateObjectManifestSha256 !== input.candidateObjectManifestSha256 ||
+        value.remoteObjectOutcome !== "created_or_exact"
+      ) {
+        invalid("Completed object-upload result does not bind its immutable manifest");
+      }
+    } else if (result.outcome === "reconciliation_required") {
+      const value = result.value as ReconciliationRequiredValueV1;
+      // Unreachable content-addressed objects are deliberately never residue.
+      if (value.subjectOperationId !== operation.id || value.remoteResidue !== "none") {
+        invalid("Object-upload reconciliation subject does not self-bind");
+      }
+    }
+    return;
   }
-  const request = operation.request.input as { readonly subjectOperationId: string };
-  const subject = operations.find((entry) => entry.id === request.subjectOperationId);
-  if (subject === undefined) invalid("Local-ref reconciliation subject is missing");
+  if (operation.kind === "github.ref.create") {
+    if (result.outcome === "interrupted") {
+      invalid("Remote-ref interruption must create a reconciliation subject");
+    }
+    if (result.outcome === "completed") {
+      const value = result.value as RemoteRefReadyValueV1;
+      const post = httpRequests.find(
+        (row) => row.operationId === operation.id && row.kind === "github.ref.post",
+      );
+      if (
+        operation.observation === null ||
+        value.baseSha1 !== landing.baseCommitSha1 ||
+        value.headSha1 !== landing.candidateCommitSha1 ||
+        post === undefined ||
+        post.status !== "settled" ||
+        // `created` requires the one mutation row settled succeeded with the
+        // exact projection; `reconciled` requires it settled ambiguous with
+        // durable prior absence and intent. A failed mutation row can produce
+        // neither.
+        (value.remoteRefOutcome === "created"
+          ? post.outcome !== "succeeded"
+          : post.outcome !== "ambiguous")
+      ) {
+        invalid("Completed remote-ref result does not match its exact post evidence");
+      }
+    } else if (result.outcome === "reconciliation_required") {
+      const value = result.value as ReconciliationRequiredValueV1;
+      const rows = httpRequests.filter((row) => row.operationId === operation.id);
+      if (
+        value.subjectOperationId !== operation.id ||
+        value.remoteResidue !== remoteRefResidueFromRows(rows)
+      ) {
+        invalid("Remote-ref reconciliation subject does not self-bind its residue");
+      }
+    }
+    return;
+  }
+  if (!(result.outcome === "completed" || result.outcome === "reconciliation_required")) {
+    invalid("Landing reconciliation has an illegal settlement outcome");
+  }
+  const input = operation.request.input as LandingReconcileInputV1;
+  const subject = operations.find((entry) => entry.id === input.subjectOperationId);
+  if (subject === undefined) invalid("Landing reconciliation subject is missing");
   if (result.outcome === "reconciliation_required") {
     const value = result.value as ReconciliationRequiredValueV1;
-    if (value.subjectOperationId !== subject.id || value.remoteResidue !== "none") {
-      invalid("Unresolved local-ref reconciliation changed its subject or residue");
+    // Local-ref and object subjects never carry mutable remote residue; a ref
+    // subject's residue derives from the freshest durable head proof.
+    const expectedResidue =
+      subject.kind === "github.ref.create"
+        ? remoteRefResidueFromRows(httpRequests.filter((row) => row.operationId === operation.id))
+        : "none";
+    if (value.subjectOperationId !== subject.id || value.remoteResidue !== expectedResidue) {
+      invalid("Unresolved reconciliation changed its subject or residue");
     }
     // The accepted DDL has no transaction/batch ID. A decisive observation can
     // legitimately belong to a crashed reconciliation that takeover interrupted,
@@ -1307,39 +1793,168 @@ function validatePacket3OperationSettlement(
     return;
   }
   const value = result.value as ReconcileValueV1;
-  const freshFact = operation.observation?.facts[1];
-  if (value.subjectOperationId !== subject.id || value.remoteResidue !== "none") {
-    invalid("Completed local-ref reconciliation changed its subject or residue");
+  if (value.subjectOperationId !== subject.id) {
+    invalid("Completed reconciliation changed its original subject");
   }
-  if (result.boundary === "subject_settled") {
-    const stageValue = value.stageValue as LocalRefReadyValueV1 | null;
-    if (
-      value.nextState !== "local_ready" ||
-      stageValue === null ||
-      stageValue.headRef !== landing.headRef ||
-      stageValue.candidateCommitSha1 !== landing.candidateCommitSha1 ||
-      stageValue.localRefOutcome !== "reconciled" ||
-      stageValue.updateRefExitCode !== null ||
-      !hasAbsentLocalRefIntent(subject) ||
+  if (subject.kind === "local_ref.create") {
+    const freshFact = operation.observation?.facts[1];
+    if (value.remoteResidue !== "none") {
+      invalid("Completed local-ref reconciliation changed its residue");
+    }
+    if (result.boundary === "subject_settled") {
+      const stageValue = value.stageValue as LocalRefReadyValueV1 | null;
+      if (
+        value.nextState !== "local_ready" ||
+        stageValue === null ||
+        stageValue.headRef !== landing.headRef ||
+        stageValue.candidateCommitSha1 !== landing.candidateCommitSha1 ||
+        stageValue.localRefOutcome !== "reconciled" ||
+        stageValue.updateRefExitCode !== null ||
+        !hasAbsentLocalRefIntent(subject) ||
+        freshFact?.fact !== "local_ref" ||
+        freshFact.requestId !== null ||
+        freshFact.resultSha256 !== directLocalRefFactSha256(landing.candidateCommitSha1 ?? "")
+      ) {
+        invalid("Local-ref subject settlement lacks exact reconciled stage proof");
+      }
+    } else if (
+      result.boundary !== "retry_stage_proven" ||
+      value.nextState !== "approved" ||
+      value.stageValue !== null ||
       freshFact?.fact !== "local_ref" ||
       freshFact.requestId !== null ||
-      freshFact.resultSha256 !== directLocalRefFactSha256(landing.candidateCommitSha1 ?? "")
+      freshFact.resultSha256 !== ABSENT_LOCAL_REF_FACT_SHA256
     ) {
-      invalid("Local-ref subject settlement lacks exact reconciled stage proof");
+      invalid("Local-ref retry-stage reconciliation has an illegal closed mapping");
+    }
+    return;
+  }
+  if (subject.kind === "github.objects.upload") {
+    const subjectInput = subject.request.input as GitHubObjectsUploadInputV1;
+    if (value.remoteResidue !== "none") {
+      invalid("Object reconciliation cannot claim mutable remote residue");
+    }
+    if (result.boundary === "subject_settled") {
+      const stageValue = value.stageValue as ObjectsExactValueV1 | null;
+      if (
+        value.nextState !== "objects_ready" ||
+        stageValue === null ||
+        stageValue.candidateObjectManifestSha256 !== subjectInput.candidateObjectManifestSha256 ||
+        stageValue.remoteObjectOutcome !== "created_or_exact" ||
+        !objectUploadRowsProveCompletion(subject, httpRequests)
+      ) {
+        invalid("Object-upload subject settlement lacks the exact immutable-object proof");
+      }
+    } else if (
+      result.boundary !== "retry_stage_proven" ||
+      value.nextState !== "local_ready" ||
+      value.stageValue !== null
+    ) {
+      invalid("Object-upload retry-stage reconciliation has an illegal closed mapping");
+    }
+    return;
+  }
+  // github.ref.create subjects: advance to remote_ready only on the exact
+  // proven branch with an unchanged base; retry at objects_ready only when the
+  // base is unchanged and the head is freshly absent.
+  const reconcileRows = httpRequests.filter((row) => row.operationId === operation.id);
+  const freshBase = reconcileRows.find(
+    (row) => row.kind === "github.base_ref.get" && row.status === "settled",
+  )?.result?.projection;
+  const freshHead = reconcileRows.find(
+    (row) => row.kind === "github.head_ref.get" && row.status === "settled",
+  )?.result?.projection;
+  const subjectPost = httpRequests.find(
+    (row) => row.operationId === subject.id && row.kind === "github.ref.post",
+  );
+  if (result.boundary === "subject_settled") {
+    const stageValue = value.stageValue as RemoteRefReadyValueV1 | null;
+    if (
+      value.nextState !== "remote_ready" ||
+      value.remoteResidue !== "branch" ||
+      stageValue === null ||
+      stageValue.baseSha1 !== landing.baseCommitSha1 ||
+      stageValue.headSha1 !== landing.candidateCommitSha1 ||
+      stageValue.remoteRefOutcome !== "reconciled" ||
+      subjectPost === undefined ||
+      subjectPost.status !== "settled" ||
+      !(subjectPost.outcome === "succeeded" || subjectPost.outcome === "ambiguous") ||
+      !hasRemoteRefAbsentIntent(subject, httpRequests) ||
+      freshBase?.type !== "ref" ||
+      freshBase.state !== "direct" ||
+      freshBase.sha1 !== landing.baseCommitSha1 ||
+      freshHead?.type !== "ref" ||
+      freshHead.state !== "direct" ||
+      freshHead.sha1 !== landing.candidateCommitSha1
+    ) {
+      invalid("Remote-ref subject settlement lacks exact reconciled stage proof");
     }
   } else if (
     result.boundary !== "retry_stage_proven" ||
-    value.nextState !== "approved" ||
+    value.nextState !== "objects_ready" ||
     value.stageValue !== null ||
-    freshFact?.fact !== "local_ref" ||
-    freshFact.requestId !== null ||
-    freshFact.resultSha256 !== ABSENT_LOCAL_REF_FACT_SHA256
+    value.remoteResidue !== "none" ||
+    freshBase?.type !== "ref" ||
+    freshBase.state !== "direct" ||
+    freshBase.sha1 !== landing.baseCommitSha1 ||
+    freshHead?.type !== "ref" ||
+    freshHead.state !== "absent"
   ) {
-    invalid("Local-ref retry-stage reconciliation has an illegal closed mapping");
+    invalid("Remote-ref retry-stage reconciliation has an illegal closed mapping");
   }
 }
 
-function validateAggregate(status: LandingStatusV1): void {
+/**
+ * The effect-operation preflight binding: the immediately preceding operation
+ * in the same coordinator attempt must be a completed `github.preflight` whose
+ * result digest, identity, expected state, and bound landing values match the
+ * effect's input exactly. A stale, cross-attempt, mismatched, failed, or
+ * incomplete preflight cannot start an effect operation.
+ */
+function hasExactPreflightBinding(
+  operation: LandingOperationRecordV1,
+  operations: readonly LandingOperationRecordV1[],
+): boolean {
+  const input = operation.request.input as GitHubObjectsUploadInputV1 | GitHubRefCreateInputV1;
+  const attemptOperations = operations.filter(
+    (entry) => entry.coordinatorAttempt === operation.coordinatorAttempt,
+  );
+  const index = attemptOperations.findIndex((entry) => entry.id === operation.id);
+  const preflight = index > 0 ? attemptOperations[index - 1] : undefined;
+  if (
+    preflight === undefined ||
+    preflight.kind !== "github.preflight" ||
+    preflight.status !== "completed" ||
+    preflight.result?.outcome !== "completed" ||
+    preflight.id !== input.preflightOperationId ||
+    preflight.resultSha256 !== input.preflightResultSha256 ||
+    preflight.request.expectedState !== operation.request.expectedState ||
+    preflightInput(preflight.request).includePullRequestAbsence !==
+      (operation.request.expectedState === "remote_ready")
+  ) {
+    return false;
+  }
+  // Every value both inputs carry must be byte-equal: the effect operation
+  // provably continues the exact preflight's landing, base, head, and
+  // candidate authority.
+  const bound = preflightInput(preflight.request);
+  if (bound.landingSha256 !== input.landingSha256) return false;
+  if (operation.kind === "github.ref.create") {
+    const refInput = input as GitHubRefCreateInputV1;
+    return (
+      bound.baseRef === refInput.baseRef &&
+      bound.expectedRemoteBaseSha1 === refInput.expectedRemoteBaseSha1 &&
+      bound.headRef === refInput.headRef &&
+      bound.candidateCommitSha1 === refInput.candidateCommitSha1
+    );
+  }
+  return true;
+}
+
+function validateAggregate(
+  status: LandingStatusV1,
+  expectedHttp: ReadonlyMap<string, readonly HttpDescriptorV1[]>,
+): void {
   const { landing, decision, attempts, operations, httpRequests, events } = status;
   if (
     attempts.length === 0 ||
@@ -1386,12 +2001,21 @@ function validateAggregate(status: LandingStatusV1): void {
   }
   for (const operation of operations) {
     const owned = httpRequestsByOperation.get(operation.id) ?? [];
-    const grammar = httpGrammarFor(operation);
+    const descriptors = expectedHttp.get(operation.id) ?? [];
     if (
-      owned.length > grammar.length ||
-      !owned.every((row, index) => row.kind === grammar[index])
+      owned.length > descriptors.length ||
+      !owned.every((row, index) => {
+        const descriptor = descriptors[index];
+        return (
+          descriptor !== undefined &&
+          row.kind === descriptor.kind &&
+          row.method === descriptor.method &&
+          row.request.bodySha256 === descriptor.bodySha256 &&
+          canonicalLandingJson(row.request.subject) === canonicalLandingJson(descriptor.subject)
+        );
+      })
     ) {
-      invalid("Landing HTTP requests do not match the operation's request grammar");
+      invalid("Landing HTTP requests do not match the operation's derived request grammar");
     }
     const admitted = owned.filter((row) => row.status === "admitted");
     if (
@@ -1455,7 +2079,7 @@ function validateAggregate(status: LandingStatusV1): void {
     if (!canStartLandingOperation(operation.kind, operation.request.expectedState)) {
       invalid("Landing operation request has an illegal expected state");
     }
-    validatePacket3OperationSettlement(operation, landing, operations);
+    validatePacket3OperationSettlement(operation, status);
     if (operation.kind === "candidate.prepare") {
       const input = operation.request.input as LandingOperationRequestV1["input"] & {
         readonly profileSha256: string;
@@ -1519,25 +2143,101 @@ function validateAggregate(status: LandingStatusV1): void {
       ) {
         invalid("Preflight operation does not bind the approved landing");
       }
-    } else {
-      const input = operation.request.input as {
-        readonly landingSha256: string;
-        readonly resumeState: string;
-        readonly subjectOperationId: string;
-        readonly subjectRequestSha256: string;
-        readonly subjectResultSha256: string;
-      };
-      const subject = operations.find((candidate) => candidate.id === input.subjectOperationId);
+    } else if (operation.kind === "github.objects.upload") {
+      const input = operation.request.input as GitHubObjectsUploadInputV1;
+      const candidate = operations.find(
+        (entry) =>
+          entry.kind === "candidate.prepare" &&
+          entry.status === "completed" &&
+          entry.result?.outcome === "completed",
+      );
+      const candidateValue = candidate?.result?.value as CandidateReadyValueV1 | undefined;
       if (
         input.landingSha256 !== landing.landingSha256 ||
-        input.resumeState !== "approved" ||
-        subject?.kind !== "local_ref.create" ||
+        candidateValue === undefined ||
+        input.candidateObjectManifestSha256 !== candidateValue.candidateObjectManifestSha256 ||
+        input.changedPathsSha256 !== landing.changedPathsSha256 ||
+        !hasExactPreflightBinding(operation, operations)
+      ) {
+        invalid("Object-upload operation does not bind the approved landing and preflight");
+      }
+      // The retry-subject pair is null exactly when no prior upload admitted a
+      // mutating POST; otherwise it binds the most recent effectful subject
+      // whose completed reconciliation authorized the byte-identical retry.
+      const priorEffectful = operations.filter(
+        (entry) =>
+          entry.kind === "github.objects.upload" &&
+          entry.kindAttempt < operation.kindAttempt &&
+          httpRequests.some((row) => row.operationId === entry.id && row.method === "POST"),
+      );
+      const mostRecent = priorEffectful.at(-1);
+      if (input.retrySubjectOperationId === null) {
+        if (mostRecent !== undefined) {
+          invalid("Object-upload retry dropped the most recent effectful subject");
+        }
+      } else {
+        if (
+          mostRecent === undefined ||
+          input.retrySubjectOperationId !== mostRecent.id ||
+          input.retrySubjectRequestSha256 !== mostRecent.requestSha256
+        ) {
+          invalid("Object-upload retry does not bind the most recent effectful subject");
+        }
+        const subjectInput = mostRecent.request.input as GitHubObjectsUploadInputV1;
+        if (
+          subjectInput.landingSha256 !== input.landingSha256 ||
+          subjectInput.candidateObjectManifestSha256 !== input.candidateObjectManifestSha256 ||
+          subjectInput.changedPathsSha256 !== input.changedPathsSha256
+        ) {
+          invalid("Object-upload retry subject drifted from the immutable landing");
+        }
+        const grant = operations.find(
+          (entry) =>
+            entry.kind === "landing.reconcile" &&
+            entry.status === "completed" &&
+            entry.result?.outcome === "completed" &&
+            entry.result.boundary === "retry_stage_proven" &&
+            (entry.request.input as LandingReconcileInputV1).subjectOperationId === mostRecent.id &&
+            (entry.result.value as ReconcileValueV1).nextState === "local_ready",
+        );
+        if (grant === undefined) {
+          invalid("Object-upload retry lacks the subject's completed reconciliation grant");
+        }
+      }
+    } else if (operation.kind === "github.ref.create") {
+      const input = operation.request.input as GitHubRefCreateInputV1;
+      if (
+        input.landingSha256 !== landing.landingSha256 ||
+        input.baseRef !== `refs/heads/${landing.profile.baseBranch}` ||
+        input.expectedRemoteBaseSha1 !== landing.baseCommitSha1 ||
+        input.headRef !== landing.headRef ||
+        input.candidateCommitSha1 !== landing.candidateCommitSha1 ||
+        !hasExactPreflightBinding(operation, operations)
+      ) {
+        invalid("Remote-ref operation does not bind the approved landing and preflight");
+      }
+    } else {
+      const input = operation.request.input as LandingReconcileInputV1;
+      const subject = operations.find((candidate) => candidate.id === input.subjectOperationId);
+      // The resume state pins the one legal subject kind: approved reconciles a
+      // local ref, local_ready an object upload, objects_ready a remote ref.
+      const expectedSubjectKind =
+        input.resumeState === "approved"
+          ? "local_ref.create"
+          : input.resumeState === "local_ready"
+            ? "github.objects.upload"
+            : input.resumeState === "objects_ready"
+              ? "github.ref.create"
+              : null;
+      if (
+        input.landingSha256 !== landing.landingSha256 ||
+        subject?.kind !== expectedSubjectKind ||
         subject.status !== "interrupted" ||
         subject.coordinatorAttempt >= operation.coordinatorAttempt ||
         subject.requestSha256 !== input.subjectRequestSha256 ||
         subject.resultSha256 !== input.subjectResultSha256
       ) {
-        invalid("Local-ref reconciliation does not bind its settled original subject");
+        invalid("Landing reconciliation does not bind its settled original subject");
       }
       const resultValue = operation.result?.value;
       if (
@@ -1546,25 +2246,12 @@ function validateAggregate(status: LandingStatusV1): void {
         "subjectOperationId" in resultValue &&
         resultValue.subjectOperationId !== subject.id
       ) {
-        invalid("Local-ref reconciliation result changed its original subject");
+        invalid("Landing reconciliation result changed its original subject");
       }
       if (operation.observation !== null) {
-        const subjectProjection = {
-          schemaVersion: 1,
-          operationId: subject.id,
-          landingId: subject.landingId,
-          coordinatorAttempt: subject.coordinatorAttempt,
-          kind: subject.kind,
-          kindAttempt: subject.kindAttempt,
-          status: subject.status,
-          requestSha256: subject.requestSha256,
-          observationSha256: subject.observationSha256,
-          resultSha256: subject.resultSha256,
-          errorCode: subject.errorCode,
-        };
         if (
           operation.observation.facts[0]?.fact !== "subject_operation" ||
-          operation.observation.facts[0].resultSha256 !== digestLandingRecord(subjectProjection)
+          operation.observation.facts[0].resultSha256 !== subjectOperationProjectionSha256(subject)
         ) {
           invalid("Reconciliation observation does not hash its settled subject projection");
         }
@@ -1589,9 +2276,10 @@ function validateAggregate(status: LandingStatusV1): void {
     invalid("Landing has more than one started operation");
   }
   // Per attempt the contract permits at most one preflight followed by at most
-  // one effect operation, and the attempt's settlement equals the last
-  // operation's. Only preflight is reachable in this slice, so a two-operation
-  // attempt can load only when it already has the ordered ii-b shape.
+  // one effect operation. Within the attempt every operation but the last must
+  // be completed, and the attempt's settlement equals the last operation's —
+  // except an interrupted attempt may legitimately end with all-completed
+  // operations, the crash having landed in the window between two stages.
   const EFFECT_OPERATION_KINDS: ReadonlySet<LandingOperationKindV1> = new Set([
     "github.objects.upload",
     "github.ref.create",
@@ -1614,7 +2302,15 @@ function validateAggregate(status: LandingStatusV1): void {
       if (
         (!final && (operation.status !== "completed" || operation.errorCode !== null)) ||
         (final &&
-          (operation.status !== attempt.status || operation.errorCode !== attempt.errorCode))
+          ((attempt.status === "completed" &&
+            (operation.status !== "completed" || operation.errorCode !== null)) ||
+            (attempt.status === "failed" &&
+              (operation.status !== "failed" || operation.errorCode !== attempt.errorCode)) ||
+            (attempt.status === "interrupted" &&
+              !(
+                operation.status === "completed" ||
+                (operation.status === "interrupted" && operation.errorCode === attempt.errorCode)
+              ))))
       ) {
         invalid("Landing operation and coordinator attempt settlements disagree");
       }
@@ -1627,7 +2323,8 @@ function validateAggregate(status: LandingStatusV1): void {
     const activeStates =
       actionState === null ? landingOperationExpectedStates(startedOperation.kind) : [actionState];
     // `github.preflight` maps to no action state: it runs while the landing
-    // remains in its stable retry-safe state (`local_ready` in this slice).
+    // remains in its stable retry-safe state (`local_ready`/`objects_ready` in
+    // this slice).
     if (
       startedAttempt === undefined ||
       !(activeStates as readonly LandingStateV1[]).includes(landing.state)
@@ -1641,9 +2338,13 @@ function validateAggregate(status: LandingStatusV1): void {
       !(
         landing.state === "preparing_candidate" ||
         landing.state === "approved" ||
-        landing.state === "local_ready"
+        landing.state === "local_ready" ||
+        landing.state === "objects_ready"
       )) ||
-    (startedAttempt === undefined && landing.state === "creating_local_ref")
+    (startedAttempt === undefined &&
+      (landing.state === "creating_local_ref" ||
+        landing.state === "uploading_objects" ||
+        landing.state === "creating_remote_ref"))
   ) {
     invalid("Landing active attempt/operation does not match its current state");
   }
@@ -1661,15 +2362,21 @@ function validateAggregate(status: LandingStatusV1): void {
         landing.state === "approved" ||
         landing.state === "creating_local_ref" ||
         landing.state === "local_ready" ||
+        landing.state === "uploading_objects" ||
+        landing.state === "objects_ready" ||
+        landing.state === "creating_remote_ref" ||
+        landing.state === "remote_ready" ||
         landing.state === "reconciliation_required" ||
         (landing.state === "failed" &&
-          (landing.resumeState === "approved" || landing.resumeState === "local_ready"))
+          (landing.resumeState === "approved" ||
+            landing.resumeState === "local_ready" ||
+            landing.resumeState === "objects_ready"))
       ))
   ) {
     invalid("Landing decision and current state are inconsistent");
   }
   if (landing.state === "reconciliation_required") {
-    localReconciliationSubject(status);
+    reconciliationSubject(status);
   }
   if (landing.state === "local_ready") {
     const readyProofs = operations.filter((operation) => {
@@ -1684,13 +2391,61 @@ function validateAggregate(status: LandingStatusV1): void {
           value.candidateCommitSha1 === landing.candidateCommitSha1
         );
       }
-      if (operation.kind === "landing.reconcile") {
+      // A retry-stage reconcile returning to local_ready proves the object
+      // upload's retry stage, not the local-ref delivery stage; only a
+      // subject-settled local-ref reconciliation is that stage's proof.
+      if (
+        operation.kind === "landing.reconcile" &&
+        operation.result.boundary === "subject_settled"
+      ) {
         const value = operation.result.value;
         return value !== null && "nextState" in value && value.nextState === "local_ready";
       }
       return false;
     });
     if (readyProofs.length !== 1) invalid("Local-ready landing lacks one exact stage proof");
+  }
+  if (landing.state === "objects_ready") {
+    const readyProofs = operations.filter((operation) => {
+      if (operation.status !== "completed" || operation.result?.outcome !== "completed") {
+        return false;
+      }
+      if (operation.kind === "github.objects.upload") {
+        const value = operation.result.value;
+        return value !== null && "candidateObjectManifestSha256" in value;
+      }
+      if (
+        operation.kind === "landing.reconcile" &&
+        operation.result.boundary === "subject_settled"
+      ) {
+        const value = operation.result.value;
+        return value !== null && "nextState" in value && value.nextState === "objects_ready";
+      }
+      return false;
+    });
+    if (readyProofs.length !== 1) invalid("Objects-ready landing lacks one exact stage proof");
+  }
+  if (landing.state === "remote_ready") {
+    const readyProofs = operations.filter((operation) => {
+      if (operation.status !== "completed" || operation.result?.outcome !== "completed") {
+        return false;
+      }
+      if (operation.kind === "github.ref.create") {
+        const value = operation.result.value;
+        return (
+          value !== null && "headSha1" in value && value.headSha1 === landing.candidateCommitSha1
+        );
+      }
+      if (
+        operation.kind === "landing.reconcile" &&
+        operation.result.boundary === "subject_settled"
+      ) {
+        const value = operation.result.value;
+        return value !== null && "nextState" in value && value.nextState === "remote_ready";
+      }
+      return false;
+    });
+    if (readyProofs.length !== 1) invalid("Remote-ready landing lacks one exact stage proof");
   }
 
   const eventsByType = new Map<string, LandingEventRecordV1[]>();
@@ -1850,7 +2605,7 @@ function validateAggregate(status: LandingStatusV1): void {
     invalid("Landing decision event has no source row");
   }
 
-  for (const operation of operations) {
+  for (const [operationIndex, operation] of operations.entries()) {
     const attemptStarted = attemptStartEvents.get(operation.coordinatorAttempt);
     const operationStarted = operationStartEvents.get(operation.id);
     if (
@@ -1860,21 +2615,40 @@ function validateAggregate(status: LandingStatusV1): void {
     ) {
       invalid("Landing operation started before its coordinator attempt");
     }
-    const operationSettled = operationSettleEvents.get(operation.id);
-    const attemptSettled = attemptSettleEvents.get(operation.coordinatorAttempt);
-    if (
-      operation.status !== "started" &&
-      (operationSettled === undefined ||
-        attemptSettled === undefined ||
-        attemptSettled.sequence !== operationSettled.sequence + 1)
-    ) {
-      invalid("Landing operation and attempt settlements are not in exact source order");
-    }
     if (
       operation.kind === "landing.reconcile" &&
       operationStarted.sequence !== attemptStarted.sequence + 1
     ) {
       invalid("Landing reconciliation admission is not atomic in event order");
+    }
+    if (operation.status === "started") continue;
+    const operationSettled = operationSettleEvents.get(operation.id);
+    if (operationSettled === undefined) {
+      invalid("Landing operation settlement event is missing");
+    }
+    const attemptSettled = attemptSettleEvents.get(operation.coordinatorAttempt);
+    const attempt = attempts.find((entry) => entry.ordinal === operation.coordinatorAttempt);
+    const nextOperation = operations[operationIndex + 1];
+    const isLastInAttempt =
+      nextOperation === undefined ||
+      nextOperation.coordinatorAttempt !== operation.coordinatorAttempt;
+    if (!isLastInAttempt) {
+      // A mid-attempt operation settlement closes only its own transaction; the
+      // next operation starts immediately after (preflight, then one effect).
+      if (
+        nextOperation === undefined ||
+        operationStartEvents.get(nextOperation.id)?.sequence !== operationSettled.sequence + 1
+      ) {
+        invalid("Landing mid-attempt operation settlement is not followed by the next start");
+      }
+      continue;
+    }
+    // The attempt's settlement follows the last settled operation: the one
+    // ambiguous request settlement an interrupted-effect takeover writes
+    // precedes the operation settlement, so the two stay adjacent.
+    if (attempt === undefined || attempt.status === "started") continue;
+    if (attemptSettled === undefined || attemptSettled.sequence !== operationSettled.sequence + 1) {
+      invalid("Landing operation and attempt settlements are not in exact source order");
     }
   }
 
@@ -1893,13 +2667,15 @@ function validateAggregate(status: LandingStatusV1): void {
     if (event.type === "landing.attempt.started") {
       const ordinal = (event.payload as { readonly coordinatorAttempt: number }).coordinatorAttempt;
       const initialAttempt = ordinal === 1;
-      // `local_ready` is admitted here because the read-only preflight stage
-      // runs at that stable state. The mutation-stage states remain excluded
-      // until their own slices admit them.
+      // The stable delivery states this slice admits attempts from. The
+      // mutation-stage states `uploading_objects`/`creating_remote_ref` are
+      // action states (never admission states), and `remote_ready` stays
+      // parked until the draft-PR slice admits from it.
       const allowedAdmissionState =
         replayedState === "preparing_candidate" ||
         replayedState === "approved" ||
         replayedState === "local_ready" ||
+        replayedState === "objects_ready" ||
         replayedState === "failed" ||
         replayedState === "reconciliation_required";
       if (
@@ -2113,20 +2889,76 @@ function validateAggregate(status: LandingStatusV1): void {
         invalid("Local-ref settlement transition has the wrong operation owner");
       }
       replayedResumeState = to === "failed" || to === "reconciliation_required" ? "approved" : null;
-    } else if (transition === "local_ready->failed") {
-      // The read-only preflight's deterministic refusal: the landing keeps its
-      // retry-safe stable state as the resume marker and no effect occurred.
+    } else if (transition === "local_ready->failed" || transition === "objects_ready->failed") {
+      // A deterministic refusal at a stable state keeps it as the retry-safe
+      // resume marker: the read-only preflight's failure, or the stage
+      // effect's definitive pre-mutation refusal (before its one POST exists).
+      const effectKind = from === "local_ready" ? "github.objects.upload" : "github.ref.create";
       if (
-        owner?.kind !== "github.preflight" ||
+        !(owner?.kind === "github.preflight" || owner?.kind === effectKind) ||
         owner.result?.outcome !== "failed" ||
         !isSettlementOwned
       ) {
-        invalid("Preflight failure transition has the wrong operation owner");
+        invalid("Stable-state failure transition has the wrong operation owner");
       }
-      replayedResumeState = "local_ready";
+      replayedResumeState = from === "local_ready" ? "local_ready" : "objects_ready";
+    } else if (transition === "local_ready->uploading_objects") {
+      if (
+        owner?.kind !== "github.objects.upload" ||
+        operationStartEvents.get(owner.id)?.sequence !== event.sequence - 1
+      ) {
+        invalid("Object-upload action transition has the wrong started operation");
+      }
+    } else if (
+      transition === "uploading_objects->objects_ready" ||
+      transition === "uploading_objects->failed" ||
+      transition === "uploading_objects->reconciliation_required"
+    ) {
+      const expectedOutcome =
+        to === "objects_ready"
+          ? "completed"
+          : to === "failed"
+            ? "failed"
+            : "reconciliation_required";
+      if (
+        owner?.kind !== "github.objects.upload" ||
+        owner.result?.outcome !== expectedOutcome ||
+        !isSettlementOwned
+      ) {
+        invalid("Object-upload settlement transition has the wrong operation owner");
+      }
+      replayedResumeState = to === "objects_ready" ? null : "local_ready";
+    } else if (transition === "objects_ready->creating_remote_ref") {
+      if (
+        owner?.kind !== "github.ref.create" ||
+        operationStartEvents.get(owner.id)?.sequence !== event.sequence - 1
+      ) {
+        invalid("Remote-ref action transition has the wrong started operation");
+      }
+    } else if (
+      transition === "creating_remote_ref->remote_ready" ||
+      transition === "creating_remote_ref->failed" ||
+      transition === "creating_remote_ref->reconciliation_required"
+    ) {
+      const expectedOutcome =
+        to === "remote_ready"
+          ? "completed"
+          : to === "failed"
+            ? "failed"
+            : "reconciliation_required";
+      if (
+        owner?.kind !== "github.ref.create" ||
+        owner.result?.outcome !== expectedOutcome ||
+        !isSettlementOwned
+      ) {
+        invalid("Remote-ref settlement transition has the wrong operation owner");
+      }
+      replayedResumeState = to === "remote_ready" ? null : "objects_ready";
     } else if (
       transition === "reconciliation_required->approved" ||
-      transition === "reconciliation_required->local_ready"
+      transition === "reconciliation_required->local_ready" ||
+      transition === "reconciliation_required->objects_ready" ||
+      transition === "reconciliation_required->remote_ready"
     ) {
       const value = owner?.result?.value as ReconcileValueV1 | null | undefined;
       if (
@@ -2143,7 +2975,9 @@ function validateAggregate(status: LandingStatusV1): void {
     } else if (
       transition === "failed->preparing_candidate" ||
       transition === "failed->approved" ||
-      transition === "failed->local_ready"
+      transition === "failed->local_ready" ||
+      transition === "failed->objects_ready" ||
+      transition === "failed->remote_ready"
     ) {
       if (
         payload.operationId !== null ||
@@ -2367,6 +3201,66 @@ export class LandingLedger {
     }
   }
 
+  /**
+   * Re-derives the candidate object manifest from the landing's immutable
+   * columns and the evidence checkpoint bytes, and requires it to digest to
+   * the completed candidate operation's recorded manifest digest. Returns null
+   * only before candidate settlement; a digest drift fails closed.
+   */
+  #uploadEvidence(
+    status: LandingStatusV1,
+    required = false,
+  ): {
+    readonly manifest: CandidateObjectManifestV1;
+    readonly checkpointFiles: readonly CheckpointFile[];
+  } | null {
+    const landing = status.landing;
+    const hasUpload = status.operations.some(
+      (operation) => operation.kind === "github.objects.upload",
+    );
+    // Reading the run evidence requires a still-completed run; loads of
+    // pre-delivery landings after a rollback has begun must stay readable, so
+    // the manifest is derived only when an upload exists (or the caller
+    // requires it for an admission or settlement).
+    if (!hasUpload && !required) {
+      return null;
+    }
+    if (
+      landing.candidateTreeSha1 === null ||
+      landing.candidateCommitSha1 === null ||
+      landing.candidateCommitPayloadSha256 === null
+    ) {
+      if (required) {
+        invalid("Object upload requires the completed candidate authority");
+      }
+      return null;
+    }
+    const candidate = status.operations.find(
+      (operation) =>
+        operation.kind === "candidate.prepare" &&
+        operation.status === "completed" &&
+        operation.result?.outcome === "completed",
+    );
+    const candidateValue = candidate?.result?.value as CandidateReadyValueV1 | undefined;
+    if (candidateValue === undefined) {
+      invalid("Landing candidate settlement lacks its completed operation");
+    }
+    const evidence = this.#evidenceSource(landing.runId);
+    const manifest = deriveCandidateObjectManifestV1({
+      baseCommitSha1: landing.baseCommitSha1,
+      baseTreeSha1: landing.baseTreeSha1,
+      candidateTreeSha1: landing.candidateTreeSha1,
+      candidateCommitSha1: landing.candidateCommitSha1,
+      candidateCommitPayloadSha256: landing.candidateCommitPayloadSha256,
+      changedPaths: landing.changedPaths,
+      checkpointFiles: evidence.checkpointFiles,
+    });
+    if (digestLandingRecord(manifest) !== candidateValue.candidateObjectManifestSha256) {
+      invalid("Candidate object manifest no longer matches its durable digest");
+    }
+    return { manifest, checkpointFiles: evidence.checkpointFiles };
+  }
+
   getProfile(projectId: string): LandingProfileRecordV1 | null {
     assertUuid(projectId, "projectId");
     const entry = this.#database
@@ -2530,7 +3424,23 @@ export class LandingLedger {
       events,
       revision: events.at(-1)?.sequence ?? 0,
     };
-    validateAggregate(status);
+    // The candidate object manifest is re-derived from durable evidence
+    // whenever an object upload exists, so stored HTTP rows are revalidated
+    // against the exact immutable byte authority rather than trusted.
+    const uploadEvidence = this.#uploadEvidence(status);
+    const expectedHttp = new Map<string, readonly HttpDescriptorV1[]>();
+    for (const operation of operations) {
+      if (operation.kind === "candidate.prepare" || operation.kind === "local_ref.create") continue;
+      const descriptors = httpDescriptorsFor(
+        operation,
+        landing,
+        uploadEvidence?.manifest ?? null,
+        uploadEvidence?.checkpointFiles ?? [],
+        operations,
+      );
+      if (descriptors.length > 0) expectedHttp.set(operation.id, descriptors);
+    }
+    validateAggregate(status, expectedHttp);
     reconstructLandingDigest(status);
     return status;
   }
@@ -2732,7 +3642,13 @@ export class LandingLedger {
 
   #startOperation(
     status: LandingStatusV1,
-    kind: "candidate.prepare" | "local_ref.create" | "github.preflight" | "landing.reconcile",
+    kind:
+      | "candidate.prepare"
+      | "local_ref.create"
+      | "github.preflight"
+      | "github.objects.upload"
+      | "github.ref.create"
+      | "landing.reconcile",
     input: LandingOperationRequestV1["input"],
   ): string {
     const attempt = this.#startedAttempt(status);
@@ -3240,27 +4156,124 @@ export class LandingLedger {
         ) {
           invalid("Local-ref reconciliation subject is not durably interrupted");
         }
-        const subjectProjection = {
-          schemaVersion: 1,
-          operationId: subject.id,
-          landingId: subject.landingId,
-          coordinatorAttempt: subject.coordinatorAttempt,
-          kind: subject.kind,
-          kindAttempt: subject.kindAttempt,
-          status: subject.status,
-          requestSha256: subject.requestSha256,
-          observationSha256: subject.observationSha256,
-          resultSha256: subject.resultSha256,
-          errorCode: subject.errorCode,
-        };
         facts = [
           {
             fact: "subject_operation",
             requestId: null,
-            resultSha256: digestLandingRecord(subjectProjection),
+            resultSha256: subjectOperationProjectionSha256(subject),
           },
           { fact: "local_ref", requestId: null, resultSha256: factSha256 },
         ];
+      }
+      const observation = decodeLandingOperationObservationV1({
+        schemaVersion: 1,
+        operationId,
+        kind: operation.kind,
+        phase: operation.kind === "landing.reconcile" ? "reconciliation" : "pre_effect",
+        facts,
+      });
+      const observationJson = canonicalLandingJson(observation);
+      const observationSha256 = sha256(observationJson);
+      if (operation.observation !== null) {
+        if (
+          operation.observationSha256 === observationSha256 &&
+          canonicalLandingJson(operation.observation) === observationJson
+        ) {
+          return;
+        }
+        throw new IcarusError(
+          "LANDING_OBSERVATION_CONFLICT",
+          "Operation already has a different durable observation",
+        );
+      }
+      const update = this.#database
+        .prepare(
+          "UPDATE landing_operations SET observation_sha256 = ?, observation_json = ? " +
+            "WHERE id = ? AND landing_id = ? AND status = 'started' " +
+            "AND observation_sha256 IS NULL AND observation_json IS NULL",
+        )
+        .run(observationSha256, observationJson, operation.id, operation.landingId);
+      if (update.changes !== 1) {
+        throw new IcarusError("LANDING_CONFLICT", "Landing observation changed concurrently");
+      }
+    });
+    runImmediate(transaction);
+    return this.getStatus(landingId);
+  }
+
+  /**
+   * Writes the one complete pre-effect (or reconciliation) observation for an
+   * HTTP-owning operation, derived from its durable settled reads and — for a
+   * reconciliation — the settled subject projection. Partial observations are
+   * never stored: every required provider read must be settled succeeded first.
+   */
+  recordGithubOperationObservation(landingId: string, operationIdInput: string): LandingStatusV1 {
+    const operationId = assertUuid(operationIdInput, "operationId");
+    const transaction = this.#database.transaction(() => {
+      const status = this.#mutableStatus(landingId);
+      const operation = status.operations.find((entry) => entry.id === operationId);
+      if (
+        operation === undefined ||
+        operation.status !== "started" ||
+        !(
+          operation.kind === "github.objects.upload" ||
+          operation.kind === "github.ref.create" ||
+          operation.kind === "landing.reconcile"
+        )
+      ) {
+        throw new IcarusError(
+          "LANDING_NOT_ADMITTED",
+          "Observation has no active HTTP-owning operation",
+        );
+      }
+      const rows = status.httpRequests
+        .filter((entry) => entry.operationId === operation.id)
+        .sort((left, right) => left.requestOrdinal - right.requestOrdinal);
+      const providerFact = (
+        fact: "actor" | "base_ref" | "head_ref",
+        position: number,
+      ): LandingOperationObservationV1["facts"][number] => {
+        const row = rows[position];
+        if (
+          row === undefined ||
+          row.status !== "settled" ||
+          row.outcome !== "succeeded" ||
+          row.kind !== `github.${fact}.get` ||
+          row.resultSha256 === null
+        ) {
+          invalid("Observation lacks its settled exact provider fact");
+        }
+        return { fact, requestId: row.id, resultSha256: row.resultSha256 };
+      };
+      let facts: LandingOperationObservationV1["facts"];
+      if (operation.kind === "github.objects.upload") {
+        facts = [providerFact("actor", 0)];
+      } else if (operation.kind === "github.ref.create") {
+        facts = [
+          providerFact("actor", 0),
+          providerFact("base_ref", 1),
+          providerFact("head_ref", 2),
+        ];
+      } else {
+        const input = operation.request.input as LandingReconcileInputV1;
+        const subject = status.operations.find((entry) => entry.id === input.subjectOperationId);
+        if (subject === undefined) {
+          invalid("Reconciliation subject is missing");
+        }
+        const subjectFact = {
+          fact: "subject_operation" as const,
+          requestId: null,
+          resultSha256: subjectOperationProjectionSha256(subject),
+        };
+        facts =
+          reconciliationSubjectKind(operation, status.operations) === "github.ref.create"
+            ? [
+                subjectFact,
+                providerFact("actor", 0),
+                providerFact("base_ref", 1),
+                providerFact("head_ref", 2),
+              ]
+            : [subjectFact];
       }
       const observation = decodeLandingOperationObservationV1({
         schemaVersion: 1,
@@ -3426,10 +4439,13 @@ export class LandingLedger {
     let operationId = "";
     const transaction = this.#database.transaction(() => {
       const status = this.#mutableStatus(landingId);
-      if (status.landing.state !== "local_ready" || status.decision?.decision !== "approve") {
+      if (
+        !(status.landing.state === "local_ready" || status.landing.state === "objects_ready") ||
+        status.decision?.decision !== "approve"
+      ) {
         throw new IcarusError(
           "INVALID_LANDING_STATE",
-          "Landing is not local-ready for GitHub preflight",
+          "Landing is not at a stable state admitting GitHub preflight",
         );
       }
       if (
@@ -3446,11 +4462,148 @@ export class LandingLedger {
         expectedRemoteBaseSha1: status.landing.baseCommitSha1,
         headRef: status.landing.headRef,
         candidateCommitSha1: status.landing.candidateCommitSha1,
+        // Pull-request absence is part of the draft-PR preflight at
+        // `remote_ready`, which this slice never reaches.
         includePullRequestAbsence: false,
       });
     });
     runImmediate(transaction);
     return { status: this.getStatus(landingId), operationId };
+  }
+
+  /**
+   * Admits the object-upload intent at `local_ready` and enters the action
+   * state atomically. The input binds the candidate manifest, the immediately
+   * preceding completed preflight in this attempt, and — when a prior upload
+   * admitted a mutating POST — the retry subject and its reconciliation grant.
+   */
+  startGithubObjectsUpload(landingId: string): LandingOperationAdmissionV1 {
+    let operationId = "";
+    const transaction = this.#database.transaction(() => {
+      const status = this.#mutableStatus(landingId);
+      if (status.landing.state !== "local_ready" || status.decision?.decision !== "approve") {
+        throw new IcarusError(
+          "INVALID_LANDING_STATE",
+          "Landing is not local-ready for object upload",
+        );
+      }
+      const reconstructed = reconstructLandingDigest(status);
+      if (reconstructed === null || status.landing.landingSha256 === null) {
+        invalid("Approved landing authority is incomplete");
+      }
+      const uploadEvidence = this.#uploadEvidence(status, true);
+      if (uploadEvidence === null) {
+        invalid("Object upload requires the derived candidate object manifest");
+      }
+      const preflight = this.#immediatelyPrecedingCompletedPreflight(status);
+      const retry = this.#objectUploadRetrySubject(status);
+      operationId = this.#startOperation(status, "github.objects.upload", {
+        landingSha256: status.landing.landingSha256,
+        candidateObjectManifestSha256: reconstructed.candidate.candidateObjectManifestSha256,
+        changedPathsSha256: status.landing.changedPathsSha256,
+        preflightOperationId: preflight.id,
+        preflightResultSha256: preflight.resultSha256 ?? invalid("Preflight result is unsettled"),
+        retrySubjectOperationId: retry?.id ?? null,
+        retrySubjectRequestSha256: retry?.requestSha256 ?? null,
+      });
+      this.#transition(status.landing, "uploading_objects", null, null, operationId);
+    });
+    runImmediate(transaction);
+    return { status: this.getStatus(landingId), operationId };
+  }
+
+  /**
+   * Admits the absent-only remote-ref intent at `objects_ready` and enters the
+   * action state atomically, mirroring the local compare-and-swap discipline:
+   * the operation binds the immediately preceding completed preflight of this
+   * attempt before any mutation is admitted.
+   */
+  startGithubRemoteRef(landingId: string): LandingOperationAdmissionV1 {
+    let operationId = "";
+    const transaction = this.#database.transaction(() => {
+      const status = this.#mutableStatus(landingId);
+      if (status.landing.state !== "objects_ready" || status.decision?.decision !== "approve") {
+        throw new IcarusError(
+          "INVALID_LANDING_STATE",
+          "Landing is not objects-ready for remote-ref creation",
+        );
+      }
+      if (
+        status.landing.landingSha256 === null ||
+        status.landing.candidateCommitSha1 === null ||
+        reconstructLandingDigest(status)?.sha256 !== status.landing.landingSha256
+      ) {
+        invalid("Approved landing authority is incomplete");
+      }
+      const preflight = this.#immediatelyPrecedingCompletedPreflight(status);
+      operationId = this.#startOperation(status, "github.ref.create", {
+        landingSha256: status.landing.landingSha256,
+        baseRef: `refs/heads/${status.landing.profile.baseBranch}`,
+        expectedRemoteBaseSha1: status.landing.baseCommitSha1,
+        headRef: status.landing.headRef,
+        candidateCommitSha1: status.landing.candidateCommitSha1,
+        preflightOperationId: preflight.id,
+        preflightResultSha256: preflight.resultSha256 ?? invalid("Preflight result is unsettled"),
+      });
+      this.#transition(status.landing, "creating_remote_ref", null, null, operationId);
+    });
+    runImmediate(transaction);
+    return { status: this.getStatus(landingId), operationId };
+  }
+
+  /**
+   * The one completed preflight immediately preceding the effect operation in
+   * the current started attempt, with no intervening operation. Everything the
+   * binding must prove is revalidated here and again at load.
+   */
+  #immediatelyPrecedingCompletedPreflight(status: LandingStatusV1): LandingOperationRecordV1 {
+    const attempt = this.#startedAttempt(status);
+    const attemptOperations = status.operations.filter(
+      (operation) => operation.coordinatorAttempt === attempt.ordinal,
+    );
+    const preflight = attemptOperations.at(-1);
+    if (
+      preflight === undefined ||
+      preflight.kind !== "github.preflight" ||
+      preflight.status !== "completed" ||
+      preflight.result?.outcome !== "completed"
+    ) {
+      invalid("Landing effect operation lacks its immediately preceding completed preflight");
+    }
+    return preflight;
+  }
+
+  /**
+   * The retry subject for a new object upload: the most recent prior upload
+   * that admitted a mutating POST, which must carry a completed reconciliation
+   * authorizing the byte-identical retry at `local_ready`. A missing
+   * reconciliation refuses before actor resolution or any POST.
+   */
+  #objectUploadRetrySubject(status: LandingStatusV1): LandingOperationRecordV1 | null {
+    const attempt = this.#startedAttempt(status);
+    const priorEffectful = status.operations.filter(
+      (operation) =>
+        operation.kind === "github.objects.upload" &&
+        operation.coordinatorAttempt !== attempt.ordinal &&
+        status.httpRequests.some(
+          (row) => row.operationId === operation.id && row.method === "POST",
+        ),
+    );
+    const subject = priorEffectful.at(-1);
+    if (subject === undefined) return null;
+    const grant = status.operations.find(
+      (operation) =>
+        operation.kind === "landing.reconcile" &&
+        operation.status === "completed" &&
+        operation.result?.outcome === "completed" &&
+        operation.result.boundary === "retry_stage_proven" &&
+        (operation.request.input as LandingReconcileInputV1).subjectOperationId === subject.id &&
+        (operation.result.value as ReconcileValueV1).nextState === "local_ready",
+    );
+    if (grant === undefined) {
+      invalid("Object-upload retry lacks the subject's completed reconciliation grant");
+    }
+    return subject;
   }
 
   /**
@@ -3489,9 +4642,16 @@ export class LandingLedger {
           "Landing HTTP admission has an unsettled prior request",
         );
       }
-      const grammar = httpGrammarFor(operation);
-      const nextKind = grammar[operationRows.length];
-      if (nextKind === undefined || kind !== nextKind) {
+      const uploadEvidence = this.#uploadEvidence(status);
+      const descriptors = httpDescriptorsFor(
+        operation,
+        status.landing,
+        uploadEvidence?.manifest ?? null,
+        uploadEvidence?.checkpointFiles ?? [],
+        status.operations,
+      );
+      const descriptor = descriptors[operationRows.length];
+      if (descriptor === undefined || kind !== descriptor.kind) {
         invalid("Landing HTTP request does not match the operation's request grammar");
       }
       const attemptRows = status.httpRequests.filter(
@@ -3514,10 +4674,10 @@ export class LandingLedger {
         operationKind: operation.kind,
         requestOrdinal,
         kind,
-        method: HTTP_GET_KINDS.has(kind) ? "GET" : "POST",
+        method: descriptor.method,
         profileSha256: status.landing.profileSha256,
-        bodySha256: null,
-        subject: httpSubjectFor(kind, status.landing),
+        bodySha256: descriptor.bodySha256,
+        subject: descriptor.subject,
       });
       const requestJson = canonicalLandingJson(request);
       const requestSha256 = sha256(requestJson);
@@ -3577,15 +4737,12 @@ export class LandingLedger {
       errorCode: input.errorCode,
     });
     // The projection must restate the admitted subject, so a caller cannot
-    // record an observation about a different actor or reference than the one
-    // the durable request binds.
-    const subject = request.request.subject;
+    // record an observation about a different actor, reference, or object than
+    // the one the durable request binds.
     if (
       result.outcome === "succeeded" &&
-      ((result.projection?.type === "actor" && result.projection.login !== subject.expectedActor) ||
-        (result.projection?.type === "ref" &&
-          result.projection.ref !==
-            (request.kind === "github.base_ref.get" ? subject.baseRef : subject.headRef)))
+      (result.projection === null ||
+        !httpProjectionRestatesSubject(request.request, result.projection))
     ) {
       invalid("Landing HTTP result does not restate its admitted subject");
     }
@@ -3658,10 +4815,10 @@ export class LandingLedger {
   /**
    * Settles the read-only preflight. A completed settlement derives its exact
    * value from the durable settled reads, writes the one complete observation,
-   * and closes the attempt atomically — without any landing transition, since
-   * preflight maps to no action state. A failed settlement enters `failed`
-   * with `local_ready` as the retry-safe resume marker; an interrupted
-   * settlement leaves the landing in `local_ready` for explicit resume.
+   * and — when the coordinator chains the attempt's effect operation next —
+   * leaves the attempt open for it. A failed settlement enters `failed` with
+   * the current stable state as the retry-safe resume marker; an interrupted
+   * settlement leaves the landing in that state for explicit resume.
    */
   settleGithubPreflight(
     landingId: string,
@@ -3681,8 +4838,11 @@ export class LandingLedger {
     }
     const transaction = this.#database.transaction(() => {
       const status = this.#mutableStatus(landingId);
-      if (status.landing.state !== "local_ready") {
-        throw new IcarusError("INVALID_LANDING_STATE", "Landing is not local-ready for preflight");
+      if (status.landing.state !== "local_ready" && status.landing.state !== "objects_ready") {
+        throw new IcarusError(
+          "INVALID_LANDING_STATE",
+          "Landing is not at a stable state settling preflight",
+        );
       }
       const operation = this.#startedOperation(status, "github.preflight");
       const attempt = this.#startedAttempt(status);
@@ -3714,11 +4874,11 @@ export class LandingLedger {
         });
         this.#settleAttempt(attempt, input.outcome, errorCode);
         if (input.outcome === "failed") {
-          this.#transition(status.landing, "failed", "local_ready", errorCode, operation.id);
+          this.#transition(status.landing, "failed", status.landing.state, errorCode, operation.id);
         }
         return;
       }
-      const grammar = httpGrammarFor(operation);
+      const grammar = httpGrammarFor(operation, status.operations, null);
       if (
         rows.length !== grammar.length ||
         rows.some((row) => row.outcome !== "succeeded" || row.result === null)
@@ -3730,13 +4890,19 @@ export class LandingLedger {
       const base = projections[1]?.type === "ref" ? projections[1] : null;
       const head = projections[2]?.type === "ref" ? projections[2] : null;
       const pullRequests = projections[3]?.type === "pull_request_list" ? projections[3] : null;
+      // The required head state is `absent` before the object/remote-ref
+      // stages and `exact` (the candidate commit) before draft-PR creation.
+      const requiredHeadState =
+        operation.request.expectedState === "remote_ready" ? "exact" : "absent";
+      const headExact =
+        head?.state === "direct" && head.sha1 === status.landing.candidateCommitSha1;
       if (
         actor !== status.landing.profile.expectedActor ||
         base?.state !== "direct" ||
         base.sha1 !== status.landing.baseCommitSha1 ||
-        head?.state !== "absent"
+        (requiredHeadState === "absent" ? head?.state !== "absent" : !headExact)
       ) {
-        invalid("Completed preflight does not prove the approved actor, base, and absent head");
+        invalid("Completed preflight does not prove the approved actor, base, and head state");
       }
       const includePullRequestAbsence = preflightInput(operation.request).includePullRequestAbsence;
       if (
@@ -3748,7 +4914,7 @@ export class LandingLedger {
       const value: PreflightExactValueV1 = {
         actor,
         baseSha1: base.sha1,
-        headState: "absent",
+        headState: requiredHeadState,
         pullRequestCount: includePullRequestAbsence ? 0 : null,
       };
       const facts = rows.map((row) => ({
@@ -3787,7 +4953,524 @@ export class LandingLedger {
         value,
         errorCode: null,
       });
+      if (input.closeAttempt) {
+        this.#settleAttempt(attempt, "completed", null);
+      }
+    });
+    runImmediate(transaction);
+    return this.getStatus(landingId);
+  }
+
+  /**
+   * Settles the object upload. A completed settlement requires the full blob/
+   * tree/commit grammar settled succeeded with every returned object name
+   * equal to its locally computed identity (enforced when each row settled).
+   * A failed settlement is legal only before the first mutating POST. Anything
+   * else — a failed or ambiguous POST row — enters `reconciliation_required`;
+   * unreachable content-addressed objects are never remote residue.
+   */
+  settleGithubObjectsUpload(
+    landingId: string,
+    input: GithubEffectSettlementInputV1,
+  ): LandingStatusV1 {
+    if (
+      !(
+        input.outcome === "completed" ||
+        input.outcome === "failed" ||
+        input.outcome === "reconciliation_required"
+      )
+    ) {
+      invalid("Object-upload settlement outcome is unsupported");
+    }
+    if (input.outcome === "completed" && input.errorCode !== null) {
+      invalid("Completed object-upload settlement cannot have an error");
+    }
+    const transaction = this.#database.transaction(() => {
+      const status = this.#mutableStatus(landingId);
+      if (status.landing.state !== "uploading_objects") {
+        throw new IcarusError("INVALID_LANDING_STATE", "Landing is not uploading objects");
+      }
+      const operation = this.#startedOperation(status, "github.objects.upload");
+      const attempt = this.#startedAttempt(status);
+      if (operation.coordinatorAttempt !== attempt.ordinal) {
+        invalid("Object-upload operation and coordinator attempt disagree");
+      }
+      const rows = status.httpRequests
+        .filter((entry) => entry.operationId === operation.id)
+        .sort((left, right) => left.requestOrdinal - right.requestOrdinal);
+      if (rows.some((entry) => entry.status !== "settled")) {
+        invalid("Object-upload settlement has an unsettled admitted request");
+      }
+      const evidence = this.#operationEvidence(operation, rows);
+      if (input.outcome === "reconciliation_required") {
+        const errorCode = assertSafeCode(input.errorCode, "object-upload errorCode");
+        this.#settleOperation(operation, {
+          schemaVersion: 1,
+          operationId: operation.id,
+          kind: operation.kind,
+          outcome: "reconciliation_required",
+          boundary: "reconciliation_required",
+          evidence,
+          value: { subjectOperationId: operation.id, remoteResidue: "none" },
+          errorCode,
+        });
+        this.#settleAttempt(attempt, "interrupted", errorCode);
+        this.#transition(
+          status.landing,
+          "reconciliation_required",
+          "local_ready",
+          errorCode,
+          operation.id,
+        );
+        return;
+      }
+      if (input.outcome === "failed") {
+        const errorCode = assertSafeCode(input.errorCode, "object-upload errorCode");
+        if (rows.some((row) => row.method === "POST")) {
+          invalid("Object-upload failure after a mutating POST must reconcile, not fail");
+        }
+        this.#settleOperation(operation, {
+          schemaVersion: 1,
+          operationId: operation.id,
+          kind: operation.kind,
+          outcome: "failed",
+          boundary: "operation_failed",
+          evidence,
+          value: null,
+          errorCode,
+        });
+        this.#settleAttempt(attempt, "failed", errorCode);
+        this.#transition(status.landing, "failed", "local_ready", errorCode, operation.id);
+        return;
+      }
+      const uploadEvidence = this.#uploadEvidence(status, true);
+      if (uploadEvidence === null) {
+        invalid("Object-upload settlement lacks the derived candidate manifest");
+      }
+      const grammar = httpGrammarFor(operation, status.operations, uploadEvidence.manifest);
+      if (
+        rows.length !== grammar.length ||
+        rows.some((row) => row.outcome !== "succeeded" || row.result === null) ||
+        operation.observation === null
+      ) {
+        invalid("Completed object upload lacks its exact settled grammar and observation");
+      }
+      const manifestSha256 = digestLandingRecord(uploadEvidence.manifest);
+      const inputManifest = (operation.request.input as GitHubObjectsUploadInputV1)
+        .candidateObjectManifestSha256;
+      if (manifestSha256 !== inputManifest) {
+        invalid("Object-upload input manifest does not match the derived evidence");
+      }
+      this.#settleOperation(operation, {
+        schemaVersion: 1,
+        operationId: operation.id,
+        kind: operation.kind,
+        outcome: "completed",
+        boundary: "objects_exact",
+        evidence,
+        value: {
+          candidateObjectManifestSha256: inputManifest,
+          remoteObjectOutcome: "created_or_exact",
+        },
+        errorCode: null,
+      });
       this.#settleAttempt(attempt, "completed", null);
+      this.#transition(status.landing, "objects_ready", null, null, operation.id);
+    });
+    runImmediate(transaction);
+    return this.getStatus(landingId);
+  }
+
+  /**
+   * Settles the absent-only remote-ref creation, mirroring the local CAS
+   * discipline: `created` only when the one POST settled succeeded and the
+   * post-read suffix proved the exact head on the unchanged base; `reconciled`
+   * only when the POST settled ambiguous and the suffix proves the branch; a
+   * failed POST row can produce neither. A definitive no-effect suffix (absent
+   * head, unchanged base) fails back to `objects_ready` for an explicit retry;
+   * everything uncertain or drifted enters `reconciliation_required` with the
+   * honestly derived residue.
+   */
+  settleGithubRemoteRef(landingId: string, input: GithubEffectSettlementInputV1): LandingStatusV1 {
+    if (
+      !(
+        input.outcome === "completed" ||
+        input.outcome === "failed" ||
+        input.outcome === "reconciliation_required"
+      )
+    ) {
+      invalid("Remote-ref settlement outcome is unsupported");
+    }
+    if (input.outcome === "completed" && input.errorCode !== null) {
+      invalid("Completed remote-ref settlement cannot have an error");
+    }
+    const transaction = this.#database.transaction(() => {
+      const status = this.#mutableStatus(landingId);
+      if (status.landing.state !== "creating_remote_ref") {
+        throw new IcarusError("INVALID_LANDING_STATE", "Landing is not creating its remote ref");
+      }
+      const operation = this.#startedOperation(status, "github.ref.create");
+      const attempt = this.#startedAttempt(status);
+      if (operation.coordinatorAttempt !== attempt.ordinal) {
+        invalid("Remote-ref operation and coordinator attempt disagree");
+      }
+      const rows = status.httpRequests
+        .filter((entry) => entry.operationId === operation.id)
+        .sort((left, right) => left.requestOrdinal - right.requestOrdinal);
+      if (rows.some((entry) => entry.status !== "settled")) {
+        invalid("Remote-ref settlement has an unsettled admitted request");
+      }
+      const evidence = this.#operationEvidence(operation, rows);
+      if (input.outcome === "reconciliation_required") {
+        const errorCode = assertSafeCode(input.errorCode, "remote-ref errorCode");
+        this.#settleOperation(operation, {
+          schemaVersion: 1,
+          operationId: operation.id,
+          kind: operation.kind,
+          outcome: "reconciliation_required",
+          boundary: "reconciliation_required",
+          evidence,
+          value: {
+            subjectOperationId: operation.id,
+            remoteResidue: remoteRefResidueFromRows(rows),
+          },
+          errorCode,
+        });
+        this.#settleAttempt(attempt, "interrupted", errorCode);
+        this.#transition(
+          status.landing,
+          "reconciliation_required",
+          "objects_ready",
+          errorCode,
+          operation.id,
+        );
+        return;
+      }
+      const post = rows.find((entry) => entry.kind === "github.ref.post");
+      const suffixHead = rows.filter((entry) => entry.kind === "github.head_ref.get").at(-1);
+      const suffixBase = rows.filter((entry) => entry.kind === "github.base_ref.get").at(-1);
+      const headProjection =
+        suffixHead?.result?.projection?.type === "ref" ? suffixHead.result.projection : null;
+      const baseProjection =
+        suffixBase?.result?.projection?.type === "ref" ? suffixBase.result.projection : null;
+      const suffixProvesAbsentUnchanged =
+        headProjection?.state === "absent" &&
+        baseProjection?.state === "direct" &&
+        baseProjection.sha1 === status.landing.baseCommitSha1;
+      const suffixProvesExactUnchanged =
+        headProjection?.state === "direct" &&
+        headProjection.sha1 === status.landing.candidateCommitSha1 &&
+        baseProjection?.state === "direct" &&
+        baseProjection.sha1 === status.landing.baseCommitSha1;
+      if (input.outcome === "failed") {
+        const errorCode = assertSafeCode(input.errorCode, "remote-ref errorCode");
+        if (!(post === undefined || (post.status === "settled" && suffixProvesAbsentUnchanged))) {
+          invalid("Remote-ref failure without a definitive no-effect proof must reconcile");
+        }
+        this.#settleOperation(operation, {
+          schemaVersion: 1,
+          operationId: operation.id,
+          kind: operation.kind,
+          outcome: "failed",
+          boundary: "operation_failed",
+          evidence,
+          value: null,
+          errorCode,
+        });
+        this.#settleAttempt(attempt, "failed", errorCode);
+        this.#transition(status.landing, "failed", "objects_ready", errorCode, operation.id);
+        return;
+      }
+      if (
+        post === undefined ||
+        post.status !== "settled" ||
+        post.outcome === "failed" ||
+        !(post.outcome === "succeeded" || post.outcome === "ambiguous") ||
+        !suffixProvesExactUnchanged ||
+        headProjection?.sha1 === undefined ||
+        baseProjection?.sha1 === undefined ||
+        operation.observation === null
+      ) {
+        invalid("Completed remote-ref settlement lacks its exact created or reconciled proof");
+      }
+      this.#settleOperation(operation, {
+        schemaVersion: 1,
+        operationId: operation.id,
+        kind: operation.kind,
+        outcome: "completed",
+        boundary: "remote_ref_ready",
+        evidence,
+        value: {
+          baseSha1: baseProjection.sha1,
+          headSha1: headProjection.sha1 ?? invalid("Remote-ref value lacks its proven head"),
+          remoteRefOutcome: post.outcome === "succeeded" ? "created" : "reconciled",
+        },
+        errorCode: null,
+      });
+      this.#settleAttempt(attempt, "completed", null);
+      this.#transition(status.landing, "remote_ready", null, null, operation.id);
+    });
+    runImmediate(transaction);
+    return this.getStatus(landingId);
+  }
+
+  /**
+   * The result evidence replaying the durable observation facts first, then
+   * each settled request result not already represented, in ordinal order.
+   */
+  #operationEvidence(
+    operation: LandingOperationRecordV1,
+    rows: readonly LandingHttpRequestRecordV1[],
+  ): { readonly requestId: string | null; readonly resultSha256: string }[] {
+    const facts = operation.observation?.facts ?? [];
+    const represented = new Set(facts.map((fact) => fact.requestId).filter((id) => id !== null));
+    return [
+      ...facts.map((fact) => ({ requestId: fact.requestId, resultSha256: fact.resultSha256 })),
+      ...rows
+        .filter((row) => !represented.has(row.id))
+        .map((row) => ({
+          requestId: row.id,
+          resultSha256:
+            row.resultSha256 ?? invalid("Settled landing HTTP request lacks its result digest"),
+        })),
+    ];
+  }
+
+  /**
+   * Settles an object-upload reconciliation. No fresh reads exist for the
+   * immutable subject: the completed settlement either proves the whole
+   * grammar landed (`objects_ready`) or authorizes the byte-identical retry
+   * (`local_ready`), both derived from the subject's durable rows.
+   */
+  settleObjectUploadReconciliation(
+    landingId: string,
+    input: GithubReconciliationSettlementInputV1,
+  ): LandingStatusV1 {
+    if (
+      !(
+        input.outcome === "objects_ready" ||
+        input.outcome === "retry_local_ready" ||
+        input.outcome === "reconciliation_required"
+      )
+    ) {
+      invalid("Object-upload reconciliation outcome is unsupported");
+    }
+    const transaction = this.#database.transaction(() => {
+      const status = this.#mutableStatus(landingId);
+      if (
+        status.landing.state !== "reconciliation_required" ||
+        status.landing.resumeState !== "local_ready"
+      ) {
+        throw new IcarusError(
+          "INVALID_LANDING_STATE",
+          "Landing is not reconciling an object upload",
+        );
+      }
+      const operation = this.#startedOperation(status, "landing.reconcile");
+      const attempt = this.#startedAttempt(status);
+      const subject = this.#reconciliationSubject(status);
+      if (subject.kind !== "github.objects.upload") {
+        invalid("Landing reconciliation subject is not an object upload");
+      }
+      const rows = status.httpRequests
+        .filter((entry) => entry.operationId === operation.id)
+        .sort((left, right) => left.requestOrdinal - right.requestOrdinal);
+      if (rows.some((entry) => entry.status !== "settled")) {
+        invalid("Reconciliation settlement has an unsettled admitted request");
+      }
+      const evidence = this.#operationEvidence(operation, rows);
+      if (input.outcome === "reconciliation_required") {
+        const errorCode = assertSafeCode(input.errorCode, "reconciliation errorCode");
+        this.#settleOperation(operation, {
+          schemaVersion: 1,
+          operationId: operation.id,
+          kind: operation.kind,
+          outcome: "reconciliation_required",
+          boundary: "reconciliation_required",
+          evidence,
+          value: { subjectOperationId: subject.id, remoteResidue: "none" },
+          errorCode,
+        });
+        this.#settleAttempt(attempt, "interrupted", errorCode);
+        return;
+      }
+      if (input.errorCode !== null) {
+        invalid("Completed reconciliation cannot carry an error");
+      }
+      const stageValue =
+        input.outcome === "objects_ready"
+          ? {
+              candidateObjectManifestSha256: (subject.request.input as GitHubObjectsUploadInputV1)
+                .candidateObjectManifestSha256,
+              remoteObjectOutcome: "created_or_exact" as const,
+            }
+          : null;
+      if (
+        input.outcome === "objects_ready" &&
+        !objectUploadRowsProveCompletion(subject, status.httpRequests)
+      ) {
+        invalid("Object-upload reconciliation lacks the complete immutable-object proof");
+      }
+      this.#settleOperation(operation, {
+        schemaVersion: 1,
+        operationId: operation.id,
+        kind: operation.kind,
+        outcome: "completed",
+        boundary: input.outcome === "objects_ready" ? "subject_settled" : "retry_stage_proven",
+        evidence,
+        value: {
+          subjectOperationId: subject.id,
+          nextState: input.outcome === "objects_ready" ? "objects_ready" : "local_ready",
+          remoteResidue: "none",
+          stageValue,
+        },
+        errorCode: null,
+      });
+      this.#settleAttempt(attempt, "completed", null);
+      this.#transition(
+        status.landing,
+        input.outcome === "objects_ready" ? "objects_ready" : "local_ready",
+        null,
+        null,
+        operation.id,
+      );
+    });
+    runImmediate(transaction);
+    return this.getStatus(landingId);
+  }
+
+  /**
+   * Settles a remote-ref reconciliation from its fresh settled reads: the
+   * unchanged base plus the exact candidate head advances to `remote_ready`
+   * (reconciled — never caller-chosen); the unchanged base plus a freshly
+   * absent head authorizes one more absent-only POST from `objects_ready`;
+   * drift, conflict, or unresolved visibility holds `reconciliation_required`
+   * with the derived residue.
+   */
+  settleRemoteRefReconciliation(
+    landingId: string,
+    input: GithubReconciliationSettlementInputV1,
+  ): LandingStatusV1 {
+    if (
+      !(
+        input.outcome === "remote_ready" ||
+        input.outcome === "retry_objects_ready" ||
+        input.outcome === "reconciliation_required"
+      )
+    ) {
+      invalid("Remote-ref reconciliation outcome is unsupported");
+    }
+    const transaction = this.#database.transaction(() => {
+      const status = this.#mutableStatus(landingId);
+      if (
+        status.landing.state !== "reconciliation_required" ||
+        status.landing.resumeState !== "objects_ready"
+      ) {
+        throw new IcarusError("INVALID_LANDING_STATE", "Landing is not reconciling a remote ref");
+      }
+      const operation = this.#startedOperation(status, "landing.reconcile");
+      const attempt = this.#startedAttempt(status);
+      const subject = this.#reconciliationSubject(status);
+      if (subject.kind !== "github.ref.create") {
+        invalid("Landing reconciliation subject is not a remote ref");
+      }
+      const rows = status.httpRequests
+        .filter((entry) => entry.operationId === operation.id)
+        .sort((left, right) => left.requestOrdinal - right.requestOrdinal);
+      if (rows.some((entry) => entry.status !== "settled")) {
+        invalid("Reconciliation settlement has an unsettled admitted request");
+      }
+      const evidence = this.#operationEvidence(operation, rows);
+      if (input.outcome === "reconciliation_required") {
+        const errorCode = assertSafeCode(input.errorCode, "reconciliation errorCode");
+        this.#settleOperation(operation, {
+          schemaVersion: 1,
+          operationId: operation.id,
+          kind: operation.kind,
+          outcome: "reconciliation_required",
+          boundary: "reconciliation_required",
+          evidence,
+          value: {
+            subjectOperationId: subject.id,
+            remoteResidue: remoteRefResidueFromRows(rows),
+          },
+          errorCode,
+        });
+        this.#settleAttempt(attempt, "interrupted", errorCode);
+        return;
+      }
+      if (input.errorCode !== null) {
+        invalid("Completed reconciliation cannot carry an error");
+      }
+      const freshBase = rows.find((entry) => entry.kind === "github.base_ref.get")?.result
+        ?.projection;
+      const freshHead = rows.find((entry) => entry.kind === "github.head_ref.get")?.result
+        ?.projection;
+      const baseUnchanged =
+        freshBase?.type === "ref" &&
+        freshBase.state === "direct" &&
+        freshBase.sha1 === status.landing.baseCommitSha1;
+      const subjectPost = status.httpRequests.find(
+        (row) => row.operationId === subject.id && row.kind === "github.ref.post",
+      );
+      if (input.outcome === "remote_ready") {
+        if (
+          !baseUnchanged ||
+          freshHead?.type !== "ref" ||
+          freshHead.state !== "direct" ||
+          freshHead.sha1 !== status.landing.candidateCommitSha1 ||
+          subjectPost === undefined ||
+          subjectPost.status !== "settled" ||
+          !(subjectPost.outcome === "succeeded" || subjectPost.outcome === "ambiguous") ||
+          !hasRemoteRefAbsentIntent(subject, status.httpRequests)
+        ) {
+          invalid("Remote-ref reconciliation lacks the exact proven branch");
+        }
+        this.#settleOperation(operation, {
+          schemaVersion: 1,
+          operationId: operation.id,
+          kind: operation.kind,
+          outcome: "completed",
+          boundary: "subject_settled",
+          evidence,
+          value: {
+            subjectOperationId: subject.id,
+            nextState: "remote_ready",
+            remoteResidue: "branch",
+            stageValue: {
+              baseSha1: status.landing.baseCommitSha1,
+              headSha1:
+                status.landing.candidateCommitSha1 ??
+                invalid("Landing remote-ref value lacks its candidate commit"),
+              remoteRefOutcome: "reconciled",
+            },
+          },
+          errorCode: null,
+        });
+        this.#settleAttempt(attempt, "completed", null);
+        this.#transition(status.landing, "remote_ready", null, null, operation.id);
+        return;
+      }
+      if (!baseUnchanged || freshHead?.type !== "ref" || freshHead.state !== "absent") {
+        invalid("Remote-ref retry reconciliation lacks the unchanged base and absent head");
+      }
+      this.#settleOperation(operation, {
+        schemaVersion: 1,
+        operationId: operation.id,
+        kind: operation.kind,
+        outcome: "completed",
+        boundary: "retry_stage_proven",
+        evidence,
+        value: {
+          subjectOperationId: subject.id,
+          nextState: "objects_ready",
+          remoteResidue: "none",
+          stageValue: null,
+        },
+        errorCode: null,
+      });
+      this.#settleAttempt(attempt, "completed", null);
+      this.#transition(status.landing, "objects_ready", null, null, operation.id);
     });
     runImmediate(transaction);
     return this.getStatus(landingId);
@@ -3830,26 +5513,29 @@ export class LandingLedger {
     };
   }
 
-  #localReconciliationSubject(status: LandingStatusV1): LandingOperationRecordV1 {
-    return localReconciliationSubject(status);
+  #reconciliationSubject(status: LandingStatusV1): LandingOperationRecordV1 {
+    return reconciliationSubject(status);
   }
 
   #startReconciliation(status: LandingStatusV1): string {
+    const resumeState = status.landing.resumeState;
     if (
       status.landing.state !== "reconciliation_required" ||
-      status.landing.resumeState !== "approved" ||
+      (resumeState !== "approved" &&
+        resumeState !== "local_ready" &&
+        resumeState !== "objects_ready") ||
       status.landing.landingSha256 === null
     ) {
       throw new IcarusError(
         "INVALID_LANDING_STATE",
-        "Landing is not awaiting local-ref reconciliation",
+        "Landing is not awaiting reconciliation in an implemented slice",
       );
     }
-    const subject = this.#localReconciliationSubject(status);
+    const subject = this.#reconciliationSubject(status);
     if (subject.resultSha256 === null) invalid("Reconciliation subject result digest is missing");
     return this.#startOperation(status, "landing.reconcile", {
       landingSha256: status.landing.landingSha256,
-      resumeState: "approved",
+      resumeState,
       subjectOperationId: subject.id,
       subjectRequestSha256: subject.requestSha256,
       subjectResultSha256: subject.resultSha256,
@@ -3872,17 +5558,22 @@ export class LandingLedger {
             ? "candidate.prepare"
             : status.landing.state === "creating_local_ref"
               ? "local_ref.create"
-              : status.landing.state === "local_ready"
+              : status.landing.state === "local_ready" || status.landing.state === "objects_ready"
                 ? "github.preflight"
-                : status.landing.state === "reconciliation_required"
-                  ? "landing.reconcile"
-                  : null;
+                : status.landing.state === "uploading_objects"
+                  ? "github.objects.upload"
+                  : status.landing.state === "creating_remote_ref"
+                    ? "github.ref.create"
+                    : status.landing.state === "reconciliation_required"
+                      ? "landing.reconcile"
+                      : null;
         if (
           (activeOperation === undefined &&
             !(
               status.landing.state === "preparing_candidate" ||
               status.landing.state === "approved" ||
-              status.landing.state === "local_ready"
+              status.landing.state === "local_ready" ||
+              status.landing.state === "objects_ready"
             )) ||
           (activeOperation !== undefined && activeOperation.kind !== expectedActiveKind)
         ) {
@@ -3941,8 +5632,9 @@ export class LandingLedger {
               value: { subjectOperationId: activeOperation.id, remoteResidue: "none" },
               errorCode: takeoverError,
             });
-          } else if (activeOperation.kind === "landing.reconcile") {
-            const subject = this.#localReconciliationSubject(status);
+          } else if (activeOperation.kind === "github.objects.upload") {
+            // An interrupted effect always reconciles; content-addressed
+            // objects are unreachable, so they are never remote residue.
             this.#settleOperation(activeOperation, {
               schemaVersion: 1,
               operationId: activeOperation.id,
@@ -3950,7 +5642,39 @@ export class LandingLedger {
               outcome: "reconciliation_required",
               boundary: "reconciliation_required",
               evidence,
-              value: { subjectOperationId: subject.id, remoteResidue: "none" },
+              value: { subjectOperationId: activeOperation.id, remoteResidue: "none" },
+              errorCode: takeoverError,
+            });
+          } else if (activeOperation.kind === "github.ref.create") {
+            this.#settleOperation(activeOperation, {
+              schemaVersion: 1,
+              operationId: activeOperation.id,
+              kind: activeOperation.kind,
+              outcome: "reconciliation_required",
+              boundary: "reconciliation_required",
+              evidence,
+              value: {
+                subjectOperationId: activeOperation.id,
+                remoteResidue: remoteRefResidueFromRows(operationRows),
+              },
+              errorCode: takeoverError,
+            });
+          } else if (activeOperation.kind === "landing.reconcile") {
+            const subject = this.#reconciliationSubject(status);
+            this.#settleOperation(activeOperation, {
+              schemaVersion: 1,
+              operationId: activeOperation.id,
+              kind: activeOperation.kind,
+              outcome: "reconciliation_required",
+              boundary: "reconciliation_required",
+              evidence,
+              value: {
+                subjectOperationId: subject.id,
+                remoteResidue:
+                  subject.kind === "github.ref.create"
+                    ? remoteRefResidueFromRows(operationRows)
+                    : "none",
+              },
               errorCode: takeoverError,
             });
           } else {
@@ -3975,6 +5699,22 @@ export class LandingLedger {
             takeoverError,
             activeOperation.id,
           );
+        } else if (activeOperation?.kind === "github.objects.upload") {
+          this.#transition(
+            status.landing,
+            "reconciliation_required",
+            "local_ready",
+            takeoverError,
+            activeOperation.id,
+          );
+        } else if (activeOperation?.kind === "github.ref.create") {
+          this.#transition(
+            status.landing,
+            "reconciliation_required",
+            "objects_ready",
+            takeoverError,
+            activeOperation.id,
+          );
         }
         status = this.getStatus(landingId);
       }
@@ -3994,6 +5734,7 @@ export class LandingLedger {
         status.landing.state === "preparing_candidate" ||
         status.landing.state === "approved" ||
         status.landing.state === "local_ready" ||
+        status.landing.state === "objects_ready" ||
         status.landing.state === "reconciliation_required";
       if (!resumable) return;
       if (status.attempts.some((attempt) => attempt.status === "started")) {
@@ -4049,7 +5790,7 @@ export class LandingLedger {
       const operation = this.#startedOperation(status, "landing.reconcile");
       const attempt = this.#startedAttempt(status);
       const fact = this.#assertObservationFact(operation, input.fact, 1);
-      const subject = this.#localReconciliationSubject(status);
+      const subject = this.#reconciliationSubject(status);
       const evidence =
         operation.observation?.facts.map(({ requestId, resultSha256 }) => ({
           requestId,

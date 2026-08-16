@@ -217,6 +217,46 @@ export function assertCommitMessage(value: string): string {
   return value;
 }
 
+const GIT_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+export interface GithubCommitParty {
+  readonly name: string;
+  readonly email: string;
+  readonly date: string;
+}
+
+/**
+ * The author/committer identity on an uploaded commit. The landing digest binds
+ * these bytes and Git hashes them into the commit object, so they are validated
+ * here before they reach a request body: bounded printable ASCII without the
+ * Git header delimiters, and the exact whole-second UTC instant the contract's
+ * `GitInstant` spells.
+ */
+export function assertCommitParty(value: GithubCommitParty, subject: string): GithubCommitParty {
+  invariant(
+    typeof value.name === "string" &&
+      /^[\x20-\x7e]{1,128}$/.test(value.name) &&
+      !/[<>]/.test(value.name) &&
+      value.name === value.name.trim(),
+    "GITHUB_COMMIT_IDENTITY_INVALID",
+    `${subject} name must be bounded printable ASCII without Git header delimiters`,
+  );
+  invariant(
+    typeof value.email === "string" &&
+      /^[\x20-\x7e]{1,254}$/.test(value.email) &&
+      !/[<>]/.test(value.email) &&
+      value.email === value.email.trim(),
+    "GITHUB_COMMIT_IDENTITY_INVALID",
+    `${subject} email must be bounded printable ASCII without Git header delimiters`,
+  );
+  invariant(
+    typeof value.date === "string" && GIT_INSTANT_PATTERN.test(value.date),
+    "GITHUB_COMMIT_IDENTITY_INVALID",
+    `${subject} date must be an exact YYYY-MM-DDTHH:mm:ssZ instant`,
+  );
+  return value;
+}
+
 export function assertTitle(value: string): string {
   invariant(
     value.length > 0 && utf8Bytes(value) <= MAX_PULL_REQUEST_TITLE_BYTES && !/[\r\n\0]/.test(value),

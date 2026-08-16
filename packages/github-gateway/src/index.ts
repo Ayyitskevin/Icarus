@@ -18,6 +18,7 @@ export {
   assertBaseRef,
   assertIcarusRef,
   branchNameForRef,
+  type GithubCommitParty,
   ICARUS_REF_NAMESPACE,
   icarusRefForRun,
 } from "./identifiers.js";
