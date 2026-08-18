@@ -62,7 +62,11 @@ what closes Gate 1.
       draft-PR creation, and receipt effects, as a closed set compared by exact
       ordered equality; every force-push, update/delete, merge, deployment, and
       source-checkout mutation prohibition is retained and remains inexpressible
-- [ ] Consume the profile in a live runner (not yet implemented)
+- [~] Consume the profile in a live runner — the authority half landed
+      2026-08-18 (`authorizeLiveEvidenceRun` plus `LiveEvidenceEffectLedger`:
+      pre-flight refusal, per-effect authorization, one-POST-per-case, budget
+      ceilings that bound rather than report, and a completeness assertion).
+      The case executor that drives real repositories is NOT implemented
 - [ ] Record 3/3 live evidence with passing complete checks, exact changed paths,
       unchanged source checkouts, reviewable draft PRs, matching immutable
       receipts, restart/reconciliation evidence, and exact candidate/live

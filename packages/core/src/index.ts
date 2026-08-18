@@ -152,6 +152,12 @@ export {
   LIVE_EVIDENCE_PROFILE_SCHEMA_VERSION,
   liveEvidenceProfileApprovalDigest,
 } from "./live-evidence-profile.js";
+export type {
+  LiveEvidenceEffectSummaryV1,
+  LiveEvidenceLedgerSummaryV1,
+  LiveEvidenceRunAuthorizationV1,
+} from "./live-evidence-run.js";
+export { authorizeLiveEvidenceRun, LiveEvidenceEffectLedger } from "./live-evidence-run.js";
 export {
   assertOperatorActor,
   checkpointDigest,

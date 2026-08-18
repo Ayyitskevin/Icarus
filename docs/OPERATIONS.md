@@ -721,6 +721,26 @@ holding one performs no network call and authorizes no effect on its own.
   creating a head reference or opening a same-repo draft pull request runs the
   head branch's own automation with repository secrets.
 
+`authorizeLiveEvidenceRun(profile, manifest, manifestDigest, environment)`
+decides whether a run may begin. It asserts the approval binds this exact
+profile content, asserts the manifest and complete case set match, and confirms
+every credential environment variable the run will need is present — presence
+only, never the value, so a credential cannot reach an error string, a log
+line, or durable state through the gate. A missing token refuses before any
+remote effect rather than halfway through the second case.
+
+`LiveEvidenceEffectLedger` is the ledger the executor consults before every
+effect. It refuses unauthorized effects and unknown cases, admits
+`github.pull_request.create.draft` at most once per case (mirroring the durable
+`one_create_pr_post_per_landing` index — a lost response is reconciled by
+reading, never by a second POST), refuses the call that would exceed the spend
+or runtime ceiling rather than reporting the overage afterwards, and refuses to
+call a run complete unless every case recorded the full authorized chain, so
+partial evidence cannot be reported as passing.
+
+Neither performs I/O. They are the authority half of the live runner; the case
+executor that consumes them is not yet implemented.
+
 **Operator guidance for a first live attempt:** use disposable repositories you
 own with automation disabled, so the assessment is an honest
 `inert-repository`. Do not aim a first 3/3 at a project whose PR automation you
