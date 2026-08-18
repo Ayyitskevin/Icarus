@@ -744,6 +744,39 @@ commit that carries the receipt — each reopened and resumed with
 exactly-one-POST, receipt-idempotence, and zero-real-network assertions. No
 live GitHub call exists anywhere in tests.
 
+### Packet 4b sub-slice record — S2b-iii receipt presentation chain
+
+Status: **IMPLEMENTED (receipt presentation; Packet 4b's offline surface is
+complete).** The final Packet 4b slice: the immutable landing receipt now
+reaches the operator through every existing surface, with no new authority
+anywhere.
+
+What exists now: `LandingReceiptPresentationV1` — the receipt's display-safe
+DTO — rides `RunLandingPresentation` from the ledger's status read path, so
+`presentRun` carries it with no new route and no API change beyond the field.
+`presentLandingReceiptV1` projects the durable record lockstep (every field
+copied, nothing added), and the receipt joins both the approval projection and
+`presentLandingStatusV1`, which is what the CLI `landing
+prepare/status/decide/resume` routes print. The workspace validates the exact
+28-key receipt shape fail-closed (`isExactLandingReceiptView`, wired into
+`isExactLandingView`) and the landing panel renders it as inert text — no
+interactive element, no new browser authority. The receipt is absent (and
+presented as absent) until the landing lands.
+
+Packet 4b is thereby complete offline: preflight, object upload, absent-only
+remote ref, one-POST-ever draft PR, immutable receipt, and its presentation.
+What remains for Gate 1 is S3 alone: the credential-gated live-evidence
+profile and the operator's credentialed 3/3 run against real repositories.
+Every claim in this packet remains offline evidence — Gate 1 closes only on
+that live run.
+
+Evidence: the presentation suite pins the receipt's exact key order, the
+full-shape projection at both the service and API seams, credential-sentinel
+non-leakage through the receipt path, and the CLI's shared projection; the
+workspace suites assert the exact-key validation (accept the 28-key shape,
+reject an injected or dropped key) and the panel's inert render. Full
+`pnpm check` exit 0.
+
 ## Released Gate 0 baseline: ADR 0026 slice 2b production wiring
 
 Status: **MERGED AND RELEASED AT THE GATE 0 RELEASE HEAD**. The corrected ADR 0026

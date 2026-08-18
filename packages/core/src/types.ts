@@ -840,6 +840,42 @@ export interface RunHistory {
   readonly events: readonly EventRecord[];
 }
 
+/**
+ * The operator-facing projection of the immutable landing receipt: metadata,
+ * identities, digests, and evidence-derived outcomes only — never credentials,
+ * paths, or upstream text. Field-for-field the display-safe LandingReceiptV1.
+ */
+export interface LandingReceiptPresentationV1 {
+  readonly version: 1;
+  readonly landingId: string;
+  readonly runId: string;
+  readonly projectId: string;
+  readonly provider: "github";
+  readonly owner: string;
+  readonly repository: string;
+  readonly baseRef: string;
+  readonly baseCommitSha1: string;
+  readonly headRef: string;
+  readonly candidateTreeSha1: string;
+  readonly candidateCommitSha1: string;
+  readonly pullRequestNumber: number;
+  readonly reconstructedPullRequestUrl: string;
+  readonly draft: true;
+  readonly landingSha256: string;
+  readonly profileSha256: string;
+  readonly planSha256: string;
+  readonly diffSha256: string;
+  readonly checkpointSha256: string;
+  readonly verificationSha256: string;
+  readonly reviewDecisionSha256: string;
+  readonly changedPathsSha256: string;
+  readonly localRefOutcome: "created" | "reconciled";
+  readonly remoteObjectOutcome: "created_or_exact";
+  readonly remoteRefOutcome: "created" | "reconciled";
+  readonly pullRequestOutcome: "created" | "reconciled";
+  readonly completedAt: string;
+}
+
 export interface RunLandingPresentation {
   readonly landingId: string;
   readonly state: LandingStateV1;
@@ -849,6 +885,7 @@ export interface RunLandingPresentation {
   readonly candidateCommitSha1: string | null;
   readonly pullRequestTitle: string;
   readonly pullRequestBody: string | null;
+  readonly receipt: LandingReceiptPresentationV1 | null;
   readonly derivativeEffects: {
     readonly version: 1;
     readonly disposition: "inert-repository" | "operator-approved";

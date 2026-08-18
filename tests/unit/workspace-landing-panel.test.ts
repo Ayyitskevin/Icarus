@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { describe, expect, test } from "vitest";
 
 import { LANDING_EFFECT_WARNING } from "../../packages/api/src/present.js";
-import type { LandingView } from "../../packages/workspace/src/api.js";
+import type { LandingReceiptView, LandingView } from "../../packages/workspace/src/api.js";
 import { LandingPanel } from "../../packages/workspace/src/LandingPanel.js";
 
 const workspaceRequire = createRequire(
@@ -16,6 +16,39 @@ const { renderToStaticMarkup } = workspaceRequire("react-dom/server") as {
   renderToStaticMarkup(element: unknown): string;
 };
 
+function receipt(): LandingReceiptView {
+  return {
+    version: 1,
+    landingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    runId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    projectId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    provider: "github",
+    owner: "icarus-test",
+    repository: "landing-panel",
+    baseRef: "refs/heads/main",
+    baseCommitSha1: "e".repeat(40),
+    headRef: "refs/heads/icarus/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    candidateTreeSha1: "f".repeat(40),
+    candidateCommitSha1: "b".repeat(40),
+    pullRequestNumber: 701,
+    reconstructedPullRequestUrl: "https://github.com/icarus-test/landing-panel/pull/701",
+    draft: true,
+    landingSha256: "a".repeat(64),
+    profileSha256: "1".repeat(64),
+    planSha256: "2".repeat(64),
+    diffSha256: "3".repeat(64),
+    checkpointSha256: "4".repeat(64),
+    verificationSha256: "5".repeat(64),
+    reviewDecisionSha256: "6".repeat(64),
+    changedPathsSha256: "7".repeat(64),
+    localRefOutcome: "created",
+    remoteObjectOutcome: "created_or_exact",
+    remoteRefOutcome: "reconciled",
+    pullRequestOutcome: "created",
+    completedAt: "2026-08-02T12:02:00.000Z",
+  };
+}
+
 function landing(): LandingView {
   return {
     landingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -27,6 +60,7 @@ function landing(): LandingView {
     pullRequestTitle: "Exact <script>title()</script>",
     pullRequestBody:
       "line one\n\nline two <img src=x onerror=alert(1)>\n\n<!-- icarus-landing:v1 -->",
+    receipt: null,
     decision: {
       actor: "operator <admin>",
       decision: "approve",
@@ -76,6 +110,30 @@ describe("workspace read-only landing panel", () => {
     expect(markup).toContain("operator-approved");
     expect(markup).toContain("c".repeat(64));
     expect(markup).toContain("AMBIGUOUS_REMOTE_EFFECT");
+    expect(markup).toContain("No receipt is recorded");
+  });
+
+  test("renders the immutable receipt as inert text once the landing has landed", () => {
+    const landed: LandingView = {
+      ...landing(),
+      state: "landed",
+      resumeState: null,
+      errorCode: null,
+      receipt: receipt(),
+    };
+    const markup = renderToStaticMarkup(
+      createElement(LandingPanel, { landing: landed, landingRevision: 21 }),
+    );
+
+    expect(markup).toContain("Landing receipt");
+    expect(markup).toContain("#701");
+    expect(markup).toContain("https://github.com/icarus-test/landing-panel/pull/701");
+    expect(markup).toContain("refs/heads/icarus/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    expect(markup).toContain("created_or_exact");
+    expect(markup).toContain("e".repeat(40));
+    expect(markup).toContain("2026-08-02T12:02:00.000Z");
+    expect(markup).not.toContain("No receipt is recorded");
+    expect(markup).not.toMatch(/<(?:a|button|form|input|select|textarea)\b/u);
   });
 
   test("states explicitly when no landing record exists", () => {

@@ -940,6 +940,37 @@ export type LandingResumeStateView =
   | "objects_ready"
   | "remote_ready";
 
+export interface LandingReceiptView {
+  readonly version: 1;
+  readonly landingId: string;
+  readonly runId: string;
+  readonly projectId: string;
+  readonly provider: "github";
+  readonly owner: string;
+  readonly repository: string;
+  readonly baseRef: string;
+  readonly baseCommitSha1: string;
+  readonly headRef: string;
+  readonly candidateTreeSha1: string;
+  readonly candidateCommitSha1: string;
+  readonly pullRequestNumber: number;
+  readonly reconstructedPullRequestUrl: string;
+  readonly draft: true;
+  readonly landingSha256: string;
+  readonly profileSha256: string;
+  readonly planSha256: string;
+  readonly diffSha256: string;
+  readonly checkpointSha256: string;
+  readonly verificationSha256: string;
+  readonly reviewDecisionSha256: string;
+  readonly changedPathsSha256: string;
+  readonly localRefOutcome: "created" | "reconciled";
+  readonly remoteObjectOutcome: "created_or_exact";
+  readonly remoteRefOutcome: "created" | "reconciled";
+  readonly pullRequestOutcome: "created" | "reconciled";
+  readonly completedAt: string;
+}
+
 export interface LandingView {
   readonly landingId: string;
   readonly state: LandingStateView;
@@ -949,6 +980,7 @@ export interface LandingView {
   readonly candidateCommitSha1: string | null;
   readonly pullRequestTitle: string;
   readonly pullRequestBody: string | null;
+  readonly receipt: LandingReceiptView | null;
   readonly decision: {
     readonly actor: string;
     readonly decision: "approve" | "reject";
@@ -1309,12 +1341,43 @@ const ACTION_LANDING_KEYS = [
   "landingSha256",
   "pullRequestBody",
   "pullRequestTitle",
+  "receipt",
   "resumeState",
   "state",
   "updatedAt",
   "version",
 ];
 const ACTION_LANDING_DECISION_KEYS = ["actor", "createdAt", "decision"];
+const ACTION_LANDING_RECEIPT_KEYS = [
+  "baseCommitSha1",
+  "baseRef",
+  "candidateCommitSha1",
+  "candidateTreeSha1",
+  "changedPathsSha256",
+  "checkpointSha256",
+  "completedAt",
+  "diffSha256",
+  "draft",
+  "headRef",
+  "landingId",
+  "landingSha256",
+  "localRefOutcome",
+  "owner",
+  "planSha256",
+  "profileSha256",
+  "projectId",
+  "provider",
+  "pullRequestNumber",
+  "pullRequestOutcome",
+  "reconstructedPullRequestUrl",
+  "remoteObjectOutcome",
+  "remoteRefOutcome",
+  "repository",
+  "reviewDecisionSha256",
+  "runId",
+  "verificationSha256",
+  "version",
+];
 const ACTION_LANDING_DISCLOSURE_KEYS = [
   "disposition",
   "evidenceSha256",
@@ -1371,6 +1434,59 @@ function responseMatchesExactTuple(value: unknown, expected: readonly string[]):
   );
 }
 
+const HEX_SHA256 = /^[a-f0-9]{64}$/u;
+const HEX_SHA1 = /^[a-f0-9]{40}$/u;
+
+export function isExactLandingReceiptView(value: unknown): boolean {
+  if (value === null) return true;
+  const receipt = responseRecord(value);
+  return (
+    receipt !== null &&
+    responseHasExactKeys(receipt, ACTION_LANDING_RECEIPT_KEYS) &&
+    receipt.version === 1 &&
+    typeof receipt.landingId === "string" &&
+    typeof receipt.runId === "string" &&
+    typeof receipt.projectId === "string" &&
+    receipt.provider === "github" &&
+    typeof receipt.owner === "string" &&
+    typeof receipt.repository === "string" &&
+    typeof receipt.baseRef === "string" &&
+    typeof receipt.baseCommitSha1 === "string" &&
+    HEX_SHA1.test(receipt.baseCommitSha1) &&
+    typeof receipt.headRef === "string" &&
+    typeof receipt.candidateTreeSha1 === "string" &&
+    HEX_SHA1.test(receipt.candidateTreeSha1) &&
+    typeof receipt.candidateCommitSha1 === "string" &&
+    HEX_SHA1.test(receipt.candidateCommitSha1) &&
+    typeof receipt.pullRequestNumber === "number" &&
+    Number.isSafeInteger(receipt.pullRequestNumber) &&
+    receipt.pullRequestNumber >= 1 &&
+    typeof receipt.reconstructedPullRequestUrl === "string" &&
+    receipt.draft === true &&
+    typeof receipt.landingSha256 === "string" &&
+    HEX_SHA256.test(receipt.landingSha256) &&
+    typeof receipt.profileSha256 === "string" &&
+    HEX_SHA256.test(receipt.profileSha256) &&
+    typeof receipt.planSha256 === "string" &&
+    HEX_SHA256.test(receipt.planSha256) &&
+    typeof receipt.diffSha256 === "string" &&
+    HEX_SHA256.test(receipt.diffSha256) &&
+    typeof receipt.checkpointSha256 === "string" &&
+    HEX_SHA256.test(receipt.checkpointSha256) &&
+    typeof receipt.verificationSha256 === "string" &&
+    HEX_SHA256.test(receipt.verificationSha256) &&
+    typeof receipt.reviewDecisionSha256 === "string" &&
+    HEX_SHA256.test(receipt.reviewDecisionSha256) &&
+    typeof receipt.changedPathsSha256 === "string" &&
+    HEX_SHA256.test(receipt.changedPathsSha256) &&
+    (receipt.localRefOutcome === "created" || receipt.localRefOutcome === "reconciled") &&
+    receipt.remoteObjectOutcome === "created_or_exact" &&
+    (receipt.remoteRefOutcome === "created" || receipt.remoteRefOutcome === "reconciled") &&
+    (receipt.pullRequestOutcome === "created" || receipt.pullRequestOutcome === "reconciled") &&
+    typeof receipt.completedAt === "string"
+  );
+}
+
 export function isExactLandingView(value: unknown): boolean {
   if (value === null) return true;
   const landing = responseRecord(value);
@@ -1394,6 +1510,7 @@ export function isExactLandingView(value: unknown): boolean {
         /^[a-f0-9]{40}$/u.test(landing.candidateCommitSha1))) &&
     typeof landing.pullRequestTitle === "string" &&
     (landing.pullRequestBody === null || typeof landing.pullRequestBody === "string") &&
+    isExactLandingReceiptView(landing.receipt) &&
     (landing.decision === null ||
       (decision !== null &&
         responseHasExactKeys(decision, ACTION_LANDING_DECISION_KEYS) &&

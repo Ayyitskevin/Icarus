@@ -47,9 +47,10 @@ that later roadmap features already exist.
 > gateway package is merged; the S2b-ii slices wire the landing coordinator to
 > it through `landed` (read-only preflight, immutable object upload, one
 > absent-only remote ref, and the one-POST-ever draft PR with its immutable
-> receipt), while receipt presentation remains fenced.
-> Packet 4's receipt presentation,
-> credential-gated live-evidence profile, live-state migration, deployment, and
+> receipt), and S2b-iii presents that receipt read-only through the CLI, the
+> API run projection, and the workspace landing panel.
+> Packet 4's credential-gated live-evidence profile, live-state migration,
+> deployment, and
 > Gate 1 completion remain incomplete. No GitHub or
 > other external landing, migration, deployment, or public-release authority was
 > authorized by this local acceptance.
@@ -107,8 +108,9 @@ review-only and disable the corresponding controls.
 The Packet 3 landing mutation path is Linux-only. CLI
 `landing prepare/status/decide/resume` commands and the API/browser use the same
 bounded landing projection, including the exact authority digest, candidate and
-private-ref identities, decision, effects, disposition, warnings, evidence, and
-revision. Non-Linux mutation refuses before persistence, Git, credential, or
+private-ref identities, decision, effects, disposition, warnings, evidence,
+revision, and — once the landing has landed — the immutable receipt. Non-Linux
+mutation refuses before persistence, Git, credential, or
 network effects; the browser presentation itself grants no landing authority.
 
 The second Milestone 3 slice adds project-scoped, nonpersistent repository
