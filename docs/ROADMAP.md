@@ -378,3 +378,11 @@ action outside Packet 2's closed eight-kind lifecycle matrix remain separate
 expansions until explicitly designed and evidenced. CLI PatchSet materialization
 and the failed-verification
 session are no longer deferred.
+
+## Measurement tooling
+
+The `icarus probe` verb (2026-08-18) is measurement-only model characterization
+through the production provider gateway. It is not a gate, carries no
+authority, and its results are never acceptance evidence. Deeper evaluation
+entry points (parameterized benchmark runs, unattended eval grants) remain
+future, separately reviewed work.

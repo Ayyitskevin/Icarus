@@ -313,6 +313,7 @@ a review. Causing that unreviewed code to run now requires write access.
 | Comment body evaluated as shell in the runner | Untrusted fields passed only via `env:` | Assertion rejects `${{ github.event.comment… }}` inside `run:` |
 | Session contents of a public repository shared upstream | `share: false` | Assertion requires the input to be present |
 | Pinned third-party code exfiltrates the injected secret | **Unmitigated** — pin is not review | Requires write access to reach; secret rotation and a supply-chain review remain outstanding under ADR 0025 |
+| A probe measurement is mistaken for verification evidence, or probe input widens provider authority | probes reuse the closed structured-generation gateway with operator-supplied provider configuration; they execute no repository code, hold no run state, and emit measurement rows documented as non-authoritative; unknown probe kinds and out-of-range parameters fail closed with `INVALID_PROBE` | unit tests reject unknown kinds and ranges; integration tests prove a loopback-only provider conversation and the v1 row shape; suspected context truncation is surfaced in the row, never converted to a pass |
 
 ## Residual risks
 

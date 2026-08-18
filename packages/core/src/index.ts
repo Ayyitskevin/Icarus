@@ -145,7 +145,24 @@ export {
   planApprovalDigest,
   readableManifestDigest,
 } from "./policy.js";
+export type {
+  ContextCorpus,
+  ProbeAggregate,
+  ProbeAttempt,
+  ProbeKind,
+  ProbeRequest,
+  ProbeResultV1,
+  ProbeRuntime,
+} from "./probe.js";
+export {
+  buildContextCorpus,
+  createProbeRequest,
+  PROBE_KINDS,
+  PROBE_RESULT_SCHEMA_VERSION,
+  runProbe,
+} from "./probe.js";
 export { createProviderConfig, parseProviderBaseUrl } from "./provider.js";
+export { createGateway } from "./providers.js";
 export {
   type ReadExclusion,
   type ReadExclusionReason,
