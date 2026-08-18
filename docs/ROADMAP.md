@@ -323,9 +323,10 @@ attempt coordinator, digest-bound decision, deterministic candidate, absent-only
 private ref, shared CLI/browser projection, and explicit crash recovery operate
 without network or source-checkout mutation. Packet 4a's bounded GitHub gateway
 package is merged; the S2b-ii slices wire the landing coordinator to it through
-`remote_ready`: read-only preflight, immutable object upload, and one
-absent-only remote reference, with the draft PR and receipt still fenced.
-Packet 4's pull-request stage, PR receipt runtime, credential-gated live
+`landed`: read-only preflight, immutable object upload, one absent-only remote
+reference, and the one-POST-ever draft pull request with its immutable receipt.
+S2b-iii presents the receipt read-only through the shared CLI/API/browser
+projection. Packet 4's credential-gated live
 evidence, live-state migration, and Gate 1 completion remain incomplete.
 
 Slice 1 adds the populated closed input contract at

@@ -183,6 +183,7 @@ function landingView(): LandingView {
     candidateCommitSha1: "b".repeat(40),
     pullRequestTitle: "Exact title",
     pullRequestBody: "Exact complete body",
+    receipt: null,
     decision: null,
     errorCode: null,
     updatedAt: "2026-08-02T12:00:00.000Z",
@@ -200,6 +201,39 @@ function landingView(): LandingView {
       evidenceSha256: "c".repeat(64),
     },
     effectWarning: LANDING_EFFECT_WARNING,
+  };
+}
+
+function landingReceiptView(): NonNullable<LandingView["receipt"]> {
+  return {
+    version: 1,
+    landingId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    runId: "11111111-1111-4111-8111-111111111111",
+    projectId: "55555555-5555-4555-8555-555555555555",
+    provider: "github",
+    owner: "icarus-owner",
+    repository: "icarus-repository",
+    baseRef: "refs/heads/main",
+    baseCommitSha1: "1".repeat(40),
+    headRef: "refs/heads/icarus/11111111-1111-4111-8111-111111111111",
+    candidateTreeSha1: "7".repeat(40),
+    candidateCommitSha1: "b".repeat(40),
+    pullRequestNumber: 701,
+    reconstructedPullRequestUrl: "https://github.com/icarus-owner/icarus-repository/pull/701",
+    draft: true,
+    landingSha256: "a".repeat(64),
+    profileSha256: "0".repeat(64),
+    planSha256: "2".repeat(64),
+    diffSha256: "3".repeat(64),
+    checkpointSha256: "4".repeat(64),
+    verificationSha256: "5".repeat(64),
+    reviewDecisionSha256: "6".repeat(64),
+    changedPathsSha256: "8".repeat(64),
+    localRefOutcome: "created",
+    remoteObjectOutcome: "created_or_exact",
+    remoteRefOutcome: "reconciled",
+    pullRequestOutcome: "created",
+    completedAt: "2026-08-02T12:03:00.000Z",
   };
 }
 
@@ -613,6 +647,52 @@ describe("workspace guarded browser actions", () => {
           run: {
             ...runWithLanding,
             landing: { ...landingView(), credentialEnv: "MUST_NOT_BE_ACCEPTED" },
+          },
+        },
+        request,
+      ),
+    ).toBe(false);
+    // A landed run carries its receipt: the exact 28-key projection is
+    // accepted, and any widened or dropped receipt key fails closed.
+    expect(
+      browserActionExecutionMatchesRequest(
+        {
+          action: receipt,
+          run: {
+            ...runWithLanding,
+            landing: { ...landingView(), state: "landed", receipt: landingReceiptView() },
+          },
+        },
+        request,
+      ),
+    ).toBe(true);
+    expect(
+      browserActionExecutionMatchesRequest(
+        {
+          action: receipt,
+          run: {
+            ...runWithLanding,
+            landing: {
+              ...landingView(),
+              state: "landed",
+              receipt: { ...landingReceiptView(), credentialValue: "MUST_NOT_BE_ACCEPTED" },
+            },
+          },
+        },
+        request,
+      ),
+    ).toBe(false);
+    expect(
+      browserActionExecutionMatchesRequest(
+        {
+          action: receipt,
+          run: {
+            ...runWithLanding,
+            landing: {
+              ...landingView(),
+              state: "landed",
+              receipt: { ...landingReceiptView(), draft: false },
+            },
           },
         },
         request,

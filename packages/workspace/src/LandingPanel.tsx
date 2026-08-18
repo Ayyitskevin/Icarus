@@ -95,6 +95,64 @@ export function LandingPanel({ landing, landingRevision }: LandingPanelProps) {
             )}
           </section>
 
+          <section className="landing-panel__receipt" aria-labelledby="landing-receipt-heading">
+            <h4 id="landing-receipt-heading">Landing receipt</h4>
+            {landing.receipt === null ? (
+              <p className="empty-state">
+                No receipt is recorded. The receipt exists only after the landing lands.
+              </p>
+            ) : (
+              <dl className="facts facts--compact">
+                <div>
+                  <dt>Draft pull request</dt>
+                  <dd>
+                    #{landing.receipt.pullRequestNumber} ({landing.receipt.pullRequestOutcome}) —{" "}
+                    {landing.receipt.reconstructedPullRequestUrl}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Head reference</dt>
+                  <dd className="digest">{landing.receipt.headRef}</dd>
+                </div>
+                <div>
+                  <dt>Base</dt>
+                  <dd>
+                    {landing.receipt.baseRef} at{" "}
+                    <span className="digest">{landing.receipt.baseCommitSha1}</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Candidate commit SHA-1</dt>
+                  <dd className="digest">{landing.receipt.candidateCommitSha1}</dd>
+                </div>
+                <div>
+                  <dt>Local ref outcome</dt>
+                  <dd>{landing.receipt.localRefOutcome}</dd>
+                </div>
+                <div>
+                  <dt>Remote object outcome</dt>
+                  <dd>{landing.receipt.remoteObjectOutcome}</dd>
+                </div>
+                <div>
+                  <dt>Remote ref outcome</dt>
+                  <dd>{landing.receipt.remoteRefOutcome}</dd>
+                </div>
+                <div>
+                  <dt>Landing SHA-256</dt>
+                  <dd className="digest">{landing.receipt.landingSha256}</dd>
+                </div>
+                <div>
+                  <dt>Completed</dt>
+                  <dd>
+                    <time dateTime={landing.receipt.completedAt}>
+                      {landing.receipt.completedAt}
+                    </time>
+                  </dd>
+                </div>
+              </dl>
+            )}
+          </section>
+
           <section className="landing-panel__effects" aria-labelledby="landing-effects-heading">
             <h4 id="landing-effects-heading">Landing effects</h4>
             <p className="message message--warning" role="note">

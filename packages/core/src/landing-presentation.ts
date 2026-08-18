@@ -9,7 +9,8 @@ import {
   DIRECT_ICARUS_EFFECTS,
   landingPullRequestMarkerV1,
 } from "./landing-records.js";
-import type { RunLandingPresentation } from "./types.js";
+import type { LandingReceiptV1 } from "./landing-records.js";
+import type { LandingReceiptPresentationV1, RunLandingPresentation } from "./types.js";
 
 export const LANDING_DIRECT_ICARUS_EFFECTS = DIRECT_ICARUS_EFFECTS;
 export const LANDING_DERIVATIVE_GITHUB_EVENTS = DERIVATIVE_GITHUB_EVENTS;
@@ -27,6 +28,7 @@ export interface LandingApprovalPresentationV1 {
   readonly candidateCommitSha1: string | null;
   readonly pullRequestTitle: string;
   readonly pullRequestBody: string | null;
+  readonly receipt: LandingReceiptPresentationV1 | null;
   readonly decision: RunLandingPresentation["decision"];
   readonly errorCode: string | null;
   readonly updatedAt: string;
@@ -46,6 +48,8 @@ export interface LandingStatusPresentationV1 {
   readonly landingRevision: number;
   /** Exact operator-facing approval projection. */
   readonly approval: LandingApprovalPresentationV1 | null;
+  /** Immutable receipt projection once the landing has landed. */
+  readonly receipt: LandingReceiptPresentationV1 | null;
   /** Complete durable evidence, including attempts, operations, and events. */
   readonly status: LandingStatusV1 | null;
 }
@@ -101,6 +105,43 @@ function derivedPullRequestBody(status: LandingStatusV1): string | null {
   return body;
 }
 
+/**
+ * The lockstep projection of the durable receipt into its operator-facing
+ * DTO: every field copied, nothing upstream added, nothing durable dropped.
+ */
+export function presentLandingReceiptV1(receipt: LandingReceiptV1): LandingReceiptPresentationV1 {
+  return {
+    version: receipt.version,
+    landingId: receipt.landingId,
+    runId: receipt.runId,
+    projectId: receipt.projectId,
+    provider: receipt.provider,
+    owner: receipt.owner,
+    repository: receipt.repository,
+    baseRef: receipt.baseRef,
+    baseCommitSha1: receipt.baseCommitSha1,
+    headRef: receipt.headRef,
+    candidateTreeSha1: receipt.candidateTreeSha1,
+    candidateCommitSha1: receipt.candidateCommitSha1,
+    pullRequestNumber: receipt.pullRequestNumber,
+    reconstructedPullRequestUrl: receipt.reconstructedPullRequestUrl,
+    draft: receipt.draft,
+    landingSha256: receipt.landingSha256,
+    profileSha256: receipt.profileSha256,
+    planSha256: receipt.planSha256,
+    diffSha256: receipt.diffSha256,
+    checkpointSha256: receipt.checkpointSha256,
+    verificationSha256: receipt.verificationSha256,
+    reviewDecisionSha256: receipt.reviewDecisionSha256,
+    changedPathsSha256: receipt.changedPathsSha256,
+    localRefOutcome: receipt.localRefOutcome,
+    remoteObjectOutcome: receipt.remoteObjectOutcome,
+    remoteRefOutcome: receipt.remoteRefOutcome,
+    pullRequestOutcome: receipt.pullRequestOutcome,
+    completedAt: receipt.completedAt,
+  };
+}
+
 export function presentLandingApprovalV1(
   landing: RunLandingPresentation,
 ): LandingApprovalPresentationV1 {
@@ -113,6 +154,7 @@ export function presentLandingApprovalV1(
     candidateCommitSha1: landing.candidateCommitSha1,
     pullRequestTitle: landing.pullRequestTitle,
     pullRequestBody: landing.pullRequestBody,
+    receipt: landing.receipt === null ? null : presentLandingReceiptV1(landing.receipt),
     decision:
       landing.decision === null
         ? null
@@ -142,6 +184,7 @@ export function presentLandingStatusV1(
     return {
       landingRevision: 0,
       approval: null,
+      receipt: null,
       status: null,
     };
   }
@@ -160,6 +203,7 @@ export function presentLandingStatusV1(
       candidateCommitSha1: landing.candidateCommitSha1,
       pullRequestTitle: landing.pullRequestTitle,
       pullRequestBody: derivedPullRequestBody(status),
+      receipt: status.receipt,
       derivativeEffects: landing.profile.derivativeEffects,
       decision:
         status.decision === null
@@ -172,6 +216,7 @@ export function presentLandingStatusV1(
       errorCode: landing.errorCode,
       updatedAt: landing.updatedAt,
     }),
+    receipt: status.receipt === null ? null : presentLandingReceiptV1(status.receipt),
     status,
   };
 }
