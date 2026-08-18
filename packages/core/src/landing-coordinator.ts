@@ -2019,8 +2019,7 @@ export class LandingCoordinator {
     const baseUnchanged =
       baseProjection?.state === "direct" && baseProjection.sha1 === landing.baseCommitSha1;
     const headExact =
-      headProjection?.state === "direct" &&
-      headProjection.sha1 === landing.candidateCommitSha1;
+      headProjection?.state === "direct" && headProjection.sha1 === landing.candidateCommitSha1;
     const provenPullRequest =
       listProjection !== null && listProjection.complete && listProjection.count === 1
         ? (listProjection.objects[0] ?? null)
@@ -2053,9 +2052,7 @@ export class LandingCoordinator {
         ? headProjection?.state === "absent"
           ? "LANDING_REMOTE_HEAD_MISSING"
           : "LANDING_REMOTE_HEAD_CONFLICT"
-        : (post.errorCode ??
-          suffixList?.errorCode ??
-          "LANDING_PULL_REQUEST_OUTCOME_AMBIGUOUS");
+        : (post.errorCode ?? suffixList?.errorCode ?? "LANDING_PULL_REQUEST_OUTCOME_AMBIGUOUS");
     return this.#store.settleGithubPullRequest(landingId, {
       outcome: "reconciliation_required",
       errorCode,

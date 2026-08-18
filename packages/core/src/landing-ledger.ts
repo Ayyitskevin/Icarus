@@ -1149,9 +1149,7 @@ function httpGrammarFor(
       if (subjectKind === "github.ref.create") {
         return ["github.actor.get", "github.base_ref.get", "github.head_ref.get"];
       }
-      return subjectKind === "github.pull_request.create"
-        ? PULL_REQUEST_RECONCILE_GRAMMAR
-        : [];
+      return subjectKind === "github.pull_request.create" ? PULL_REQUEST_RECONCILE_GRAMMAR : [];
     }
     case "candidate.prepare":
     case "local_ref.create":
@@ -3461,17 +3459,11 @@ function landingDeliveryStageOutcomes(status: LandingStatusV1): {
         remoteRefOutcome = "reconciled";
       } else if (value.nextState === "landed") {
         const stageValue = value.stageValue;
-        draftPr =
-          stageValue !== null && "pullRequestOutcome" in stageValue ? stageValue : null;
+        draftPr = stageValue !== null && "pullRequestOutcome" in stageValue ? stageValue : null;
       }
     }
   }
-  if (
-    localRefOutcome === null ||
-    !objectsProven ||
-    remoteRefOutcome === null ||
-    draftPr === null
-  ) {
+  if (localRefOutcome === null || !objectsProven || remoteRefOutcome === null || draftPr === null) {
     return null;
   }
   return {
@@ -5798,10 +5790,7 @@ export class LandingLedger {
    * its post-settle view) and never from caller input. The primary key makes
    * the write exactly-once; the loader revalidates digest and binding.
    */
-  #insertLandingReceipt(
-    status: LandingStatusV1,
-    settledOperation: LandingOperationRecordV1,
-  ): void {
+  #insertLandingReceipt(status: LandingStatusV1, settledOperation: LandingOperationRecordV1): void {
     const landing = status.landing;
     const outcomes = landingDeliveryStageOutcomes({
       ...status,
@@ -6366,9 +6355,7 @@ export class LandingLedger {
       );
       if (input.outcome === "landed") {
         const provenPullRequest =
-          freshList?.type === "pull_request_list" &&
-          freshList.complete &&
-          freshList.count === 1
+          freshList?.type === "pull_request_list" && freshList.complete && freshList.count === 1
             ? (freshList.objects[0] ?? null)
             : null;
         if (

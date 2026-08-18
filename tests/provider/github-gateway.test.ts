@@ -285,7 +285,11 @@ describe("GithubGateway HTTP contract", () => {
 
   it("reconstructs the pull request URL instead of echoing the response", async () => {
     server = await startProviderHttpServer((_request, response) => {
-sendProviderJson(response, 201, pullRequestEntry({ number: 7, html_url: "https://evil.test/phish" }));
+      sendProviderJson(
+        response,
+        201,
+        pullRequestEntry({ number: 7, html_url: "https://evil.test/phish" }),
+      );
     });
 
     const receipt = await gatewayFor(server).createDraftPullRequest(coordinates, {
@@ -322,7 +326,7 @@ sendProviderJson(response, 201, pullRequestEntry({ number: 7, html_url: "https:/
 
   it("finds an existing draft pull request by head for idempotent retry", async () => {
     server = await startProviderHttpServer((_request, response) => {
-sendProviderJson(response, 200, [pullRequestEntry({ number: 9 })]);
+      sendProviderJson(response, 200, [pullRequestEntry({ number: 9 })]);
     });
 
     const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
@@ -341,7 +345,7 @@ sendProviderJson(response, 200, [pullRequestEntry({ number: 9 })]);
     // Reconciliation must locate the existing pull request rather than refuse
     // it, or an interrupted attempt would open a second one.
     server = await startProviderHttpServer((_request, response) => {
-sendProviderJson(response, 200, [pullRequestEntry({ number: 11, draft: false })]);
+      sendProviderJson(response, 200, [pullRequestEntry({ number: 11, draft: false })]);
     });
 
     const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
@@ -368,7 +372,14 @@ sendProviderJson(response, 200, [pullRequestEntry({ number: 11, draft: false })]
 
   it("distinguishes a merged pull request from an abandoned one", async () => {
     server = await startProviderHttpServer((_request, response) => {
-sendProviderJson(response, 200, [pullRequestEntry({ number: 12, draft: false, state: "closed", merged_at: "2026-08-08T04:00:00Z" })]);
+      sendProviderJson(response, 200, [
+        pullRequestEntry({
+          number: 12,
+          draft: false,
+          state: "closed",
+          merged_at: "2026-08-08T04:00:00Z",
+        }),
+      ]);
     });
 
     const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
@@ -580,7 +591,7 @@ sendProviderJson(response, 200, [pullRequestEntry({ number: 12, draft: false, st
       sendProviderJson(
         response,
         200,
-Array.from({ length: 2 }, (_value, index) => pullRequestEntry({ number: index + 1 })),
+        Array.from({ length: 2 }, (_value, index) => pullRequestEntry({ number: index + 1 })),
       );
     });
 

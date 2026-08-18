@@ -123,6 +123,10 @@ enum CrashPhase {
   RemoteRefAfterPost = "remote-ref-after-post",
   RemoteRefBeforeSettlement = "remote-ref-before-settlement",
   RemoteRefAfterSettlement = "remote-ref-after-settlement",
+  DraftPrBeforePost = "pr-before-post",
+  DraftPrDuringPost = "pr-during-post",
+  DraftPrBeforeSettlement = "pr-before-settlement",
+  DraftPrAfterSettlement = "pr-after-settlement",
 }
 
 interface Paths {
@@ -619,7 +623,14 @@ async function openRealRuntime(
 /** Reopens the crashed fixture with the loopback GitHub transport wired in. */
 async function reopenPreflightWithLoopback(
   fixture: RealFixture,
-  options: { readonly remoteRefs?: Readonly<Record<string, string>> } = {},
+  options: {
+    readonly remoteRefs?: Readonly<Record<string, string>>;
+    readonly initialPullRequest?: {
+      readonly title: string;
+      readonly body: string;
+      readonly number: number;
+    };
+  } = {},
 ): Promise<{
   readonly runtime: Runtime;
   readonly loopback: GithubLoopback;
@@ -641,6 +652,9 @@ async function reopenPreflightWithLoopback(
     candidateTreeSha1: () => candidateTreeSha1,
     candidateCommitSha1: () => candidateCommitSha1,
     ...(options.remoteRefs === undefined ? {} : { initialRefs: options.remoteRefs }),
+    ...(options.initialPullRequest === undefined
+      ? {}
+      : { initialPullRequest: options.initialPullRequest }),
   });
   const runtime = await openRealRuntime(fixture.root, undefined, "git", {
     gateway: (credential) =>
@@ -716,7 +730,33 @@ function pause(markerPath: string, phase: CrashPhase, detail?: unknown): never {
 const PREFLIGHT_TOKEN = "ghp-crash-preflight-token-sentinel-do-not-persist";
 
 type PreflightReadClass = "actor" | "base" | "head";
-type GithubPostClass = "blob" | "tree" | "commit" | "ref";
+type GithubPostClass = "blob" | "tree" | "commit" | "ref" | "pr";
+
+/** The loopback remote's one pull request record, when the POST landed. */
+interface LoopbackPullRequest {
+  readonly number: number;
+  readonly title: string;
+  readonly body: string;
+  readonly headBranch: string;
+  readonly baseBranch: string;
+  readonly headSha1: string;
+  readonly baseSha1: string;
+}
+
+/** The wire shape the gateway's pull-request reader validates and projects. */
+function loopbackPullRequestPayload(pr: LoopbackPullRequest) {
+  return {
+    number: pr.number,
+    draft: true,
+    state: "open",
+    merged_at: null,
+    head: { ref: pr.headBranch, sha: pr.headSha1 },
+    base: { ref: pr.baseBranch, sha: pr.baseSha1 },
+    title: pr.title,
+    body: pr.body,
+    maintainer_can_modify: false,
+  };
+}
 
 interface GithubLoopback {
   readonly server: ProviderHttpServer;
@@ -740,6 +780,12 @@ async function startGithubLoopback(options: {
   readonly candidateTreeSha1?: () => string;
   readonly candidateCommitSha1?: () => string;
   readonly initialRefs?: Readonly<Record<string, string>>;
+  /** A pre-existing conforming pull request, for "the lost POST landed" answers. */
+  readonly initialPullRequest?: {
+    readonly title: string;
+    readonly body: string;
+    readonly number: number;
+  };
   readonly pauseOnRead?: PreflightReadClass;
   readonly pauseOnPost?: GithubPostClass;
   readonly pausePhase?: CrashPhase;
@@ -747,6 +793,31 @@ async function startGithubLoopback(options: {
 }): Promise<GithubLoopback> {
   const authorizationChecks: boolean[] = [];
   const remoteRefs = new Map<string, string>(Object.entries(options.initialRefs ?? {}));
+  const headBranch = options.headRef.startsWith("refs/heads/")
+    ? options.headRef.slice("refs/heads/".length)
+    : options.headRef;
+  let remotePullRequest: LoopbackPullRequest | null = null;
+  let initialPullRequestConsumed = false;
+  // The candidate closures answer "" until the worker reads its store, so the
+  // initial pull request materializes lazily at its first read.
+  const currentPullRequest = (): LoopbackPullRequest | null => {
+    if (!initialPullRequestConsumed) {
+      initialPullRequestConsumed = true;
+      const initial = options.initialPullRequest;
+      if (initial !== undefined) {
+        remotePullRequest = {
+          number: initial.number,
+          title: initial.title,
+          body: initial.body,
+          headBranch,
+          baseBranch: "main",
+          headSha1: remoteRefs.get(options.headRef) ?? options.candidateCommitSha1?.() ?? "",
+          baseSha1: options.baseCommitSha1(),
+        };
+      }
+    }
+    return remotePullRequest;
+  };
   const prefix = "/repos/icarus-crash-test/landing-crash-recovery";
   const server = await startProviderHttpServer((request, response) => {
     authorizationChecks.push(request.headers.authorization === `Bearer ${PREFLIGHT_TOKEN}`);
@@ -768,7 +839,9 @@ async function startGithubLoopback(options: {
               ? "commit"
               : url === `${prefix}/git/refs`
                 ? "ref"
-                : null;
+                : url === `${prefix}/pulls`
+                  ? "pr"
+                  : null;
       if (post === null) {
         sendProviderJson(response, 404, { message: "Not Found" });
         return;
@@ -777,6 +850,24 @@ async function startGithubLoopback(options: {
         pauseHere("github-post-in-flight", { post });
       }
       const body = parseProviderRequestBody(request) as Record<string, unknown>;
+      if (post === "pr") {
+        // The draft-PR create: record the one pull request the way GitHub
+        // would, then answer the exact created shape.
+        const head = typeof body.head === "string" ? body.head : "";
+        const separator = head.indexOf(":");
+        remotePullRequest = {
+          number: 701,
+          title: typeof body.title === "string" ? body.title : "",
+          body: typeof body.body === "string" ? body.body : "",
+          headBranch: separator === -1 ? head : head.slice(separator + 1),
+          baseBranch: typeof body.base === "string" ? body.base : "main",
+          headSha1: remoteRefs.get(options.headRef) ?? options.candidateCommitSha1?.() ?? "",
+          baseSha1: options.baseCommitSha1(),
+        };
+        initialPullRequestConsumed = true;
+        sendProviderJson(response, 201, loopbackPullRequestPayload(remotePullRequest));
+        return;
+      }
       if (post === "blob") {
         const content = typeof body.content === "string" ? body.content : "";
         const sha = gitObjectSha1("blob", Buffer.from(content, "base64"));
@@ -795,6 +886,13 @@ async function startGithubLoopback(options: {
       const sha = typeof body.sha === "string" ? body.sha : "";
       remoteRefs.set(ref, sha);
       sendProviderJson(response, 201, { ref, object: { sha, type: "commit" } });
+      return;
+    }
+    if (url.startsWith(`${prefix}/pulls`)) {
+      // The pull-request list read: the complete one-page answer, either the
+      // empty absence proof or the one record the create stored.
+      const pr = currentPullRequest();
+      sendProviderJson(response, 200, pr === null ? [] : [loopbackPullRequestPayload(pr)]);
       return;
     }
     const read: PreflightReadClass | null =
@@ -836,7 +934,10 @@ async function startGithubLoopback(options: {
 
 function isRemotePhase(phase: CrashPhase): boolean {
   return (
-    phase.startsWith("preflight-") || phase.startsWith("upload-") || phase.startsWith("remote-ref-")
+    phase.startsWith("preflight-") ||
+    phase.startsWith("upload-") ||
+    phase.startsWith("remote-ref-") ||
+    phase.startsWith("pr-")
   );
 }
 
@@ -856,6 +957,8 @@ function preflightBeforeGetKind(phase: CrashPhase): string | null {
       return "github.commit.post";
     case CrashPhase.RemoteRefBeforePost:
       return "github.ref.post";
+    case CrashPhase.DraftPrBeforePost:
+      return "github.pull_request.post";
     default:
       return null;
   }
@@ -884,6 +987,8 @@ function duringPostClass(phase: CrashPhase): GithubPostClass | null {
       return "commit";
     case CrashPhase.RemoteRefDuringPost:
       return "ref";
+    case CrashPhase.DraftPrDuringPost:
+      return "pr";
     default:
       return null;
   }
@@ -919,7 +1024,12 @@ function afterPostObjectKind(phase: CrashPhase): GithubPostClass | null {
 
 function settlementOperationKind(
   phase: CrashPhase,
-): "github.preflight" | "github.objects.upload" | "github.ref.create" | null {
+):
+  | "github.preflight"
+  | "github.objects.upload"
+  | "github.ref.create"
+  | "github.pull_request.create"
+  | null {
   switch (phase) {
     case CrashPhase.PreflightBeforeSettlement:
     case CrashPhase.PreflightAfterSettlement:
@@ -930,6 +1040,9 @@ function settlementOperationKind(
     case CrashPhase.RemoteRefBeforeSettlement:
     case CrashPhase.RemoteRefAfterSettlement:
       return "github.ref.create";
+    case CrashPhase.DraftPrBeforeSettlement:
+    case CrashPhase.DraftPrAfterSettlement:
+      return "github.pull_request.create";
     default:
       return null;
   }
@@ -939,7 +1052,8 @@ function isBeforeSettlementPhase(phase: CrashPhase): boolean {
   return (
     phase === CrashPhase.PreflightBeforeSettlement ||
     phase === CrashPhase.UploadBeforeSettlement ||
-    phase === CrashPhase.RemoteRefBeforeSettlement
+    phase === CrashPhase.RemoteRefBeforeSettlement ||
+    phase === CrashPhase.DraftPrBeforeSettlement
   );
 }
 
@@ -1000,7 +1114,9 @@ function armPreflightWrappers(store: IcarusStore, phase: CrashPhase, markerPath:
         ? "settleGithubPreflight"
         : operationKind === "github.objects.upload"
           ? "settleGithubObjectsUpload"
-          : "settleGithubRemoteRef";
+          : operationKind === "github.ref.create"
+            ? "settleGithubRemoteRef"
+            : "settleGithubPullRequest";
     const original = store[method].bind(store) as (...args: unknown[]) => unknown;
     Object.defineProperty(store, method, {
       configurable: true,
@@ -1184,6 +1300,21 @@ async function preflightWorkerMain(
       const objectsReady = await runtime.service.resumeLanding(RUN_ID);
       if (objectsReady.landing.state !== "objects_ready") {
         throw new Error("Landing did not reach objects_ready before the remote-ref phase");
+      }
+      armPreflightWrappers(runtime.store, phase, markerPath);
+      await runtime.service.resumeLanding(RUN_ID);
+      return;
+    }
+    if (phase.startsWith("pr-")) {
+      // Draft-PR phases crash the fourth resume: first finish the upload and
+      // the remote ref so the landing sits armed at remote_ready.
+      const objectsReady = await runtime.service.resumeLanding(RUN_ID);
+      if (objectsReady.landing.state !== "objects_ready") {
+        throw new Error("Landing did not reach objects_ready before the draft-PR phase");
+      }
+      const remoteReady = await runtime.service.resumeLanding(RUN_ID);
+      if (remoteReady.landing.state !== "remote_ready") {
+        throw new Error("Landing did not reach remote_ready before the draft-PR phase");
       }
       armPreflightWrappers(runtime.store, phase, markerPath);
       await runtime.service.resumeLanding(RUN_ID);
@@ -2495,24 +2626,324 @@ if (workerPhase !== undefined) {
         }, 60_000);
       }
 
-      test("crash after the remote-ref settlement commit parks at remote_ready", async () => {
+      test("crash after the remote-ref settlement commit resumes remote_ready into landed", async () => {
         const fixture = await createRealFixture();
         await approveLanding(fixture);
         const marker = await crashAt(fixture, CrashPhase.RemoteRefAfterSettlement);
         expect(marker.detail).toMatchObject({ boundary: "after-operation-settlement" });
 
+        const candidateCommitSha1 = (() => {
+          const probe = new IcarusStore(fixture.databasePath, { now: () => NOW });
+          try {
+            const interrupted = probe.getLandingStatusForRun(RUN_ID);
+            expect(interrupted?.landing).toMatchObject({ state: "remote_ready", errorCode: null });
+            expect(interrupted?.operations.at(-1)).toMatchObject({
+              kind: "github.ref.create",
+              status: "completed",
+            });
+            return interrupted?.landing.candidateCommitSha1 ?? "";
+          } finally {
+            probe.close();
+          }
+        })();
+
+        // The draft-PR slice is admitted: the remote_ready preflight re-proves
+        // the exact head and the empty pull-request list, then the one POST
+        // lands and the receipt commits.
         const { runtime, loopback } = await reopenPreflightWithLoopback(fixture, {
-          remoteRefs: {},
+          remoteRefs: { [fixture.headRef]: candidateCommitSha1 },
         });
         try {
-          const inspection = runtime.service.getLandingStatus(RUN_ID);
-          expect(inspection?.landing).toMatchObject({ state: "remote_ready", errorCode: null });
-          expect(inspection?.operations.at(-1)).toMatchObject({
-            kind: "github.ref.create",
-            status: "completed",
+          const landed = await runtime.service.resumeLanding(RUN_ID);
+          expect(landed.landing).toMatchObject({ state: "landed", errorCode: null });
+          expect(landed.receipt?.pullRequestOutcome).toBe("created");
+          expect(
+            landed.httpRequests.filter((row) => row.kind === "github.pull_request.post"),
+          ).toHaveLength(1);
+          // `landed` is terminal: resume refuses with zero new remote calls.
+          const requestsBefore = loopback.requests.length;
+          await expect(runtime.service.resumeLanding(RUN_ID)).rejects.toMatchObject({
+            code: "INVALID_LANDING_STATE",
           });
-          // The draft-PR slice is fenced: resume refuses truthfully without
+          expect(loopback.requests).toHaveLength(requestsBefore);
+          expect(fixture.requests()).toBe(0);
+        } finally {
+          runtime.close();
+          await loopback.server.close();
+        }
+      }, 60_000);
+
+      test("crash before the draft-PR POST admission still admits exactly one POST ever", async () => {
+        const fixture = await createRealFixture();
+        await approveLanding(fixture);
+        const marker = await crashAt(fixture, CrashPhase.DraftPrBeforePost);
+        expect(marker.detail).toMatchObject({
+          boundary: "before-request-admission",
+          kind: "github.pull_request.post",
+        });
+
+        const candidateCommitSha1 = (() => {
+          const probe = new IcarusStore(fixture.databasePath, { now: () => NOW });
+          try {
+            const interrupted = probe.getLandingStatusForRun(RUN_ID);
+            expect(interrupted?.landing).toMatchObject({
+              state: "opening_draft_pr",
+              errorCode: null,
+            });
+            expect(interrupted?.operations.at(-1)).toMatchObject({
+              kind: "github.pull_request.create",
+              status: "started",
+            });
+            expect(
+              interrupted?.httpRequests.some((row) => row.kind === "github.pull_request.post"),
+            ).toBe(false);
+            return interrupted?.landing.candidateCommitSha1 ?? "";
+          } finally {
+            probe.close();
+          }
+        })();
+
+        const { runtime, loopback } = await reopenPreflightWithLoopback(fixture, {
+          remoteRefs: { [fixture.headRef]: candidateCommitSha1 },
+        });
+        try {
+          // The interrupted operation never admitted its POST: reconciliation
+          // proves the complete empty list and authorizes the retry from
+          // remote_ready from the durable rows alone.
+          let resumed = await runtime.service.resumeLanding(RUN_ID);
+          expect(resumed.landing).toMatchObject({ state: "remote_ready", errorCode: null });
+          resumed = await runtime.service.resumeLanding(RUN_ID);
+          expect(resumed.landing).toMatchObject({ state: "landed", errorCode: null });
+          const posts = resumed.httpRequests.filter(
+            (row) => row.kind === "github.pull_request.post",
+          );
+          expect(posts).toHaveLength(1);
+          expect(posts[0]?.outcome).toBe("succeeded");
+          expect(resumed.receipt?.pullRequestOutcome).toBe("created");
+          expect(
+            resumed.operations
+              .filter((operation) => operation.kind === "github.pull_request.create")
+              .map((operation) => [operation.kindAttempt, operation.status]),
+          ).toEqual([
+            [1, "interrupted"],
+            [2, "completed"],
+          ]);
+          expect(fixture.requests()).toBe(0);
+        } finally {
+          runtime.close();
+          await loopback.server.close();
+        }
+      }, 60_000);
+
+      for (const remoteState of ["absent", "exact"] as const) {
+        test(`crash during the draft-PR POST with the remote ${remoteState} never admits a second POST`, async () => {
+          const fixture = await createRealFixture();
+          await approveLanding(fixture);
+          const marker = await crashAt(fixture, CrashPhase.DraftPrDuringPost);
+          expect(marker.detail).toMatchObject({
+            boundary: "github-post-in-flight",
+            post: "pr",
+            authorized: true,
+          });
+
+          const crashed = (() => {
+            const probe = new IcarusStore(fixture.databasePath, { now: () => NOW });
+            try {
+              const interrupted = probe.getLandingStatusForRun(RUN_ID);
+              expect(interrupted?.landing).toMatchObject({
+                state: "opening_draft_pr",
+                errorCode: null,
+              });
+              expect(interrupted?.operations.at(-1)).toMatchObject({
+                kind: "github.pull_request.create",
+                status: "started",
+              });
+              // The POST was admitted but never settled: the response is lost.
+              expect(interrupted?.httpRequests.at(-1)).toMatchObject({
+                kind: "github.pull_request.post",
+                status: "admitted",
+              });
+              return {
+                candidateCommitSha1: interrupted?.landing.candidateCommitSha1 ?? "",
+                pullRequestTitle: interrupted?.landing.pullRequestTitle ?? "",
+                pullRequestBody:
+                  probe.getRunLandingProjection(RUN_ID).landing?.pullRequestBody ?? "",
+              };
+            } finally {
+              probe.close();
+            }
+          })();
+
+          const { runtime, loopback } = await reopenPreflightWithLoopback(fixture, {
+            remoteRefs: { [fixture.headRef]: crashed.candidateCommitSha1 },
+            ...(remoteState === "exact"
+              ? {
+                  initialPullRequest: {
+                    title: crashed.pullRequestTitle,
+                    body: crashed.pullRequestBody,
+                    number: 701,
+                  },
+                }
+              : {}),
+          });
+          try {
+            if (remoteState === "exact") {
+              // The lost POST actually landed: the takeover settles its row
+              // ambiguous and the fresh complete list proves the one
+              // conforming pull request — reconciled, never a second create.
+              const resumed = await runtime.service.resumeLanding(RUN_ID);
+              expect(resumed.landing).toMatchObject({ state: "landed", errorCode: null });
+              expect(
+                resumed.httpRequests.filter((row) => row.kind === "github.pull_request.post"),
+              ).toHaveLength(1);
+              expect(resumed.receipt?.pullRequestOutcome).toBe("reconciled");
+              const receiptJson = canonicalLandingJson(resumed.receipt);
+              const requestsBefore = loopback.requests.length;
+              await expect(runtime.service.resumeLanding(RUN_ID)).rejects.toMatchObject({
+                code: "INVALID_LANDING_STATE",
+              });
+              expect(loopback.requests).toHaveLength(requestsBefore);
+              expect(canonicalLandingJson(runtime.service.getLandingStatus(RUN_ID)?.receipt)).toBe(
+                receiptJson,
+              );
+              expect(
+                readFileSync(fixture.databasePath).includes(Buffer.from(PREFLIGHT_TOKEN)),
+              ).toBe(false);
+              expect(fixture.requests()).toBe(0);
+              return;
+            }
+            // The complete empty list proves the lost POST had no effect, but
+            // the spent admission forbids the retry mapping: the landing holds
+            // for the operator, and a further resume still admits no POST.
+            const held = await runtime.service.resumeLanding(RUN_ID);
+            expect(held.landing).toMatchObject({
+              state: "reconciliation_required",
+              resumeState: "remote_ready",
+            });
+            expect(held.receipt).toBeNull();
+            const heldAgain = await runtime.service.resumeLanding(RUN_ID);
+            expect(heldAgain.landing).toMatchObject({
+              state: "reconciliation_required",
+              resumeState: "remote_ready",
+            });
+            expect(
+              heldAgain.httpRequests.filter((row) => row.kind === "github.pull_request.post"),
+            ).toHaveLength(1);
+            expect(loopback.requests.filter((request) => request.method === "POST")).toHaveLength(
+              0,
+            );
+            expect(fixture.requests()).toBe(0);
+          } finally {
+            runtime.close();
+            await loopback.server.close();
+          }
+        }, 60_000);
+      }
+
+      test("crash before the draft-PR settlement commit replays the receipt exactly once", async () => {
+        const fixture = await createRealFixture();
+        await approveLanding(fixture);
+        const marker = await crashAt(fixture, CrashPhase.DraftPrBeforeSettlement);
+        expect(marker.detail).toMatchObject({
+          boundary: "before-operation-settlement",
+          kind: "github.pull_request.create",
+        });
+
+        const crashed = (() => {
+          const probe = new IcarusStore(fixture.databasePath, { now: () => NOW });
+          try {
+            const interrupted = probe.getLandingStatusForRun(RUN_ID);
+            // The POST and its suffix reads are settled; the settlement
+            // transaction — operation, receipt, and the landed transition —
+            // never committed, so no receipt exists yet.
+            expect(interrupted?.landing).toMatchObject({
+              state: "opening_draft_pr",
+              errorCode: null,
+            });
+            expect(interrupted?.receipt).toBeNull();
+            expect(interrupted?.operations.at(-1)).toMatchObject({
+              kind: "github.pull_request.create",
+              status: "started",
+            });
+            const post = interrupted?.httpRequests.find(
+              (row) => row.kind === "github.pull_request.post",
+            );
+            expect(post).toMatchObject({ status: "settled", outcome: "succeeded" });
+            return {
+              candidateCommitSha1: interrupted?.landing.candidateCommitSha1 ?? "",
+              pullRequestTitle: interrupted?.landing.pullRequestTitle ?? "",
+              pullRequestBody: probe.getRunLandingProjection(RUN_ID).landing?.pullRequestBody ?? "",
+            };
+          } finally {
+            probe.close();
+          }
+        })();
+
+        const { runtime, loopback } = await reopenPreflightWithLoopback(fixture, {
+          remoteRefs: { [fixture.headRef]: crashed.candidateCommitSha1 },
+          initialPullRequest: {
+            title: crashed.pullRequestTitle,
+            body: crashed.pullRequestBody,
+            number: 701,
+          },
+        });
+        try {
+          const resumed = await runtime.service.resumeLanding(RUN_ID);
+          expect(resumed.landing).toMatchObject({ state: "landed", errorCode: null });
+          // Exactly one POST and exactly one receipt over the whole recovery:
+          // the reconciliation proof, not the settled POST response, writes it.
+          expect(
+            resumed.httpRequests.filter((row) => row.kind === "github.pull_request.post"),
+          ).toHaveLength(1);
+          expect(resumed.receipt?.pullRequestOutcome).toBe("reconciled");
+          const receiptJson = canonicalLandingJson(resumed.receipt);
+          const requestsBefore = loopback.requests.length;
+          await expect(runtime.service.resumeLanding(RUN_ID)).rejects.toMatchObject({
+            code: "INVALID_LANDING_STATE",
+          });
+          expect(loopback.requests).toHaveLength(requestsBefore);
+          expect(canonicalLandingJson(runtime.service.getLandingStatus(RUN_ID)?.receipt)).toBe(
+            receiptJson,
+          );
+          expect(fixture.requests()).toBe(0);
+        } finally {
+          runtime.close();
+          await loopback.server.close();
+        }
+      }, 60_000);
+
+      test("crash after the draft-PR settlement commit leaves landed terminal with its receipt durable", async () => {
+        const fixture = await createRealFixture();
+        await approveLanding(fixture);
+        const marker = await crashAt(fixture, CrashPhase.DraftPrAfterSettlement);
+        expect(marker.detail).toMatchObject({
+          boundary: "after-operation-settlement",
+          kind: "github.pull_request.create",
+        });
+
+        const receiptJson = (() => {
+          const probe = new IcarusStore(fixture.databasePath, { now: () => NOW });
+          try {
+            const landed = probe.getLandingStatusForRun(RUN_ID);
+            expect(landed?.landing).toMatchObject({ state: "landed", errorCode: null });
+            expect(landed?.operations.at(-1)).toMatchObject({
+              kind: "github.pull_request.create",
+              status: "completed",
+            });
+            expect(landed?.receipt?.pullRequestOutcome).toBe("created");
+            return canonicalLandingJson(landed?.receipt);
+          } finally {
+            probe.close();
+          }
+        })();
+
+        const { runtime, loopback } = await reopenPreflightWithLoopback(fixture);
+        try {
+          const reloaded = runtime.service.getLandingStatus(RUN_ID);
+          expect(reloaded?.landing.state).toBe("landed");
+          // The receipt reloads byte-identically and resume refuses without
           // any new admission or remote call.
+          expect(canonicalLandingJson(reloaded?.receipt)).toBe(receiptJson);
           await expect(runtime.service.resumeLanding(RUN_ID)).rejects.toMatchObject({
             code: "INVALID_LANDING_STATE",
           });

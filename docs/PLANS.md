@@ -693,6 +693,57 @@ both remote answers (absent and exact) and the proof that an interrupted
 upload replays byte-identically with no second ref creation. No live GitHub
 call exists anywhere in tests.
 
+### Packet 4b sub-slice record — S2b-ii-c draft PR + landing receipt
+
+Status: **IMPLEMENTED (draft-PR creation and the immutable receipt; the
+presentation chain remains fenced).** This is the final runtime sub-slice of
+Packet 4b. It admits `remote_ready` and opens exactly one operation kind,
+`github.pull_request.create`, plus the `landed` state and the
+`landing_receipts` write.
+
+What exists now: an explicit `landing resume` at `remote_ready` runs the
+preflight with its fourth grammar member — the complete empty pull-request
+list under `pull_requests.get` — and then the draft-PR stage in the same
+attempt: the exact base, the exact candidate head, and the prior-absence
+proof commit durably before the one POST is admitted. The POST is admitted
+**at most once per landing, ever**: the `one_create_pr_post_per_landing`
+unique index refuses a second row at write, the store-level invariant survey
+refuses any load that lost that discipline, and a lost or contradicted
+response is never retried — only the fixed post-read suffix (base, head, and
+a fresh complete list) decides. `created` versus `reconciled` is
+evidence-derived from the durable rows, never caller-chosen; a definitive
+pre-POST refusal (conflict, missing head, drifted base) fails back to
+`remote_ready` for an explicit retry with the admission unspent, while a
+spent admission without proof holds `reconciliation_required` with the
+honestly derived residue. The receipt commits in the settlement's one
+transaction — insert `landing_receipts` (the canonical LandingReceiptV1
+digest; metadata and digests only, never credentials, paths, or text), settle
+the operation, append the event, transition to `landed` — so a crash anywhere
+around it replays to exactly one receipt. `landed` is terminal: resume
+refuses with zero network and the stored receipt reloads byte-identically.
+One contract decision is recorded here: the PR-POST `head` field is
+owner-qualified (`owner:branch`) on the wire, aligning the gateway to the
+record contract's spelling rather than bending the record to the earlier
+bare-branch accident. ADR 0043's two open questions (head-filter case
+sensitivity, page size against the response ceiling) remain open and still
+fail closed: a case-sensitive filter would surface as a 422 refusal and an
+operator hold, never a duplicate pull request; the live observation that
+settles them belongs to S3.
+
+What remains: S2b-iii (receipt presentation through the four-file
+presentation chain) and S3 (the live-evidence profile plus the operator's
+credentialed 3/3 run — only that closes Gate 1).
+
+Evidence: the store-level suite pins the admission, settlement, residue, and
+one-POST-ever invariants; the coordinator suite drives the full chain to
+`landed`, the refusal/conflict/ambiguity holds, credential and platform
+gates, and hostile-error redaction through a fake gateway. The crash matrix
+adds five draft-PR phases — before the POST admission, during the POST under
+both remote answers (absent and exact), and both sides of the settlement
+commit that carries the receipt — each reopened and resumed with
+exactly-one-POST, receipt-idempotence, and zero-real-network assertions. No
+live GitHub call exists anywhere in tests.
+
 ## Released Gate 0 baseline: ADR 0026 slice 2b production wiring
 
 Status: **MERGED AND RELEASED AT THE GATE 0 RELEASE HEAD**. The corrected ADR 0026

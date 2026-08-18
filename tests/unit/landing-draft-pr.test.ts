@@ -635,13 +635,7 @@ function startStorePullRequest(
   const started = store.startGithubPullRequest(landingId);
   settleRead(store, landingId, started.operationId, "github.actor.get", ACTOR_PROJECTION);
   settleRead(store, landingId, started.operationId, "github.base_ref.get", BASE_PROJECTION);
-  settleRead(
-    store,
-    landingId,
-    started.operationId,
-    "github.head_ref.get",
-    HEAD_DIRECT_PROJECTION,
-  );
+  settleRead(store, landingId, started.operationId, "github.head_ref.get", HEAD_DIRECT_PROJECTION);
   settleRead(
     store,
     landingId,
@@ -665,8 +659,7 @@ function settleStorePullRequestPost(
   store.settleGithubRequest(landingId, admission.requestId, {
     outcome,
     httpStatus: outcome === "succeeded" ? 201 : null,
-    projection:
-      outcome === "succeeded" ? pullRequestProjection(store, status) : (null as never),
+    projection: outcome === "succeeded" ? pullRequestProjection(store, status) : (null as never),
     errorCode: outcome === "succeeded" ? null : "GITHUB_OUTCOME_AMBIGUOUS",
   });
   return admission.requestId;
@@ -907,7 +900,13 @@ describe("durable draft pull-request store slice", () => {
     settleDraftPrPreflightForChain(fixture.store, landingId);
     const started = fixture.store.startGithubPullRequest(landingId);
     settleRead(fixture.store, landingId, started.operationId, "github.actor.get", ACTOR_PROJECTION);
-    settleRead(fixture.store, landingId, started.operationId, "github.base_ref.get", BASE_PROJECTION);
+    settleRead(
+      fixture.store,
+      landingId,
+      started.operationId,
+      "github.base_ref.get",
+      BASE_PROJECTION,
+    );
     settleRead(
       fixture.store,
       landingId,
@@ -1108,9 +1107,9 @@ describe("durable draft pull-request store slice", () => {
       value: { remoteResidue: "branch" },
     });
     expect(held.receipt).toBeNull();
-    expect(
-      held.httpRequests.filter((row) => row.kind === "github.pull_request.post"),
-    ).toHaveLength(1);
+    expect(held.httpRequests.filter((row) => row.kind === "github.pull_request.post")).toHaveLength(
+      1,
+    );
     fixture.store.close();
   });
 
@@ -1202,7 +1201,13 @@ describe("durable draft pull-request store slice", () => {
     fixture.store.admitLandingResume(landingId);
     const started = fixture.store.startGithubPreflight(landingId);
     settleRead(fixture.store, landingId, started.operationId, "github.actor.get", ACTOR_PROJECTION);
-    settleRead(fixture.store, landingId, started.operationId, "github.base_ref.get", BASE_PROJECTION);
+    settleRead(
+      fixture.store,
+      landingId,
+      started.operationId,
+      "github.base_ref.get",
+      BASE_PROJECTION,
+    );
     settleRead(
       fixture.store,
       landingId,
@@ -1233,9 +1238,7 @@ describe("durable draft pull-request store slice", () => {
       closeAttempt: false,
     });
     const status = fixture.store.getLandingStatus(landingId);
-    const preflight = status.operations.find(
-      (operation) => operation.id === started.operationId,
-    );
+    const preflight = status.operations.find((operation) => operation.id === started.operationId);
     expect(preflight?.result).toMatchObject({
       outcome: "completed",
       value: { headState: "exact", pullRequestCount: 0 },
@@ -1402,28 +1405,29 @@ function fakePrGateway(behavior: PrGatewayBehavior = {}): {
         remote.refs.set(ref, sha);
         return { ref, sha, responseSha256: sha256("ref-bytes"), latencyMs: 1 };
       },
-      createDraftPullRequest:
-        behavior.createDraftPullRequest ??
-        (async (_coordinates, input) => {
-          calls.push("pr_post");
-          const headSha1 = remote.refs.get(input.headRef);
-          if (headSha1 === undefined) {
-            throw new Error("The fake remote lost the landing head ref");
-          }
-          remote.pr = {
-            number: PULL_REQUEST_NUMBER,
-            title: input.title,
-            body: input.body,
-            headRef: input.headRef,
-            baseBranch: input.baseBranch,
-            headSha1,
-            baseSha1: remote.baseSha1,
-            state: "open",
-            isDraft: true,
-            maintainerCanModify: false,
-          };
-          return prReceiptFromStored(remote.pr);
-        }),
+      createDraftPullRequest: async (coordinates, input) => {
+        calls.push("pr_post");
+        if (behavior.createDraftPullRequest !== undefined) {
+          return behavior.createDraftPullRequest(coordinates, input);
+        }
+        const headSha1 = remote.refs.get(input.headRef);
+        if (headSha1 === undefined) {
+          throw new Error("The fake remote lost the landing head ref");
+        }
+        remote.pr = {
+          number: PULL_REQUEST_NUMBER,
+          title: input.title,
+          body: input.body,
+          headRef: input.headRef,
+          baseBranch: input.baseBranch,
+          headSha1,
+          baseSha1: remote.baseSha1,
+          state: "open",
+          isDraft: true,
+          maintainerCanModify: false,
+        };
+        return prReceiptFromStored(remote.pr);
+      },
     };
   };
   return { factory, calls, credentials, remote };
@@ -1618,26 +1622,30 @@ describe("landing service draft pull-request stage", () => {
     await service.resumeLanding(UNIT_RUN_ID);
 
     // The operator's repository already has a conforming pull request on this
-    // head (built from the landing's own derived bytes).
+    // head (built from the landing's own derived bytes). A real remote always
+    // has the branch its pull request sits on, so the conflicting remote
+    // carries the head ref too.
     const projection = fixture.store.getRunLandingProjection(UNIT_RUN_ID).landing;
     const body = projection?.pullRequestBody;
     expect(typeof body).toBe("string");
+    const conflictingGateway = fakePrGateway({
+      readPullRequestByHead: async () =>
+        prReceiptFromStored({
+          number: 11,
+          title: PULL_REQUEST_TITLE,
+          body: body ?? "",
+          headRef: LANDING_HEAD_REF,
+          baseBranch: "main",
+          headSha1: CANDIDATE_COMMIT_SHA1,
+          baseSha1: UNIT_BASE_COMMIT,
+          state: "open",
+          isDraft: true,
+          maintainerCanModify: false,
+        }),
+    });
+    conflictingGateway.remote.refs.set(LANDING_HEAD_REF, CANDIDATE_COMMIT_SHA1);
     const conflicting = await draftPrService(fixture, {
-      gateway: fakePrGateway({
-        readPullRequestByHead: async () =>
-          prReceiptFromStored({
-            number: 11,
-            title: PULL_REQUEST_TITLE,
-            body: body ?? "",
-            headRef: LANDING_HEAD_REF,
-            baseBranch: "main",
-            headSha1: CANDIDATE_COMMIT_SHA1,
-            baseSha1: UNIT_BASE_COMMIT,
-            state: "open",
-            isDraft: true,
-            maintainerCanModify: false,
-          }),
-      }).factory,
+      gateway: conflictingGateway.factory,
     });
     const failed = await conflicting.resumeLanding(UNIT_RUN_ID);
     expect(failed.landing).toMatchObject({
@@ -1678,7 +1686,10 @@ describe("landing service draft pull-request stage", () => {
           isDraft: true,
           maintainerCanModify: false,
         };
-        return prReceiptFromStored({ ...gateway.remote.pr, title: "a contradicting upstream title" });
+        return prReceiptFromStored({
+          ...gateway.remote.pr,
+          title: "a contradicting upstream title",
+        });
       },
     });
     const service = await draftPrService(fixture, { gateway: gateway.factory });

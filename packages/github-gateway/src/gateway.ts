@@ -758,10 +758,10 @@ function sha256Hex(value: string): string {
 /** Counts the reserved landing-marker occurrences in a pull-request body. */
 function countLandingMarkers(body: string): number {
   let count = 0;
-  let index = 0;
-  while ((index = body.indexOf(LANDING_MARKER_PREFIX, index)) !== -1) {
+  let index = body.indexOf(LANDING_MARKER_PREFIX);
+  while (index !== -1) {
     count += 1;
-    index += LANDING_MARKER_PREFIX.length;
+    index = body.indexOf(LANDING_MARKER_PREFIX, index + LANDING_MARKER_PREFIX.length);
   }
   return count;
 }
