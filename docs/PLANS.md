@@ -1773,6 +1773,18 @@ Final adversarial candidate local evidence on 2026-07-20:
 - Hosted `ci` run 29719143172 passed all jobs in 50 seconds at exact
   implementation commit `c56bd9e4026a9c09649110fe1133aea3799f90b6`.
 
+## E1 model probes (2026-08-18)
+
+The measurement-only `icarus probe` verb characterizes a configured
+provider/model (structured throughput, context anchor recall with truncation
+suspicion, closed-schema compliance) through the production gateway and emits a
+schema-versioned row. It adds no execution, approval, landing, or grant
+authority, and exists so fleet seats measure models through one governed
+contract instead of ad-hoc external harnesses. Evidence: unit suite
+`tests/unit/probe.test.ts` (15 tests) and integration suite
+`tests/integration/probe-cli.test.ts` (3 tests) over the loopback provider
+contract.
+
 ## Deferred plan
 
 ADR 0025 resolved ADR 0010 by hardening; its third-party review and secret

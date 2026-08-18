@@ -620,6 +620,33 @@ preserve the state and require explicit operator recovery.
   rejects remote, LAN, Tailscale, public, OpenAI, and other cloud endpoints
   before persisting the draft; the broader CLI provider contract is unchanged.
 
+## Model probes
+
+`icarus probe throughput|context|structured --model MODEL` measures a configured
+provider/model through the production structured-generation adapter and prints
+one schema-versioned JSON measurement row (`schemaVersion: 1`). Probes execute
+no repository code, use no worktree or sandbox, and carry no approval or grant
+authority; their entire effect is one HTTP conversation with the configured
+provider and a printed row. Probe results are measurements, never verification
+evidence.
+
+- `throughput` reports structured-generation tokens per second from
+  provider-reported counts only; it refuses to fabricate a rate when the
+  provider omits token counts.
+- `context` synthesizes a deterministic corpus of `--target-input-tokens` with
+  anchors at the start, interior, and tail, then checks anchor recall and the
+  provider-reported consumed-input count. Losing the start anchor while keeping
+  the end anchor, or consuming under half the estimated input, sets
+  `truncationSuspected` — silent front truncation surfaces instead of passing.
+- `structured` measures closed-schema compliance across `--repeat` attempts.
+
+Tool-call probing is deliberately unsupported: the gateway exposes structured
+generation only, so it is reported as unsupported rather than approximated. A
+run that completes its measurement exits `0` even when attempts fail (the
+failures are the measurement); invalid arguments exit `2`. Before probing a
+large local model, verify host memory headroom first — loading a model that
+does not fit can destabilize the host, and the probe does not check for room.
+
 ## GitHub gateway (Packet 4a package; S2b-ii coordinator wiring)
 
 `packages/github-gateway` is imported by `@icarus/core`'s landing coordinator.
