@@ -110,9 +110,24 @@ export interface ProbeResultV1 {
   readonly aggregate: ProbeAggregate;
 }
 
+// A provider as *requested*, not as validated. An unsupported probe never
+// connects, so it must be describable without pricing, credentials, or a URL
+// policy check — that is exactly what made the previous implementation
+// provider-dependent: config construction ran first and rejected remote
+// providers before the unsupported answer could be given.
+export interface ProbeProviderDescriptor {
+  readonly kind: string;
+  readonly baseUrl: string;
+  readonly model: string;
+}
+
 export interface ProbeRuntime {
   readonly now?: () => Date;
   readonly createId?: () => string;
+}
+
+export function isUnsupportedProbeKind(kind: string): kind is UnsupportedProbeKind {
+  return (UNSUPPORTED_PROBE_KINDS as readonly string[]).includes(kind);
 }
 
 export function createProbeRequest(input: {
@@ -521,6 +536,51 @@ function aggregate(
   };
 }
 
+export function unsupportedProbeResult(
+  request: ProbeRequest,
+  provider: ProbeProviderDescriptor,
+  runtime: ProbeRuntime = {},
+): ProbeResultV1 {
+  invariant(
+    isUnsupportedProbeKind(request.kind),
+    "INVALID_PROBE",
+    "unsupportedProbeResult requires a recognized unsupported probe kind",
+  );
+  // The descriptor is echoed, never connected to. Validate only what keeps the
+  // emitted row well-formed; pricing and credential policy deliberately do not
+  // apply to an answer that contacts nothing.
+  invariant(
+    provider.model.trim().length > 0 &&
+      provider.model.length <= 256 &&
+      !/[\r\n\0]/.test(provider.model),
+    "INVALID_MODEL",
+    "Model ID is invalid",
+  );
+  const now = runtime.now ?? (() => new Date());
+  const createId = runtime.createId ?? randomUUID;
+  return {
+    schemaVersion: PROBE_RESULT_SCHEMA_VERSION,
+    probeId: createId(),
+    startedAt: now().toISOString(),
+    status: "unsupported",
+    unsupportedReason: UNSUPPORTED_PROBE_REASONS[request.kind],
+    probe: request,
+    provider: {
+      kind: provider.kind,
+      baseUrl: provider.baseUrl,
+      model: provider.model,
+    },
+    attempts: [],
+    aggregate: {
+      attemptCount: 0,
+      okCount: 0,
+      meanOutputTokensPerSecond: null,
+      minConsumedInputRatio: null,
+      truncationSuspected: null,
+    },
+  };
+}
+
 export async function runProbe(
   gateway: ModelGateway,
   request: ProbeRequest,
@@ -529,31 +589,13 @@ export async function runProbe(
 ): Promise<ProbeResultV1> {
   const now = runtime.now ?? (() => new Date());
   const createId = runtime.createId ?? randomUUID;
+  if (isUnsupportedProbeKind(request.kind)) {
+    // Programmatic callers that already hold a gateway still get the same row
+    // from the same builder the CLI uses pre-construction.
+    return unsupportedProbeResult(request, gateway.config, runtime);
+  }
   const probeId = createId();
   const startedAt = now().toISOString();
-  if ((UNSUPPORTED_PROBE_KINDS as readonly string[]).includes(request.kind)) {
-    return {
-      schemaVersion: PROBE_RESULT_SCHEMA_VERSION,
-      probeId,
-      startedAt,
-      status: "unsupported",
-      unsupportedReason: UNSUPPORTED_PROBE_REASONS[request.kind as UnsupportedProbeKind],
-      probe: request,
-      provider: {
-        kind: gateway.config.kind,
-        baseUrl: gateway.config.baseUrl,
-        model: gateway.config.model,
-      },
-      attempts: [],
-      aggregate: {
-        attemptCount: 0,
-        okCount: 0,
-        meanOutputTokensPerSecond: null,
-        minConsumedInputRatio: null,
-        truncationSuspected: null,
-      },
-    };
-  }
   const attempts: ProbeAttempt[] = [];
   for (let attempt = 1; attempt <= request.repeat; attempt += 1) {
     let result: ProbeAttempt;

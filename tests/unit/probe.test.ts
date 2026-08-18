@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { IcarusError } from "../../packages/core/src/errors.js";
-import { buildContextCorpus, createProbeRequest, runProbe } from "../../packages/core/src/probe.js";
+import {
+  buildContextCorpus,
+  createProbeRequest,
+  runProbe,
+  unsupportedProbeResult,
+} from "../../packages/core/src/probe.js";
 import type {
   ModelGateway,
   StructuredGenerationRequest,
@@ -222,6 +227,33 @@ describe("unsupported probe kinds", () => {
     expect(result.aggregate.attemptCount).toBe(0);
     expect(result.aggregate.okCount).toBe(0);
     expect(gateway.requests).toHaveLength(0);
+  });
+
+  it("builds an unsupported row from a raw descriptor without any provider validation, so remote providers answer identically", () => {
+    const request = createProbeRequest({ kind: "tool-call" });
+    const row = unsupportedProbeResult(
+      request,
+      { kind: "openai", baseUrl: "https://api.openai.com/v1/", model: "gpt-4o" },
+      RUNTIME,
+    );
+    expect(row.status).toBe("unsupported");
+    expect(row.provider).toEqual({
+      kind: "openai",
+      baseUrl: "https://api.openai.com/v1/",
+      model: "gpt-4o",
+    });
+    expect(row.attempts).toHaveLength(0);
+  });
+
+  it("refuses to build an unsupported row for a supported kind, so the two paths cannot be confused", () => {
+    const request = createProbeRequest({ kind: "throughput" });
+    expect(() =>
+      unsupportedProbeResult(
+        request,
+        { kind: "ollama", baseUrl: "http://x/", model: "m" },
+        RUNTIME,
+      ),
+    ).toThrowError(/recognized unsupported probe kind/);
   });
 
   it("still rejects genuinely unknown kinds so typos stay loud", () => {

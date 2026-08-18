@@ -643,7 +643,11 @@ evidence.
 - `structured` measures closed-schema compliance across `--repeat` attempts.
 
 `icarus probe tool-call` returns an explicit unsupported result
-(`status: "unsupported"`, a machine-readable reason, zero attempts, exit `0`):
+(`status: "unsupported"`, a machine-readable reason, zero attempts, exit `0`)
+**for every provider**, including remote ones with no credential and no
+configured pricing: recognized-but-unsupported kinds are answered before any
+provider configuration is constructed, so the answer never depends on the
+provider it never contacts.
 the gateway exposes structured generation only, so tool-call behavior is
 reported as unsupported rather than approximated or rejected as a usage error.
 A run that completes its measurement exits `0` even when attempts fail (the
