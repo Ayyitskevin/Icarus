@@ -22,6 +22,22 @@ const treeSha = "2".repeat(40);
 const blobSha = "3".repeat(40);
 const GIT_INSTANT = "2026-07-19T12:00:00Z";
 
+/** A complete GitHub pull-request response entry; tests override what they vary. */
+function pullRequestEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    number: 9,
+    draft: true,
+    state: "open",
+    merged_at: null,
+    title: "Icarus candidate",
+    body: "evidence",
+    maintainer_can_modify: false,
+    head: { ref: `icarus/${runId}`, sha: commitSha },
+    base: { ref: "main", sha: treeSha },
+    ...overrides,
+  };
+}
+
 async function expectCode(promise: Promise<unknown>, code: string): Promise<GithubGatewayError> {
   try {
     await promise;
@@ -220,7 +236,7 @@ describe("GithubGateway HTTP contract", () => {
 
   it("always opens the pull request as a draft", async () => {
     server = await startProviderHttpServer((_request, response) => {
-      sendProviderJson(response, 201, { number: 42, draft: true, state: "open" });
+      sendProviderJson(response, 201, pullRequestEntry({ number: 42 }));
     });
 
     const receipt = await gatewayFor(server).createDraftPullRequest(coordinates, {
@@ -230,12 +246,21 @@ describe("GithubGateway HTTP contract", () => {
       baseBranch: "main",
     });
 
-    expect(receipt).toMatchObject({ number: 42, isDraft: true, state: "open" });
+    expect(receipt).toMatchObject({
+      number: 42,
+      isDraft: true,
+      state: "open",
+      headSha1: commitSha,
+      baseSha1: treeSha,
+      markerCount: 0,
+      maintainerCanModify: false,
+    });
     expect(receipt.htmlUrl).toBe("https://github.com/ayyitskevin/icarus/pull/42");
+    // The owner-qualified head is the record contract's exact wire form.
     expect(parseProviderRequestBody(server.requests[0] as CapturedProviderRequest)).toEqual({
       title: "Icarus candidate",
       body: "evidence",
-      head: `icarus/${runId}`,
+      head: `ayyitskevin:icarus/${runId}`,
       base: "main",
       draft: true,
       maintainer_can_modify: false,
@@ -244,7 +269,7 @@ describe("GithubGateway HTTP contract", () => {
 
   it("refuses a pull request GitHub did not record as a draft", async () => {
     server = await startProviderHttpServer((_request, response) => {
-      sendProviderJson(response, 201, { number: 42, draft: false, state: "open" });
+      sendProviderJson(response, 201, pullRequestEntry({ number: 42, draft: false }));
     });
 
     await expectCode(
@@ -260,12 +285,7 @@ describe("GithubGateway HTTP contract", () => {
 
   it("reconstructs the pull request URL instead of echoing the response", async () => {
     server = await startProviderHttpServer((_request, response) => {
-      sendProviderJson(response, 201, {
-        number: 7,
-        draft: true,
-        state: "open",
-        html_url: "https://evil.test/phish",
-      });
+sendProviderJson(response, 201, pullRequestEntry({ number: 7, html_url: "https://evil.test/phish" }));
     });
 
     const receipt = await gatewayFor(server).createDraftPullRequest(coordinates, {
@@ -302,16 +322,7 @@ describe("GithubGateway HTTP contract", () => {
 
   it("finds an existing draft pull request by head for idempotent retry", async () => {
     server = await startProviderHttpServer((_request, response) => {
-      sendProviderJson(response, 200, [
-        {
-          number: 9,
-          draft: true,
-          state: "open",
-          base: { ref: "main" },
-          head: { ref: `icarus/${runId}` },
-          merged_at: null,
-        },
-      ]);
+sendProviderJson(response, 200, [pullRequestEntry({ number: 9 })]);
     });
 
     const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
@@ -330,16 +341,7 @@ describe("GithubGateway HTTP contract", () => {
     // Reconciliation must locate the existing pull request rather than refuse
     // it, or an interrupted attempt would open a second one.
     server = await startProviderHttpServer((_request, response) => {
-      sendProviderJson(response, 200, [
-        {
-          number: 11,
-          draft: false,
-          state: "open",
-          base: { ref: "main" },
-          head: { ref: `icarus/${runId}` },
-          merged_at: null,
-        },
-      ]);
+sendProviderJson(response, 200, [pullRequestEntry({ number: 11, draft: false })]);
     });
 
     const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
@@ -349,14 +351,12 @@ describe("GithubGateway HTTP contract", () => {
 
   it("refuses a listed pull request whose head or base is not the one requested", async () => {
     for (const entry of [
-      { base: { ref: "release" }, head: { ref: `icarus/${runId}` } },
-      { base: { ref: "main" }, head: { ref: "someone-elses-branch" } },
+      { base: { ref: "release", sha: treeSha } },
+      { head: { ref: "someone-elses-branch", sha: commitSha } },
     ]) {
       await server?.close();
       server = await startProviderHttpServer((_request, response) => {
-        sendProviderJson(response, 200, [
-          { number: 3, draft: true, state: "open", merged_at: null, ...entry },
-        ]);
+        sendProviderJson(response, 200, [pullRequestEntry({ number: 3, ...entry })]);
       });
 
       await expectCode(
@@ -368,16 +368,7 @@ describe("GithubGateway HTTP contract", () => {
 
   it("distinguishes a merged pull request from an abandoned one", async () => {
     server = await startProviderHttpServer((_request, response) => {
-      sendProviderJson(response, 200, [
-        {
-          number: 12,
-          draft: false,
-          state: "closed",
-          base: { ref: "main" },
-          head: { ref: `icarus/${runId}` },
-          merged_at: "2026-08-08T04:00:00Z",
-        },
-      ]);
+sendProviderJson(response, 200, [pullRequestEntry({ number: 12, draft: false, state: "closed", merged_at: "2026-08-08T04:00:00Z" })]);
     });
 
     const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
@@ -503,22 +494,10 @@ describe("GithubGateway HTTP contract", () => {
     // entry among many closed ones is still unambiguous.
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, [
-        {
-          number: 1,
-          draft: true,
-          state: "open",
-          base: { ref: "main" },
-          head: { ref: `icarus/${runId}` },
-          merged_at: null,
-        },
-        ...Array.from({ length: 99 }, (_value, index) => ({
-          number: index + 2,
-          draft: true,
-          state: "closed",
-          base: { ref: "main" },
-          head: { ref: `icarus/${runId}` },
-          merged_at: null,
-        })),
+        pullRequestEntry({ number: 1 }),
+        ...Array.from({ length: 99 }, (_value, index) =>
+          pullRequestEntry({ number: index + 2, state: "closed" }),
+        ),
       ]);
     });
 
@@ -547,22 +526,8 @@ describe("GithubGateway HTTP contract", () => {
     // open. Requiring exactly one would deadlock the run permanently.
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, [
-        {
-          number: 5,
-          draft: true,
-          state: "closed",
-          base: { ref: "main" },
-          head: { ref: `icarus/${runId}` },
-          merged_at: null,
-        },
-        {
-          number: 6,
-          draft: true,
-          state: "open",
-          base: { ref: "main" },
-          head: { ref: `icarus/${runId}` },
-          merged_at: null,
-        },
+        pullRequestEntry({ number: 5, state: "closed" }),
+        pullRequestEntry({ number: 6 }),
       ]);
     });
 
@@ -615,14 +580,7 @@ describe("GithubGateway HTTP contract", () => {
       sendProviderJson(
         response,
         200,
-        Array.from({ length: 2 }, (_value, index) => ({
-          number: index + 1,
-          draft: true,
-          state: "open",
-          base: { ref: "main" },
-          head: { ref: `icarus/${runId}` },
-          merged_at: null,
-        })),
+Array.from({ length: 2 }, (_value, index) => pullRequestEntry({ number: index + 1 })),
       );
     });
 
@@ -635,22 +593,8 @@ describe("GithubGateway HTTP contract", () => {
   it("fails closed when more than one pull request matches the exact head", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, [
-        {
-          number: 1,
-          draft: true,
-          state: "open",
-          base: { ref: "main" },
-          head: { ref: `icarus/${runId}` },
-          merged_at: null,
-        },
-        {
-          number: 2,
-          draft: true,
-          state: "open",
-          base: { ref: "main" },
-          head: { ref: `icarus/${runId}` },
-          merged_at: null,
-        },
+        pullRequestEntry({ number: 1 }),
+        pullRequestEntry({ number: 2 }),
       ]);
     });
 

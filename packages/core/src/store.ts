@@ -1648,6 +1648,10 @@ export class IcarusStore {
     return this.#landingLedger.startGithubRemoteRef(landingId);
   }
 
+  startGithubPullRequest(landingId: string): LandingOperationAdmissionV1 {
+    return this.#landingLedger.startGithubPullRequest(landingId);
+  }
+
   admitGithubRequest(
     landingId: string,
     operationId: string,
@@ -1686,6 +1690,13 @@ export class IcarusStore {
     return this.#landingLedger.settleGithubRemoteRef(landingId, input);
   }
 
+  settleGithubPullRequest(
+    landingId: string,
+    input: GithubEffectSettlementInputV1,
+  ): LandingStatusV1 {
+    return this.#landingLedger.settleGithubPullRequest(landingId, input);
+  }
+
   settleObjectUploadReconciliation(
     landingId: string,
     input: GithubReconciliationSettlementInputV1,
@@ -1698,6 +1709,13 @@ export class IcarusStore {
     input: GithubReconciliationSettlementInputV1,
   ): LandingStatusV1 {
     return this.#landingLedger.settleRemoteRefReconciliation(landingId, input);
+  }
+
+  settlePullRequestReconciliation(
+    landingId: string,
+    input: GithubReconciliationSettlementInputV1,
+  ): LandingStatusV1 {
+    return this.#landingLedger.settlePullRequestReconciliation(landingId, input);
   }
 
   getLandingStatus(landingId: string): LandingStatusV1 {
