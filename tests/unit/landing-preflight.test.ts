@@ -1316,6 +1316,9 @@ function fakeGithubGateway(
         if (receipt.ref !== undefined) remoteRefs.set(receipt.ref, receipt.sha);
         return receipt;
       },
+      createDraftPullRequest: async () => {
+        throw new Error("Pull-request creation is exercised in the draft-PR slice tests");
+      },
     };
   };
   return { factory, calls, credentials };

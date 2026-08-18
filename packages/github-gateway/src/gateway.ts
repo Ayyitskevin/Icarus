@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { GithubGatewayError, invariant } from "./errors.js";
 import { type GithubHttpResponse, sendGithubRequest } from "./http.js";
 import {
@@ -14,6 +16,7 @@ import {
   assertTreePath,
   branchNameForRef,
   type GithubCommitParty,
+  MAX_PULL_REQUEST_BODY_BYTES,
 } from "./identifiers.js";
 import {
   buildOperationUrl,
@@ -92,6 +95,18 @@ export interface GithubPullRequestReceipt extends GithubReceipt {
   readonly state: string;
   readonly headRef: string;
   readonly baseBranch: string;
+  /** The exact object names the response reports for the head and base. */
+  readonly headSha1: string;
+  readonly baseSha1: string;
+  /**
+   * Digests of the reported title and body, plus the count of reserved landing
+   * markers in the body. The coordinator's exact-proof needs these, and the
+   * upstream text itself never leaves this package.
+   */
+  readonly titleSha256: string;
+  readonly bodySha256: string;
+  readonly markerCount: number;
+  readonly maintainerCanModify: boolean;
   /** Reconstructed from validated components; never echoed from the response. */
   readonly htmlUrl: string;
 }
@@ -476,14 +491,15 @@ export class GithubGateway {
     const baseBranch = assertBaseBranch(input.baseBranch);
     const response = await this.#call("create_draft_pull_request", coordinates, {
       // Ascending-ASCII key order: the wire bytes must equal the canonical
-      // serialization the landing ledger binds with `bodySha256`.
+      // serialization the landing ledger binds with `bodySha256`. The head is
+      // owner-qualified exactly as the record contract spells it.
       body: {
         base: baseBranch,
         body: assertBody(input.body),
         // A literal, never a parameter: this gateway cannot open a ready pull
         // request.
         draft: true,
-        head: headBranch,
+        head: `${coordinates.owner}:${headBranch}`,
         maintainer_can_modify: false,
         title: assertTitle(input.title),
       },
@@ -686,6 +702,31 @@ export class GithubGateway {
       "GitHub pull request response has an unreadable merge timestamp",
       { status: response.status, responseSha256: response.bodySha256 },
     );
+    const head = asNestedObject(object.head, response, "GitHub pull request head");
+    const base = asNestedObject(object.base, response, "GitHub pull request base");
+    const title = object.title;
+    invariant(
+      typeof title === "string" && title.length <= 1024,
+      "GITHUB_PROTOCOL_ERROR",
+      "GitHub pull request response has an unreadable title",
+      { status: response.status, number, responseSha256: response.bodySha256 },
+    );
+    const body = object.body;
+    invariant(
+      (typeof body === "string" || body === null) &&
+        (body === null || Buffer.byteLength(body, "utf8") <= MAX_PULL_REQUEST_BODY_BYTES * 4),
+      "GITHUB_PROTOCOL_ERROR",
+      "GitHub pull request response has an unreadable body",
+      { status: response.status, number, responseSha256: response.bodySha256 },
+    );
+    const maintainerCanModify = object.maintainer_can_modify;
+    invariant(
+      typeof maintainerCanModify === "boolean",
+      "GITHUB_PROTOCOL_ERROR",
+      "GitHub pull request response has no maintainer-modify flag",
+      { status: response.status, number, responseSha256: response.bodySha256 },
+    );
+    const bodyText = body ?? "";
     return {
       number,
       isDraft,
@@ -693,6 +734,12 @@ export class GithubGateway {
       state,
       headRef,
       baseBranch,
+      headSha1: readSha(head, response, "GitHub pull request head"),
+      baseSha1: readSha(base, response, "GitHub pull request base"),
+      titleSha256: sha256Hex(title),
+      bodySha256: sha256Hex(bodyText),
+      markerCount: countLandingMarkers(bodyText),
+      maintainerCanModify,
       // Reconstructed from validated inputs rather than echoed, so no upstream
       // byte reaches the receipt.
       htmlUrl: `https://github.com/${coordinates.owner}/${coordinates.repository}/pull/${number}`,
@@ -700,6 +747,23 @@ export class GithubGateway {
       latencyMs: response.latencyMs,
     };
   }
+}
+
+const LANDING_MARKER_PREFIX = "<!-- icarus-landing:";
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+/** Counts the reserved landing-marker occurrences in a pull-request body. */
+function countLandingMarkers(body: string): number {
+  let count = 0;
+  let index = body.indexOf(LANDING_MARKER_PREFIX);
+  while (index !== -1) {
+    count += 1;
+    index = body.indexOf(LANDING_MARKER_PREFIX, index + LANDING_MARKER_PREFIX.length);
+  }
+  return count;
 }
 
 /**

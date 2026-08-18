@@ -622,9 +622,11 @@ describe("durable remote mutation store slice (object upload + remote ref)", () 
       "objects_ready->creating_remote_ref",
       "creating_remote_ref->remote_ready",
     ]);
-    // remote_ready parks: no admission is legal until the draft-PR slice.
+    // remote_ready admits the draft-PR resume chain: the attempt starts with
+    // no pre-admitted operation (the pull-request-absence preflight runs first).
     expect(fixture.store.admitLandingResume(ready.landing.id)).toMatchObject({
-      attemptOrdinal: null,
+      attemptOrdinal: 5,
+      operationId: null,
       attemptLimitReached: false,
     });
     fixture.store.close();
@@ -1101,6 +1103,9 @@ function fakeRemoteGateway(behavior: GatewayBehavior = {}): {
           remote.refs.set(ref, sha);
           return { ref, sha, responseSha256: sha256("ref-bytes"), latencyMs: 1 };
         }),
+      createDraftPullRequest: async () => {
+        throw new Error("Pull-request creation is exercised in the draft-PR slice tests");
+      },
     };
   };
   return { factory, calls, credentials, remote };

@@ -652,11 +652,15 @@ does not fit can destabilize the host, and the probe does not check for room.
 `packages/github-gateway` is imported by `@icarus/core`'s landing coordinator.
 An explicit `landing resume` now runs remote stages through it: at
 `local_ready` the read-only preflight plus the immutable object upload (blobs,
-tree, commit), and at `objects_ready` the preflight plus the absent-only
-remote-ref creation. These are the first remote mutations any Icarus command
-can perform. The draft-PR POST, pull-request reads, and the receipt stay
-fenced for the next slices; a landing parked at `remote_ready` refuses a
-resume truthfully until then. Each request is admitted to the durable ledger
+tree, commit), at `objects_ready` the preflight plus the absent-only
+remote-ref creation, and at `remote_ready` the preflight (now including the
+complete empty pull-request list) plus the draft-PR creation and the
+immutable landing receipt. These are the only remote mutations any Icarus
+command can perform; the draft-PR POST is admitted at most once per landing,
+ever, and a lost or contradicted response is reconciled by reads, never
+retried. A landing holding at `reconciliation_required` waits for the
+operator with its honestly derived residue; `landed` is terminal and its
+receipt reloads byte-identically. Each request is admitted to the durable ledger
 before its I/O and settled after; an interruption reconciles through fresh
 reads or byte-identical immutable replays, never a blind repeat. The
 operator-visible requirement is the profile's allowlisted
