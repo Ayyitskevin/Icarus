@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { IcarusError } from "../../packages/core/src/errors.js";
 import { buildContextCorpus, createProbeRequest, runProbe } from "../../packages/core/src/probe.js";
 import type {
   ModelGateway,
@@ -149,7 +150,7 @@ describe("context probe", () => {
     expect(result.aggregate.truncationSuspected).toBe(true);
   });
 
-  it("flags suspected truncation on a low consumed-input ratio even when recall passes, because a lucky answer must not launder a dropped prompt", async () => {
+  it("invalidates the attempt on a low consumed-input ratio even when recall passes, so ok/okCount can never launder a dropped prompt", async () => {
     const gateway = new FakeGateway((generation) => ({
       text: JSON.stringify({
         startAnchor: anchorFromInput(generation.input, "START"),
@@ -159,7 +160,9 @@ describe("context probe", () => {
       usage: usage({ inputTokens: 100, outputTokens: 30 }),
     }));
     const result = await runProbe(gateway, request, RUNTIME);
-    expect(result.attempts[0]?.ok).toBe(true);
+    expect(result.attempts[0]?.ok).toBe(false);
+    expect(result.attempts[0]?.detail).toContain("suspected truncation invalidates the attempt");
+    expect(result.aggregate.okCount).toBe(0);
     expect(result.aggregate.minConsumedInputRatio).not.toBeNull();
     expect(result.aggregate.truncationSuspected).toBe(true);
   });
@@ -207,6 +210,36 @@ describe("structured probe", () => {
   });
 });
 
+describe("unsupported probe kinds", () => {
+  it("returns an explicit unsupported result for tool-call without calling the provider, because unsupported must be a status, not an argument error or an approximation", async () => {
+    const gateway = new FakeGateway(() => {
+      throw new Error("provider must never be called for an unsupported kind");
+    });
+    const result = await runProbe(gateway, createProbeRequest({ kind: "tool-call" }), RUNTIME);
+    expect(result.status).toBe("unsupported");
+    expect(result.unsupportedReason).toContain("structured generation only");
+    expect(result.attempts).toHaveLength(0);
+    expect(result.aggregate.attemptCount).toBe(0);
+    expect(result.aggregate.okCount).toBe(0);
+    expect(gateway.requests).toHaveLength(0);
+  });
+
+  it("still rejects genuinely unknown kinds so typos stay loud", () => {
+    expect(() => createProbeRequest({ kind: "speed" })).toThrowError(/Probe kind/);
+  });
+});
+
+describe("cancellation", () => {
+  it("propagates CANCELLED instead of recording it as a completed measurement, because an interrupted run must not report success", async () => {
+    const gateway = new FakeGateway(() => {
+      throw new IcarusError("CANCELLED", "Provider request was cancelled before it started");
+    });
+    await expect(
+      runProbe(gateway, createProbeRequest({ kind: "structured", repeat: 2 }), RUNTIME),
+    ).rejects.toMatchObject({ code: "CANCELLED" });
+  });
+});
+
 describe("runProbe resilience and identity", () => {
   it("survives a provider error mid-run so one failed attempt cannot void a measurement", async () => {
     const gateway = new FakeGateway((_generation, index) => {
@@ -240,6 +273,8 @@ describe("runProbe resilience and identity", () => {
     }));
     const result = await runProbe(gateway, createProbeRequest({ kind: "throughput" }), RUNTIME);
     expect(result.schemaVersion).toBe(1);
+    expect(result.status).toBe("measured");
+    expect(result.unsupportedReason).toBeNull();
     expect(result.probeId).toBe("probe-fixed-id");
     expect(result.startedAt).toBe("2026-08-18T12:00:00.000Z");
     expect(result.provider).toEqual({

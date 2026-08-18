@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -127,5 +127,34 @@ describe("probe CLI", () => {
     const result = await runCli(stateRoot, ["probe", "speed", "--model", "fake-model"]);
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("INVALID_PROBE");
+  });
+
+  it("reports tool-call as an explicit unsupported result with exit 0, never as a usage error", async () => {
+    const result = await runCli(stateRoot, ["probe", "tool-call", "--model", "fake-model"]);
+    const row = jsonOutput<ProbeResultV1>(result);
+    expect(row.status).toBe("unsupported");
+    expect(row.unsupportedReason).toContain("structured generation only");
+    expect(row.attempts).toHaveLength(0);
+  });
+
+  it("creates no runtime state, because a probe's entire effect is one provider conversation plus a printed row", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, {
+        message: { role: "assistant", content: '{"text":"prose"}' },
+        prompt_eval_count: 8,
+        eval_count: 8,
+      });
+    });
+    const result = await runCli(stateRoot, [
+      "probe",
+      "throughput",
+      "--model",
+      "fake-model",
+      "--base-url",
+      server.baseUrl,
+    ]);
+    expect(result.exitCode).toBe(0);
+    const entries = await readdir(stateRoot);
+    expect(entries).toEqual([]);
   });
 });

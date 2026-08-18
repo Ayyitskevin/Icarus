@@ -23,14 +23,27 @@ import type { JsonValue, ProviderUsage } from "./types.js";
 //   structured  schema compliance across repeated attempts against a fixed
 //               nested schema.
 //
-// Tool-call probing is deliberately absent: ModelGateway exposes structured
-// generation only, so a tool-call probe cannot be measured through the
-// production path today. Per the evaluation reliability rule, that is
-// reported as unsupported rather than approximated.
+// Tool-call probing is recognized but unsupported: ModelGateway exposes
+// structured generation only, so a tool-call probe cannot be measured through
+// the production path today. Per the evaluation reliability rule it returns an
+// explicit unsupported result rather than an approximation or a usage error.
 
 export type ProbeKind = "throughput" | "context" | "structured";
 
 export const PROBE_KINDS: readonly ProbeKind[] = ["throughput", "context", "structured"];
+
+// Kinds that are recognized but cannot be measured through the production
+// gateway today. Per the evaluation reliability rule they produce an explicit
+// unsupported result — a stable machine-readable status, not an argument error
+// and never an approximation.
+export const UNSUPPORTED_PROBE_KINDS = ["tool-call"] as const;
+
+export type UnsupportedProbeKind = (typeof UNSUPPORTED_PROBE_KINDS)[number];
+
+export const UNSUPPORTED_PROBE_REASONS: Readonly<Record<UnsupportedProbeKind, string>> = {
+  "tool-call":
+    "ModelGateway exposes structured generation only; tool-call behavior cannot be measured through the production path.",
+};
 
 export const PROBE_RESULT_SCHEMA_VERSION = 1;
 
@@ -47,7 +60,7 @@ const ESTIMATED_CHARS_PER_TOKEN = 4;
 const TRUNCATION_CONSUMED_RATIO_FLOOR = 0.5;
 
 export interface ProbeRequest {
-  readonly kind: ProbeKind;
+  readonly kind: ProbeKind | UnsupportedProbeKind;
   readonly repeat: number;
   readonly maxOutputTokens: number;
   readonly timeoutMs: number;
@@ -83,6 +96,10 @@ export interface ProbeResultV1 {
   readonly schemaVersion: typeof PROBE_RESULT_SCHEMA_VERSION;
   readonly probeId: string;
   readonly startedAt: string;
+  /** "measured" when attempts ran; "unsupported" when the kind is recognized
+   * but cannot be measured through the production gateway. */
+  readonly status: "measured" | "unsupported";
+  readonly unsupportedReason: string | null;
   readonly probe: ProbeRequest;
   readonly provider: {
     readonly kind: string;
@@ -106,11 +123,12 @@ export function createProbeRequest(input: {
   readonly targetInputTokens?: number | null | undefined;
 }): ProbeRequest {
   invariant(
-    (PROBE_KINDS as readonly string[]).includes(input.kind),
+    (PROBE_KINDS as readonly string[]).includes(input.kind) ||
+      (UNSUPPORTED_PROBE_KINDS as readonly string[]).includes(input.kind),
     "INVALID_PROBE",
-    `Probe kind must be one of: ${PROBE_KINDS.join(", ")}`,
+    `Probe kind must be one of: ${[...PROBE_KINDS, ...UNSUPPORTED_PROBE_KINDS].join(", ")}`,
   );
-  const kind = input.kind as ProbeKind;
+  const kind = input.kind as ProbeKind | UnsupportedProbeKind;
   const repeat = input.repeat ?? 1;
   invariant(
     Number.isInteger(repeat) && repeat >= 1 && repeat <= MAX_REPEAT,
@@ -410,9 +428,18 @@ async function runContextAttempt(
     result.usage.inputTokens === null || corpus.estimatedTokens <= 0
       ? null
       : result.usage.inputTokens / corpus.estimatedTokens;
+  // Suspected truncation invalidates the attempt even when anchor recall
+  // passes: a lucky answer must not launder a dropped prompt, and consumers
+  // read ok/okCount as success. "Surfaced, never passed" has to bind here,
+  // not only in the aggregate flag.
+  const consumedTooLittle =
+    consumedInputRatio !== null && consumedInputRatio < TRUNCATION_CONSUMED_RATIO_FLOOR;
+  if (consumedTooLittle) {
+    detail = `${detail}; consumed-input ratio ${consumedInputRatio.toFixed(3)} below ${TRUNCATION_CONSUMED_RATIO_FLOOR} — suspected truncation invalidates the attempt`;
+  }
   return {
     attempt,
-    ok: recall.start && recall.middle && recall.end,
+    ok: recall.start && recall.middle && recall.end && !consumedTooLittle,
     detail,
     usage: result.usage,
     outputTokensPerSecond: tokensPerSecond(result.usage),
@@ -465,7 +492,10 @@ async function runStructuredAttempt(
   };
 }
 
-function aggregate(kind: ProbeKind, attempts: readonly ProbeAttempt[]): ProbeAggregate {
+function aggregate(
+  kind: ProbeKind | UnsupportedProbeKind,
+  attempts: readonly ProbeAttempt[],
+): ProbeAggregate {
   const okCount = attempts.filter((entry) => entry.ok).length;
   const rates = attempts
     .map((entry) => entry.outputTokensPerSecond)
@@ -501,6 +531,29 @@ export async function runProbe(
   const createId = runtime.createId ?? randomUUID;
   const probeId = createId();
   const startedAt = now().toISOString();
+  if ((UNSUPPORTED_PROBE_KINDS as readonly string[]).includes(request.kind)) {
+    return {
+      schemaVersion: PROBE_RESULT_SCHEMA_VERSION,
+      probeId,
+      startedAt,
+      status: "unsupported",
+      unsupportedReason: UNSUPPORTED_PROBE_REASONS[request.kind as UnsupportedProbeKind],
+      probe: request,
+      provider: {
+        kind: gateway.config.kind,
+        baseUrl: gateway.config.baseUrl,
+        model: gateway.config.model,
+      },
+      attempts: [],
+      aggregate: {
+        attemptCount: 0,
+        okCount: 0,
+        meanOutputTokensPerSecond: null,
+        minConsumedInputRatio: null,
+        truncationSuspected: null,
+      },
+    };
+  }
   const attempts: ProbeAttempt[] = [];
   for (let attempt = 1; attempt <= request.repeat; attempt += 1) {
     let result: ProbeAttempt;
@@ -513,7 +566,10 @@ export async function runProbe(
         result = await runStructuredAttempt(gateway, request, attempt, probeId, signal);
       }
     } catch (error) {
-      if (error instanceof IcarusError && error.code === "INVALID_PROBE") {
+      if (
+        error instanceof IcarusError &&
+        (error.code === "INVALID_PROBE" || error.code === "CANCELLED")
+      ) {
         throw error;
       }
       result = {
@@ -532,6 +588,8 @@ export async function runProbe(
     schemaVersion: PROBE_RESULT_SCHEMA_VERSION,
     probeId,
     startedAt,
+    status: "measured",
+    unsupportedReason: null,
     probe: request,
     provider: {
       kind: gateway.config.kind,
