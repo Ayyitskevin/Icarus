@@ -1826,6 +1826,14 @@ Final adversarial candidate local evidence on 2026-07-20:
 
 ## E1 model probes (2026-08-18)
 
+Post-merge HOLD findings from Codex's independent review, fixed same day:
+suspected context truncation now invalidates the attempt (excluded from
+`okCount`); `tool-call` returns an explicit `status: "unsupported"` result
+instead of an `INVALID_PROBE` usage error; `CANCELLED` propagates instead of
+being recorded as a completed measurement; probe dispatch moved before runtime
+creation so a probe genuinely creates no local state (verified by an
+integration test asserting an empty state root).
+
 The measurement-only `icarus probe` verb characterizes a configured
 provider/model (structured throughput, context anchor recall with truncation
 suspicion, closed-schema compliance) through the production gateway and emits a

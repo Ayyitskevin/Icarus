@@ -637,15 +637,22 @@ evidence.
   anchors at the start, interior, and tail, then checks anchor recall and the
   provider-reported consumed-input count. Losing the start anchor while keeping
   the end anchor, or consuming under half the estimated input, sets
-  `truncationSuspected` — silent front truncation surfaces instead of passing.
+  `truncationSuspected` — and a suspected-truncation attempt is **invalid**
+  (`ok: false`, excluded from `okCount`), so no success count can launder a
+  dropped prompt.
 - `structured` measures closed-schema compliance across `--repeat` attempts.
 
-Tool-call probing is deliberately unsupported: the gateway exposes structured
-generation only, so it is reported as unsupported rather than approximated. A
-run that completes its measurement exits `0` even when attempts fail (the
-failures are the measurement); invalid arguments exit `2`. Before probing a
-large local model, verify host memory headroom first — loading a model that
-does not fit can destabilize the host, and the probe does not check for room.
+`icarus probe tool-call` returns an explicit unsupported result
+(`status: "unsupported"`, a machine-readable reason, zero attempts, exit `0`):
+the gateway exposes structured generation only, so tool-call behavior is
+reported as unsupported rather than approximated or rejected as a usage error.
+A run that completes its measurement exits `0` even when attempts fail (the
+failures are the measurement); invalid arguments exit `2`. An interrupted run
+propagates `CANCELLED` rather than reporting a completed measurement. Probes
+dispatch before runtime creation and therefore create no state root, store, or
+controller directories. Before probing a large local model, verify host memory
+headroom first — loading a model that does not fit can destabilize the host,
+and the probe does not check for room.
 
 ## GitHub gateway (Packet 4a package; S2b-ii coordinator wiring)
 

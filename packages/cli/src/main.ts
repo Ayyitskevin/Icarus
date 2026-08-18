@@ -460,6 +460,49 @@ function usage(): never {
   );
 }
 
+// Probes run before runtime creation on purpose: a probe's entire effect is
+// one HTTP conversation with the configured provider plus a printed row, so it
+// must not create or open the state root, store, or controller directories.
+async function dispatchProbe(args: readonly string[], signal: AbortSignal): Promise<boolean> {
+  const [group, action, ...rest] = args;
+  if (group !== "probe" || action === undefined) {
+    return false;
+  }
+  const options = parseOptions(rest, [
+    "--provider",
+    "--model",
+    "--base-url",
+    "--repeat",
+    "--max-output-tokens",
+    "--timeout-ms",
+    "--target-input-tokens",
+  ]);
+  noPositionals(options);
+  const kind = optional(options, "--provider") ?? "ollama";
+  if (kind !== "ollama" && kind !== "openai" && kind !== "anthropic") {
+    fail("INVALID_PROVIDER", "--provider must be ollama, openai, or anthropic");
+  }
+  const defaultBaseUrls: Record<typeof kind, string> = {
+    ollama: "http://127.0.0.1:11434/",
+    openai: "https://api.openai.com/v1/",
+    anthropic: "https://api.anthropic.com/v1/",
+  };
+  const provider = createProviderConfig({
+    kind,
+    model: required(options, "--model"),
+    baseUrl: optional(options, "--base-url") ?? defaultBaseUrls[kind],
+  });
+  const request = createProbeRequest({
+    kind: action,
+    repeat: numberOption(options, "--repeat"),
+    maxOutputTokens: numberOption(options, "--max-output-tokens"),
+    timeoutMs: numberOption(options, "--timeout-ms"),
+    targetInputTokens: numberOption(options, "--target-input-tokens") ?? null,
+  });
+  print(await runProbe(createGateway(provider, process.env), request, {}, signal));
+  return true;
+}
+
 async function dispatch(
   runtime: IcarusRuntime,
   args: readonly string[],
@@ -587,41 +630,6 @@ async function dispatch(
   if (group === "landing" && action === "resume") {
     const options = parseOptions(rest, []);
     print(presentLandingStatusV1(await runtime.service.resumeLanding(oneRunId(options), signal)));
-    return;
-  }
-  if (group === "probe" && action !== undefined) {
-    const options = parseOptions(rest, [
-      "--provider",
-      "--model",
-      "--base-url",
-      "--repeat",
-      "--max-output-tokens",
-      "--timeout-ms",
-      "--target-input-tokens",
-    ]);
-    noPositionals(options);
-    const kind = optional(options, "--provider") ?? "ollama";
-    if (kind !== "ollama" && kind !== "openai" && kind !== "anthropic") {
-      fail("INVALID_PROVIDER", "--provider must be ollama, openai, or anthropic");
-    }
-    const defaultBaseUrls: Record<typeof kind, string> = {
-      ollama: "http://127.0.0.1:11434/",
-      openai: "https://api.openai.com/v1/",
-      anthropic: "https://api.anthropic.com/v1/",
-    };
-    const provider = createProviderConfig({
-      kind,
-      model: required(options, "--model"),
-      baseUrl: optional(options, "--base-url") ?? defaultBaseUrls[kind],
-    });
-    const request = createProbeRequest({
-      kind: action,
-      repeat: numberOption(options, "--repeat"),
-      maxOutputTokens: numberOption(options, "--max-output-tokens"),
-      timeoutMs: numberOption(options, "--timeout-ms"),
-      targetInputTokens: numberOption(options, "--target-input-tokens") ?? null,
-    });
-    print(await runProbe(createGateway(provider, process.env), request, {}, signal));
     return;
   }
   if (group !== "run" || action === undefined) {
@@ -808,6 +816,7 @@ export async function runCliMain(options: CliMainOptions = {}): Promise<void> {
   try {
     const args = options.args ?? process.argv.slice(2);
     if (dispatchFileOnlyHandoff(args)) return;
+    if (await dispatchProbe(args, controller.signal)) return;
     assertLandingMutationPlatform(args, options.platform ?? process.platform);
     const root = stateRoot();
     if (dispatchReadOnlyRunHandoff(args, root)) return;

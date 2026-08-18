@@ -153,6 +153,7 @@ export type {
   ProbeRequest,
   ProbeResultV1,
   ProbeRuntime,
+  UnsupportedProbeKind,
 } from "./probe.js";
 export {
   buildContextCorpus,
@@ -160,6 +161,8 @@ export {
   PROBE_KINDS,
   PROBE_RESULT_SCHEMA_VERSION,
   runProbe,
+  UNSUPPORTED_PROBE_KINDS,
+  UNSUPPORTED_PROBE_REASONS,
 } from "./probe.js";
 export { createProviderConfig, parseProviderBaseUrl } from "./provider.js";
 export { createGateway } from "./providers.js";
