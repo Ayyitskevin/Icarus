@@ -151,6 +151,7 @@ export type {
   ProbeAggregate,
   ProbeAttempt,
   ProbeKind,
+  ProbeProviderDescriptor,
   ProbeRequest,
   ProbeResultV1,
   ProbeRuntime,
@@ -159,11 +160,13 @@ export type {
 export {
   buildContextCorpus,
   createProbeRequest,
+  isUnsupportedProbeKind,
   PROBE_KINDS,
   PROBE_RESULT_SCHEMA_VERSION,
   runProbe,
   UNSUPPORTED_PROBE_KINDS,
   UNSUPPORTED_PROBE_REASONS,
+  unsupportedProbeResult,
 } from "./probe.js";
 export { createProviderConfig, parseProviderBaseUrl } from "./provider.js";
 export { createGateway } from "./providers.js";

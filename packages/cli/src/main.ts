@@ -29,6 +29,7 @@ import {
   IcarusError,
   type IcarusRuntime,
   inspectChangeHandoffDocuments,
+  isUnsupportedProbeKind,
   LANDING_LEDGER_MIGRATION,
   migrateGate1Schema,
   presentLandingStatusV1,
@@ -36,6 +37,7 @@ import {
   readChangeHandoffSource,
   readSecureHandoffFile,
   runProbe,
+  unsupportedProbeResult,
   verifyChangeHandoffDocuments,
   writeChangeHandoffFiles,
 } from "@icarus/core";
@@ -487,11 +489,8 @@ async function dispatchProbe(args: readonly string[], signal: AbortSignal): Prom
     openai: "https://api.openai.com/v1/",
     anthropic: "https://api.anthropic.com/v1/",
   };
-  const provider = createProviderConfig({
-    kind,
-    model: required(options, "--model"),
-    baseUrl: optional(options, "--base-url") ?? defaultBaseUrls[kind],
-  });
+  const model = required(options, "--model");
+  const baseUrl = optional(options, "--base-url") ?? defaultBaseUrls[kind];
   const request = createProbeRequest({
     kind: action,
     repeat: numberOption(options, "--repeat"),
@@ -499,6 +498,15 @@ async function dispatchProbe(args: readonly string[], signal: AbortSignal): Prom
     timeoutMs: numberOption(options, "--timeout-ms"),
     targetInputTokens: numberOption(options, "--target-input-tokens") ?? null,
   });
+  // Answer recognized-but-unsupported kinds before any provider construction.
+  // createProviderConfig enforces pricing and credential policy for remote
+  // providers, so building it first made the unsupported contract true only
+  // for Ollama — the answer must not depend on the provider it never contacts.
+  if (isUnsupportedProbeKind(request.kind)) {
+    print(unsupportedProbeResult(request, { kind, baseUrl, model }));
+    return true;
+  }
+  const provider = createProviderConfig({ kind, model, baseUrl });
   print(await runProbe(createGateway(provider, process.env), request, {}, signal));
   return true;
 }

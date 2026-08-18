@@ -1859,6 +1859,13 @@ Final adversarial candidate local evidence on 2026-07-20:
 
 ## E1 model probes (2026-08-18)
 
+A second post-merge audit found the unsupported contract was provider-dependent:
+`createProviderConfig` ran before the unsupported check, so remote providers
+returned `PRICING_REQUIRED` (exit 1) instead of an unsupported row. Recognized
+unsupported kinds are now answered from a shared builder before any provider
+construction, with OpenAI/Anthropic regression tests and a closed-port trap-URL
+test proving nothing is contacted.
+
 Post-merge HOLD findings from Codex's independent review, fixed same day:
 suspected context truncation now invalidates the attempt (excluded from
 `okCount`); `tool-call` returns an explicit `status: "unsupported"` result

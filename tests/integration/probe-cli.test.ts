@@ -137,6 +137,46 @@ describe("probe CLI", () => {
     expect(row.attempts).toHaveLength(0);
   });
 
+  it("reports tool-call as unsupported for OpenAI with no key and no pricing, because the contract must not depend on the provider it never contacts", async () => {
+    const result = await runCli(
+      stateRoot,
+      ["probe", "tool-call", "--provider", "openai", "--model", "gpt-4o"],
+      { OPENAI_API_KEY: undefined },
+    );
+    const row = jsonOutput<ProbeResultV1>(result);
+    expect(row.status).toBe("unsupported");
+    expect(row.provider.kind).toBe("openai");
+    expect(row.attempts).toHaveLength(0);
+  });
+
+  it("reports tool-call as unsupported for Anthropic with no key and no pricing", async () => {
+    const result = await runCli(
+      stateRoot,
+      ["probe", "tool-call", "--provider", "anthropic", "--model", "claude-sonnet-4"],
+      { ANTHROPIC_API_KEY: undefined },
+    );
+    const row = jsonOutput<ProbeResultV1>(result);
+    expect(row.status).toBe("unsupported");
+    expect(row.provider.kind).toBe("anthropic");
+  });
+
+  it("contacts nothing for an unsupported kind, proven by a base URL that must never be reached", async () => {
+    // 127.0.0.1:1 is closed. Any connection attempt fails loudly; a clean
+    // unsupported row is therefore evidence that no request was made.
+    const result = await runCli(stateRoot, [
+      "probe",
+      "tool-call",
+      "--model",
+      "fake-model",
+      "--base-url",
+      "http://127.0.0.1:1/",
+    ]);
+    const row = jsonOutput<ProbeResultV1>(result);
+    expect(row.status).toBe("unsupported");
+    expect(row.provider.baseUrl).toBe("http://127.0.0.1:1/");
+    expect(row.attempts).toHaveLength(0);
+  });
+
   it("creates no runtime state, because a probe's entire effect is one provider conversation plus a printed row", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, {
