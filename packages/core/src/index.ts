@@ -136,6 +136,22 @@ export type {
   LandingReceiptV1,
   LocalRefFactV1,
 } from "./landing-records.js";
+export type {
+  LiveEvidenceApprovalV1,
+  LiveEvidenceBudgetV1,
+  LiveEvidenceCasePinV1,
+  LiveEvidenceEffect,
+  LiveEvidenceProfileV1,
+  LiveEvidenceProviderPinV1,
+} from "./live-evidence-profile.js";
+export {
+  assertLiveEvidenceProfileApproved,
+  assertLiveEvidenceProfileMatchesManifest,
+  decodeLiveEvidenceProfileV1,
+  LIVE_EVIDENCE_AUTHORIZED_EFFECTS,
+  LIVE_EVIDENCE_PROFILE_SCHEMA_VERSION,
+  liveEvidenceProfileApprovalDigest,
+} from "./live-evidence-profile.js";
 export {
   assertOperatorActor,
   checkpointDigest,

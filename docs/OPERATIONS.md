@@ -698,6 +698,35 @@ the package boundary.
   existing reference does, and the gateway reads no upstream bytes to tell them
   apart.
 
+## Gate 1 live-evidence profile
+
+`LiveEvidenceProfileV1` (ADR 0045) is the separately approved authority for a
+credential-gated live Gate 1 attempt. It is an offline record: decoding or
+holding one performs no network call and authorizes no effect on its own.
+
+- It pins `offlineManifestDigest`, `benchmarkId`, and `benchmarkRevision`, and
+  its case set must be a bijection with the offline manifest's. A changed
+  manifest invalidates the profile.
+- `authorizedEffects` must equal exactly `github.objects.upload`,
+  `github.ref.create.absent_only`, `github.pull_request.create.draft`,
+  `github.landing.receipt`, in that order. Neither an added nor a removed entry
+  is accepted, so authority cannot be widened by appending.
+- `approval.profileDigestSha256` is the digest of the record with `approval`
+  removed. Editing any pinned field after approval invalidates it — notably a
+  repository swap, which would otherwise redirect real effects at a repository
+  nobody approved.
+- Each case embeds a full landing profile, so the per-repository
+  branch/PR-triggered automation assessment (`derivativeEffects`: disposition
+  plus operator evidence digest) is mandatory. This is not a formality:
+  creating a head reference or opening a same-repo draft pull request runs the
+  head branch's own automation with repository secrets.
+
+**Operator guidance for a first live attempt:** use disposable repositories you
+own with automation disabled, so the assessment is an honest
+`inert-repository`. Do not aim a first 3/3 at a project whose PR automation you
+have not read. A loopback provider is a valid pin and makes `maxSpendUsd: 0`
+truthful rather than aspirational.
+
 ## Runbook
 
 - `run list [--project <name>]` rediscovers persisted runs without exposing
