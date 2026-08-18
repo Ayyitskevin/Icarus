@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 
 import {
   type IcarusRuntime,
+  type LandingReceiptV1,
   type LandingStatusV1,
   LANDING_DERIVATIVE_GITHUB_EVENTS,
   LANDING_DERIVATIVE_MAY_TRIGGER,
   LANDING_DIRECT_ICARUS_EFFECTS,
   LANDING_EFFECT_WARNING,
   presentLandingApprovalV1,
+  presentLandingReceiptV1,
   presentLandingStatusV1,
   type RunLandingPresentation,
 } from "../../packages/core/src/index.js";
@@ -116,6 +118,7 @@ function statusFixture(): LandingStatusV1 {
       updatedAt: NOW,
     },
     decision: null,
+    receipt: null,
     attempts: [
       {
         landingId: LANDING_ID,
@@ -143,6 +146,39 @@ function statusFixture(): LandingStatusV1 {
     ],
     revision: 17,
   } as unknown as LandingStatusV1;
+}
+
+function receiptFixture(): LandingReceiptV1 {
+  return {
+    version: 1,
+    landingId: LANDING_ID,
+    runId: RUN_ID,
+    projectId: "55555555-5555-4555-8555-555555555555",
+    provider: "github",
+    owner: "icarus-owner",
+    repository: "icarus-repository",
+    baseRef: "refs/heads/main",
+    baseCommitSha1: "1".repeat(40),
+    headRef: `refs/heads/icarus/${RUN_ID}`,
+    candidateTreeSha1: "7".repeat(40),
+    candidateCommitSha1: CANDIDATE_COMMIT_SHA1,
+    pullRequestNumber: 701,
+    reconstructedPullRequestUrl: "https://github.com/icarus-owner/icarus-repository/pull/701",
+    draft: true,
+    landingSha256: LANDING_SHA256,
+    profileSha256: "0".repeat(64),
+    planSha256: PLAN_SHA256,
+    diffSha256: DIFF_SHA256,
+    checkpointSha256: CHECKPOINT_SHA256,
+    verificationSha256: "3".repeat(64),
+    reviewDecisionSha256: "4".repeat(64),
+    changedPathsSha256: "5".repeat(64),
+    localRefOutcome: "created",
+    remoteObjectOutcome: "created_or_exact",
+    remoteRefOutcome: "reconciled",
+    pullRequestOutcome: "created",
+    completedAt: NOW,
+  };
 }
 
 function captureProcessWrites(): {
@@ -180,6 +216,7 @@ describe("landing approval presentation", () => {
           candidateCommitSha1: CANDIDATE_COMMIT_SHA1,
           pullRequestTitle: TITLE,
           pullRequestBody: pullRequestBody(),
+          receipt: null,
           decision: null,
           errorCode: null,
           updatedAt: NOW,
@@ -193,6 +230,7 @@ describe("landing approval presentation", () => {
           },
           effectWarning: LANDING_EFFECT_WARNING,
         },
+        receipt: null,
         status,
       });
       expect(result.status).toBe(status);
@@ -217,6 +255,7 @@ describe("landing approval presentation", () => {
       candidateCommitSha1: CANDIDATE_COMMIT_SHA1,
       pullRequestTitle: TITLE,
       pullRequestBody: pullRequestBody(),
+      receipt: null,
       derivativeEffects: {
         version: 1,
         disposition: "operator-approved",
@@ -239,6 +278,7 @@ describe("landing approval presentation", () => {
       "candidateCommitSha1",
       "pullRequestTitle",
       "pullRequestBody",
+      "receipt",
       "decision",
       "errorCode",
       "updatedAt",
@@ -253,6 +293,7 @@ describe("landing approval presentation", () => {
     expect(presentLandingStatusV1(null)).toEqual({
       landingRevision: 0,
       approval: null,
+      receipt: null,
       status: null,
     });
 
@@ -267,6 +308,57 @@ describe("landing approval presentation", () => {
     expect(() => presentLandingStatusV1(mismatched)).toThrowError(
       expect.objectContaining({ code: "LANDING_RECORD_INVALID" }),
     );
+  });
+
+  test("projects the landed receipt lockstep with its exact key order and no credential", () => {
+    process.env[TOKEN_ENV] = TOKEN_SENTINEL;
+    try {
+      const status = {
+        ...statusFixture(),
+        landing: { ...statusFixture().landing, state: "landed" },
+        receipt: receiptFixture(),
+      } as LandingStatusV1;
+
+      const receipt = presentLandingReceiptV1(receiptFixture());
+      expect(receipt).toEqual(receiptFixture());
+      expect(Object.keys(receipt)).toEqual([
+        "version",
+        "landingId",
+        "runId",
+        "projectId",
+        "provider",
+        "owner",
+        "repository",
+        "baseRef",
+        "baseCommitSha1",
+        "headRef",
+        "candidateTreeSha1",
+        "candidateCommitSha1",
+        "pullRequestNumber",
+        "reconstructedPullRequestUrl",
+        "draft",
+        "landingSha256",
+        "profileSha256",
+        "planSha256",
+        "diffSha256",
+        "checkpointSha256",
+        "verificationSha256",
+        "reviewDecisionSha256",
+        "changedPathsSha256",
+        "localRefOutcome",
+        "remoteObjectOutcome",
+        "remoteRefOutcome",
+        "pullRequestOutcome",
+        "completedAt",
+      ]);
+
+      const result = presentLandingStatusV1(status);
+      expect(result.receipt).toEqual(receiptFixture());
+      expect(result.approval?.receipt).toEqual(receiptFixture());
+      expect(JSON.stringify(result)).not.toContain(TOKEN_SENTINEL);
+    } finally {
+      delete process.env[TOKEN_ENV];
+    }
   });
 });
 

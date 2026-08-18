@@ -126,6 +126,7 @@ export {
   type LandingApprovalPresentationV1,
   type LandingStatusPresentationV1,
   presentLandingApprovalV1,
+  presentLandingReceiptV1,
   presentLandingStatusV1,
 } from "./landing-presentation.js";
 export type {
@@ -239,6 +240,7 @@ export type {
   CheckpointCardBody,
   EventRecord,
   EventSummaryRecord,
+  LandingReceiptPresentationV1,
   ModelCapabilities,
   PatchsetActionStatus,
   PatchsetCardBody,

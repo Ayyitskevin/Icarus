@@ -476,6 +476,7 @@ export interface LandingRunProjectionV1 {
   readonly candidateCommitSha1: string | null;
   readonly pullRequestTitle: string;
   readonly pullRequestBody: string | null;
+  readonly receipt: LandingReceiptV1 | null;
   readonly derivativeEffects: GitHubLandingProfileV1["derivativeEffects"];
   readonly decision: {
     readonly actor: string;
@@ -3960,6 +3961,9 @@ export class LandingLedger {
           candidateCommitSha1: status.landing.candidateCommitSha1,
           pullRequestTitle: status.landing.pullRequestTitle,
           pullRequestBody: body,
+          // The receipt is loaded and validated with the status; it is already
+          // the display-safe projection the presentation DTO mirrors.
+          receipt: status.receipt,
           derivativeEffects: status.landing.profile.derivativeEffects,
           decision:
             status.decision === null
