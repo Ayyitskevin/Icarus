@@ -48,11 +48,22 @@ therefore mandatory input, not documentation.
 Introduce `LiveEvidenceProfileV1`, an offline, strictly decoded record with
 three binding properties.
 
-1. **Manifest and case binding.** The profile pins `offlineManifestDigest`,
-   `benchmarkId`, and `benchmarkRevision`, and its case set must be a bijection
-   with the offline manifest's. A profile covering a subset cannot produce
-   complete evidence; one naming an unknown case targets unreviewed work.
-   Changing the manifest invalidates the profile.
+1. **Manifest, case, and target binding.** The profile pins
+   `offlineManifestDigest`, `benchmarkId`, and `benchmarkRevision`; its case set
+   must be a bijection with the offline manifest's; and each case's embedded
+   landing owner, repository, and base branch must equal the identity that
+   manifest case pins. A profile covering a subset cannot produce complete
+   evidence; one naming an unknown case targets unreviewed work. Changing the
+   manifest invalidates the profile.
+
+   A matching case-id set alone is **not** a pin. An independent review of the
+   first implementation demonstrated this by construction: a profile carrying
+   the exact manifest digest, the exact case ids, and a self-consistent
+   approval was accepted while aiming a case at `unreviewed-repository`. The
+   repository is the field that decides which real repository receives real
+   effects, so it is bound explicitly. A manifest case that carries no
+   repository identity is refused rather than treated as unconstrained —
+   absence must not read as permission.
 
 2. **Closed effect set.** `authorizedEffects` must equal
    `["github.objects.upload", "github.ref.create.absent_only",
@@ -84,7 +95,9 @@ ceiling is valid, because a loopback provider genuinely costs nothing.
   against which repositories, under what ceilings, bound to which contract."
 - A repository swap after approval — the highest-consequence tamper, since it
   redirects real effects at a real repository — invalidates approval rather
-  than inheriting it.
+  than inheriting it. A repository that was wrong *at* approval time is caught
+  separately by the manifest identity comparison, which is the case digest
+  binding alone cannot catch.
 - The profile alone authorizes nothing. Consuming it in a runner, and the run
   itself, remain separate work under operator control.
 - Strict-decode helpers are duplicated privately in the new module rather than

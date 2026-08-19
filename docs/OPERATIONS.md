@@ -704,9 +704,14 @@ the package boundary.
 credential-gated live Gate 1 attempt. It is an offline record: decoding or
 holding one performs no network call and authorizes no effect on its own.
 
-- It pins `offlineManifestDigest`, `benchmarkId`, and `benchmarkRevision`, and
-  its case set must be a bijection with the offline manifest's. A changed
-  manifest invalidates the profile.
+- It pins `offlineManifestDigest`, `benchmarkId`, and `benchmarkRevision`; its
+  case set must be a bijection with the offline manifest's; and each case's
+  landing owner, repository, and base branch must equal the identity that
+  manifest case pins. A changed manifest invalidates the profile, and a profile
+  aiming a case at a repository the manifest does not pin is refused even when
+  its digest, case ids, and approval are all internally consistent. A manifest
+  case carrying no repository identity is refused rather than treated as
+  unconstrained.
 - `authorizedEffects` must equal exactly `github.objects.upload`,
   `github.ref.create.absent_only`, `github.pull_request.create.draft`,
   `github.landing.receipt`, in that order. Neither an added nor a removed entry

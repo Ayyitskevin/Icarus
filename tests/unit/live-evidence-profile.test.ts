@@ -80,13 +80,24 @@ function approvedProfile(overrides: Record<string, unknown> = {}): Record<string
   };
 }
 
+function manifestCase(id: string, repository: string) {
+  return {
+    id,
+    repository: {
+      githubOwner: "ayyitskevin",
+      githubRepository: repository,
+      baseBranch: "main",
+    },
+  };
+}
+
 const MANIFEST = {
   benchmarkId: "icarus-gate1",
   benchmarkRevision: "v1",
   cases: [
-    { id: "typescript-library-repair" },
-    { id: "python-cli-repair" },
-    { id: "react-node-repair" },
+    manifestCase("typescript-library-repair", "icarus-gate1-typescript"),
+    manifestCase("python-cli-repair", "icarus-gate1-python"),
+    manifestCase("react-node-repair", "icarus-gate1-react"),
   ],
 };
 
@@ -257,6 +268,72 @@ describe("manifest binding", () => {
     expect(() =>
       assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST, manifestDigest),
     ).toThrowError(/exactly the offline manifest case set/);
+  });
+
+  it("rejects a correctly approved profile that aims a case at an unreviewed repository, the finding that a matching case-id set alone cannot catch", () => {
+    // Reproduces the reviewer's construction exactly: exact manifest digest,
+    // exact case-id set, self-consistent approval, one swapped repository.
+    const swapped = approvedProfile({
+      cases: [
+        {
+          caseId: "typescript-library-repair",
+          landingProfile: landingProfile({ repository: "unreviewed-repository" }),
+        },
+        {
+          caseId: "python-cli-repair",
+          landingProfile: landingProfile({ repository: "icarus-gate1-python" }),
+        },
+        {
+          caseId: "react-node-repair",
+          landingProfile: landingProfile({ repository: "icarus-gate1-react" }),
+        },
+      ],
+    });
+    const decoded = decodeLiveEvidenceProfileV1(swapped);
+    // The approval genuinely binds this content — the old checks both passed.
+    expect(() => assertLiveEvidenceProfileApproved(decoded)).not.toThrow();
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST, manifestDigest),
+    ).toThrowError(/unreviewed-repository.*but the offline manifest pins/);
+  });
+
+  it("rejects a swapped base branch, because the branch is part of the target identity", () => {
+    const decoded = decodeLiveEvidenceProfileV1(
+      approvedProfile({
+        cases: [
+          {
+            caseId: "typescript-library-repair",
+            landingProfile: landingProfile({ baseBranch: "release" }),
+          },
+          {
+            caseId: "python-cli-repair",
+            landingProfile: landingProfile({ repository: "icarus-gate1-python" }),
+          },
+          {
+            caseId: "react-node-repair",
+            landingProfile: landingProfile({ repository: "icarus-gate1-react" }),
+          },
+        ],
+      }),
+    );
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST, manifestDigest),
+    ).toThrowError(/but the offline manifest pins/);
+  });
+
+  it("refuses a manifest case with no repository identity, so a missing pin cannot read as no constraint", () => {
+    const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
+    const unpinned = {
+      ...MANIFEST,
+      cases: [
+        { id: "typescript-library-repair" },
+        manifestCase("python-cli-repair", "icarus-gate1-python"),
+        manifestCase("react-node-repair", "icarus-gate1-react"),
+      ],
+    };
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(decoded, unpinned, manifestDigest),
+    ).toThrowError(/must carry the authoritative repository identity/);
   });
 
   it("rejects a mismatched benchmark revision", () => {

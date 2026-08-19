@@ -15,7 +15,24 @@ const MANIFEST_DIGEST = "a".repeat(64);
 const MANIFEST = {
   benchmarkId: "icarus-gate1",
   benchmarkRevision: "v1",
-  cases: [{ id: "case-one" }, { id: "case-two" }],
+  cases: [
+    {
+      id: "case-one",
+      repository: {
+        githubOwner: "ayyitskevin",
+        githubRepository: "icarus-gate1-one",
+        baseBranch: "main",
+      },
+    },
+    {
+      id: "case-two",
+      repository: {
+        githubOwner: "ayyitskevin",
+        githubRepository: "icarus-gate1-two",
+        baseBranch: "main",
+      },
+    },
+  ],
 };
 
 function landingProfile(repository: string, credentialName: string): Record<string, unknown> {

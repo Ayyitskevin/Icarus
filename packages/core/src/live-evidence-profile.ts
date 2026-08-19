@@ -13,9 +13,12 @@ import type { JsonValue, ProviderKind } from "./types.js";
 //
 // Three properties carry the safety of this record:
 //
-//  1. It binds the offline manifest digest and the exact case set. A profile
-//     cannot silently target different work than the contract that was
-//     reviewed; changing the manifest invalidates the profile.
+//  1. It binds the offline manifest digest, the exact case set, AND each case's
+//     authoritative repository identity (owner, repository, base branch) as
+//     pinned by that manifest case. A matching case-id set alone is not a pin:
+//     without the identity comparison a profile could carry the exact digest
+//     and case ids, hold a self-consistent approval, and still aim a case at a
+//     repository nobody reviewed. Changing the manifest invalidates the profile.
 //  2. Its effect list is a CLOSED set, compared by equality rather than by
 //     subset. Authority cannot be widened by appending an effect, and the
 //     prohibitions (force update, ref deletion, merge, deployment,
@@ -399,12 +402,32 @@ export function assertLiveEvidenceProfileMatchesManifest(
   if (!Array.isArray(manifest.cases)) {
     invalid("offline manifest has no case list");
   }
-  const manifestCaseIds = manifest.cases.map((entry, index) => {
-    const decoded = entry as { readonly id?: unknown };
-    return text(decoded.id, `manifest.cases[${index}].id`);
+  // Each manifest case carries the authoritative repository identity for that
+  // case. Absence is refused rather than skipped: a missing pin must not read
+  // as "no constraint", because the repository is the field that decides which
+  // real repository receives real effects.
+  const manifestCases = manifest.cases.map((entry, index) => {
+    const decoded = entry as { readonly id?: unknown; readonly repository?: unknown };
+    const id = text(decoded.id, `manifest.cases[${index}].id`);
+    const repository = decoded.repository;
+    if (typeof repository !== "object" || repository === null || Array.isArray(repository)) {
+      invalid(
+        `manifest.cases[${index}].repository must carry the authoritative repository identity`,
+      );
+    }
+    const pinned = repository as Record<string, unknown>;
+    return {
+      id,
+      githubOwner: text(pinned.githubOwner, `manifest.cases[${index}].repository.githubOwner`),
+      githubRepository: text(
+        pinned.githubRepository,
+        `manifest.cases[${index}].repository.githubRepository`,
+      ),
+      baseBranch: text(pinned.baseBranch, `manifest.cases[${index}].repository.baseBranch`),
+    };
   });
   const profileCaseIds = profile.cases.map((entry) => entry.caseId);
-  const sortedManifest = [...manifestCaseIds].sort(asciiCompare);
+  const sortedManifest = [...manifestCases.map((entry) => entry.id)].sort(asciiCompare);
   const sortedProfile = [...profileCaseIds].sort(asciiCompare);
   if (
     sortedManifest.length !== sortedProfile.length ||
@@ -413,5 +436,24 @@ export function assertLiveEvidenceProfileMatchesManifest(
     invalid(
       "profile.cases must cover exactly the offline manifest case set, with no missing or extra case",
     );
+  }
+  // A matching case-id set is not a pin. Without this, a profile carrying the
+  // exact manifest digest, the exact case ids, and a self-consistent approval
+  // could still aim a case at a repository nobody reviewed.
+  for (const entry of profile.cases) {
+    const pinned = manifestCases.find((candidate) => candidate.id === entry.caseId);
+    if (pinned === undefined) {
+      invalid(`profile.cases contains ${entry.caseId}, which the offline manifest does not pin`);
+    }
+    const landing = entry.landingProfile;
+    if (
+      landing.owner !== pinned.githubOwner ||
+      landing.repository !== pinned.githubRepository ||
+      landing.baseBranch !== pinned.baseBranch
+    ) {
+      invalid(
+        `profile case ${entry.caseId} targets ${landing.owner}/${landing.repository}@${landing.baseBranch}, but the offline manifest pins ${pinned.githubOwner}/${pinned.githubRepository}@${pinned.baseBranch}`,
+      );
+    }
   }
 }
