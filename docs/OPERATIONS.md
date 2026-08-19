@@ -702,6 +702,60 @@ the package boundary.
   existing reference does, and the gateway reads no upstream bytes to tell them
   apart.
 
+## Gate 1 live-evidence profile
+
+`LiveEvidenceProfileV1` (ADR 0045) is the separately approved authority for a
+credential-gated live Gate 1 attempt. It is an offline record: decoding or
+holding one performs no network call and authorizes no effect on its own.
+
+- It pins `offlineManifestDigest`, `benchmarkId`, and `benchmarkRevision`; its
+  case set must be a bijection with the offline manifest's; and each case's
+  landing owner, repository, and base branch must equal the identity that
+  manifest case pins. A changed manifest invalidates the profile, and a profile
+  aiming a case at a repository the manifest does not pin is refused even when
+  its digest, case ids, and approval are all internally consistent. A manifest
+  case carrying no repository identity is refused rather than treated as
+  unconstrained.
+- `authorizedEffects` must equal exactly `github.objects.upload`,
+  `github.ref.create.absent_only`, `github.pull_request.create.draft`,
+  `github.landing.receipt`, in that order. Neither an added nor a removed entry
+  is accepted, so authority cannot be widened by appending.
+- `approval.profileDigestSha256` is the digest of the record with `approval`
+  removed. Editing any pinned field after approval invalidates it — notably a
+  repository swap, which would otherwise redirect real effects at a repository
+  nobody approved.
+- Each case embeds a full landing profile, so the per-repository
+  branch/PR-triggered automation assessment (`derivativeEffects`: disposition
+  plus operator evidence digest) is mandatory. This is not a formality:
+  creating a head reference or opening a same-repo draft pull request runs the
+  head branch's own automation with repository secrets.
+
+`authorizeLiveEvidenceRun(profile, manifest, manifestDigest, environment)`
+decides whether a run may begin. It asserts the approval binds this exact
+profile content, asserts the manifest and complete case set match, and confirms
+every credential environment variable the run will need is present — presence
+only, never the value, so a credential cannot reach an error string, a log
+line, or durable state through the gate. A missing token refuses before any
+remote effect rather than halfway through the second case.
+
+`LiveEvidenceEffectLedger` is the ledger the executor consults before every
+effect. It refuses unauthorized effects and unknown cases, admits
+`github.pull_request.create.draft` at most once per case (mirroring the durable
+`one_create_pr_post_per_landing` index — a lost response is reconciled by
+reading, never by a second POST), refuses the call that would exceed the spend
+or runtime ceiling rather than reporting the overage afterwards, and refuses to
+call a run complete unless every case recorded the full authorized chain, so
+partial evidence cannot be reported as passing.
+
+Neither performs I/O. They are the authority half of the live runner; the case
+executor that consumes them is not yet implemented.
+
+**Operator guidance for a first live attempt:** use disposable repositories you
+own with automation disabled, so the assessment is an honest
+`inert-repository`. Do not aim a first 3/3 at a project whose PR automation you
+have not read. A loopback provider is a valid pin and makes `maxSpendUsd: 0`
+truthful rather than aspirational.
+
 ## Runbook
 
 - `run list [--project <name>]` rediscovers persisted runs without exposing

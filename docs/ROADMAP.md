@@ -387,3 +387,10 @@ through the production provider gateway. It is not a gate, carries no
 authority, and its results are never acceptance evidence. Deeper evaluation
 entry points (parameterized benchmark runs, unattended eval grants) remain
 future, separately reviewed work.
+
+## Gate 1 live-evidence record
+
+ADR 0045 adds the offline live-evidence profile record and its validation. It
+authorizes no run by itself: a runner that consumes it, the operator's
+repository assessments and credential, the profile approval, and the 3/3 live
+attempt all remain outstanding. Gate 1 still closes only on that run.

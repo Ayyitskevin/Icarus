@@ -41,16 +41,32 @@ Packet 2's separate browser-authority record appears below.
 
 ### Gate 1 live-evidence hold
 
-- [ ] Define and separately approve a versioned credential-gated live-evidence
-      profile bound to the offline manifest digest and exact immutable case/task/
-      check/source/expected-change/candidate pins
-- [ ] Pin the real provider/model and adapter version, captured pricing and
-      spend/runtime budgets, and an operator-produced assessment of each real
-      repository's branch/PR-triggered automation with disposition and raw digest
-- [ ] Authorize only named, separately approved Git object upload, absent-only
-      remote-ref creation, draft-PR creation, and receipt effects; retain every
-      force-push, update/delete, merge, deployment, and source-checkout mutation
-      prohibition
+Record and validation landed 2026-08-18 (ADR 0045, `LiveEvidenceProfileV1`).
+The record is offline only: it authorizes nothing by existing, and no runner
+consumes it yet. The operator items below remain open, and the 3/3 run is
+what closes Gate 1.
+
+- [x] Define a versioned credential-gated live-evidence profile bound to the
+      offline manifest digest and exact immutable case pins — `LiveEvidenceProfileV1`
+      binds `offlineManifestDigest`, `benchmarkId`, `benchmarkRevision`, and a
+      bijection with the manifest case set
+- [ ] Separately approve an instance of that profile (operator; approval is
+      digest-bound, so it must be produced against final pinned content)
+- [x] Provide the fields pinning real provider/model and adapter version,
+      captured pricing, and spend/runtime budgets; the per-repository
+      branch/PR-triggered automation assessment is mandatory by construction
+      because each case embeds a decoded `GitHubLandingProfileV1` carrying
+      `derivativeEffects` (disposition plus operator evidence digest)
+- [ ] Produce the actual assessments and pins for three real repositories (operator)
+- [x] Authorize only named Git object upload, absent-only remote-ref creation,
+      draft-PR creation, and receipt effects, as a closed set compared by exact
+      ordered equality; every force-push, update/delete, merge, deployment, and
+      source-checkout mutation prohibition is retained and remains inexpressible
+- [~] Consume the profile in a live runner — the authority half landed
+      2026-08-18 (`authorizeLiveEvidenceRun` plus `LiveEvidenceEffectLedger`:
+      pre-flight refusal, per-effect authorization, one-POST-per-case, budget
+      ceilings that bound rather than report, and a completeness assertion).
+      The case executor that drives real repositories is NOT implemented
 - [ ] Record 3/3 live evidence with passing complete checks, exact changed paths,
       unchanged source checkouts, reviewable draft PRs, matching immutable
       receipts, restart/reconciliation evidence, and exact candidate/live
