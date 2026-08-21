@@ -149,6 +149,20 @@ export {
   resolveHeadlessProfileV1,
 } from "./headless-profile.js";
 export type {
+  ActiveHeadlessExecutionV1,
+  HeadlessWorkerExecutionV1,
+  HeadlessWorkerExitCodeV1,
+  HeadlessWorkerOutcomeV1,
+  HeadlessWorkerSettlementV1,
+} from "./headless-worker.js";
+export {
+  assertHeadlessWorkerBudgetAvailable,
+  createHeadlessWorkerSettlementV1,
+  HEADLESS_WORKER_SCHEMA,
+  headlessWorkerSettledPayload,
+  headlessWorkerStartedPayload,
+} from "./headless-worker.js";
+export type {
   LandingProfileRecordV1,
   LandingRunProjectionSnapshotV1,
   LandingRunProjectionV1,

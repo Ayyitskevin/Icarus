@@ -289,6 +289,23 @@ host-validated `report_done` may land an approvable `awaiting_review`. A human
 question or exhaustion also lands `awaiting_review`, but records a blocker that
 review approval must refuse.
 
+The H2b headless entry point is a sibling of ordinary plan approval, not a
+second dispatcher. `approveHeadlessPlan` holds the same Linux run lease while
+it validates and records the ordinary approval, reconstructs the ADR 0047
+binding from SQLite, records `headless.worker.started`, and invokes the existing
+execution path. The binding's tighter `SunCeiling` is supplied to service
+calculations and every ordinary SQLite operation reservation; SQLite rejects a
+supplied ceiling above the persisted project ceiling. Cumulative planning and
+approval usage is not reset. The profile's tool set additionally filters the
+metered session registry but never replaces a plan capability grant.
+
+Worker return is allowed only after history proves no operation remains active.
+Exactly one `headless.worker.settled` event records review-ready, human-input,
+exhausted, cancelled, or failed disposition and its process exit semantics.
+The CLI then renders the complete checksum-terminated H0 history as JSONL. A
+started worker is not restart authority: crash replay and continuation remain
+H3 work.
+
 ## Guarded CLI golden-path sequence
 
 1. State-root initialization first rejects a location inside any Git checkout,

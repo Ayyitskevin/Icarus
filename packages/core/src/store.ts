@@ -38,6 +38,12 @@ import {
 import { digestJson, sha256 } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
 import { assertGate1SchemasForStartup, createGate1Schemas } from "./gate1-schema.js";
+import type { HeadlessExecutionBindingV1 } from "./headless-binding.js";
+import {
+  headlessWorkerSettledPayload,
+  headlessWorkerStartedPayload,
+  type HeadlessWorkerSettlementV1,
+} from "./headless-worker.js";
 import {
   type CandidateSettlementInputV1,
   type CreateLandingInputV1,
@@ -4390,6 +4396,92 @@ export class IcarusStore {
     return resumeState;
   }
 
+  recordHeadlessWorkerStarted(runId: string, binding: HeadlessExecutionBindingV1): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const run = this.getRun(runId);
+      invariant(
+        run.id === binding.runId && run.state === "running",
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker can start only for its bound running run",
+      );
+      invariant(
+        run.worktreePath === null &&
+          run.cachePath === null &&
+          run.patchSet === null &&
+          run.verification === null &&
+          run.lastError === null,
+        "HEADLESS_BINDING_AUTHORITY_DENIED",
+        "Headless worker must start before the first execution effect",
+      );
+      invariant(
+        this.#database
+          .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
+          .get(runId) === undefined,
+        "RUN_BUSY",
+        "Headless worker cannot start across an active operation",
+      );
+      invariant(
+        this.#database
+          .prepare(
+            "SELECT 1 FROM run_events WHERE run_id = ? AND type LIKE 'headless.worker.%' LIMIT 1",
+          )
+          .get(runId) === undefined,
+        "HEADLESS_WORKER_ALREADY_STARTED",
+        "Headless worker lifecycle already exists for this run",
+      );
+      this.#appendEvent(runId, "headless.worker.started", headlessWorkerStartedPayload(binding));
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
+  recordHeadlessWorkerSettled(runId: string, settlement: HeadlessWorkerSettlementV1): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const run = this.getRun(runId);
+      invariant(
+        settlement.runId === runId && settlement.finalState === run.state,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker settlement does not match the current run",
+      );
+      invariant(
+        this.#database
+          .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
+          .get(runId) === undefined,
+        "HEADLESS_WORKER_NOT_QUIESCENT",
+        "Headless worker cannot settle across an active operation",
+      );
+      const started = this.#database
+        .prepare(
+          `SELECT payload_json FROM run_events
+           WHERE run_id = ? AND type = 'headless.worker.started'
+           ORDER BY sequence DESC LIMIT 1`,
+        )
+        .get(runId);
+      invariant(started !== undefined, "MISSING_HEADLESS_WORKER", "Headless worker never started");
+      const startedPayload = parseJson<Record<string, JsonValue>>(
+        row(started, "headless worker start").payload_json,
+        "headless worker start.payload_json",
+      );
+      invariant(
+        startedPayload.bindingDigestSha256 === settlement.bindingDigestSha256,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker binding changed before settlement",
+      );
+      invariant(
+        this.#database
+          .prepare(
+            "SELECT 1 FROM run_events WHERE run_id = ? AND type = 'headless.worker.settled' LIMIT 1",
+          )
+          .get(runId) === undefined,
+        "HEADLESS_WORKER_ALREADY_SETTLED",
+        "Headless worker already settled",
+      );
+      this.#appendEvent(runId, "headless.worker.settled", headlessWorkerSettledPayload(settlement));
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
   beginOperation(
     runId: string,
     kind: string,
@@ -4398,6 +4490,7 @@ export class IcarusStore {
     reservedRuntimeMs: number,
     expectedState?: RunState,
     browserActionId: string | null = null,
+    authorityCeiling?: SunCeiling,
   ): OperationToken {
     return this.#beginOperation(
       runId,
@@ -4408,6 +4501,7 @@ export class IcarusStore {
       "ordinary",
       expectedState,
       browserActionId,
+      authorityCeiling,
     );
   }
 
@@ -4436,6 +4530,7 @@ export class IcarusStore {
     budgetClass: "ordinary" | "emergency",
     expectedState?: RunState,
     browserActionId: string | null = null,
+    authorityCeiling?: SunCeiling,
   ): OperationToken {
     assertOperationKind(kind);
     invariant(
@@ -4504,6 +4599,13 @@ export class IcarusStore {
         recoveryAttempt = attempts + 1;
       } else {
         const project = this.getProject(run.projectId);
+        const ceiling = authorityCeiling ?? project.ceiling;
+        assertSunCeiling(ceiling);
+        invariant(
+          SUN_CEILING_KEYS.every((key) => ceiling[key] <= project.ceiling[key]),
+          "INVALID_OPERATION_CEILING",
+          "Operation authority ceiling cannot exceed the persisted project ceiling",
+        );
         invariant(
           kind !== CANCELLATION_RECOVERY_OPERATION_KIND,
           "INVALID_EMERGENCY_OPERATION",
@@ -4524,24 +4626,23 @@ export class IcarusStore {
           );
         }
         invariant(
-          run.usage.toolCalls + 1 <= project.ceiling.maxToolCalls,
+          run.usage.toolCalls + 1 <= ceiling.maxToolCalls,
           "TOOL_BUDGET_EXCEEDED",
           "Tool-call ceiling exhausted",
         );
         invariant(
-          run.usage.activeRuntimeMs + reservedRuntimeMs <= project.ceiling.maxActiveRuntimeMs,
+          run.usage.activeRuntimeMs + reservedRuntimeMs <= ceiling.maxActiveRuntimeMs,
           "RUNTIME_BUDGET_EXCEEDED",
           "Active-runtime reservation would exceed the ceiling",
         );
         invariant(
-          run.usage.inputTokens + run.usage.outputTokens + reservedTokens <=
-            project.ceiling.maxTotalTokens,
+          run.usage.inputTokens + run.usage.outputTokens + reservedTokens <= ceiling.maxTotalTokens,
           "TOKEN_BUDGET_EXCEEDED",
           "Token ceiling would be exceeded",
         );
         invariant(
           run.usage.estimatedCostUsd + run.usage.reservedCostUsd + reservedCostUsd <=
-            project.ceiling.maxCostUsd,
+            ceiling.maxCostUsd,
           "COST_BUDGET_EXCEEDED",
           "Cost ceiling would be exceeded",
         );

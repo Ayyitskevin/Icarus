@@ -467,6 +467,27 @@ node packages/cli/dist/main.js run annotate <run-id> \
 node packages/cli/dist/main.js run annotations <run-id>
 ```
 
+To approve and execute exactly one task through the bounded H2b headless path,
+pass a strict source profile and host provider catalog as bounded JSON. Neither
+record may contain credentials; provider secrets remain in the normal host
+environment:
+
+```text
+node packages/cli/dist/main.js run approve-headless <run-id> \
+  --plan-sha <displayed-digest> \
+  --actor kevin \
+  --profile-json '<strict HeadlessProfileV1 JSON>' \
+  --provider-catalog-json '<host provider profile array JSON>'
+```
+
+The command holds the existing Linux run lease from approval through
+quiescence, reconstructs the persisted authority binding before the first
+effect, and writes the checksum-terminated headless history as JSONL. Exit `0`
+means passing evidence is ready for human review; `1` is failure, `2` is
+exhaustion, `3` requires human input, and `130` is settled signal cancellation.
+It does not approve review, commit, push, deploy, schedule, create child runs,
+or configure an external research adapter.
+
 Use `run list [--project <name>]` to rediscover persisted run IDs and `run
 history <run-id>` to inspect the append-only transition and approval record.
 

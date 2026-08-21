@@ -1,5 +1,33 @@
 # Implementation plans
 
+## Headless H2b bounded worker candidate
+
+Status: locally implemented and independently reviewed under proposed ADR
+0048; risky-change research, live-provider measurement, and deployment remain
+open.
+
+- [x] Add an approve-and-run entry point that holds the existing Linux lease
+      across ordinary plan approval, H2a reconstruction, first effect, and
+      settlement.
+- [x] Apply the profile's tighter cumulative `SunCeiling` in service
+      calculations and ordinary SQLite operation admission; refuse widened or
+      already-exceeded ceilings.
+- [x] Apply the profile tool list as an additional metered ADR 0026 session
+      filter without creating grants.
+- [x] Persist exactly one start and quiescent settlement lifecycle; emit the
+      checksum-terminated H0 JSONL trajectory and explicit exit semantics.
+- [x] Measure 13 realistic local cases plus focused unit/security contracts in
+      `docs/evals/2026-08-21-headless-worker.md`.
+- [x] Run the full local release gate: 999 unit/provider, 170 integration,
+      181 security, and 7 supported offline evaluation cases passed; the three
+      Gate 1 live-evidence cases remained explicitly not run.
+- [x] Obtain one non-author round-table review of the exact local candidate;
+      GLM returned PASS with no required fixes on 2026-08-21.
+- [ ] H3: reconstruct and resume/fork after process death from durable lineage.
+- [ ] H4: isolated child runs with depth, write-set, tool, and budget limits.
+- [ ] H5: separately governed external/research adapters. SearXNG and DeepAPI
+      are not part of H2b.
+
 ## Accepted Gate 1 Slice 1 offline benchmark checkpoint
 
 Status: the versioned, deterministic, zero-external-effect offline benchmark

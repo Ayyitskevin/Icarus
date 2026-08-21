@@ -94,11 +94,15 @@ plan, approval provenance, profile, and resolution identities. Its digest is
 not an approval, lease, grant, or execution receipt and cannot be replayed as
 authority after the state changes.
 
-H2b must add the actual one-task runner modeled on the useful part of
-`dsh --profile headless`: machine-readable lifecycle events, cancellation,
-quiescence, and a non-success exit for budget exhaustion or incomplete
-settlement. It must reconstruct H2a from authoritative records while holding
-the existing Icarus service lease and preserve every approval gate.
+The local H2b candidate under proposed ADR 0048 adds the actual one-task runner
+modeled on the useful part of `dsh --profile headless`. It reconstructs H2a
+after ordinary approval but before the first effect while holding the existing
+Icarus service lease, applies tighter cumulative ceilings and the profile's
+additional session-tool filter, records machine-readable start/settlement
+events, proves quiescence, emits H0 JSONL, and returns non-success exits for
+exhaustion, human input, cancellation, failure, or incomplete settlement.
+Independent H2b review passed locally. Risky-change research, live-provider
+measurement, H3 crash-derived continuation, and deployment remain open.
 
 ### H3 — replay, fork, and resume
 

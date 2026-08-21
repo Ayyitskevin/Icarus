@@ -19,6 +19,17 @@ import { createContextPreview, type ProjectContextPreview } from "./context-prev
 import { digestJson, sha256 } from "./digest.js";
 import { errorMessage, IcarusError, invariant } from "./errors.js";
 import type { GitController, RepositoryInspection, WorktreeFileWrite } from "./git.js";
+import { bindHeadlessExecutionV1, type HeadlessExecutionBindingV1 } from "./headless-binding.js";
+import {
+  type HeadlessHostProviderProfileV1,
+  resolveHeadlessProfileV1,
+} from "./headless-profile.js";
+import {
+  type ActiveHeadlessExecutionV1,
+  assertHeadlessWorkerBudgetAvailable,
+  createHeadlessWorkerSettlementV1,
+  type HeadlessWorkerExecutionV1,
+} from "./headless-worker.js";
 import {
   type LandingCandidateResult,
   LandingGitController,
@@ -633,6 +644,7 @@ export class IcarusService {
   readonly #leases: RunLeaseManager;
   readonly #platform: NodeJS.Platform;
   readonly #browserActionContexts = new Map<string, BrowserActionExecutionContext>();
+  readonly #headlessExecutionContexts = new Map<string, ActiveHeadlessExecutionV1>();
 
   constructor(options: IcarusServiceOptions) {
     this.#stateRoot = path.resolve(options.stateRoot);
@@ -1232,6 +1244,26 @@ export class IcarusService {
     );
   }
 
+  async approveHeadlessPlan(
+    runId: string,
+    planSha256: string,
+    actor: string,
+    profile: unknown,
+    providerProfiles: readonly HeadlessHostProviderProfileV1[],
+    signal?: AbortSignal,
+  ): Promise<HeadlessWorkerExecutionV1> {
+    return this.#leases.withLease(runId, () =>
+      this.#approveHeadlessPlanUnleased(
+        runId,
+        planSha256,
+        actor,
+        profile,
+        providerProfiles,
+        signal,
+      ),
+    );
+  }
+
   async review(
     runId: string,
     decision: "approve" | "reject",
@@ -1308,6 +1340,18 @@ export class IcarusService {
     signal: AbortSignal | undefined,
     context: BrowserActionExecutionContext | null,
   ): Promise<RunRecord> {
+    const cancelled = await this.#validatePlanApproval(runId, planSha256, actor, signal);
+    if (cancelled !== null) return cancelled;
+    this.#store.approvePlan(runId, planSha256, actor, context?.actionId ?? null);
+    return this.#guarded(runId, "running", () => this.#execute(runId, signal), signal);
+  }
+
+  async #validatePlanApproval(
+    runId: string,
+    planSha256: string,
+    actor: string,
+    signal: AbortSignal | undefined,
+  ): Promise<RunRecord | null> {
     const run = this.#store.preflightPlanApproval(runId, planSha256, actor);
     const project = this.#store.getProject(run.projectId);
     try {
@@ -1327,8 +1371,85 @@ export class IcarusService {
       }
       throw error;
     }
-    this.#store.approvePlan(runId, planSha256, actor, context?.actionId ?? null);
-    return this.#guarded(runId, "running", () => this.#execute(runId, signal), signal);
+    return null;
+  }
+
+  async #approveHeadlessPlanUnleased(
+    runId: string,
+    planSha256: string,
+    actor: string,
+    profile: unknown,
+    providerProfiles: readonly HeadlessHostProviderProfileV1[],
+    signal: AbortSignal | undefined,
+  ): Promise<HeadlessWorkerExecutionV1> {
+    const cancelled = await this.#validatePlanApproval(runId, planSha256, actor, signal);
+    if (cancelled !== null) {
+      throw new IcarusError("CANCELLED", "Operator cancelled headless approval validation");
+    }
+    const candidate = this.#store.getRun(runId);
+    invariant(candidate.plan !== null, "MISSING_PLAN", "Headless run has no persisted plan");
+    const project = this.#store.getProject(candidate.projectId);
+    const preflight = resolveHeadlessProfileV1(profile, {
+      providerProfiles,
+      projectCeiling: project.ceiling,
+      approvedPlan: candidate.plan,
+    });
+    invariant(
+      digestJson(asJsonValue(preflight.provider)) === digestJson(asJsonValue(candidate.provider)),
+      "HEADLESS_BINDING_AUTHORITY_DENIED",
+      "Resolved profile provider does not equal the plan-selected run provider",
+    );
+    const { iterationCeiling: _preflightIterations, ...preflightCeiling } =
+      preflight.profile.budgets;
+    assertHeadlessWorkerBudgetAvailable(candidate, preflightCeiling);
+    this.#store.approvePlan(runId, planSha256, actor);
+    let binding: HeadlessExecutionBindingV1;
+    try {
+      const run = this.#store.getRun(runId);
+      binding = bindHeadlessExecutionV1(profile, {
+        run,
+        project: this.#store.getProject(run.projectId),
+        approvals: this.#store.listApprovals(runId),
+        readableManifest: this.#store.readableManifest(runId),
+        providerProfiles,
+      });
+    } catch (error) {
+      const failure = asIcarusError(error, "HEADLESS_BINDING_FAILED");
+      this.#store.failRun(runId, "running", failure);
+      throw failure;
+    }
+
+    const { iterationCeiling: _iterationCeiling, ...ceiling } = binding.resolution.profile.budgets;
+    const active: ActiveHeadlessExecutionV1 = {
+      binding,
+      ceiling,
+      toolIds: new Set(binding.resolution.profile.toolIds),
+    };
+    assertHeadlessWorkerBudgetAvailable(this.#store.getRun(runId), ceiling);
+    this.#store.recordHeadlessWorkerStarted(runId, binding);
+    this.#headlessExecutionContexts.set(runId, active);
+    try {
+      try {
+        await this.#guarded(runId, "running", () => this.#execute(runId, signal), signal);
+      } catch {
+        // #guarded has already persisted the failed run; settlement below is authoritative.
+      }
+      const run = this.#store.getRun(runId);
+      const fallbackError =
+        run.lastError === null
+          ? null
+          : { code: run.lastError.code, message: run.lastError.message };
+      const settlement = createHeadlessWorkerSettlementV1({
+        binding,
+        run,
+        events: this.#store.listEvents(runId),
+        error: fallbackError,
+      });
+      this.#store.recordHeadlessWorkerSettled(runId, settlement);
+      return { binding, settlement, run: this.#store.getRun(runId) };
+    } finally {
+      this.#headlessExecutionContexts.delete(runId);
+    }
   }
 
   async #reviewUnleased(
@@ -1828,9 +1949,19 @@ export class IcarusService {
     );
   }
 
+  #projectForRun(run: RunRecord): ProjectRecord {
+    const project = this.#store.getProject(run.projectId);
+    const active = this.#headlessExecutionContexts.get(run.id);
+    return active === undefined ? project : { ...project, ceiling: active.ceiling };
+  }
+
+  #activeHeadlessExecution(runId: string): ActiveHeadlessExecutionV1 | null {
+    return this.#headlessExecutionContexts.get(runId) ?? null;
+  }
+
   async #loadContext(run: RunRecord): Promise<ContextBundle> {
     this.#assertCurrentContextPolicy(run);
-    const project = this.#store.getProject(run.projectId);
+    const project = this.#projectForRun(run);
     const value = await this.#artifacts.readJson(
       run.contextArtifactPath,
       project.ceiling.maxContextBytes * 4 + 1024 * 1024,
@@ -2090,7 +2221,7 @@ export class IcarusService {
       return this.#runRepairSession(runId, signal);
     }
     const plan = run.plan;
-    const project = this.#store.getProject(run.projectId);
+    const project = this.#projectForRun(run);
     const repository = this.#store.getRepository(project.repositoryId);
     const context = await this.#runHostStage(
       runId,
@@ -2381,7 +2512,7 @@ export class IcarusService {
       "MISSING_EDIT_STATE",
       "Verification has no complete patch-set intent",
     );
-    const project = this.#store.getProject(run.projectId);
+    const project = this.#projectForRun(run);
     const checkpointFiles = this.#store.listCheckpointFiles(runId);
     invariant(
       checkpointFiles.length > 0,
@@ -2576,7 +2707,7 @@ export class IcarusService {
       "MISSING_VERIFICATION",
       "Agent session requires an approved plan and private workspace",
     );
-    const project = this.#store.getProject(run.projectId);
+    const project = this.#projectForRun(run);
     const plan = run.plan as NonNullable<RunRecord["plan"]>;
     // Canonical grant parsing dominates both the recoverable state transition
     // and every session worktree effect. This fails closed for legacy rows
@@ -2882,11 +3013,17 @@ export class IcarusService {
         },
       },
     };
+    const activeHeadless = this.#activeHeadlessExecution(runId);
 
     const outcome = await runSessionLoop(
       {
         initialEvidence: this.#durableSessionEvidence(runId),
-        iterationCeiling: Math.min(plan.iterationCeiling, MAX_SESSION_ITERATIONS),
+        iterationCeiling: Math.min(
+          plan.iterationCeiling,
+          activeHeadless?.binding.resolution.profile.budgets.iterationCeiling ??
+            MAX_SESSION_ITERATIONS,
+          MAX_SESSION_ITERATIONS,
+        ),
         spentIterations: () => this.#store.countSessionIterations(runId),
         callProvider: async (prompt) => {
           assertNoProviderSecretFields([prompt]);
@@ -2907,6 +3044,7 @@ export class IcarusService {
           return parseProviderJson(text, project.ceiling.maxContextBytes);
         },
         toolContext,
+        ...(activeHeadless === null ? {} : { enabledTools: activeHeadless.toolIds }),
         callsSoFar: (kind) =>
           this.#store.countOperationsByKind(runId, sessionCapabilityOperationKind(kind)),
         invokeTool: async (call, action) => {
@@ -2965,7 +3103,7 @@ export class IcarusService {
       "MISSING_CHECKPOINT",
       "Unsettled session recovery requires persisted checkpoint files",
     );
-    const project = this.#store.getProject(run.projectId);
+    const project = this.#projectForRun(run);
     await this.#runHostStage(
       runId,
       "session.reconcile",
@@ -3086,7 +3224,7 @@ export class IcarusService {
   ): string {
     const run = this.#store.getRun(runId);
     invariant(run.plan !== null, "MISSING_PLAN", "Agent session has no approved plan");
-    const project = this.#store.getProject(run.projectId);
+    const project = this.#projectForRun(run);
     const readableManifest = this.#store.readableManifest(runId);
     const remote = run.provider.capabilities.locality === "remote";
     const fullVerification =
@@ -3179,7 +3317,7 @@ export class IcarusService {
     takeSettlement: () => SessionToolSettlement | null,
   ): Promise<ToolResult> {
     const run = this.#store.getRun(runId);
-    const project = this.#store.getProject(run.projectId);
+    const project = this.#projectForRun(run);
     const requestedRuntime =
       call.name === "run_checks"
         ? call.checkIds.length * project.ceiling.commandTimeoutMs + 120_000
@@ -3208,6 +3346,7 @@ export class IcarusService {
       Math.min(availableRuntime, requestedRuntime),
       "running",
       this.#browserActionIdForOperation(runId, operationKind),
+      project.ceiling,
     );
     const operationSignal = boundedSignal(signal, operation.reservedRuntimeMs);
     const startedAt = performance.now();
@@ -3322,7 +3461,7 @@ export class IcarusService {
       "MISSING_APPLIED_PATCH",
       "Session verification snapshot requires an applied patch set",
     );
-    const project = this.#store.getProject(run.projectId);
+    const project = this.#projectForRun(run);
     const checkpointFiles = this.#store.listCheckpointFiles(runId);
     invariant(checkpointFiles.length > 0, "MISSING_EDIT_STATE", "Session has no patch bytes");
     const patchPaths = checkpointFiles.map((file) => file.path);
@@ -3426,7 +3565,7 @@ export class IcarusService {
       "CHECK_MISMATCH",
       "run_checks must name the complete approved check list in plan order",
     );
-    const project = this.#store.getProject(run.projectId);
+    const project = this.#projectForRun(run);
     const checkpointFiles = this.#store.listCheckpointFiles(runId);
     invariant(checkpointFiles.length > 0, "MISSING_EDIT_STATE", "Session has no patch bytes");
     const patchPaths = checkpointFiles.map((file) => file.path);
@@ -3570,7 +3709,7 @@ export class IcarusService {
       "VERIFICATION_NOT_PASSED",
       "report_done requires current passing registered-check evidence",
     );
-    const project = this.#store.getProject(run.projectId);
+    const project = this.#projectForRun(run);
     const checkpointFiles = this.#store.listCheckpointFiles(runId);
     invariant(checkpointFiles.length > 0, "MISSING_VERIFICATION", "Run has no patch bytes");
     const patchPaths = checkpointFiles.map((file) => file.path);
@@ -3986,7 +4125,7 @@ export class IcarusService {
       "Host-stage runtime must be a positive integer",
     );
     const run = this.#store.getRun(runId);
-    const project = this.#store.getProject(run.projectId);
+    const project = this.#projectForRun(run);
     const remainingRuntime = project.ceiling.maxActiveRuntimeMs - run.usage.activeRuntimeMs;
     invariant(
       remainingRuntime > 0,
@@ -4002,6 +4141,7 @@ export class IcarusService {
       reservedRuntime,
       undefined,
       this.#browserActionIdForOperation(runId, kind),
+      project.ceiling,
     );
     const aggregateSignal = boundedSignal(signal, reservedRuntime);
     const startedAt = performance.now();
@@ -4062,7 +4202,7 @@ export class IcarusService {
     reserveSessionRecovery = false,
   ): Promise<string> {
     const run = this.#store.getRun(runId);
-    const project = this.#store.getProject(run.projectId);
+    const project = this.#projectForRun(run);
     if (run.provider.capabilities.locality === "remote") {
       invariant(
         this.#store
@@ -4117,6 +4257,7 @@ export class IcarusService {
       providerRuntime,
       undefined,
       this.#browserActionIdForOperation(runId, kind),
+      project.ceiling,
     );
     const effectiveTimeoutMs = Math.max(1, Math.min(request.timeoutMs, providerRuntime - 1_000));
     const providerSignal = boundedSignal(signal, effectiveTimeoutMs);
