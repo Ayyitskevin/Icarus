@@ -296,3 +296,49 @@ append-only event history with its bounded check evidence and diff. The evaluato
 records manifest/fixture digests, observed evidence only after assertions pass,
 honest unsupported reasons, measurements, aggregates, limitations, and counts in
 the ignored local report. Generated reports are never committed.
+
+## Gate 2 benchmark contract
+
+The closed Gate 2 contract is `fixtures/evals/gate2/manifest.v1.json`. It pins
+30 task documents and seven existing fixture repositories by complete sorted
+file inventory, raw-byte SHA-256, and canonical inventory digest. The task mix
+is fixed at ten repairs, five refactors, five explanations, five security
+reviews, and five scaffolds. Unknown, missing, duplicate, reordered, reclassified,
+unpinned, or byte-drifted input fails validation.
+
+`pnpm benchmark:gate2:contract` strict-parses and validates those pins offline.
+`pnpm eval` includes the same command. A successful command reports 30 validated
+cases, zero executed cases, and `contract_validated_gate2_execution_not_run`.
+It reads no credentials, invokes no provider or repository code, performs no
+network or Git operation, mutates no source checkout, and cannot complete Gate 2.
+
+The manifest publishes these quality gates before a live runner exists:
+
+- at least 24 of 30 successful tasks;
+- macro retrieval recall at least 0.90 and macro precision at least 0.60;
+- manifest-matching digest provenance for every retrieved path;
+- first-pass plan acceptance at least 0.80;
+- zero changed paths outside each case's exact expected set; and
+- for an exact paired baseline/routed comparison, at least 30% lower median
+  estimated cost per success without lowering the successful-task count.
+
+A case succeeds only when its exact scenario evaluator reports `passed`, its
+class-specific changed-path/citation/finding evidence matches the manifest, and
+it has zero incorrect edits. Each case binds a stable
+`<case-id>-evaluator` identifier. This slice defines that vocabulary but does
+not implement or impersonate those evaluators; unavailable execution must be
+reported as `unsupported` and makes a result incomplete.
+
+The strict result contract recomputes retrieval, provenance, plan, outcome,
+usage, cost, and aggregate values from 30 manifest-bound observations. It
+refuses duplicate or extra fields, stale repository/task identities, invented
+digests, over-budget usage, inferred billing, and caller-supplied aggregate
+tampering. `actualBilledUsd` is always null; cost is an estimate from the
+captured profile price table. One result can pass the published quality
+thresholds but still reports that paired comparison is required. A routing
+claim requires baseline and routed records with the same execution-profile
+digest, model set, repository/task revisions, budgets, and captured prices.
+
+This contract makes the benchmark reviewable; it is not benchmark evidence.
+Gate 2 remains open until the scenario evaluators and deterministic retrieval
+runtime execute the fixed suite and satisfy the accepted ADR 0036 exit gate.
