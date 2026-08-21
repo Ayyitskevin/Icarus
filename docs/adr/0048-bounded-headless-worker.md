@@ -87,8 +87,9 @@ worker refuses an unexplained terminal failure as an incomplete settlement.
 - Ordinary interactive approval remains behaviorally unchanged.
 - Signal cancellation uses the existing guarded cancellation/recovery path and
   settles only after no operation remains active.
-- H2b is one-shot. Crash-derived replay, binding reconstruction after process
-  death, and continuation of a started worker remain H3 work.
+- H2b is one-shot. ADR 0049's H3a slice may close a dead worker's operation and
+  event tail but grants no continuation authority; binding reconstruction and
+  exactly-once resume remain H3b.
 - Child runs, concurrency above one, schedules, daemons, deployment, SearXNG,
   DeepAPI, arbitrary plugins, and external worker adapters remain excluded.
 

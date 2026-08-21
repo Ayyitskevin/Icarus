@@ -307,8 +307,13 @@ evidence derives a named verification error for exit 1; a failed disposition
 without either that evidence or an explicit persisted error remains an
 incomplete settlement and is refused.
 The CLI then renders the complete checksum-terminated H0 history as JSONL. A
-started worker is not restart authority: crash replay and continuation remain
-H3 work.
+started worker is not restart authority. H3a's explicit
+`run reconcile-headless` path reacquires the same run lease, marks started
+operations interrupted with their full reservations, proves operation
+quiescence, and appends one `icarus.headless.worker-interruption.v1` settlement
+without changing run state or re-entering execution. Repeated reconciliation
+returns the existing settlement. Ordinary resume refuses any headless lifecycle;
+binding reconstruction and exactly-once continuation remain H3b work.
 
 ## Guarded CLI golden-path sequence
 

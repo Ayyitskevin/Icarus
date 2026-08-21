@@ -27,8 +27,11 @@ import {
 import {
   type ActiveHeadlessExecutionV1,
   assertHeadlessWorkerBudgetAvailable,
+  createInterruptedHeadlessWorkerSettlementV1,
   createHeadlessWorkerSettlementV1,
   type HeadlessWorkerExecutionV1,
+  type HeadlessWorkerReconciliationV1,
+  inspectHeadlessWorkerLifecycleV1,
 } from "./headless-worker.js";
 import {
   type LandingCandidateResult,
@@ -1264,6 +1267,31 @@ export class IcarusService {
     );
   }
 
+  async reconcileHeadlessWorker(runId: string): Promise<HeadlessWorkerReconciliationV1> {
+    return this.#leases.withLease(runId, async () => {
+      const before = this.#store.listEvents(runId);
+      const lifecycle = inspectHeadlessWorkerLifecycleV1(runId, before);
+      invariant(
+        lifecycle.status !== "absent",
+        "MISSING_HEADLESS_WORKER",
+        "Headless worker never started",
+      );
+      if (lifecycle.status === "settled") {
+        return { settlement: lifecycle.settlement, run: this.#store.getRun(runId) };
+      }
+
+      this.#store.markStartedOperationsInterrupted(runId);
+      const events = this.#store.listEvents(runId);
+      const run = this.#store.getRun(runId);
+      const settlement = createInterruptedHeadlessWorkerSettlementV1({
+        run,
+        events,
+      });
+      this.#store.recordHeadlessWorkerSettled(runId, settlement);
+      return { settlement, run: this.#store.getRun(runId) };
+    });
+  }
+
   async review(
     runId: string,
     decision: "approve" | "reject",
@@ -1503,6 +1531,16 @@ export class IcarusService {
     signal: AbortSignal | undefined,
     context: BrowserActionExecutionContext | null,
   ): Promise<RunRecord> {
+    const headless = inspectHeadlessWorkerLifecycleV1(runId, this.#store.listEvents(runId));
+    invariant(
+      headless.status === "absent",
+      headless.status === "started"
+        ? "HEADLESS_WORKER_RECONCILIATION_REQUIRED"
+        : "HEADLESS_BINDING_RECONSTRUCTION_REQUIRED",
+      headless.status === "started"
+        ? "Reconcile the interrupted headless worker before continuation"
+        : "Headless continuation requires binding reconstruction",
+    );
     let run: RunRecord;
     if (context === null) {
       this.#store.recordResumeRequested(runId);

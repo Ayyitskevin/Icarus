@@ -2,7 +2,11 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { runCliMain } from "../../packages/cli/src/main.js";
 import type { HeadlessExecutionBindingV1 } from "../../packages/core/src/headless-binding.js";
-import { createHeadlessWorkerSettlementV1 } from "../../packages/core/src/headless-worker.js";
+import {
+  createHeadlessWorkerSettlementV1,
+  createInterruptedHeadlessWorkerSettlementV1,
+  inspectHeadlessWorkerLifecycleV1,
+} from "../../packages/core/src/headless-worker.js";
 import { createProviderConfig } from "../../packages/core/src/provider.js";
 import type { EventRecord, RunRecord } from "../../packages/core/src/types.js";
 import type { IcarusRuntime } from "../../packages/core/src/runtime.js";
@@ -80,6 +84,185 @@ function event(sequence: number, type: string, payload: EventRecord["payload"] =
 }
 
 describe("headless worker settlement", () => {
+  test("recognizes one open worker without treating its start as resume authority", () => {
+    expect(
+      inspectHeadlessWorkerLifecycleV1(RUN_ID, [
+        event(1, "headless.worker.started", {
+          schema: "icarus.headless.worker.v1",
+          bindingDigestSha256: binding.bindingDigestSha256,
+        }),
+      ]),
+    ).toEqual({
+      status: "started",
+      bindingDigestSha256: binding.bindingDigestSha256,
+      startedEventSequence: 1,
+    });
+  });
+
+  test("creates an explicit interrupted settlement only after operation reconciliation", () => {
+    const events = [
+      event(1, "headless.worker.started", {
+        schema: "icarus.headless.worker.v1",
+        bindingDigestSha256: binding.bindingDigestSha256,
+      }),
+      event(2, "operation.started", { operationId: "operation-1" }),
+      event(3, "operation.interrupted", { operationId: "operation-1" }),
+    ];
+    expect(
+      createInterruptedHeadlessWorkerSettlementV1({
+        run: run("running", null),
+        events,
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        schema: "icarus.headless.worker-interruption.v1",
+        runId: RUN_ID,
+        bindingDigestSha256: binding.bindingDigestSha256,
+        outcome: "interrupted",
+        exitCode: 1,
+        finalState: "running",
+        error: expect.objectContaining({ code: "HEADLESS_WORKER_INTERRUPTED" }),
+        reconciliation: {
+          startedEventSequence: 1,
+          interruptedOperationIds: ["operation-1"],
+          continuation: "requires_binding_reconstruction",
+        },
+      }),
+    );
+  });
+
+  test("rejects duplicate starts and interruption while an operation is still open", () => {
+    const started = event(1, "headless.worker.started", {
+      schema: "icarus.headless.worker.v1",
+      bindingDigestSha256: binding.bindingDigestSha256,
+    });
+    expect(() =>
+      inspectHeadlessWorkerLifecycleV1(RUN_ID, [started, { ...started, sequence: 2 }]),
+    ).toThrowError(/exactly one start/);
+    expect(() =>
+      createInterruptedHeadlessWorkerSettlementV1({
+        run: run("running", null),
+        events: [started, event(2, "operation.started", { operationId: "operation-1" })],
+      }),
+    ).toThrowError(/active operation/);
+    expect(() =>
+      createInterruptedHeadlessWorkerSettlementV1({
+        run: run("running", null),
+        events: [
+          started,
+          event(2, "operation.interrupted", { operationId: "operation-1" }),
+          event(3, "operation.interrupted", { operationId: "operation-1" }),
+        ],
+      }),
+    ).toThrowError(/duplicate operation/);
+  });
+
+  test("rejects an interruption settlement that does not bind the start sequence", () => {
+    expect(() =>
+      inspectHeadlessWorkerLifecycleV1(RUN_ID, [
+        event(1, "headless.worker.started", {
+          schema: "icarus.headless.worker.v1",
+          bindingDigestSha256: binding.bindingDigestSha256,
+        }),
+        event(2, "headless.worker.settled", {
+          schema: "icarus.headless.worker-interruption.v1",
+          runId: RUN_ID,
+          bindingDigestSha256: binding.bindingDigestSha256,
+          outcome: "interrupted",
+          exitCode: 1,
+          finalState: "running",
+          verificationOutcome: null,
+          usage: { ...run("running", null).usage },
+          error: { code: "HEADLESS_WORKER_INTERRUPTED", message: "Interrupted" },
+          reconciliation: {
+            startedEventSequence: 99,
+            interruptedOperationIds: [],
+            continuation: "requires_binding_reconstruction",
+          },
+        }),
+      ]),
+    ).toThrowError(/lacks reconciliation evidence/);
+
+    expect(() =>
+      inspectHeadlessWorkerLifecycleV1(RUN_ID, [
+        event(1, "headless.worker.started", {
+          schema: "icarus.headless.worker.v1",
+          bindingDigestSha256: binding.bindingDigestSha256,
+        }),
+        event(2, "operation.interrupted", { operationId: "operation-1" }),
+        event(3, "headless.worker.settled", {
+          schema: "icarus.headless.worker-interruption.v1",
+          runId: RUN_ID,
+          bindingDigestSha256: binding.bindingDigestSha256,
+          outcome: "interrupted",
+          exitCode: 1,
+          finalState: "running",
+          verificationOutcome: null,
+          usage: { ...run("running", null).usage },
+          error: { code: "HEADLESS_WORKER_INTERRUPTED", message: "Interrupted" },
+          reconciliation: {
+            startedEventSequence: 1,
+            interruptedOperationIds: [],
+            continuation: "requires_binding_reconstruction",
+          },
+        }),
+      ]),
+    ).toThrowError(/does not match durable interruption history/);
+  });
+
+  test("rejects incomplete or contradictory ordinary settlements", () => {
+    const started = event(1, "headless.worker.started", {
+      schema: "icarus.headless.worker.v1",
+      bindingDigestSha256: binding.bindingDigestSha256,
+    });
+    expect(() =>
+      inspectHeadlessWorkerLifecycleV1(RUN_ID, [
+        started,
+        event(2, "headless.worker.settled", {
+          schema: "icarus.headless.worker.v1",
+          runId: RUN_ID,
+          bindingDigestSha256: binding.bindingDigestSha256,
+          outcome: "review_ready",
+          exitCode: 0,
+        }),
+      ]),
+    ).toThrowError(/settlement members are malformed/);
+
+    expect(() =>
+      inspectHeadlessWorkerLifecycleV1(RUN_ID, [
+        started,
+        event(2, "headless.worker.settled", {
+          schema: "icarus.headless.worker.v1",
+          runId: RUN_ID,
+          bindingDigestSha256: binding.bindingDigestSha256,
+          outcome: "review_ready",
+          exitCode: 0,
+          finalState: "running",
+          verificationOutcome: "passed",
+          usage: { ...run("running", "passed").usage },
+          error: null,
+        }),
+      ]),
+    ).toThrowError(/outcome does not match its evidence/);
+
+    expect(() =>
+      inspectHeadlessWorkerLifecycleV1(RUN_ID, [
+        started,
+        event(2, "headless.worker.settled", {
+          schema: "icarus.headless.worker.v1",
+          runId: RUN_ID,
+          bindingDigestSha256: binding.bindingDigestSha256,
+          outcome: "failed",
+          exitCode: 1,
+          finalState: "completed",
+          verificationOutcome: "passed",
+          usage: { ...run("completed", "passed").usage },
+          error: { code: "SYNTHETIC_FAILURE", message: "Synthetic failure" },
+        }),
+      ]),
+    ).toThrowError(/outcome does not match its evidence/);
+  });
+
   test("maps passing review evidence to success", () => {
     expect(
       createHeadlessWorkerSettlementV1({

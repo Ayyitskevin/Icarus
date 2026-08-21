@@ -150,17 +150,24 @@ export {
 } from "./headless-profile.js";
 export type {
   ActiveHeadlessExecutionV1,
+  DurableHeadlessWorkerSettlementV1,
   HeadlessWorkerExecutionV1,
   HeadlessWorkerExitCodeV1,
+  HeadlessWorkerLifecycleV1,
   HeadlessWorkerOutcomeV1,
+  HeadlessWorkerReconciliationV1,
   HeadlessWorkerSettlementV1,
+  InterruptedHeadlessWorkerSettlementV1,
 } from "./headless-worker.js";
 export {
   assertHeadlessWorkerBudgetAvailable,
+  createInterruptedHeadlessWorkerSettlementV1,
   createHeadlessWorkerSettlementV1,
+  HEADLESS_WORKER_INTERRUPTION_SCHEMA,
   HEADLESS_WORKER_SCHEMA,
   headlessWorkerSettledPayload,
   headlessWorkerStartedPayload,
+  inspectHeadlessWorkerLifecycleV1,
 } from "./headless-worker.js";
 export type {
   LandingProfileRecordV1,

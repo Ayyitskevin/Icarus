@@ -64,8 +64,9 @@ the snapshot's usefulness for execution.
 - No second session, approval, grant, event, or state store is introduced.
 - H2b still must implement lease-held one-task execution, lifecycle events,
   cancellation, quiescence, metering, and explicit non-success settlement.
-- H3 resume must reconstruct and compare the binding after it verifies run,
-  provider, workspace, and persisted evidence identity.
+- H3b resume must reconstruct and compare the binding after H3a closes any open
+  crash tail and it verifies run, provider, workspace, and persisted evidence
+  identity.
 
 ## Alternatives rejected
 

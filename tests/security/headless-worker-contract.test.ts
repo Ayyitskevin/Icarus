@@ -86,11 +86,36 @@ describe("headless worker security contract", () => {
     expect(worker).toContain("HEADLESS_WORKER_NOT_QUIESCENT");
   });
 
+  test("crash-tail reconciliation closes operations before settlement and never resumes work", () => {
+    const reconciliation = body(service, "async reconcileHeadlessWorker(", "async review(");
+    expect(reconciliation).toContain("this.#leases.withLease(runId");
+    const interrupt = reconciliation.indexOf("markStartedOperationsInterrupted(");
+    const settlement = reconciliation.indexOf("createInterruptedHeadlessWorkerSettlementV1(");
+    const record = reconciliation.indexOf("recordHeadlessWorkerSettled(");
+    expect(interrupt).toBeGreaterThanOrEqual(0);
+    expect(settlement).toBeGreaterThan(interrupt);
+    expect(record).toBeGreaterThan(settlement);
+    expect(reconciliation).not.toContain("this.#execute(");
+    expect(reconciliation).not.toContain("createGateway(");
+  });
+
+  test("ordinary resume cannot bypass headless binding reconstruction", () => {
+    const resume = body(service, "async #resumeUnleased(", "async #cancelUnleased(");
+    const guard = resume.indexOf("inspectHeadlessWorkerLifecycleV1(");
+    const resumeEvent = resume.indexOf("recordResumeRequested(");
+    const execute = resume.indexOf("this.#execute(");
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(resumeEvent).toBeGreaterThan(guard);
+    expect(execute).toBeGreaterThan(guard);
+    expect(resume).toContain("HEADLESS_BINDING_RECONSTRUCTION_REQUIRED");
+  });
+
   test("the CLI emits checksum-terminated history and propagates worker exit status", () => {
     const command = body(cli, 'if (action === "approve-headless")', 'if (action === "status")');
     expect(command).toContain("createHeadlessHistoryLines(");
     expect(command).toContain("canonicalJsonLine(line)");
     expect(command).toContain("process.exitCode = result.settlement.exitCode");
     expect(command).not.toContain("process.exit(0)");
+    expect(command).toContain('if (action === "reconcile-headless")');
   });
 });

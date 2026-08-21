@@ -492,6 +492,20 @@ fails closed.
 It does not approve review, commit, push, deploy, schedule, create child runs,
 or configure an external research adapter.
 
+If the process dies after `headless.worker.started`, close that worker's durable
+tail explicitly:
+
+```text
+node packages/cli/dist/main.js run reconcile-headless <run-id>
+```
+
+The H3a command holds the run lease, marks any open operation interrupted with
+its full conservative reservation, appends one
+`icarus.headless.worker-interruption.v1` settlement, emits checksum-verified
+JSONL, and exits `1`. Repeating it returns the same history. It never resumes
+execution; ordinary `run resume` is refused until H3b can reconstruct the exact
+headless binding.
+
 Use `run list [--project <name>]` to rediscover persisted run IDs and `run
 history <run-id>` to inspect the append-only transition and approval record.
 

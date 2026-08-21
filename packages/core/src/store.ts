@@ -42,7 +42,7 @@ import type { HeadlessExecutionBindingV1 } from "./headless-binding.js";
 import {
   headlessWorkerSettledPayload,
   headlessWorkerStartedPayload,
-  type HeadlessWorkerSettlementV1,
+  type DurableHeadlessWorkerSettlementV1,
 } from "./headless-worker.js";
 import {
   type CandidateSettlementInputV1,
@@ -4435,7 +4435,10 @@ export class IcarusStore {
     return this.getRun(runId);
   }
 
-  recordHeadlessWorkerSettled(runId: string, settlement: HeadlessWorkerSettlementV1): RunRecord {
+  recordHeadlessWorkerSettled(
+    runId: string,
+    settlement: DurableHeadlessWorkerSettlementV1,
+  ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const run = this.getRun(runId);
       invariant(

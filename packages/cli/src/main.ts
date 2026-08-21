@@ -575,6 +575,7 @@ function usage(): never {
       "icarus run approve-egress RUN --context-sha SHA --actor ACTOR",
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
       "icarus run approve-headless RUN --plan-sha SHA --actor ACTOR --profile-json JSON --provider-catalog-json JSON",
+      "icarus run reconcile-headless RUN",
       "icarus run status RUN",
       "icarus run list [--project NAME]",
       "icarus run history RUN [--format json|jsonl]",
@@ -1024,6 +1025,20 @@ async function dispatch(
       providerCatalog as readonly HeadlessHostProviderProfileV1[],
       signal,
     );
+    const history = runtime.service.history(result.run.id);
+    const lines = createHeadlessHistoryLines(
+      history.run.id,
+      publicRun(history.run) as JsonValue,
+      history.approvals,
+      history.events,
+    );
+    for (const line of lines) process.stdout.write(canonicalJsonLine(line));
+    process.exitCode = result.settlement.exitCode;
+    return;
+  }
+  if (action === "reconcile-headless") {
+    const options = parseOptions(rest, []);
+    const result = await runtime.service.reconcileHeadlessWorker(oneRunId(options));
     const history = runtime.service.history(result.run.id);
     const lines = createHeadlessHistoryLines(
       history.run.id,

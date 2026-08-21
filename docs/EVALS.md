@@ -29,6 +29,19 @@ The evaluator writes `.local/eval-report.json` with report schema v2, manifest
 and fixture digests, per-case evidence, fixed per-case measurements, aggregate
 measurements, limitations, and separate passed, failed, and unsupported counts.
 
+H3a crash-tail evidence is a focused runtime integration rather than a new
+manifest capability class. It starts the compiled headless CLI against a
+deterministic loopback provider, waits until the second provider operation is
+durably admitted, sends `SIGKILL`, and reopens the same SQLite state through the
+compiled reconciliation command. The test requires exactly one charged
+`operation.interrupted`, one `icarus.headless.worker-interruption.v1`
+settlement, a checksum-valid committed prefix, byte-identical repeated recovery,
+full conservative reservation accounting, no additional provider request,
+refused ordinary resume, and an unchanged source Git fingerprint. The pure
+grammar also retains already-committed interruption IDs if reconciliation
+itself dies before settlement. The dated record is
+[`docs/evals/2026-08-21-headless-crash-tail.md`](evals/2026-08-21-headless-crash-tail.md).
+
 ## Gate 1 benchmark contract
 
 The populated Gate 1 input contract is committed at
