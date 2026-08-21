@@ -16,7 +16,9 @@ import {
   CHANGE_HANDOFF_RESULT_MAX_BYTES,
   type ChangeRoomAnnotationTarget,
   type CheckProfile,
+  canonicalJsonLine,
   createChangeHandoffExportResult,
+  createHeadlessHistoryLines,
   createIcarusRuntime,
   createProviderConfig,
   DEFAULT_CEILING,
@@ -27,6 +29,7 @@ import {
   IcarusError,
   type IcarusRuntime,
   inspectChangeHandoffDocuments,
+  type JsonValue,
   LANDING_LEDGER_MIGRATION,
   migrateGate1Schema,
   presentLandingStatusV1,
@@ -434,7 +437,7 @@ function usage(): never {
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
       "icarus run status RUN",
       "icarus run list [--project NAME]",
-      "icarus run history RUN",
+      "icarus run history RUN [--format json|jsonl]",
       "icarus run handoff-preview RUN --correlation-id ID [--external-task-ref REF]",
       "icarus run handoff-export RUN --correlation-id ID [--external-task-ref REF] --expected-preview-sha256 SHA --output-dir DIR",
       "icarus handoff verify --input FILE",
@@ -674,8 +677,22 @@ async function dispatch(
     return;
   }
   if (action === "history") {
-    const options = parseOptions(rest, []);
+    const options = parseOptions(rest, ["--format"]);
     const history = runtime.service.history(oneRunId(options));
+    const format = optional(options, "--format") ?? "json";
+    if (format === "jsonl") {
+      const lines = createHeadlessHistoryLines(
+        history.run.id,
+        publicRun(history.run) as JsonValue,
+        history.approvals,
+        history.events,
+      );
+      for (const line of lines) process.stdout.write(canonicalJsonLine(line));
+      return;
+    }
+    if (format !== "json") {
+      fail("INVALID_ARGUMENT", "--format must be json or jsonl");
+    }
     print({
       run: publicRun(history.run),
       approvals: history.approvals,

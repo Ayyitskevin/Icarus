@@ -38,6 +38,7 @@ Decision records for the current milestone:
 | [0041](adr/0041-change-rooms-evidence-projections.md) | Change Rooms are evidence projections, not a chat system, workflow engine, or execution authority | Proposed |
 | [0042](adr/0042-change-handoff-packs.md) | Change Handoff Packs are operator-exported redacted evidence capsules, not Change Room replicas or cross-system authority | Accepted — exact published-main CI passed at `133aa38d` in run `30725709403` |
 | [0043](adr/0043-github-gateway-boundary.md) | The GitHub gateway's authority is one closed nine-kind operation table with GET/POST-only inexpressibility, automation-path denial, loopback opt-in, coordinator-owned retry, and 422-as-refusal | Accepted — records the merged unwired package (PRs #25–27) and carries their missing independent-review record forward; two contract-level questions (identity case in the pull-request head filter, pinned page size against the response ceiling) remain Open and require an ADR 0027 amendment |
+| [0044](adr/0044-headless-workspace-harness-direction.md) | Icarus headless workspace harness: authoritative kernel, event stream, bounded workers, optional pinned external adapters | Accepted for headless workstream; no Mickey deployment |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.
