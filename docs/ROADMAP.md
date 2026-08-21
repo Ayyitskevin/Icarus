@@ -28,7 +28,7 @@ The current sequence is:
 
 ## Headless workspace harness (active shift)
 
-ADR 0044 establishes a headless-first workstream for Mickey-like AI workspaces. Icarus remains the authority kernel. H0 is the versioned, checksum-terminated `icarus.headless.history.v1` JSONL trajectory export; H1 adds digestable default-deny profiles; H2 adds a bounded one-task worker; H3 adds replay/fork/resume; H4 adds isolated child runs; H5 may add pinned out-of-process adapters such as DeepSeek Harness.
+ADR 0044 establishes a headless-first workstream for Mickey-like AI workspaces. Icarus remains the authority kernel. H0 is the versioned, checksum-terminated `icarus.headless.history.v1` JSONL trajectory export. H1's offline contract is implemented under proposed ADR 0046: strict source profiles select a host provider ID, an explicit closed-tool subset, tightening budgets, JSONL output, and a one-task/no-child/no-schedule worker policy; host resolution refuses selections outside the project ceiling or approved plan and emits a mapping-sensitive digest. No H1 runner or Mickey deployment exists. H2 adds a bounded one-task worker; H3 adds replay/fork/resume; H4 adds isolated child runs; H5 may add pinned out-of-process adapters such as DeepSeek Harness.
 
 DeepSeek Harness is a reference implementation and optional benchmark worker, not a replacement or default dependency. The full comparison and exit gates are in [`DEEPSEEK_HARNESS_COMPARISON.md`](DEEPSEEK_HARNESS_COMPARISON.md). This shift does not absorb Gate 1 remote-mutation work or authorize a Mickey deployment.
 

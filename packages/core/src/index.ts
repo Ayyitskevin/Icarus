@@ -124,6 +124,22 @@ export {
   headlessHistoryContentSha256,
 } from "./headless-history.js";
 export type {
+  HeadlessHostProviderProfileV1,
+  HeadlessProfileAuthorityV1,
+  HeadlessProfileBudgetsV1,
+  HeadlessProfileOutputV1,
+  HeadlessProfileV1,
+  HeadlessProfileWorkerPolicyV1,
+  ResolvedHeadlessProfileV1,
+} from "./headless-profile.js";
+export {
+  decodeHeadlessProfileV1,
+  HEADLESS_PROFILE_RESOLUTION_SCHEMA,
+  HEADLESS_PROFILE_SCHEMA_VERSION,
+  headlessProfileDigest,
+  resolveHeadlessProfileV1,
+} from "./headless-profile.js";
+export type {
   LandingProfileRecordV1,
   LandingRunProjectionSnapshotV1,
   LandingRunProjectionV1,
