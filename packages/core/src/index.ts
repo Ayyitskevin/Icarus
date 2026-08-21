@@ -124,6 +124,15 @@ export {
   headlessHistoryContentSha256,
 } from "./headless-history.js";
 export type {
+  HeadlessExecutionApprovalV1,
+  HeadlessExecutionBindingAuthorityV1,
+  HeadlessExecutionBindingV1,
+} from "./headless-binding.js";
+export {
+  bindHeadlessExecutionV1,
+  HEADLESS_EXECUTION_BINDING_SCHEMA,
+} from "./headless-binding.js";
+export type {
   HeadlessHostProviderProfileV1,
   HeadlessProfileAuthorityV1,
   HeadlessProfileBudgetsV1,

@@ -84,10 +84,21 @@ gateway, worker, grant, run, schedule, or I/O; H2 remains required for execution
 
 ### H2 — bounded worker runner
 
-Add a one-task runner modeled on the useful part of `dsh --profile headless`:
-machine-readable lifecycle events, cancellation, quiescence, and a non-success
-exit for budget exhaustion or incomplete settlement. It must run through the
-existing Icarus service/lease path and preserve approval gates.
+H2a implements the non-executable authority bridge under proposed ADR 0047.
+`icarus.headless.execution-binding.v1` recomputes the complete plan approval
+digest from the persisted run/project/readable-manifest records, requires the
+exact plan approval (and exact context-egress approval for a remote provider),
+resolves H1 against that plan, and refuses a resolved provider different from
+the plan-approved run provider. The record binds run, project, base, context,
+plan, approval provenance, profile, and resolution identities. Its digest is
+not an approval, lease, grant, or execution receipt and cannot be replayed as
+authority after the state changes.
+
+H2b must add the actual one-task runner modeled on the useful part of
+`dsh --profile headless`: machine-readable lifecycle events, cancellation,
+quiescence, and a non-success exit for budget exhaustion or incomplete
+settlement. It must reconstruct H2a from authoritative records while holding
+the existing Icarus service lease and preserve every approval gate.
 
 ### H3 — replay, fork, and resume
 
