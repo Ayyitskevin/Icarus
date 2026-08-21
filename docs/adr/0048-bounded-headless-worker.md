@@ -1,8 +1,8 @@
 # ADR 0048: Lease-held bounded headless worker
 
-- Status: Proposed — local H2b candidate implemented and independently
-  reviewed; risky-change research, live-provider measurement, and deployment
-  evidence remain required
+- Status: Proposed — local H2b candidate implemented, settlement-hardened, and
+  independently reviewed; risky-change research, live-provider measurement,
+  and deployment evidence remain required
 - Date: 2026-08-21
 - Related: [ADR 0044](0044-headless-workspace-harness-direction.md),
   [ADR 0046](0046-headless-execution-profiles.md), and
@@ -73,6 +73,10 @@ including the two worker lifecycle events, and returns:
 
 `awaiting_review` is successful worker quiescence only when current verification
 passes and no later human/exhaustion disposition blocks approval.
+Persisted failed or unavailable verification explains exit 1 with the derived
+`HEADLESS_VERIFICATION_FAILED` or `HEADLESS_VERIFICATION_UNAVAILABLE` error.
+Other failed dispositions still require an explicit persisted error; the
+worker refuses an unexplained terminal failure as an incomplete settlement.
 
 ## Consequences
 

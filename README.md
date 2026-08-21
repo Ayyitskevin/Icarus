@@ -485,6 +485,10 @@ quiescence, reconstructs the persisted authority binding before the first
 effect, and writes the checksum-terminated headless history as JSONL. Exit `0`
 means passing evidence is ready for human review; `1` is failure, `2` is
 exhaustion, `3` requires human input, and `130` is settled signal cancellation.
+Failed or unavailable registered checks settle with the explicit
+`HEADLESS_VERIFICATION_FAILED` or `HEADLESS_VERIFICATION_UNAVAILABLE` error;
+an unexplained failed terminal state remains an incomplete settlement and
+fails closed.
 It does not approve review, commit, push, deploy, schedule, create child runs,
 or configure an external research adapter.
 

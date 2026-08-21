@@ -122,6 +122,25 @@ function outcomeFor(
   return { outcome: "failed", exitCode: 1 };
 }
 
+function verificationFailureFor(
+  run: RunRecord,
+): { readonly code: string; readonly message: string } | null {
+  if (run.state !== "awaiting_review") return null;
+  if (run.verification?.outcome === "failed") {
+    return {
+      code: "HEADLESS_VERIFICATION_FAILED",
+      message: "Headless worker registered checks failed",
+    };
+  }
+  if (run.verification?.outcome === "unavailable") {
+    return {
+      code: "HEADLESS_VERIFICATION_UNAVAILABLE",
+      message: "Headless worker registered checks were unavailable",
+    };
+  }
+  return null;
+}
+
 export function createHeadlessWorkerSettlementV1(input: {
   readonly binding: HeadlessExecutionBindingV1;
   readonly run: RunRecord;
@@ -140,7 +159,7 @@ export function createHeadlessWorkerSettlementV1(input: {
   );
   assertQuiescent(input.events);
   const { outcome, exitCode } = outcomeFor(input.run, input.events);
-  const error = input.error ?? null;
+  const error = input.error ?? (outcome === "failed" ? verificationFailureFor(input.run) : null);
   if (outcome === "failed" && error === null) {
     throw new IcarusError(
       "INCOMPLETE_HEADLESS_WORKER_SETTLEMENT",

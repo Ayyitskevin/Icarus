@@ -302,6 +302,10 @@ metered session registry but never replaces a plan capability grant.
 Worker return is allowed only after history proves no operation remains active.
 Exactly one `headless.worker.settled` event records review-ready, human-input,
 exhausted, cancelled, or failed disposition and its process exit semantics.
+An `awaiting_review` snapshot with failed or unavailable registered-check
+evidence derives a named verification error for exit 1; a failed disposition
+without either that evidence or an explicit persisted error remains an
+incomplete settlement and is refused.
 The CLI then renders the complete checksum-terminated H0 history as JSONL. A
 started worker is not restart authority: crash replay and continuation remain
 H3 work.

@@ -314,6 +314,38 @@ describe("bounded headless worker", () => {
     }
   });
 
+  test("settles failed initial checks durably with exit 1", async () => {
+    const current = await fixture([plan(0), patchSet(BROKEN)]);
+    try {
+      const planned = await plannedRun(current, 0);
+      const result = await current.service.approveHeadlessPlan(
+        planned.id,
+        planned.planSha256 ?? "",
+        "headless-operator",
+        profile(0),
+        PROVIDER_CATALOG,
+      );
+      expect(result.run.state).toBe("awaiting_review");
+      expect(result.run.verification?.outcome).toBe("failed");
+      expect(result.run.lastError).toBeNull();
+      expect(result.settlement).toMatchObject({
+        outcome: "failed",
+        exitCode: 1,
+        error: { code: "HEADLESS_VERIFICATION_FAILED" },
+      });
+      expect(current.store.listEvents(planned.id).at(-1)).toMatchObject({
+        type: "headless.worker.settled",
+        payload: {
+          outcome: "failed",
+          exitCode: 1,
+          error: { code: "HEADLESS_VERIFICATION_FAILED" },
+        },
+      });
+    } finally {
+      current.close();
+    }
+  });
+
   test("enforces a tighter profile operation ceiling", async () => {
     const current = await fixture([plan(0), patchSet(FIXED)]);
     try {

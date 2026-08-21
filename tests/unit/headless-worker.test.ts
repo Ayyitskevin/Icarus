@@ -116,9 +116,47 @@ describe("headless worker settlement", () => {
     ).toMatchObject({ outcome: "cancelled", exitCode: 130 });
   });
 
+  test("derives explicit errors from non-passing verification", () => {
+    expect(
+      createHeadlessWorkerSettlementV1({
+        binding,
+        run: run("awaiting_review", "failed"),
+        events: [],
+      }),
+    ).toMatchObject({
+      outcome: "failed",
+      exitCode: 1,
+      error: {
+        code: "HEADLESS_VERIFICATION_FAILED",
+        message: "Headless worker registered checks failed",
+      },
+    });
+    expect(
+      createHeadlessWorkerSettlementV1({
+        binding,
+        run: run("awaiting_review", "unavailable"),
+        events: [],
+      }),
+    ).toMatchObject({
+      outcome: "failed",
+      exitCode: 1,
+      error: {
+        code: "HEADLESS_VERIFICATION_UNAVAILABLE",
+        message: "Headless worker registered checks were unavailable",
+      },
+    });
+  });
+
   test("requires an explicit error for failed settlement", () => {
     expect(() =>
       createHeadlessWorkerSettlementV1({ binding, run: run("failed", null), events: [] }),
+    ).toThrowError(/requires an explicit error/);
+    expect(() =>
+      createHeadlessWorkerSettlementV1({
+        binding,
+        run: run("rolled_back", "failed"),
+        events: [],
+      }),
     ).toThrowError(/requires an explicit error/);
     expect(
       createHeadlessWorkerSettlementV1({
