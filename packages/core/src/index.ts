@@ -112,6 +112,17 @@ export {
   LANDING_LEDGER_SCHEMA,
   migrateGate1Schema,
 } from "./gate1-schema.js";
+export {
+  createHeadlessHistoryLines,
+  HEADLESS_HISTORY_SCHEMA,
+  type HeadlessHistoryApprovalLine,
+  type HeadlessHistoryContentLine,
+  type HeadlessHistoryEndLine,
+  type HeadlessHistoryEventLine,
+  type HeadlessHistoryLine,
+  type HeadlessHistoryRunLine,
+  headlessHistoryContentSha256,
+} from "./headless-history.js";
 export type {
   LandingProfileRecordV1,
   LandingRunProjectionSnapshotV1,
@@ -313,6 +324,7 @@ export type {
   CheckpointCardBody,
   EventRecord,
   EventSummaryRecord,
+  JsonValue,
   LandingReceiptPresentationV1,
   ModelCapabilities,
   PatchsetActionStatus,

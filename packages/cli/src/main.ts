@@ -24,6 +24,7 @@ import {
   createChangeHandoffExportResult,
   type BenchTargetV1,
   createGateway,
+  createHeadlessHistoryLines,
   createIcarusRuntime,
   createProbeRequest,
   createProviderConfig,
@@ -43,6 +44,7 @@ import {
   type IcarusRuntime,
   inspectChangeHandoffDocuments,
   isUnsupportedProbeKind,
+  type JsonValue,
   LANDING_LEDGER_MIGRATION,
   liveEvidenceProfileApprovalDigest,
   migrateGate1Schema,
@@ -561,7 +563,7 @@ function usage(): never {
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
       "icarus run status RUN",
       "icarus run list [--project NAME]",
-      "icarus run history RUN",
+      "icarus run history RUN [--format json|jsonl]",
       "icarus run handoff-preview RUN --correlation-id ID [--external-task-ref REF]",
       "icarus run handoff-export RUN --correlation-id ID [--external-task-ref REF] --expected-preview-sha256 SHA --output-dir DIR",
       "icarus handoff verify --input FILE",
@@ -1001,8 +1003,22 @@ async function dispatch(
     return;
   }
   if (action === "history") {
-    const options = parseOptions(rest, []);
+    const options = parseOptions(rest, ["--format"]);
+    const format = optional(options, "--format") ?? "json";
+    if (format !== "json" && format !== "jsonl") {
+      fail("INVALID_ARGUMENT", "--format must be json or jsonl");
+    }
     const history = runtime.service.history(oneRunId(options));
+    if (format === "jsonl") {
+      const lines = createHeadlessHistoryLines(
+        history.run.id,
+        publicRun(history.run) as JsonValue,
+        history.approvals,
+        history.events,
+      );
+      for (const line of lines) process.stdout.write(canonicalJsonLine(line));
+      return;
+    }
     print({
       run: publicRun(history.run),
       approvals: history.approvals,

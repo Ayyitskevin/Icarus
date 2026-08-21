@@ -26,6 +26,12 @@ The current sequence is:
 | 5 | Supabase change packs | isolated migrations/RLS/Auth/Storage/Realtime/functions, rollback/restore and smoke evidence, separate production approval |
 | 6 | Delivery and scale | five concurrent branch-pinned tasks, idempotent worker recovery, signed evidence, explicit public-effect approvals |
 
+## Headless workspace harness (active shift)
+
+ADR 0044 establishes a headless-first workstream for Mickey-like AI workspaces. Icarus remains the authority kernel. H0 is the versioned, checksum-terminated `icarus.headless.history.v1` JSONL trajectory export; H1 adds digestable default-deny profiles; H2 adds a bounded one-task worker; H3 adds replay/fork/resume; H4 adds isolated child runs; H5 may add pinned out-of-process adapters such as DeepSeek Harness.
+
+DeepSeek Harness is a reference implementation and optional benchmark worker, not a replacement or default dependency. The full comparison and exit gates are in [`DEEPSEEK_HARNESS_COMPARISON.md`](DEEPSEEK_HARNESS_COMPARISON.md). This shift does not absorb Gate 1 remote-mutation work or authorize a Mickey deployment.
+
 Gate C2 begins only after Gates 1–3 and the read-only Council evidence. It pulls
 the single-operator collaboration contracts in ADR 0033 and ADR 0038 forward.
 ADR 0034 retains Athena task envelopes and standing-policy pre-approvals for
