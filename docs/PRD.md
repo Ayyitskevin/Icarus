@@ -153,7 +153,8 @@ The first browser path is intentionally narrower than the guarded CLI lifecycle:
 4. Submitting a task first persists a `preparing` draft without context, provider
    work, cache creation, worktree creation, or source mutation. Planning is a
    separate request and accepts only an explicitly configured loopback Ollama
-   endpoint. The server and review-only UI support Linux, macOS, and Windows.
+   or Vulcan endpoint. The server and review-only UI support Linux, macOS, and
+   Windows.
    Mutation-capable registration, context preview, draft persistence, and
    loopback planning require a supported Chromium-family browser. ADR 0040's
    exact-head technical gate passed at

@@ -466,6 +466,108 @@ export class AnthropicMessagesGateway implements ModelGateway {
   }
 }
 
+/** Operator-attribution seat every Icarus request to Vulcan carries. Vulcan's
+ * budget ledger resolves it; the value is non-secret and never leaves the
+ * loopback boundary unattributed. */
+export const VULCAN_PROVIDER_SEAT = "icarus";
+
+/**
+ * Vulcan chat-completions adapter. Vulcan is a loopback-only OpenAI-subset
+ * gateway whose closed request contract admits no `response_format`, `tools`,
+ * or credential field, so the schema travels in the system message and the
+ * response text faces the same downstream validators every other adapter's
+ * output passes through. The gateway holds no credential: the loopback bind is
+ * the boundary, and the seat is attribution, not authentication. Aliases pass
+ * through verbatim — routing to a local or hosted upstream is Vulcan's
+ * operator-configured concern, never this adapter's.
+ */
+export class VulcanChatCompletionsGateway implements ModelGateway {
+  readonly config: ProviderConfig;
+  readonly #fetch: typeof fetch;
+
+  constructor(config: ProviderConfig, fetchImplementation: typeof fetch = globalThis.fetch) {
+    invariant(
+      config.kind === "vulcan",
+      "PROVIDER_MISMATCH",
+      "Vulcan gateway received the wrong provider config",
+    );
+    const { locality } = parseProviderBaseUrl(config.baseUrl);
+    invariant(
+      locality === "loopback",
+      "VULCAN_ORIGIN_DENIED",
+      "Vulcan provider may only target a loopback endpoint",
+    );
+    this.config = config;
+    this.#fetch = fetchImplementation;
+  }
+
+  async generateStructured(
+    request: StructuredGenerationRequest,
+    signal?: AbortSignal,
+  ): Promise<StructuredGenerationResult> {
+    const response = await fetchJson(
+      endpoint(this.config.baseUrl, "chat/completions"),
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          model: this.config.model,
+          messages: [
+            {
+              role: "system",
+              content: `${request.instructions}\n\nRespond with exactly one JSON object that validates against the JSON Schema named "${request.schemaName}", with no prose, wrapper object, or code fence:\n${JSON.stringify(request.schema)}`,
+            },
+            { role: "user", content: request.input },
+          ],
+          max_tokens: request.maxOutputTokens,
+          stream: false,
+          seat: VULCAN_PROVIDER_SEAT,
+        }),
+      },
+      request.timeoutMs,
+      signal,
+      [],
+      this.#fetch,
+    );
+    const object = asObject(response.value, "Vulcan response");
+    invariant(
+      Array.isArray(object.choices) && object.choices.length === 1,
+      "PROVIDER_PROTOCOL_ERROR",
+      "Vulcan response did not contain exactly one choice",
+    );
+    const choice = asObject(object.choices[0], "Vulcan choice");
+    invariant(
+      choice.finish_reason !== "length",
+      "PROVIDER_PROTOCOL_ERROR",
+      "Vulcan response stopped at the output ceiling",
+    );
+    const message = asObject(choice.message, "Vulcan message");
+    if (typeof message.refusal === "string" && message.refusal.length > 0) {
+      throw new IcarusError("PROVIDER_REFUSAL", "Vulcan refused the structured request");
+    }
+    invariant(
+      typeof message.content === "string",
+      "PROVIDER_PROTOCOL_ERROR",
+      "Vulcan response has no message content",
+    );
+    const usage =
+      object.usage === undefined || object.usage === null
+        ? null
+        : asObject(object.usage, "Vulcan usage");
+    const inputTokens = usage === null ? null : optionalCount(usage.prompt_tokens);
+    const outputTokens = usage === null ? null : optionalCount(usage.completion_tokens);
+    return {
+      text: message.content,
+      usage: {
+        inputTokens,
+        outputTokens,
+        estimatedCostUsd: calculateReportedCost(this.config, inputTokens, outputTokens),
+        latencyMs: response.latencyMs,
+      },
+    };
+  }
+}
+
 function credentialValue(kind: ProviderKind, environment: NodeJS.ProcessEnv): string {
   const name = providerCredentialEnvironmentName(kind);
   return name === null ? "" : (environment[name] ?? "");
@@ -480,6 +582,9 @@ export function createGateway(
   }
   if (config.kind === "anthropic") {
     return new AnthropicMessagesGateway(config, credentialValue("anthropic", environment));
+  }
+  if (config.kind === "vulcan") {
+    return new VulcanChatCompletionsGateway(config);
   }
   return new OpenAIResponsesGateway(config, credentialValue("openai", environment));
 }

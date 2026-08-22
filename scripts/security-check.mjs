@@ -1358,6 +1358,11 @@ const assertions = {
     providerSource.includes('url.hostname.toLowerCase() === "api.anthropic.com"') &&
     providerSource.includes('"PROVIDER_SECRET_DETECTED"') &&
     providerSource.includes("!text.includes(this.#apiKey)"),
+  vulcanAdapterIsLoopbackOnlyWithSeatAttribution:
+    providerSource.includes('"VULCAN_ORIGIN_DENIED"') &&
+    providerSource.includes('locality === "loopback"') &&
+    providerSource.includes('export const VULCAN_PROVIDER_SEAT = "icarus"') &&
+    providerSource.includes("seat: VULCAN_PROVIDER_SEAT"),
   workspaceApprovalProjectionFailsClosed:
     [
       "runId === expectedRunId",

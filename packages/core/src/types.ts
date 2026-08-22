@@ -20,7 +20,7 @@ export type RunState =
   | "rolled_back"
   | "restoring";
 
-export type ProviderKind = "ollama" | "openai" | "anthropic";
+export type ProviderKind = "ollama" | "openai" | "anthropic" | "vulcan";
 export type ProviderLocality = "loopback" | "remote";
 
 export interface SunCeiling {

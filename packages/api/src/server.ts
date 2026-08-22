@@ -365,7 +365,7 @@ function workspaceSnapshot(
       },
       provider: {
         status: "unconfigured",
-        reason: "Enter a loopback Ollama model and endpoint for each draft.",
+        reason: "Enter a loopback Ollama or Vulcan model and endpoint for each draft.",
       },
       planning: {
         status: mutationAvailable ? "available" : "review_only",
@@ -508,11 +508,11 @@ async function routeApi(
     if (providerEndpoint.locality !== "loopback") {
       throw new IcarusError(
         "WORKSPACE_REMOTE_PROVIDER_DENIED",
-        "The local workspace slice accepts only loopback Ollama providers",
+        "The local workspace slice accepts only loopback Ollama or Vulcan providers",
       );
     }
     const provider = createProviderConfig({
-      kind: "ollama",
+      kind: input.provider.kind,
       model: input.provider.model,
       baseUrl: input.provider.baseUrl,
     });

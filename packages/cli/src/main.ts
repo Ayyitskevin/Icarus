@@ -434,7 +434,7 @@ function usage(): never {
       "icarus repo list",
       "icarus project add --name NAME --repo REPO --base-ref REF --sandbox-image IMAGE --check JSON",
       "icarus project list",
-      "icarus run plan --project NAME --task TEXT --target PATH [--target PATH ...] --provider ollama|openai|anthropic --model MODEL [provider options]",
+      "icarus run plan --project NAME --task TEXT --target PATH [--target PATH ...] --provider ollama|openai|anthropic|vulcan --model MODEL [provider options]",
       "icarus run approve-egress RUN --context-sha SHA --actor ACTOR",
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
       "icarus run status RUN",
@@ -451,7 +451,7 @@ function usage(): never {
       "icarus run annotate RUN --card CARD|room --text TEXT --actor ACTOR",
       "icarus run annotations RUN",
       "icarus run cancel RUN --actor ACTOR",
-      "icarus probe throughput|context|structured --model MODEL [--provider ollama|openai|anthropic] [--base-url URL] [--repeat N] [--max-output-tokens N] [--timeout-ms MS] [--target-input-tokens N]",
+      "icarus probe throughput|context|structured --model MODEL [--provider ollama|openai|anthropic|vulcan] [--base-url URL] [--repeat N] [--max-output-tokens N] [--timeout-ms MS] [--target-input-tokens N]",
       "icarus landing profile-set --project NAME --owner OWNER --repository REPOSITORY --base-branch BRANCH --credential-env ENV_NAME --expected-actor ACTOR --commit-name NAME --commit-email EMAIL --derivative-effects-disposition inert-repository|operator-approved --derivative-effects-evidence-sha SHA",
       "icarus landing profile-show --project NAME",
       "icarus landing prepare RUN --commit-message TEXT --pr-title TEXT --pr-body-prefix TEXT",
@@ -481,13 +481,14 @@ async function dispatchProbe(args: readonly string[], signal: AbortSignal): Prom
   ]);
   noPositionals(options);
   const kind = optional(options, "--provider") ?? "ollama";
-  if (kind !== "ollama" && kind !== "openai" && kind !== "anthropic") {
-    fail("INVALID_PROVIDER", "--provider must be ollama, openai, or anthropic");
+  if (kind !== "ollama" && kind !== "openai" && kind !== "anthropic" && kind !== "vulcan") {
+    fail("INVALID_PROVIDER", "--provider must be ollama, openai, anthropic, or vulcan");
   }
   const defaultBaseUrls: Record<typeof kind, string> = {
     ollama: "http://127.0.0.1:11434/",
     openai: "https://api.openai.com/v1/",
     anthropic: "https://api.anthropic.com/v1/",
+    vulcan: "http://127.0.0.1:8140/v1/",
   };
   const model = required(options, "--model");
   const baseUrl = optional(options, "--base-url") ?? defaultBaseUrls[kind];
@@ -656,13 +657,14 @@ async function dispatch(
     ]);
     noPositionals(options);
     const kind = required(options, "--provider");
-    if (kind !== "ollama" && kind !== "openai" && kind !== "anthropic") {
-      fail("INVALID_PROVIDER", "--provider must be ollama, openai, or anthropic");
+    if (kind !== "ollama" && kind !== "openai" && kind !== "anthropic" && kind !== "vulcan") {
+      fail("INVALID_PROVIDER", "--provider must be ollama, openai, anthropic, or vulcan");
     }
     const defaultBaseUrls: Record<typeof kind, string> = {
       ollama: "http://127.0.0.1:11434/",
       openai: "https://api.openai.com/v1/",
       anthropic: "https://api.anthropic.com/v1/",
+      vulcan: "http://127.0.0.1:8140/v1/",
     };
     const baseUrl = optional(options, "--base-url") ?? defaultBaseUrls[kind];
     const inputRate = numberOption(options, "--input-usd-per-million");

@@ -32,7 +32,8 @@ export interface ModelGateway {
 
 /**
  * The environment variable each provider reads its credential from. Ollama runs
- * as a loopback process and reads none.
+ * as a loopback process and reads none; Vulcan is a loopback gateway that holds
+ * no credential either — its own budget ledger meters hosted aliases by seat.
  *
  * Gateway construction and every credential preflight resolve the name here. A
  * preflight that hardcoded its own name could assert a variable the gateway
@@ -44,6 +45,7 @@ export const PROVIDER_CREDENTIAL_ENVIRONMENT_NAMES: Readonly<Record<ProviderKind
     ollama: null,
     openai: "OPENAI_API_KEY",
     anthropic: "ANTHROPIC_API_KEY",
+    vulcan: null,
   });
 
 /** The credential environment variable `kind` requires, or null when it needs

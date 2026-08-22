@@ -131,7 +131,11 @@ export interface RunDraftRequest {
   readonly projectId: string;
   readonly task: string;
   readonly targets: readonly string[];
-  readonly provider: { readonly model: string; readonly baseUrl: string };
+  readonly provider: {
+    readonly kind: "ollama" | "vulcan";
+    readonly model: string;
+    readonly baseUrl: string;
+  };
 }
 
 /** ADR 0023 bounds the browser's candidate selection to the host file ceiling. */
@@ -141,7 +145,13 @@ export function runDraftRequest(value: unknown): RunDraftRequest {
   const body = objectValue(value, "request");
   exactKeys(body, ["projectId", "task", "targets", "provider"], "request");
   const provider = objectValue(body.provider, "provider");
-  exactKeys(provider, ["model", "baseUrl"], "provider");
+  exactKeys(provider, ["kind", "model", "baseUrl"], "provider");
+  // The workspace slice admits only credential-free loopback providers; the
+  // route re-checks loopback on the parsed URL before a draft is persisted.
+  if (provider.kind !== undefined && provider.kind !== "ollama" && provider.kind !== "vulcan") {
+    invalid("provider.kind must be ollama or vulcan");
+  }
+  const kind = provider.kind === "ollama" || provider.kind === "vulcan" ? provider.kind : "ollama";
   if (!Array.isArray(body.targets)) {
     throw new IcarusError("INVALID_REQUEST", "targets must be an array");
   }
@@ -159,6 +169,7 @@ export function runDraftRequest(value: unknown): RunDraftRequest {
     task: stringValue(body.task, "task", { maxBytes: 8 * 1024 }),
     targets,
     provider: {
+      kind,
       model: stringValue(provider.model, "provider.model", { maxBytes: 256 }),
       baseUrl: stringValue(provider.baseUrl, "provider.baseUrl", { maxBytes: 2_048 }),
     },
