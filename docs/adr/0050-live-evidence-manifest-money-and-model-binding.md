@@ -85,10 +85,15 @@ offline replay was performed.
 
 ## Consequences
 
-- The loopback provider pin recorded as the operator's choice for the 3/3 run
-  becomes an enforced bound rather than an intention. Reaching a paid model now
-  requires editing the manifest, which changes its digest, which invalidates the
-  approval — the intended path, and a visible one.
+- The provider KIND recorded as the operator's choice for the 3/3 run becomes an
+  enforced bound rather than an intention. Reaching a paid model now requires
+  editing the manifest, which changes its digest, which invalidates the approval
+  — the intended path, and a visible one.
+- **Correction (ADR 0053, 2026-08-22).** This clause originally read "the
+  loopback provider pin ... becomes an enforced bound". That overstated the code:
+  this ADR bound the provider `kind`, and nothing bound the provider HOST, so an
+  `ollama` pin naming a remote endpoint was admitted. The loopback half became
+  true only under ADR 0053.
 - The refusal happens at authorization, before any effect. Previously the only
   thing standing between an over-budget profile and a real spend was the project
   ceiling check inside `store.ts`, which fires at admission of the first call —

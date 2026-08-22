@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { sha256 } from "../../packages/core/src/digest.js";
+
 import {
   decodeLiveEvidenceProfileV1,
   LIVE_EVIDENCE_AUTHORIZED_EFFECTS,
@@ -12,7 +14,9 @@ import {
 } from "../../packages/core/src/live-evidence-run.js";
 import { providerCredentialEnvironmentName } from "../../packages/core/src/provider.js";
 
-const MANIFEST_DIGEST = "a".repeat(64);
+function manifestBytesOf(manifest: unknown): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(manifest));
+}
 
 // The manifest pins the provider kind, whether the adapter is paid, and the
 // case cost ceiling; the profile must agree with all three. Tests that exercise
@@ -57,6 +61,7 @@ function manifestFor(pin: { providerKind?: string; paid?: boolean; maxCostUsd?: 
 }
 
 const MANIFEST = manifestFor();
+const MANIFEST_BYTES = manifestBytesOf(MANIFEST);
 
 function landingProfile(repository: string, credentialName: string): Record<string, unknown> {
   return {
@@ -83,7 +88,7 @@ function approvedProfile(overrides: Record<string, unknown> = {}) {
     profileId: "gate1-live-v1",
     benchmarkId: "icarus-gate1",
     benchmarkRevision: "v1",
-    offlineManifestDigest: MANIFEST_DIGEST,
+    offlineManifestDigest: sha256(MANIFEST_BYTES),
     provider: {
       kind: "ollama",
       model: "qwen3.8:27b",
@@ -128,26 +133,21 @@ const PRESENT_ENV = { ICARUS_GITHUB_TOKEN_GATE1: "not-read-by-the-gate" };
 
 describe("authorizeLiveEvidenceRun", () => {
   it("authorizes a run whose approval, manifest binding, and credentials all hold", () => {
-    const authorization = authorizeLiveEvidenceRun(
-      approvedProfile(),
-      MANIFEST,
-      MANIFEST_DIGEST,
-      PRESENT_ENV,
-    );
+    const authorization = authorizeLiveEvidenceRun(approvedProfile(), MANIFEST_BYTES, PRESENT_ENV);
     expect(authorization.caseIds).toEqual(["case-one", "case-two"]);
     expect(authorization.credentialEnvironmentNames).toEqual(["ICARUS_GITHUB_TOKEN_GATE1"]);
     expect(authorization.effects).toEqual([...LIVE_EVIDENCE_AUTHORIZED_EFFECTS]);
   });
 
   it("refuses before any effect when the credential is absent, so a run cannot die halfway through mutating repositories", () => {
-    expect(() =>
-      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, {}),
-    ).toThrowError(/absent or empty; refusing before any remote effect/);
+    expect(() => authorizeLiveEvidenceRun(approvedProfile(), MANIFEST_BYTES, {})).toThrowError(
+      /absent or empty; refusing before any remote effect/,
+    );
   });
 
   it("treats an empty credential as absent", () => {
     expect(() =>
-      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, {
+      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST_BYTES, {
         ICARUS_GITHUB_TOKEN_GATE1: "",
       }),
     ).toThrowError(/absent or empty/);
@@ -172,7 +172,7 @@ describe("authorizeLiveEvidenceRun", () => {
     ["a value carrying an embedded control character", "ghp_0123\u0001456789"],
   ])("refuses %s, which the consuming gateway would reject", (_label, value) => {
     expect(() =>
-      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, {
+      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST_BYTES, {
         ICARUS_GITHUB_TOKEN_GATE1: value,
       }),
     ).toThrowError(/absent or empty|usable credential/);
@@ -181,7 +181,7 @@ describe("authorizeLiveEvidenceRun", () => {
   it("refuses a credential that is not a string, because the environment is untyped at runtime", () => {
     for (const value of [12345678, {}, [], new String("ghp_0123456789abcdef")]) {
       expect(() =>
-        authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, {
+        authorizeLiveEvidenceRun(approvedProfile(), MANIFEST_BYTES, {
           ICARUS_GITHUB_TOKEN_GATE1: value,
         } as unknown as NodeJS.ProcessEnv),
       ).toThrowError(/usable credential/);
@@ -191,12 +191,12 @@ describe("authorizeLiveEvidenceRun", () => {
   it("never surfaces the credential value in the refusal it emits for an unusable one", () => {
     const secret = "ghp_ThisMustNeverAppearAnywhere ";
     expect(() =>
-      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, {
+      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST_BYTES, {
         ICARUS_GITHUB_TOKEN_GATE1: secret,
       }),
     ).toThrowError(/usable credential/);
     try {
-      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, {
+      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST_BYTES, {
         ICARUS_GITHUB_TOKEN_GATE1: secret,
       });
       expect.unreachable("an unusable credential must refuse");
@@ -207,7 +207,7 @@ describe("authorizeLiveEvidenceRun", () => {
 
   it("never surfaces the credential value in its refusal or its result", () => {
     const secret = "ghp_ThisMustNeverAppearAnywhere";
-    const authorization = authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, {
+    const authorization = authorizeLiveEvidenceRun(approvedProfile(), MANIFEST_BYTES, {
       ICARUS_GITHUB_TOKEN_GATE1: secret,
     });
     expect(JSON.stringify(authorization)).not.toContain(secret);
@@ -218,14 +218,18 @@ describe("authorizeLiveEvidenceRun", () => {
   it("refuses a profile whose approval no longer binds its content", () => {
     const profile = approvedProfile();
     const tampered = { ...profile, budgets: { maxSpendUsd: 9999, maxRuntimeSeconds: 3600 } };
-    expect(() =>
-      authorizeLiveEvidenceRun(tampered, MANIFEST, MANIFEST_DIGEST, PRESENT_ENV),
-    ).toThrowError(/does not apply to this profile/);
+    expect(() => authorizeLiveEvidenceRun(tampered, MANIFEST_BYTES, PRESENT_ENV)).toThrowError(
+      /does not apply to this profile/,
+    );
   });
 
   it("refuses a profile bound to a different manifest", () => {
     expect(() =>
-      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, "e".repeat(64), PRESENT_ENV),
+      authorizeLiveEvidenceRun(
+        approvedProfile(),
+        manifestBytesOf({ ...MANIFEST, benchmarkRevision: "never-reviewed" }),
+        PRESENT_ENV,
+      ),
     ).toThrowError(/does not match the offline manifest/);
   });
 });
@@ -233,7 +237,7 @@ describe("authorizeLiveEvidenceRun", () => {
 describe("effect ledger", () => {
   function ledger() {
     return new LiveEvidenceEffectLedger(
-      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, PRESENT_ENV),
+      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST_BYTES, PRESENT_ENV),
     );
   }
 
@@ -328,7 +332,9 @@ describe("provider credential preflight", () => {
   // provider and declares it paid: the profile and the manifest must agree
   // about who spends money.
   const OPENAI_MANIFEST = manifestFor({ providerKind: "openai", paid: true });
+  const OPENAI_MANIFEST_BYTES = manifestBytesOf(OPENAI_MANIFEST);
   const ANTHROPIC_MANIFEST = manifestFor({ providerKind: "anthropic", paid: true });
+  const ANTHROPIC_MANIFEST_BYTES = manifestBytesOf(ANTHROPIC_MANIFEST);
 
   const ANTHROPIC_PROVIDER = {
     kind: "anthropic",
@@ -345,9 +351,11 @@ describe("provider credential preflight", () => {
     // objects and opened a pull request.
     expect(() =>
       authorizeLiveEvidenceRun(
-        approvedProfile({ provider: OPENAI_PROVIDER }),
-        OPENAI_MANIFEST,
-        MANIFEST_DIGEST,
+        approvedProfile({
+          provider: OPENAI_PROVIDER,
+          offlineManifestDigest: sha256(OPENAI_MANIFEST_BYTES),
+        }),
+        OPENAI_MANIFEST_BYTES,
         PRESENT_ENV,
       ),
     ).toThrowError(/OPENAI_API_KEY, which is absent or empty; refusing before any remote effect/);
@@ -356,9 +364,11 @@ describe("provider credential preflight", () => {
   it("refuses an Anthropic run whose model key is absent", () => {
     expect(() =>
       authorizeLiveEvidenceRun(
-        approvedProfile({ provider: ANTHROPIC_PROVIDER }),
-        ANTHROPIC_MANIFEST,
-        MANIFEST_DIGEST,
+        approvedProfile({
+          provider: ANTHROPIC_PROVIDER,
+          offlineManifestDigest: sha256(ANTHROPIC_MANIFEST_BYTES),
+        }),
+        ANTHROPIC_MANIFEST_BYTES,
         PRESENT_ENV,
       ),
     ).toThrowError(/ANTHROPIC_API_KEY, which is absent or empty/);
@@ -367,9 +377,11 @@ describe("provider credential preflight", () => {
   it("treats an empty provider key as absent", () => {
     expect(() =>
       authorizeLiveEvidenceRun(
-        approvedProfile({ provider: OPENAI_PROVIDER }),
-        OPENAI_MANIFEST,
-        MANIFEST_DIGEST,
+        approvedProfile({
+          provider: OPENAI_PROVIDER,
+          offlineManifestDigest: sha256(OPENAI_MANIFEST_BYTES),
+        }),
+        OPENAI_MANIFEST_BYTES,
         {
           ...PRESENT_ENV,
           OPENAI_API_KEY: "",
@@ -383,9 +395,11 @@ describe("provider credential preflight", () => {
     // hardcoded its own name could check a variable the gateway never reads.
     const expected = providerCredentialEnvironmentName("openai");
     const authorization = authorizeLiveEvidenceRun(
-      approvedProfile({ provider: OPENAI_PROVIDER }),
-      OPENAI_MANIFEST,
-      MANIFEST_DIGEST,
+      approvedProfile({
+        provider: OPENAI_PROVIDER,
+        offlineManifestDigest: sha256(OPENAI_MANIFEST_BYTES),
+      }),
+      OPENAI_MANIFEST_BYTES,
       { ...PRESENT_ENV, OPENAI_API_KEY: "not-read-by-the-gate" },
     );
     expect(expected).not.toBeNull();
@@ -397,21 +411,18 @@ describe("provider credential preflight", () => {
 
   it("requires no model key for a loopback Ollama run", () => {
     expect(providerCredentialEnvironmentName("ollama")).toBeNull();
-    const authorization = authorizeLiveEvidenceRun(
-      approvedProfile(),
-      MANIFEST,
-      MANIFEST_DIGEST,
-      PRESENT_ENV,
-    );
+    const authorization = authorizeLiveEvidenceRun(approvedProfile(), MANIFEST_BYTES, PRESENT_ENV);
     expect(authorization.credentialEnvironmentNames).toEqual(["ICARUS_GITHUB_TOKEN_GATE1"]);
   });
 
   it("never surfaces the provider credential value", () => {
     const secret = "sk-ThisMustNeverAppearAnywhere";
     const authorization = authorizeLiveEvidenceRun(
-      approvedProfile({ provider: OPENAI_PROVIDER }),
-      OPENAI_MANIFEST,
-      MANIFEST_DIGEST,
+      approvedProfile({
+        provider: OPENAI_PROVIDER,
+        offlineManifestDigest: sha256(OPENAI_MANIFEST_BYTES),
+      }),
+      OPENAI_MANIFEST_BYTES,
       { ...PRESENT_ENV, OPENAI_API_KEY: secret },
     );
     expect(JSON.stringify(authorization)).not.toContain(secret);
@@ -439,12 +450,7 @@ describe("authority is immutable at runtime", () => {
   }
 
   it("freezes the authorization, because readonly is a compile-time annotation and callers are not all typed", () => {
-    const authorization = authorizeLiveEvidenceRun(
-      approvedProfile(),
-      MANIFEST,
-      MANIFEST_DIGEST,
-      PRESENT_ENV,
-    );
+    const authorization = authorizeLiveEvidenceRun(approvedProfile(), MANIFEST_BYTES, PRESENT_ENV);
     expect(Object.isFrozen(authorization)).toBe(true);
     expect(Object.isFrozen(authorization.effects)).toBe(true);
     expect(Object.isFrozen(authorization.budgets)).toBe(true);
@@ -461,11 +467,9 @@ describe("authority is immutable at runtime", () => {
 
   it("copies before freezing, so authorizing does not freeze the caller's profile", () => {
     const profile = approvedProfile();
-    authorizeLiveEvidenceRun(profile, MANIFEST, MANIFEST_DIGEST, PRESENT_ENV);
+    authorizeLiveEvidenceRun(profile, MANIFEST_BYTES, PRESENT_ENV);
     expect(Object.isFrozen(profile.authorizedEffects)).toBe(false);
-    expect(() =>
-      authorizeLiveEvidenceRun(profile, MANIFEST, MANIFEST_DIGEST, PRESENT_ENV),
-    ).not.toThrow();
+    expect(() => authorizeLiveEvidenceRun(profile, MANIFEST_BYTES, PRESENT_ENV)).not.toThrow();
   });
 
   it("refuses a hand-built authorization naming an effect outside the closed set", () => {
@@ -523,7 +527,7 @@ describe("authority is immutable at runtime", () => {
 describe("the ledger binds the landing chain order", () => {
   function ledger(): LiveEvidenceEffectLedger {
     return new LiveEvidenceEffectLedger(
-      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, PRESENT_ENV),
+      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST_BYTES, PRESENT_ENV),
     );
   }
 

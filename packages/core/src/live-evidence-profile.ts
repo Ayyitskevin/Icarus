@@ -1,7 +1,9 @@
-import { digestJson } from "./digest.js";
+import { parseStrictJson } from "./canonical-json.js";
+import { digestJson, sha256 } from "./digest.js";
 import { IcarusError } from "./errors.js";
 import { decodeGitHubLandingProfileV1, type GitHubLandingProfileV1 } from "./landing-records.js";
-import type { JsonValue, ProviderKind } from "./types.js";
+import { parseProviderBaseUrl } from "./provider.js";
+import type { JsonValue, ProviderKind, ProviderLocality } from "./types.js";
 
 // The Gate 1 credential-gated live-evidence profile (S3).
 //
@@ -20,7 +22,9 @@ import type { JsonValue, ProviderKind } from "./types.js";
 //     and case ids, hold a self-consistent approval, and still aim a case at a
 //     repository nobody reviewed. Those identities must also be DISTINCT, so a
 //     single repository cannot receive the effects of two cases. Changing the
-//     manifest invalidates the profile.
+//     manifest invalidates the profile — and that is true because the manifest
+//     is supplied as BYTES whose digest is computed here, not as a parsed object
+//     beside a digest string the caller merely asserts corresponds to it.
 //  2. Its effect list is a CLOSED set, compared by equality rather than by
 //     subset. Authority cannot be widened by appending an effect, and the
 //     prohibitions (force update, ref deletion, merge, deployment,
@@ -196,6 +200,40 @@ function nullableRate(value: unknown, field: string): number | null {
   return decoded;
 }
 
+/**
+ * Decode the manifest from the exact bytes whose digest was just verified.
+ *
+ * Fatal UTF-8: a byte sequence that is not valid UTF-8 is refused rather than
+ * silently replaced, because a replacement character would change what is
+ * validated away from what was hashed.
+ */
+function decodeManifestBytes(manifestBytes: Uint8Array): {
+  readonly benchmarkId?: unknown;
+  readonly benchmarkRevision?: unknown;
+  readonly cases?: unknown;
+} {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(manifestBytes);
+  } catch {
+    invalid("offline manifest bytes are not valid UTF-8");
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseStrictJson(text);
+  } catch {
+    invalid("offline manifest bytes are not strict JSON");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    invalid("offline manifest must decode to an object");
+  }
+  return parsed as {
+    readonly benchmarkId?: unknown;
+    readonly benchmarkRevision?: unknown;
+    readonly cases?: unknown;
+  };
+}
+
 function decodeProvider(value: unknown): LiveEvidenceProviderPinV1 {
   const decoded = record(
     value,
@@ -214,17 +252,65 @@ function decodeProvider(value: unknown): LiveEvidenceProviderPinV1 {
     invalid("profile.provider.kind must be ollama, openai, or anthropic");
   }
   const baseUrl = text(decoded.baseUrl, "profile.provider.baseUrl");
+  // Resolved through `parseProviderBaseUrl`, the same function every consumer
+  // uses, rather than re-derived here.
+  //
+  // This pin binds the provider NAME. Until this call it did not bind the
+  // provider HOST: it re-implemented a weaker subset of the URL rule — valid
+  // URL, HTTP(S), no embedded credentials — and knew nothing of locality. So a
+  // profile could carry the exact reviewed manifest digest, the correct
+  // repository identities and a self-consistent approval while aiming the run's
+  // model traffic at any host on the internet. That is the same shape as the
+  // credential preflight before it applied its consumers' predicate: a gate
+  // asserting less than the code behind it.
+  //
+  // Re-deriving was also strictly weaker in two ways nobody intended:
+  // `parseProviderBaseUrl` refuses query and fragment data outright, and
+  // `createProviderConfig` refuses plaintext HTTP to a remote host. Both were
+  // admitted here.
   let parsed: URL;
+  let locality: ProviderLocality;
   try {
-    parsed = new URL(baseUrl);
-  } catch {
-    invalid("profile.provider.baseUrl must be a valid URL");
+    ({ url: parsed, locality } = parseProviderBaseUrl(baseUrl));
+  } catch (error) {
+    // Re-thrown in this module's own error class so a caller that classifies
+    // refusals by code sees one contract, not two.
+    invalid(
+      `profile.provider.baseUrl is not a usable provider URL: ${
+        error instanceof IcarusError ? error.message : "invalid"
+      }`,
+    );
   }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    invalid("profile.provider.baseUrl must use HTTP(S)");
+  if (locality === "remote" && parsed.protocol !== "https:") {
+    invalid("profile.provider.baseUrl must use HTTPS for a remote host");
   }
-  if (parsed.username !== "" || parsed.password !== "") {
-    invalid("profile.provider.baseUrl must not embed credentials");
+  // An `ollama` pin must be loopback. This is the one rule here that is STRICTER
+  // than its consumer rather than equal to it, and it is deliberate.
+  // `OllamaGateway` has no origin invariant at all — unlike the OpenAI and
+  // Anthropic gateways, which each pin their remote origin — so there is no
+  // consumer predicate to mirror, and the bound has to come from the authority
+  // record. Every other part of this record already assumes local: the provider
+  // credential table maps `ollama` to `null`, so no key is preflighted and none
+  // is sent, and an unpaid manifest case with zero rates is only honest if
+  // nothing is billed. A remote `ollama` endpoint would collect the repository
+  // context and drive the tool calls that write to three real repositories,
+  // with no credential, no egress approval, and a spend ceiling that can never
+  // fire. A remote Ollama deployment is a different product decision and needs
+  // its own ADR and credential story.
+  if (kind === "ollama" && locality !== "loopback") {
+    invalid("profile.provider.baseUrl must be loopback for an ollama pin");
+  }
+  // For the hosted kinds, mirror the gateway that will actually receive the
+  // credential. Loopback stays admissible because both gateways admit it.
+  if (locality === "remote") {
+    const host = parsed.hostname.toLowerCase();
+    const portAllowed = parsed.port === "" || parsed.port === "443";
+    if (kind === "openai" && !(host === "api.openai.com" && portAllowed)) {
+      invalid("profile.provider.baseUrl must be api.openai.com for an openai pin");
+    }
+    if (kind === "anthropic" && !(host === "api.anthropic.com" && portAllowed)) {
+      invalid("profile.provider.baseUrl must be api.anthropic.com for an anthropic pin");
+    }
   }
   return {
     kind: kind as ProviderKind,
@@ -407,16 +493,30 @@ export function assertLiveEvidenceProfileApproved(profile: LiveEvidenceProfileV1
  */
 export function assertLiveEvidenceProfileMatchesManifest(
   profile: LiveEvidenceProfileV1,
-  manifest: {
-    readonly benchmarkId?: unknown;
-    readonly benchmarkRevision?: unknown;
-    readonly cases?: unknown;
-  },
-  manifestDigest: string,
+  manifestBytes: Uint8Array,
 ): void {
-  if (profile.offlineManifestDigest !== digest(manifestDigest, "manifestDigest")) {
+  // The manifest arrives as BYTES, and the digest is computed here.
+  //
+  // This function once took the parsed manifest and its digest as two separate
+  // parameters and compared the profile's pin against the digest STRING. That
+  // compared the caller's claim to the caller's other claim: nothing linked the
+  // digest to the object, so an edited manifest handed over with the reviewed
+  // manifest's digest was admitted, and every binding below — repository
+  // identity, provider kind, unpaid-means-unpaid, the spend ceiling — was then
+  // evaluated against the edited one. A digest passed alongside the thing it is
+  // supposed to authenticate authenticates nothing.
+  //
+  // Taking bytes removes the pair, so the mismatch is not merely detected, it is
+  // unrepresentable. The parse below reads THESE bytes, so what is validated is
+  // necessarily what was hashed. `scripts/gate1-benchmark.mjs:1024-1033` has
+  // always done exactly this; the authority function is what had drifted.
+  if (!(manifestBytes instanceof Uint8Array)) {
+    invalid("offline manifest must be supplied as the exact reviewed bytes");
+  }
+  if (profile.offlineManifestDigest !== sha256(manifestBytes)) {
     invalid("profile.offlineManifestDigest does not match the offline manifest");
   }
+  const manifest = decodeManifestBytes(manifestBytes);
   if (profile.benchmarkId !== manifest.benchmarkId) {
     invalid("profile.benchmarkId does not match the offline manifest");
   }

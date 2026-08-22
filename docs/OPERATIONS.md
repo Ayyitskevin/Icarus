@@ -773,8 +773,10 @@ remote effect rather than halfway through the second case.
 
 That credential set is the pinned provider's key followed by each case's
 landing credential. An `openai` or `anthropic` profile requires its model key
-(`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) as well as the GitHub token; a
-loopback `ollama` profile requires no model key. The name is resolved through
+(`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) as well as the GitHub token; an
+`ollama` profile requires no model key, and under ADR 0053 its `baseUrl` must be
+loopback — the record enforces the locality that "requires no model key" assumes,
+rather than trusting it. The name is resolved through
 `providerCredentialEnvironmentName`, the same table `createGateway` reads, so
 the preflight cannot assert one variable while the run consumes another.
 
