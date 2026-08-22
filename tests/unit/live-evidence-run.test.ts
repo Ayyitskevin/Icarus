@@ -153,6 +153,58 @@ describe("authorizeLiveEvidenceRun", () => {
     ).toThrowError(/absent or empty/);
   });
 
+  // Each of these was ADMITTED before the usability predicate landed, while the
+  // gateway that would spend the token rejects every one of them. Presence is
+  // not usability: an own property holding `undefined` is inside the declared
+  // `NodeJS.ProcessEnv` type, and a value pasted with a trailing newline or
+  // padded with a space is the ordinary way a real operator produces one.
+  it.each([
+    ["an own property holding undefined", undefined],
+    ["a single space", " "],
+    ["only whitespace", "\t\n"],
+    ["a non-breaking space", "\u00a0"],
+    ["a value below the length floor", "short"],
+    ["a value above the length ceiling", "z".repeat(513)],
+    ["a usable value padded with a space", " ghp_0123456789abcdef "],
+    ["a usable value with a trailing newline", "ghp_0123456789abcdef\n"],
+    ["a value carrying an embedded CRLF", "ghp_0123\r\nX-Injected: 1"],
+    ["a value carrying an embedded NUL", "ghp_0123\u0000456789"],
+    ["a value carrying an embedded control character", "ghp_0123\u0001456789"],
+  ])("refuses %s, which the consuming gateway would reject", (_label, value) => {
+    expect(() =>
+      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, {
+        ICARUS_GITHUB_TOKEN_GATE1: value,
+      }),
+    ).toThrowError(/absent or empty|usable credential/);
+  });
+
+  it("refuses a credential that is not a string, because the environment is untyped at runtime", () => {
+    for (const value of [12345678, {}, [], new String("ghp_0123456789abcdef")]) {
+      expect(() =>
+        authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, {
+          ICARUS_GITHUB_TOKEN_GATE1: value,
+        } as unknown as NodeJS.ProcessEnv),
+      ).toThrowError(/usable credential/);
+    }
+  });
+
+  it("never surfaces the credential value in the refusal it emits for an unusable one", () => {
+    const secret = "ghp_ThisMustNeverAppearAnywhere ";
+    expect(() =>
+      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, {
+        ICARUS_GITHUB_TOKEN_GATE1: secret,
+      }),
+    ).toThrowError(/usable credential/);
+    try {
+      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, {
+        ICARUS_GITHUB_TOKEN_GATE1: secret,
+      });
+      expect.unreachable("an unusable credential must refuse");
+    } catch (error) {
+      expect(String((error as Error).message)).not.toContain(secret.trim());
+    }
+  });
+
   it("never surfaces the credential value in its refusal or its result", () => {
     const secret = "ghp_ThisMustNeverAppearAnywhere";
     const authorization = authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, {

@@ -687,8 +687,21 @@ const assertions = {
     liveEvidenceRunSource.includes("never by a second POST") &&
     liveEvidenceRunSource.includes("non-negative finite spend ceiling") &&
     liveEvidenceRunSource.includes("providerCredentialEnvironmentName") &&
-    // Neither module performs I/O, reads a credential VALUE, or reaches a
-    // provider or GitHub. The record authorizes; it never acts.
+    // The preflight must apply a usability predicate, not a presence check. It
+    // once admitted eleven of sixteen environment shapes that every consuming
+    // gateway rejects, so a run could be authorized and then die on an unusable
+    // token after earlier cases had already uploaded objects and opened pull
+    // requests. The behavioural relation is proven in
+    // tests/security/live-evidence-credential-agreement.test.ts against the real
+    // constructors; these clauses only stop the predicate from being quietly
+    // deleted or loosened back to presence.
+    liveEvidenceRunSource.includes("isUsableCredentialValue") &&
+    liveEvidenceRunSource.includes("CREDENTIAL_UNUSABLE_CHARACTER") &&
+    liveEvidenceRunSource.includes('typeof value === "string"') &&
+    liveEvidenceRunSource.includes("usable credential of ") &&
+    // Neither module performs I/O, reads a credential VALUE beyond deciding
+    // whether the consuming gateway would accept it, or reaches a provider or
+    // GitHub. The record authorizes; it never acts.
     !/\bfetch\s*\(|api\.github\.com|readFile|writeFile|child_process|spawn\(/.test(
       liveEvidenceProfileSource,
     ) &&

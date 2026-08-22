@@ -107,8 +107,10 @@ boundary** below).
      each case's landing credential. It resolves the name through
      `providerCredentialEnvironmentName`, the table `createGateway` reads, so
      the check cannot assert one variable while the run consumes another.
-     Presence only — the value is never read into a variable, compared, or
-     placed in a message.
+     Usability, never disclosure — the preflight decides whether the consuming
+     gateway would accept the value, and the value never reaches a message, the
+     returned authorization, the ledger, a log line, or durable state. See the
+     2026-08-22 amendment below for why presence alone was not enough.
    - The authorized effect list is also the landing **chain**, in order. Each
      case must walk it forwards without skipping; repeating the stage a case
      occupies stays admissible because uploads legitimately recur. Counting
@@ -170,6 +172,69 @@ does not state. And the ledger cannot validate that a budget it is handed is
 the budget a human approved — it has no access to the profile — so it checks
 only that the ceiling is a real bound. Binding budget provenance belongs with
 the case executor, which does hold both.
+
+## Credential amendment: presence is not usability (2026-08-22)
+
+The remediation above closed finding 1 by requiring the pinned provider's
+credential alongside each landing credential. It required the wrong thing about
+it. The check was `Object.hasOwn(environment, name) && environment[name] !== ""`,
+which answers "is this variable set to something other than the empty string" —
+not "will the gateway that spends this accept it".
+
+An independent non-author review found two shapes that slip through. An
+independent reproduction from the finding text alone found eleven of sixteen:
+an own property holding `undefined` (inside the declared `NodeJS.ProcessEnv`
+type), whitespace-only values, a non-breaking space, values under the
+eight-character floor or over the 512-character ceiling, a usable token carrying
+a trailing newline — the ordinary result of pasting one — or an embedded CRLF,
+NUL, or other control character, and non-strings including a `String` wrapper.
+`GithubGateway` rejects all eleven at construction.
+
+This is the same defect class as ADR 0050 and as findings 1 and 2 above, in its
+fourth instance on this surface: the easy property gets checked and the property
+that decides the blast radius does not. A preflight exists to refuse early what
+the consumer would refuse late. One that asserts a weaker predicate than its
+consumer is not a preflight; it is a claim about a run it cannot deliver, and
+the failure it permits is the partial landing this record exists to prevent —
+case three dying on an unusable token after cases one and two have already
+uploaded objects and opened pull requests against real repositories.
+
+The preflight therefore applies the strictest predicate any consumer applies:
+a string of 8 to 512 characters containing no whitespace, NUL, or other control
+character. That is `GithubGateway`'s rule, whose accept set is a subset of the
+model gateways', so one predicate is sound for all three. It is deliberately
+**not** a per-provider dispatch: a dispatch would be a fourth site where the
+rule that decides the blast radius is re-derived, which is precisely the class
+being closed.
+
+The "presence only — never read into a variable, compared, or placed in a
+message" wording is retired because it was never true of its own reference
+implementation: `environment[name] !== ""` is a comparison of the value. Read
+literally it would also forbid the shipped line it described. The operative
+constraint was always about escape, not computation, and it is restated that
+way: the value reaches one predicate that returns a boolean and never reaches a
+message, the authorization, the ledger, a log, or durable state. The repo
+already relies on exactly this at every gateway that consumes a credential,
+where the rule appears in the error message and the value never does.
+
+Enforcement is behavioural, not textual.
+`tests/security/live-evidence-credential-agreement.test.ts` runs a corpus
+straddling every consumer boundary through both the preflight and the real
+`GithubGateway` and `createGateway` constructors, and asserts that nothing the
+preflight admits is rejected by any of them. A consumer that tightens its own
+rule fails that test rather than silently outgrowing the preflight. The test
+also asserts its corpus produces both verdicts, because an agreement assertion
+over a corpus that is never admitted passes vacuously — which is how the
+previous audit probe on this surface decayed: its `catch` returned false for a
+malformed fixture and for a genuine refusal alike, so after ADR 0050 made
+`modelAdapter` mandatory, two of its three results measured nothing while the
+third kept working and made the output look plausible.
+
+Left where it is, deliberately: `landing-coordinator.ts` spells this same idea
+a fifth way at six sites as `credential === undefined || credential.length === 0`.
+That is also weaker than the gateway, but the gateway constructor runs
+immediately behind each one, so those refuse before an effect. Consolidating
+the five spellings is a separate slice, not this remediation.
 
 ## Alternatives rejected
 

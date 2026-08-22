@@ -19,10 +19,12 @@ import { providerCredentialEnvironmentName } from "./provider.js";
 //
 // This module is that gate. It decides whether a live run may begin, and it is
 // the ledger the executor must consult before every effect. It performs no I/O
-// of its own: it reads no file, opens no socket, and never reads a credential
-// VALUE — only whether the named environment variable is present, because a
-// run that will fail for a missing token should fail before it mutates a
-// repository, not halfway through case two.
+// of its own: it reads no file and opens no socket. It does examine each named
+// credential far enough to answer whether the gateway that will spend it would
+// accept it, because a run that will fail for an unusable token should fail
+// before it mutates a repository, not halfway through case two. That is
+// usability, not disclosure: a credential value never reaches a message, the
+// returned authorization, the ledger, or durable state.
 //
 // Fail-closed is the rule throughout. An unknown case, an unauthorized effect,
 // an out-of-order effect, a second draft-pull-request POST, or an exceeded
@@ -46,9 +48,10 @@ export interface LiveEvidenceRunAuthorizationV1 {
   readonly caseIds: readonly string[];
   readonly effects: readonly LiveEvidenceEffect[];
   readonly budgets: LiveEvidenceBudgetV1;
-  /** Deduplicated credential environment variable names, confirmed present:
-   * the pinned provider's key, then each case's landing credential. Names only
-   * — no value is ever read, stored, or surfaced. */
+  /** Deduplicated credential environment variable names, each confirmed to hold
+   * a value the consuming gateway will accept: the pinned provider's key, then
+   * each case's landing credential. Names only — no value is ever stored or
+   * surfaced here. */
   readonly credentialEnvironmentNames: readonly string[];
 }
 
@@ -67,6 +70,54 @@ export interface LiveEvidenceLedgerSummaryV1 {
 
 function refuse(message: string): never {
   throw new IcarusError("LIVE_EVIDENCE_REFUSED", message);
+}
+
+/**
+ * The bounds every consumer of these credentials already enforces.
+ *
+ * Three gateways will spend the variables this module admits, and all three
+ * apply their own rule at construction: `OpenAIResponsesGateway` and
+ * `AnthropicMessagesGateway` require 8 to 512 characters with no whitespace or
+ * NUL, and `GithubGateway` requires that plus no other control character. The
+ * GitHub rule is therefore the strictest, and its accept set is a subset of the
+ * other two — so checking it here is sound for all three at once and cannot
+ * admit a value one of them would later reject.
+ *
+ * Deliberately one predicate rather than a per-provider dispatch. A dispatch
+ * would be a fourth place where the rule that decides the blast radius is
+ * re-derived, which is the defect class this surface has already produced three
+ * times. `tests/security/live-evidence-credential-agreement.test.ts` measures
+ * the relation against the real constructors, so a consumer that tightens its
+ * rule fails that test rather than silently outgrowing this one.
+ */
+const CREDENTIAL_MIN_LENGTH = 8;
+const CREDENTIAL_MAX_LENGTH = 512;
+// Built through `new RegExp(String.raw...)` rather than as a literal, the same
+// way `github-gateway`'s CONTROL_CHARACTER_PATTERN is: a regex literal carrying
+// a control-character range is a lint error, and the repo already settled on
+// this spelling at the boundary that enforces the identical rule.
+const CREDENTIAL_UNUSABLE_CHARACTER = new RegExp(String.raw`[\s\x00-\x1f\x7f]`);
+
+/**
+ * Usability, never disclosure.
+ *
+ * The value reaches only this predicate, which returns a boolean. It is never
+ * bound to a variable that outlives the call, never compared against another
+ * secret, and never reaches the refusal message, the returned authorization,
+ * the ledger, a log line, or durable state — only the variable NAME does.
+ *
+ * `typeof` is checked at runtime rather than trusted from the declared
+ * `NodeJS.ProcessEnv`, for the same reason the authorization is frozen rather
+ * than marked `readonly`: the callers of this module are not all typed, and an
+ * own property holding `undefined` is inside the declared type anyway.
+ */
+function isUsableCredentialValue(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    value.length >= CREDENTIAL_MIN_LENGTH &&
+    value.length <= CREDENTIAL_MAX_LENGTH &&
+    !CREDENTIAL_UNUSABLE_CHARACTER.test(value)
+  );
 }
 
 /**
@@ -109,13 +160,21 @@ export function authorizeLiveEvidenceRun(
     requireCredential(entry.landingProfile.credentialRef.name);
   }
   for (const name of credentialEnvironmentNames) {
-    // Presence only. The value is never read into a variable, compared, or
-    // included in any message; a credential must not be able to reach an error
-    // string, a log line, or durable state through this check.
-    const present = Object.hasOwn(environment, name) && environment[name] !== "";
-    if (!present) {
+    if (!Object.hasOwn(environment, name) || environment[name] === "") {
       refuse(
         `live-evidence run requires environment variable ${name}, which is absent or empty; refusing before any remote effect`,
+      );
+    }
+    // Presence is not the question this gate is actually asking. A preflight
+    // exists to refuse early what the consumer would refuse late, so it must
+    // apply a predicate at least as strong as the one that will spend the
+    // credential — otherwise it admits a run it cannot deliver, and case three
+    // dies on an unusable token after cases one and two have already uploaded
+    // objects and opened pull requests against real repositories. That partial
+    // landing is the exact outcome this preflight exists to prevent.
+    if (!isUsableCredentialValue(environment[name])) {
+      refuse(
+        `live-evidence run requires environment variable ${name} to hold a usable credential of ${CREDENTIAL_MIN_LENGTH} to ${CREDENTIAL_MAX_LENGTH} non-whitespace, non-control characters; refusing before any remote effect`,
       );
     }
   }
