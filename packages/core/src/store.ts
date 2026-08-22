@@ -45,6 +45,9 @@ import {
   type LandingEligibilityV1,
   type LandingGitHubAdmittedRequestClaimV1,
   type LandingGitHubMaterialSnapshotV1,
+  type LandingGitHubObjectsAdmittedRequestClaimV1,
+  type LandingGitHubObjectsRequestAdmissionV1,
+  type LandingGitHubObjectsSettlementInputV1,
   type LandingGitHubPreflightRequestAdmissionV1,
   type LandingGitHubPreflightSettlementInputV1,
   LandingLedger,
@@ -58,6 +61,7 @@ import {
 } from "./landing-ledger.js";
 import {
   assertSha1,
+  assertUuid,
   buildVerificationDigestV1,
   decodeLandingHttpRequestV1,
   decodeReviewDecisionDigestV1,
@@ -140,6 +144,7 @@ export const CANCELLATION_RECOVERY_OPERATION_KIND = "cancellation.recovery";
 export const SESSION_ITERATION_OPERATION_KIND = "provider.revise";
 export const CANCELLATION_RECOVERY_RUNTIME_MS = 120_000;
 export const MAX_CANCELLATION_RECOVERY_ATTEMPTS = 2;
+const MAX_LANDING_REQUEST_CLAIMS_PER_GUARD = 8 * (MAX_CHANGED_FILES + 6);
 const SESSION_READ_MANIFEST_OPERATION_KIND = "session.tool.read.manifest";
 const SESSION_READ_CHECKS_OPERATION_KIND = "session.tool.read.checks";
 const SESSION_CHECK_OPERATION_KIND = "session.tool.exec.check";
@@ -1496,12 +1501,16 @@ export class IcarusStore {
   readonly #id: () => string;
   readonly #landingLedger: LandingLedger;
   readonly #registeredLandingOperationIds = new WeakMap<RunLeaseGuard, Set<string>>();
-  readonly #claimedLandingRequestIds = new WeakMap<RunLeaseGuard, Set<string>>();
+  readonly #claimedLandingRequests = new WeakMap<
+    RunLeaseGuard,
+    Map<string, { readonly landingId: string; readonly operationId: string } | null>
+  >();
   readonly #claimedLandingMaterials = new WeakMap<
     RunLeaseGuard,
     Map<
       string,
       {
+        readonly requestId: string;
         readonly landingId: string;
         readonly operationId: string;
         readonly material: LandingGitHubMaterialSnapshotV1;
@@ -1724,6 +1733,48 @@ export class IcarusStore {
     return admission;
   }
 
+  async startGitHubObjectsUpload(
+    guard: RunLeaseGuard,
+    landingId: string,
+  ): Promise<LandingOperationAdmissionV1> {
+    const runId = guard.runId;
+    await guard.assertHeld(runId);
+    const registered = this.#registeredLandingOperationIds.get(guard) ?? new Set<string>();
+    this.#registeredLandingOperationIds.set(guard, registered);
+    const status = this.#landingLedger.getStatus(landingId);
+    const currentAttempt = status.attempts.at(-1);
+    const currentOperations =
+      currentAttempt?.status === "started"
+        ? status.operations.filter(
+            (operation) => operation.coordinatorAttempt === currentAttempt.ordinal,
+          )
+        : [];
+    const currentPreflight = currentOperations[0];
+    const currentObjectUpload = currentOperations[1];
+    const expectedPreflightOperationId =
+      currentOperations.length <= 2 &&
+      currentPreflight?.kind === "github.preflight" &&
+      currentPreflight.status === "completed" &&
+      registered.has(currentPreflight.id)
+        ? currentPreflight.id
+        : null;
+    const replayOperationId =
+      currentOperations.length === 2 &&
+      currentObjectUpload?.kind === "github.objects.upload" &&
+      currentObjectUpload.status === "started" &&
+      registered.has(currentObjectUpload.id)
+        ? currentObjectUpload.id
+        : null;
+    const admission = this.#landingLedger.startGitHubObjectsUpload(
+      runId,
+      landingId,
+      expectedPreflightOperationId,
+      replayOperationId,
+    );
+    registered.add(admission.operationId);
+    return admission;
+  }
+
   async admitNextGitHubPreflightRequest(
     guard: RunLeaseGuard,
     landingId: string,
@@ -1740,24 +1791,64 @@ export class IcarusStore {
     return this.#landingLedger.admitNextGitHubPreflightRequest(runId, landingId, operationId);
   }
 
+  async admitNextGitHubObjectsRequest(
+    guard: RunLeaseGuard,
+    landingId: string,
+    operationId: string,
+  ): Promise<LandingGitHubObjectsRequestAdmissionV1> {
+    const runId = guard.runId;
+    await guard.assertHeld(runId);
+    if (!this.#registeredLandingOperationIds.get(guard)?.has(operationId)) {
+      throw new IcarusError(
+        "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
+        "GitHub object operation is not registered under this run lease",
+      );
+    }
+    return this.#landingLedger.admitNextGitHubObjectsRequest(runId, landingId, operationId);
+  }
+
+  #beginLandingRequestClaim(
+    guard: RunLeaseGuard,
+    requestId: string,
+  ): {
+    readonly requestId: string;
+    readonly claims: Map<
+      string,
+      { readonly landingId: string; readonly operationId: string } | null
+    >;
+  } {
+    const canonicalRequestId = assertUuid(requestId, "requestId");
+    const claims = this.#claimedLandingRequests.get(guard) ?? new Map();
+    this.#claimedLandingRequests.set(guard, claims);
+    if (claims.has(canonicalRequestId)) {
+      throw new IcarusError(
+        "GITHUB_REQUEST_ALREADY_CLAIMED",
+        "GitHub request was already claimed under this run lease",
+      );
+    }
+    if (claims.size >= MAX_LANDING_REQUEST_CLAIMS_PER_GUARD) {
+      throw new IcarusError(
+        "GITHUB_REQUEST_CLAIM_LIMIT",
+        "GitHub request claim history reached its per-guard bound",
+      );
+    }
+    claims.set(canonicalRequestId, null);
+    return { requestId: canonicalRequestId, claims };
+  }
+
   async claimAdmittedGitHubPreflightRequest(
     guard: RunLeaseGuard,
     requestId: string,
   ): Promise<LandingGitHubAdmittedRequestClaimV1> {
     const runId = guard.runId;
     await guard.assertHeld(runId);
-    const claimed = this.#claimedLandingRequestIds.get(guard) ?? new Set<string>();
-    this.#claimedLandingRequestIds.set(guard, claimed);
-    if (claimed.has(requestId)) {
-      throw new IcarusError(
-        "GITHUB_REQUEST_ALREADY_CLAIMED",
-        "GitHub request was already claimed under this run lease",
-      );
-    }
+    const { requestId: canonicalRequestId, claims: claimed } = this.#beginLandingRequestClaim(
+      guard,
+      requestId,
+    );
     // Mark before the ledger read. A failed validation consumes this ephemeral
     // claim for the dynamic extent of the guard rather than permitting a
     // second gateway instance to probe or dispatch the same identity.
-    claimed.add(requestId);
     const registered = this.#registeredLandingOperationIds.get(guard);
     if (registered === undefined || registered.size === 0) {
       throw new IcarusError(
@@ -1765,13 +1856,20 @@ export class IcarusStore {
         "GitHub preflight operation is not registered under this run lease",
       );
     }
-    const claim = this.#landingLedger.claimAdmittedGitHubPreflightRequest(runId, requestId);
+    const claim = this.#landingLedger.claimAdmittedGitHubPreflightRequest(
+      runId,
+      canonicalRequestId,
+    );
     if (!registered.has(claim.request.operationId)) {
       throw new IcarusError(
         "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
         "GitHub request belongs to an unregistered preflight operation",
       );
     }
+    claimed.set(canonicalRequestId, {
+      landingId: claim.request.landingId,
+      operationId: claim.request.operationId,
+    });
     return claim;
   }
 
@@ -1781,15 +1879,10 @@ export class IcarusStore {
   ): Promise<LandingGitHubAdmittedRequestClaimV1> {
     const runId = guard.runId;
     await guard.assertHeld(runId);
-    const claimed = this.#claimedLandingRequestIds.get(guard) ?? new Set<string>();
-    this.#claimedLandingRequestIds.set(guard, claimed);
-    if (claimed.has(requestId)) {
-      throw new IcarusError(
-        "GITHUB_REQUEST_ALREADY_CLAIMED",
-        "GitHub request was already claimed under this run lease",
-      );
-    }
-    claimed.add(requestId);
+    const { requestId: canonicalRequestId, claims: claimed } = this.#beginLandingRequestClaim(
+      guard,
+      requestId,
+    );
     const registered = this.#registeredLandingOperationIds.get(guard);
     if (registered === undefined || registered.size === 0) {
       throw new IcarusError(
@@ -1799,7 +1892,7 @@ export class IcarusStore {
     }
     const snapshot = this.#landingLedger.claimAdmittedGitHubPreflightRequestWithMaterial(
       runId,
-      requestId,
+      canonicalRequestId,
     );
     if (!registered.has(snapshot.claim.request.operationId)) {
       throw new IcarusError(
@@ -1807,9 +1900,87 @@ export class IcarusStore {
         "GitHub request belongs to an unregistered preflight operation",
       );
     }
+    claimed.set(canonicalRequestId, {
+      landingId: snapshot.claim.request.landingId,
+      operationId: snapshot.claim.request.operationId,
+    });
     const materials = this.#claimedLandingMaterials.get(guard) ?? new Map();
     this.#claimedLandingMaterials.set(guard, materials);
-    materials.set(requestId, {
+    materials.set(`${snapshot.claim.request.landingId}:${snapshot.claim.request.operationId}`, {
+      requestId: canonicalRequestId,
+      landingId: snapshot.claim.request.landingId,
+      operationId: snapshot.claim.request.operationId,
+      material: copyLandingGitHubMaterialSnapshotV1(snapshot.material),
+    });
+    return snapshot.claim;
+  }
+
+  async claimAdmittedGitHubObjectsRequest(
+    guard: RunLeaseGuard,
+    requestId: string,
+  ): Promise<LandingGitHubObjectsAdmittedRequestClaimV1> {
+    const runId = guard.runId;
+    await guard.assertHeld(runId);
+    const { requestId: canonicalRequestId, claims: claimed } = this.#beginLandingRequestClaim(
+      guard,
+      requestId,
+    );
+    const registered = this.#registeredLandingOperationIds.get(guard);
+    if (registered === undefined || registered.size === 0) {
+      throw new IcarusError(
+        "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
+        "GitHub object operation is not registered under this run lease",
+      );
+    }
+    const claim = this.#landingLedger.claimAdmittedGitHubObjectsRequest(runId, canonicalRequestId);
+    if (!registered.has(claim.request.operationId)) {
+      throw new IcarusError(
+        "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
+        "GitHub request belongs to an unregistered object operation",
+      );
+    }
+    claimed.set(canonicalRequestId, {
+      landingId: claim.request.landingId,
+      operationId: claim.request.operationId,
+    });
+    return claim;
+  }
+
+  async claimAdmittedGitHubObjectsRequestWithMaterial(
+    guard: RunLeaseGuard,
+    requestId: string,
+  ): Promise<LandingGitHubObjectsAdmittedRequestClaimV1> {
+    const runId = guard.runId;
+    await guard.assertHeld(runId);
+    const { requestId: canonicalRequestId, claims: claimed } = this.#beginLandingRequestClaim(
+      guard,
+      requestId,
+    );
+    const registered = this.#registeredLandingOperationIds.get(guard);
+    if (registered === undefined || registered.size === 0) {
+      throw new IcarusError(
+        "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
+        "GitHub object operation is not registered under this run lease",
+      );
+    }
+    const snapshot = this.#landingLedger.claimAdmittedGitHubObjectsRequestWithMaterial(
+      runId,
+      canonicalRequestId,
+    );
+    if (!registered.has(snapshot.claim.request.operationId)) {
+      throw new IcarusError(
+        "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
+        "GitHub request belongs to an unregistered object operation",
+      );
+    }
+    claimed.set(canonicalRequestId, {
+      landingId: snapshot.claim.request.landingId,
+      operationId: snapshot.claim.request.operationId,
+    });
+    const materials = this.#claimedLandingMaterials.get(guard) ?? new Map();
+    this.#claimedLandingMaterials.set(guard, materials);
+    materials.set(`${snapshot.claim.request.landingId}:${snapshot.claim.request.operationId}`, {
+      requestId: canonicalRequestId,
       landingId: snapshot.claim.request.landingId,
       operationId: snapshot.claim.request.operationId,
       material: copyLandingGitHubMaterialSnapshotV1(snapshot.material),
@@ -1824,11 +1995,21 @@ export class IcarusStore {
   ): Promise<LandingGitHubMaterialSnapshotV1> {
     const runId = guard.runId;
     await guard.assertHeld(runId);
-    const entry = this.#claimedLandingMaterials.get(guard)?.get(requestId);
+    const binding = this.#claimedLandingRequests.get(guard)?.get(requestId);
+    const entry =
+      binding === undefined || binding === null
+        ? undefined
+        : this.#claimedLandingMaterials
+            .get(guard)
+            ?.get(`${binding.landingId}:${binding.operationId}`);
     if (
       entry === undefined ||
+      binding === undefined ||
+      binding === null ||
+      entry.requestId !== requestId ||
       entry.landingId !== landingId ||
-      !this.#claimedLandingRequestIds.get(guard)?.has(requestId) ||
+      binding.landingId !== landingId ||
+      entry.operationId !== binding.operationId ||
       !this.#registeredLandingOperationIds.get(guard)?.has(entry.operationId)
     ) {
       throw new IcarusError(
@@ -1848,10 +2029,14 @@ export class IcarusStore {
     const runId = guard.runId;
     await guard.assertHeld(runId);
     const request = decodeLandingHttpRequestV1(input.request);
+    const binding = this.#claimedLandingRequests.get(guard)?.get(request.requestId);
     if (
       request.operationId !== operationId ||
       !this.#registeredLandingOperationIds.get(guard)?.has(operationId) ||
-      !this.#claimedLandingRequestIds.get(guard)?.has(request.requestId)
+      binding === undefined ||
+      binding === null ||
+      binding.landingId !== landingId ||
+      binding.operationId !== operationId
     ) {
       throw new IcarusError(
         "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
@@ -1859,6 +2044,34 @@ export class IcarusStore {
       );
     }
     return this.#landingLedger.settleGitHubPreflightRequest(runId, landingId, operationId, input);
+  }
+
+  async settleGitHubObjectsRequest(
+    guard: RunLeaseGuard,
+    landingId: string,
+    operationId: string,
+    input: LandingGitHubObjectsSettlementInputV1,
+  ): Promise<LandingStatusV1> {
+    const runId = guard.runId;
+    await guard.assertHeld(runId);
+    const request = decodeLandingHttpRequestV1(input.request);
+    const binding = this.#claimedLandingRequests.get(guard)?.get(request.requestId);
+    if (
+      request.operationKind !== "github.objects.upload" ||
+      request.operationId !== operationId ||
+      request.landingId !== landingId ||
+      !this.#registeredLandingOperationIds.get(guard)?.has(operationId) ||
+      binding === undefined ||
+      binding === null ||
+      binding.landingId !== landingId ||
+      binding.operationId !== operationId
+    ) {
+      throw new IcarusError(
+        "GITHUB_ADMITTED_REQUEST_UNAVAILABLE",
+        "GitHub object request was not registered and claimed under this run lease",
+      );
+    }
+    return this.#landingLedger.settleGitHubObjectsRequest(runId, landingId, operationId, input);
   }
 
   async settleGitHubObjectsReconciliation(
