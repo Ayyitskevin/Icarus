@@ -390,6 +390,17 @@ future, separately reviewed work.
 
 ## Gate 1 live-evidence record
 
+ADR 0053 binds the provider HOST. ADR 0050 bound which provider kind may run and
+recorded that the loopback pin "becomes an enforced bound rather than an
+intention"; the kind was bound and the host was not, so an `ollama` pin naming a
+remote endpoint was admitted — credential-free, since that kind preflights no
+model key, and with a zero spend ceiling that could never fire. `decodeProvider`
+now resolves the URL through the shared `parseProviderBaseUrl` rather than a
+weaker re-derivation, pins each hosted kind to its own API origin, and requires
+an `ollama` pin to be loopback. ADR 0050's consequence clause and
+`docs/OPERATIONS.md` were corrected where they stated the locality as already
+guaranteed.
+
 ADR 0052 closes the defect that made the two records below unreachable. The
 manifest binding took the parsed manifest and its digest as two independent
 parameters and compared the profile's pin against the digest string, so nothing

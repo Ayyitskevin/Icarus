@@ -684,6 +684,20 @@ const assertions = {
     liveEvidenceProfileSource.includes("manifestBytes: Uint8Array") &&
     liveEvidenceProfileSource.includes("sha256(manifestBytes)") &&
     liveEvidenceProfileSource.includes("manifestBytes instanceof Uint8Array") &&
+    // The provider pin binds the HOST, not only the provider's name. It resolves
+    // the URL through the shared parser every consumer uses rather than
+    // re-deriving a weaker rule, requires HTTPS for a remote host, pins each
+    // hosted kind to its own API origin, and requires an `ollama` pin to be
+    // loopback — the locality the rest of the record assumes when it preflights
+    // no model key and accepts a zero spend ceiling. Behaviour is proven in
+    // tests/security/live-evidence-provider-origin.test.ts against the real
+    // createProviderConfig and gateway constructors.
+    liveEvidenceProfileSource.includes("parseProviderBaseUrl") &&
+    liveEvidenceProfileSource.includes("must be loopback for an ollama pin") &&
+    liveEvidenceProfileSource.includes("must be api.openai.com for an openai pin") &&
+    liveEvidenceProfileSource.includes("must be api.anthropic.com for an anthropic pin") &&
+    liveEvidenceProfileSource.includes("must use HTTPS for a remote host") &&
+    !/parsed\s*=\s*new URL\(baseUrl\)/.test(liveEvidenceProfileSource) &&
     liveEvidenceProfileSource.includes("not valid UTF-8") &&
     !liveEvidenceProfileSource.includes("manifestDigest: string") &&
     !liveEvidenceRunSource.includes("manifestDigest: string") &&

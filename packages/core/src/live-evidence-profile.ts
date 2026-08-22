@@ -2,7 +2,8 @@ import { parseStrictJson } from "./canonical-json.js";
 import { digestJson, sha256 } from "./digest.js";
 import { IcarusError } from "./errors.js";
 import { decodeGitHubLandingProfileV1, type GitHubLandingProfileV1 } from "./landing-records.js";
-import type { JsonValue, ProviderKind } from "./types.js";
+import { parseProviderBaseUrl } from "./provider.js";
+import type { JsonValue, ProviderKind, ProviderLocality } from "./types.js";
 
 // The Gate 1 credential-gated live-evidence profile (S3).
 //
@@ -251,17 +252,65 @@ function decodeProvider(value: unknown): LiveEvidenceProviderPinV1 {
     invalid("profile.provider.kind must be ollama, openai, or anthropic");
   }
   const baseUrl = text(decoded.baseUrl, "profile.provider.baseUrl");
+  // Resolved through `parseProviderBaseUrl`, the same function every consumer
+  // uses, rather than re-derived here.
+  //
+  // This pin binds the provider NAME. Until this call it did not bind the
+  // provider HOST: it re-implemented a weaker subset of the URL rule — valid
+  // URL, HTTP(S), no embedded credentials — and knew nothing of locality. So a
+  // profile could carry the exact reviewed manifest digest, the correct
+  // repository identities and a self-consistent approval while aiming the run's
+  // model traffic at any host on the internet. That is the same shape as the
+  // credential preflight before it applied its consumers' predicate: a gate
+  // asserting less than the code behind it.
+  //
+  // Re-deriving was also strictly weaker in two ways nobody intended:
+  // `parseProviderBaseUrl` refuses query and fragment data outright, and
+  // `createProviderConfig` refuses plaintext HTTP to a remote host. Both were
+  // admitted here.
   let parsed: URL;
+  let locality: ProviderLocality;
   try {
-    parsed = new URL(baseUrl);
-  } catch {
-    invalid("profile.provider.baseUrl must be a valid URL");
+    ({ url: parsed, locality } = parseProviderBaseUrl(baseUrl));
+  } catch (error) {
+    // Re-thrown in this module's own error class so a caller that classifies
+    // refusals by code sees one contract, not two.
+    invalid(
+      `profile.provider.baseUrl is not a usable provider URL: ${
+        error instanceof IcarusError ? error.message : "invalid"
+      }`,
+    );
   }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    invalid("profile.provider.baseUrl must use HTTP(S)");
+  if (locality === "remote" && parsed.protocol !== "https:") {
+    invalid("profile.provider.baseUrl must use HTTPS for a remote host");
   }
-  if (parsed.username !== "" || parsed.password !== "") {
-    invalid("profile.provider.baseUrl must not embed credentials");
+  // An `ollama` pin must be loopback. This is the one rule here that is STRICTER
+  // than its consumer rather than equal to it, and it is deliberate.
+  // `OllamaGateway` has no origin invariant at all — unlike the OpenAI and
+  // Anthropic gateways, which each pin their remote origin — so there is no
+  // consumer predicate to mirror, and the bound has to come from the authority
+  // record. Every other part of this record already assumes local: the provider
+  // credential table maps `ollama` to `null`, so no key is preflighted and none
+  // is sent, and an unpaid manifest case with zero rates is only honest if
+  // nothing is billed. A remote `ollama` endpoint would collect the repository
+  // context and drive the tool calls that write to three real repositories,
+  // with no credential, no egress approval, and a spend ceiling that can never
+  // fire. A remote Ollama deployment is a different product decision and needs
+  // its own ADR and credential story.
+  if (kind === "ollama" && locality !== "loopback") {
+    invalid("profile.provider.baseUrl must be loopback for an ollama pin");
+  }
+  // For the hosted kinds, mirror the gateway that will actually receive the
+  // credential. Loopback stays admissible because both gateways admit it.
+  if (locality === "remote") {
+    const host = parsed.hostname.toLowerCase();
+    const portAllowed = parsed.port === "" || parsed.port === "443";
+    if (kind === "openai" && !(host === "api.openai.com" && portAllowed)) {
+      invalid("profile.provider.baseUrl must be api.openai.com for an openai pin");
+    }
+    if (kind === "anthropic" && !(host === "api.anthropic.com" && portAllowed)) {
+      invalid("profile.provider.baseUrl must be api.anthropic.com for an anthropic pin");
+    }
   }
   return {
     kind: kind as ProviderKind,
