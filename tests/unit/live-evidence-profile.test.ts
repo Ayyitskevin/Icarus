@@ -80,7 +80,7 @@ function approvedProfile(overrides: Record<string, unknown> = {}): Record<string
   };
 }
 
-function manifestCase(id: string, repository: string) {
+function manifestCase(id: string, repository: string, overrides: Record<string, unknown> = {}) {
   return {
     id,
     repository: {
@@ -88,6 +88,22 @@ function manifestCase(id: string, repository: string) {
       githubRepository: repository,
       baseBranch: "main",
     },
+    // Mirrors the committed manifest: an unpaid deterministic-loopback adapter
+    // and a zero cost ceiling. The profile fixtures pin ollama with null rates
+    // and maxSpendUsd 0, so they agree with it.
+    modelAdapter: {
+      provider: "ollama",
+      model: "icarus-gate1-fixture-model-v1",
+      adapterVersion: "production-ollama-api-chat-v1",
+      transport: "deterministic-loopback-http",
+      inputUsdPerMillionTokens: 0,
+      outputUsdPerMillionTokens: 0,
+      expectedRequests: 2,
+      paid: false,
+      credentials: false,
+    },
+    budgets: { maxCostUsd: 0 },
+    ...overrides,
   };
 }
 
@@ -387,6 +403,102 @@ describe("manifest binding", () => {
     ).not.toThrow();
   });
 
+  it("refuses the profile that binds everything except the spend: exact digest, exact case ids, correct repositories, valid approval, paid remote model", () => {
+    // This is the defect this binding exists to close, reproduced end to end.
+    // Before it, every check below passed and the run was authorized.
+    const paidRemote = decodeLiveEvidenceProfileV1(
+      approvedProfile({
+        provider: {
+          kind: "anthropic",
+          model: "claude-opus-5",
+          baseUrl: "https://api.anthropic.com/",
+          adapterVersion: "anthropic-adapter-v1",
+          inputUsdPerMillionTokens: 15,
+          outputUsdPerMillionTokens: 75,
+        },
+        budgets: { maxSpendUsd: 500, maxRuntimeSeconds: 3600 },
+      }),
+    );
+    // The approval genuinely binds this content — the tamper is not there.
+    expect(() => assertLiveEvidenceProfileApproved(paidRemote)).not.toThrow();
+    // The manifest binding is what refuses it.
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(paidRemote, MANIFEST, manifestDigest),
+    ).toThrowError(/pins provider anthropic, but offline manifest case .* pins ollama/);
+  });
+
+  it("refuses a spend ceiling above the ceiling the manifest case pins", () => {
+    const overspending = decodeLiveEvidenceProfileV1(
+      approvedProfile({ budgets: { maxSpendUsd: 0.01, maxRuntimeSeconds: 3600 } }),
+    );
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(overspending, MANIFEST, manifestDigest),
+    ).toThrowError(/authorizes up to 0.01 USD, above the 0 USD ceiling/);
+  });
+
+  it("refuses a paid token rate when the manifest declares the adapter unpaid", () => {
+    // Same provider kind, so only the rate distinguishes it: a manifest that
+    // says this case costs nothing cannot authorize a profile that charges.
+    const charged = decodeLiveEvidenceProfileV1(
+      approvedProfile({
+        provider: {
+          kind: "ollama",
+          model: "qwen3.8:27b",
+          baseUrl: "http://127.0.0.1:11434/",
+          adapterVersion: "ollama-adapter-v1",
+          inputUsdPerMillionTokens: 0,
+          outputUsdPerMillionTokens: 0.5,
+        },
+      }),
+    );
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(charged, MANIFEST, manifestDigest),
+    ).toThrowError(/declares an unpaid model adapter, but the profile pins token rates/);
+  });
+
+  it("accepts null token rates, because a loopback provider charges nothing", () => {
+    const loopback = decodeLiveEvidenceProfileV1(approvedProfile());
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(loopback, MANIFEST, manifestDigest),
+    ).not.toThrow();
+  });
+
+  it("refuses a manifest case carrying no model adapter, so a missing pin cannot read as no constraint", () => {
+    const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
+    const unpinned = {
+      ...MANIFEST,
+      cases: [
+        (() => {
+          const { modelAdapter: _dropped, ...rest } = manifestCase(
+            "typescript-library-repair",
+            "icarus-gate1-typescript",
+          );
+          return rest;
+        })(),
+        manifestCase("python-cli-repair", "icarus-gate1-python"),
+        manifestCase("react-node-repair", "icarus-gate1-react"),
+      ],
+    };
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(decoded, unpinned, manifestDigest),
+    ).toThrowError(/manifest.cases\[0\].modelAdapter must be an object/);
+  });
+
+  it("refuses a manifest case carrying no cost ceiling", () => {
+    const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
+    const unpinned = {
+      ...MANIFEST,
+      cases: [
+        manifestCase("typescript-library-repair", "icarus-gate1-typescript", { budgets: {} }),
+        manifestCase("python-cli-repair", "icarus-gate1-python"),
+        manifestCase("react-node-repair", "icarus-gate1-react"),
+      ],
+    };
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(decoded, unpinned, manifestDigest),
+    ).toThrowError(/budgets.maxCostUsd must be a finite number/);
+  });
+
   it("rejects a mismatched benchmark revision", () => {
     const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
     expect(() =>
@@ -457,5 +569,78 @@ describe("provider pin", () => {
         }),
       ),
     ).toThrowError(/provider.kind must be/);
+  });
+});
+
+describe("the approval digest signs every pinned field", () => {
+  // liveEvidenceProfileApprovalDigest hand-builds its projection. That is
+  // complete today, but a field added to LiveEvidenceProfileV1 later would be
+  // silently unsigned: the operator would approve a digest that omits it, and
+  // nothing else in the suite would notice. These two tests are the tripwire.
+
+  it("covers exactly the record's pinned keys, so a new field cannot be added without deciding whether it is signed", () => {
+    const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
+    const pinned = Object.keys(decoded)
+      .filter((key) => key !== "approval")
+      .sort();
+    // If this fails, LiveEvidenceProfileV1 grew a field. Add it to
+    // liveEvidenceProfileApprovalDigest's projection, add a digest-changes case
+    // below, and then update this list — in that order.
+    expect(pinned).toEqual([
+      "authorizedEffects",
+      "benchmarkId",
+      "benchmarkRevision",
+      "budgets",
+      "cases",
+      "offlineManifestDigest",
+      "profileId",
+      "provider",
+      "schemaVersion",
+    ]);
+  });
+
+  it("changes when any pinned field changes", () => {
+    const baseline = liveEvidenceProfileApprovalDigest(
+      decodeLiveEvidenceProfileV1(approvedProfile()),
+    );
+    const variants: Record<string, Record<string, unknown>> = {
+      profileId: { profileId: "gate1-live-v2" },
+      benchmarkId: { benchmarkId: "icarus-gate2" },
+      benchmarkRevision: { benchmarkRevision: "v2" },
+      offlineManifestDigest: { offlineManifestDigest: "c".repeat(64) },
+      provider: {
+        provider: {
+          kind: "ollama",
+          model: "a-different-model",
+          baseUrl: "http://127.0.0.1:11434/",
+          adapterVersion: "ollama-adapter-v1",
+          inputUsdPerMillionTokens: null,
+          outputUsdPerMillionTokens: null,
+        },
+      },
+      budgets: { budgets: { maxSpendUsd: 0, maxRuntimeSeconds: 7200 } },
+      cases: {
+        cases: [
+          {
+            caseId: "typescript-library-repair",
+            landingProfile: landingProfile({ expectedActor: "someone-else" }),
+          },
+          {
+            caseId: "python-cli-repair",
+            landingProfile: landingProfile({ repository: "icarus-gate1-python" }),
+          },
+          {
+            caseId: "react-node-repair",
+            landingProfile: landingProfile({ repository: "icarus-gate1-react" }),
+          },
+        ],
+      },
+    };
+    for (const [field, override] of Object.entries(variants)) {
+      const mutated = liveEvidenceProfileApprovalDigest(
+        decodeLiveEvidenceProfileV1(approvedProfile(override)),
+      );
+      expect(mutated, `${field} is not signed by the approval digest`).not.toBe(baseline);
+    }
   });
 });

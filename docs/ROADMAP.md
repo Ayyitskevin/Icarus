@@ -401,3 +401,11 @@ preflighted alongside each landing credential, manifest case identities must be
 distinct, the returned authorization is frozen and the effect ledger copies
 rather than retains it, and the ledger binds the landing chain order per case.
 Runtime authority is enforced at runtime, not by `readonly`.
+
+ADR 0050 then closed a fourth gap of the same class, found before it could
+matter: the record bound the manifest fields deciding which repositories receive
+effects but not those deciding which model runs or whether money is spent. The
+provider kind, the unpaid-adapter declaration and the case cost ceiling are now
+bound at authorization, so the loopback pin chosen for the 3/3 run is an enforced
+bound rather than an intention, and reaching a paid model requires a manifest
+edit that visibly invalidates the approval.

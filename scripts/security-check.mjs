@@ -32,6 +32,11 @@ const browserActionStateSource = await readFile(
 const landingGitSource = await readFile("packages/core/src/landing-git.ts", "utf8");
 const landingRecordsSource = await readFile("packages/core/src/landing-records.ts", "utf8");
 const landingStateSource = await readFile("packages/core/src/landing-state.ts", "utf8");
+const liveEvidenceProfileSource = await readFile(
+  "packages/core/src/live-evidence-profile.ts",
+  "utf8",
+);
+const liveEvidenceRunSource = await readFile("packages/core/src/live-evidence-run.ts", "utf8");
 const sandboxSource = await readFile("packages/core/src/sandbox.ts", "utf8");
 const workspaceServerSource = await readFile("packages/api/src/server.ts", "utf8");
 const actionCoordinatorSource = await readFile("packages/api/src/action-coordinator.ts", "utf8");
@@ -652,6 +657,44 @@ const assertions = {
     landingStateSource.includes('"reconciliation_required"') &&
     landingStateSource.includes('"github.pull_request.create"') &&
     !landingRecordsSource.includes("git push"),
+  liveEvidenceAuthorityIsClosedBoundAndInert:
+    // The closed effect set, compared by ordered equality so authority cannot
+    // grow by appending, and the four prohibitions that stay inexpressible
+    // because no effect names them.
+    liveEvidenceProfileSource.includes('"github.objects.upload"') &&
+    liveEvidenceProfileSource.includes('"github.ref.create.absent_only"') &&
+    liveEvidenceProfileSource.includes('"github.pull_request.create.draft"') &&
+    liveEvidenceProfileSource.includes('"github.landing.receipt"') &&
+    !liveEvidenceProfileSource.includes('"github.ref.force_update"') &&
+    !liveEvidenceProfileSource.includes('"github.ref.delete"') &&
+    !liveEvidenceProfileSource.includes('"github.pull_request.merge"') &&
+    !liveEvidenceProfileSource.includes('"github.deployment') &&
+    liveEvidenceProfileSource.includes("profile.authorizedEffects must be exactly") &&
+    // Approval binds exact content, and the manifest binding compares the
+    // fields that decide which repositories are touched, which model runs, and
+    // whether money may be spent.
+    liveEvidenceProfileSource.includes("liveEvidenceProfileApprovalDigest") &&
+    liveEvidenceProfileSource.includes("does not apply to this profile") &&
+    liveEvidenceProfileSource.includes("each case must land in its own repository") &&
+    liveEvidenceProfileSource.includes("but the offline manifest pins") &&
+    liveEvidenceProfileSource.includes("declares an unpaid model adapter") &&
+    liveEvidenceProfileSource.includes("above the") &&
+    liveEvidenceProfileSource.includes("USD ceiling offline manifest case") &&
+    // Runtime authority: frozen and copied, chain order bound, ceilings real.
+    liveEvidenceRunSource.includes("Object.freeze") &&
+    liveEvidenceRunSource.includes("the landing chain runs in one direction") &&
+    liveEvidenceRunSource.includes("the landing chain admits no skipped stage") &&
+    liveEvidenceRunSource.includes("never by a second POST") &&
+    liveEvidenceRunSource.includes("non-negative finite spend ceiling") &&
+    liveEvidenceRunSource.includes("providerCredentialEnvironmentName") &&
+    // Neither module performs I/O, reads a credential VALUE, or reaches a
+    // provider or GitHub. The record authorizes; it never acts.
+    !/\bfetch\s*\(|api\.github\.com|readFile|writeFile|child_process|spawn\(/.test(
+      liveEvidenceProfileSource,
+    ) &&
+    !/\bfetch\s*\(|api\.github\.com|readFile|writeFile|child_process|spawn\(/.test(
+      liveEvidenceRunSource,
+    ),
   gitPathspecMagicIsDisabled:
     gitSource.includes('GIT_LITERAL_PATHSPECS: "1"') &&
     landingGitSource.includes('GIT_LITERAL_PATHSPECS: "1"'),

@@ -39,8 +39,15 @@ Decision records for the current milestone:
 | [0042](adr/0042-change-handoff-packs.md) | Change Handoff Packs are operator-exported redacted evidence capsules, not Change Room replicas or cross-system authority | Accepted — exact published-main CI passed at `133aa38d` in run `30725709403` |
 | [0043](adr/0043-github-gateway-boundary.md) | The GitHub gateway's authority is one closed nine-kind operation table with GET/POST-only inexpressibility, automation-path denial, loopback opt-in, coordinator-owned retry, and 422-as-refusal | Accepted — records the merged unwired package (PRs #25–27) and carries their missing independent-review record forward; two contract-level questions (identity case in the pull-request head filter, pinned page size against the response ceiling) remain Open and require an ADR 0027 amendment |
 
+| [0050](adr/0050-live-evidence-manifest-money-and-model-binding.md) | The Gate 1 live-evidence profile binds the manifest fields that decide which model runs and whether money may be spent — provider kind, unpaid-adapter declaration, and a spend ceiling bounded by the case's `maxCostUsd` — while `model`, `adapterVersion`, `transport`, `expectedRequests` and `credentials` are deliberately unbound because they describe the offline replay | Proposed — validation only; no live run is authorized and nothing it adds performs I/O |
+
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.
+
+ADR 0045's row is deliberately absent from this index: the codex seat's
+unmerged headless branch already adds rows for 0044 through 0048, including
+0045, and two lanes writing the same row would auto-merge into a duplicate
+rather than conflict. Whichever lane merges first owns it.
 
 Reserved but unwritten: ADR numbers 0028, 0030–0035, 0037, and 0038 are cited
 as gate dependencies in
