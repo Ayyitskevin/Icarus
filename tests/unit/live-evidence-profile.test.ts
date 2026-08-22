@@ -336,6 +336,57 @@ describe("manifest binding", () => {
     ).toThrowError(/must carry the authoritative repository identity/);
   });
 
+  it("refuses a manifest mapping two cases to one repository, so a single landing cannot receive two cases' effects", () => {
+    // Each case's own draft-pull-request count would stay at one while the
+    // landing behind them received two POSTs, contradicting the durable
+    // one_create_pr_post_per_landing index.
+    const collided = decodeLiveEvidenceProfileV1(
+      approvedProfile({
+        cases: [
+          { caseId: "typescript-library-repair", landingProfile: landingProfile() },
+          { caseId: "python-cli-repair", landingProfile: landingProfile() },
+          {
+            caseId: "react-node-repair",
+            landingProfile: landingProfile({ repository: "icarus-gate1-react" }),
+          },
+        ],
+      }),
+    );
+    const collidedManifest = {
+      ...MANIFEST,
+      cases: [
+        manifestCase("typescript-library-repair", "icarus-gate1-typescript"),
+        manifestCase("python-cli-repair", "icarus-gate1-typescript"),
+        manifestCase("react-node-repair", "icarus-gate1-react"),
+      ],
+    };
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(collided, collidedManifest, manifestDigest),
+    ).toThrowError(/maps more than one case to repository ayyitskevin\/icarus-gate1-typescript/);
+  });
+
+  it("refuses a manifest with a duplicate case id rather than assuming the benchmark validator ran", () => {
+    const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
+    const duplicated = {
+      ...MANIFEST,
+      cases: [
+        manifestCase("typescript-library-repair", "icarus-gate1-typescript"),
+        manifestCase("typescript-library-repair", "icarus-gate1-python"),
+        manifestCase("react-node-repair", "icarus-gate1-react"),
+      ],
+    };
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(decoded, duplicated, manifestDigest),
+    ).toThrowError(/duplicate case id typescript-library-repair/);
+  });
+
+  it("still accepts the reviewed manifest, whose three cases hold three distinct repositories", () => {
+    const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST, manifestDigest),
+    ).not.toThrow();
+  });
+
   it("rejects a mismatched benchmark revision", () => {
     const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
     expect(() =>

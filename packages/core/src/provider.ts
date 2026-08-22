@@ -30,6 +30,28 @@ export interface ModelGateway {
   ): Promise<StructuredGenerationResult>;
 }
 
+/**
+ * The environment variable each provider reads its credential from. Ollama runs
+ * as a loopback process and reads none.
+ *
+ * Gateway construction and every credential preflight resolve the name here. A
+ * preflight that hardcoded its own name could assert a variable the gateway
+ * never reads, which is a preflight that proves nothing about the run it
+ * admits.
+ */
+export const PROVIDER_CREDENTIAL_ENVIRONMENT_NAMES: Readonly<Record<ProviderKind, string | null>> =
+  Object.freeze({
+    ollama: null,
+    openai: "OPENAI_API_KEY",
+    anthropic: "ANTHROPIC_API_KEY",
+  });
+
+/** The credential environment variable `kind` requires, or null when it needs
+ * none. */
+export function providerCredentialEnvironmentName(kind: ProviderKind): string | null {
+  return PROVIDER_CREDENTIAL_ENVIRONMENT_NAMES[kind];
+}
+
 export function parseProviderBaseUrl(value: string): { url: URL; locality: ProviderLocality } {
   let url: URL;
   try {
