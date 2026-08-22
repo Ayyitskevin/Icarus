@@ -91,6 +91,13 @@ enforced at authorization.
       token rates, spend ceiling bounded by the manifest's `maxCostUsd`, plus
       this surface's first `scripts/security-check.mjs` assertion). The case
       executor that drives real repositories is NOT implemented
+- [x] Make the pinned candidate commit reproducible on the live path — ADR 0051
+      adds an optional `PrepareLandingInput.commitEpochSeconds`. A Git commit
+      hashes its timestamp, so `candidate_commit_and_absent_only_branch_exact`
+      was unreachable while `prepareLanding` derived the epoch from the clock.
+      The pin moves the commit instant alone; every other durable timestamp
+      still comes from the clock, proven by difference against an unpinned
+      landing
 - [ ] Record 3/3 live evidence with passing complete checks, exact changed paths,
       unchanged source checkouts, reviewable draft PRs, matching immutable
       receipts, restart/reconciliation evidence, and exact candidate/live

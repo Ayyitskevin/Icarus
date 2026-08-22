@@ -1590,3 +1590,131 @@ test.runIf(process.platform === "linux")(
     fixture.store.close();
   },
 );
+
+describe("the candidate commit timestamp may be pinned, and nothing else moves with it", () => {
+  // A Gate 1 live-evidence case must reproduce a candidate commit whose SHA-1
+  // the offline manifest already pins. A Git commit hashes its timestamp, so a
+  // wall-clock commit can never match. These tests bind the narrowness of the
+  // pin as much as the pin itself.
+  const PINNED_EPOCH_SECONDS = 1_704_067_200; // 2024-01-01T00:00:00Z, the manifest's value
+
+  async function prepareWithPin(pin?: number) {
+    const fixture = seedEligibleRun();
+    const service = await landingService(
+      fixture,
+      fakeLandingGit({
+        inspectBase: async () => ({
+          objectFormat: "sha1",
+          baseCommitSha1: UNIT_BASE_COMMIT,
+          baseTreeSha1: BASE_TREE_SHA1,
+        }),
+        prepareCandidate: async () => {
+          throw new IcarusError("CANCELLED", "stop once the durable landing exists");
+        },
+      }),
+    );
+    try {
+      await service.prepareLanding({
+        runId: UNIT_RUN_ID,
+        commitMessage: COMMIT_MESSAGE,
+        pullRequestTitle: PULL_REQUEST_TITLE,
+        pullRequestBodyPrefix: PULL_REQUEST_BODY_PREFIX,
+        ...(pin === undefined ? {} : { commitEpochSeconds: pin }),
+      });
+    } catch {
+      // the candidate stage is deliberately unreachable: the durable landing,
+      // which is what these tests read, already exists by then
+    }
+    return { fixture, service };
+  }
+
+  test("records the pinned epoch on the durable landing", async () => {
+    const { fixture, service } = await prepareWithPin(PINNED_EPOCH_SECONDS);
+    const status = service.getLandingStatus(UNIT_RUN_ID);
+    expect(status?.landing.commitEpochSeconds).toBe(PINNED_EPOCH_SECONDS);
+    expect(status?.landing.commitIso8601).toBe(commitEpochToGitInstant(PINNED_EPOCH_SECONDS));
+    fixture.store.close();
+  });
+
+  test("moves ONLY the commit timestamp: every other durable timestamp is unchanged", async () => {
+    // This is the property that makes the pin safe. The coordinator already has
+    // a `now` seam, and pinning through THAT would backdate every durable
+    // timestamp the run writes — an evidence trail that misreports when things
+    // happened is worse than a non-deterministic commit. Proven by difference:
+    // two identical landings, one pinned and one not, must agree on everything
+    // except the commit instant.
+    const pinned = await prepareWithPin(PINNED_EPOCH_SECONDS);
+    const pinnedLanding = pinned.service.getLandingStatus(UNIT_RUN_ID)?.landing;
+    pinned.fixture.store.close();
+
+    const observed = await prepareWithPin();
+    const observedLanding = observed.service.getLandingStatus(UNIT_RUN_ID)?.landing;
+    observed.fixture.store.close();
+
+    expect(pinnedLanding?.commitEpochSeconds).toBe(PINNED_EPOCH_SECONDS);
+    expect(observedLanding?.commitEpochSeconds).not.toBe(PINNED_EPOCH_SECONDS);
+    // the record's own clock is untouched by the pin
+    expect(pinnedLanding?.createdAt).toBe(observedLanding?.createdAt);
+    expect(Date.parse(String(pinnedLanding?.createdAt))).not.toBe(PINNED_EPOCH_SECONDS * 1_000);
+  });
+
+  test("observes the clock when no pin is supplied, which stays the ordinary path", async () => {
+    const before = Math.floor(Date.now() / 1_000);
+    const { fixture, service } = await prepareWithPin();
+    const status = service.getLandingStatus(UNIT_RUN_ID);
+    expect(status?.landing.commitEpochSeconds).toBeGreaterThanOrEqual(before - 1);
+    fixture.store.close();
+  });
+
+  test("refuses a pinned epoch in the future, because a commit dated after its own creation is a false claim", async () => {
+    const fixture = seedEligibleRun();
+    const service = await landingService(
+      fixture,
+      fakeLandingGit({
+        inspectBase: async () => ({
+          objectFormat: "sha1",
+          baseCommitSha1: UNIT_BASE_COMMIT,
+          baseTreeSha1: BASE_TREE_SHA1,
+        }),
+      }),
+    );
+    await expect(
+      service.prepareLanding({
+        runId: UNIT_RUN_ID,
+        commitMessage: COMMIT_MESSAGE,
+        pullRequestTitle: PULL_REQUEST_TITLE,
+        pullRequestBodyPrefix: PULL_REQUEST_BODY_PREFIX,
+        commitEpochSeconds: Math.floor(Date.now() / 1_000) + 86_400,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_LANDING_TIMESTAMP" });
+    expect(service.getLandingStatus(UNIT_RUN_ID)).toBeNull();
+    fixture.store.close();
+  });
+
+  test("refuses a negative or non-integer pinned epoch", async () => {
+    for (const pin of [-1, 1.5, Number.NaN]) {
+      const fixture = seedEligibleRun();
+      const service = await landingService(
+        fixture,
+        fakeLandingGit({
+          inspectBase: async () => ({
+            objectFormat: "sha1",
+            baseCommitSha1: UNIT_BASE_COMMIT,
+            baseTreeSha1: BASE_TREE_SHA1,
+          }),
+        }),
+      );
+      await expect(
+        service.prepareLanding({
+          runId: UNIT_RUN_ID,
+          commitMessage: COMMIT_MESSAGE,
+          pullRequestTitle: PULL_REQUEST_TITLE,
+          pullRequestBodyPrefix: PULL_REQUEST_BODY_PREFIX,
+          commitEpochSeconds: pin,
+        }),
+      ).rejects.toMatchObject({ code: "INVALID_LANDING_TIMESTAMP" });
+      expect(service.getLandingStatus(UNIT_RUN_ID)).toBeNull();
+      fixture.store.close();
+    }
+  });
+});

@@ -409,3 +409,12 @@ provider kind, the unpaid-adapter declaration and the case cost ceiling are now
 bound at authorization, so the loopback pin chosen for the 3/3 run is an enforced
 bound rather than an intention, and reaching a paid model requires a manifest
 edit that visibly invalidates the approval.
+
+ADR 0051 then removed the second hard blocker under the live executor. The
+manifest pins the candidate commit's SHA-1, a Git commit hashes its timestamp,
+and `prepareLanding` derived that timestamp from the clock — so the
+deterministic candidate `candidate_commit_and_absent_only_branch_exact` requires
+was unreachable on the live path. It is now an optional per-landing pin that
+moves the commit instant and nothing else. What remains genuinely unsized is the
+approval surface the manifest's `separate_approval_for_each_external_mutation`
+condition names.
