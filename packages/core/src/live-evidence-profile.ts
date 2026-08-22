@@ -96,6 +96,24 @@ export interface LiveEvidenceProfileV1 {
   readonly approval: LiveEvidenceApprovalV1;
 }
 
+// The manifest's model-adapter block, decoded strictly so a renamed or dropped
+// field is refused rather than silently unbound. Only `provider`, `paid` and
+// the two rates are COMPARED against the profile — see
+// `assertLiveEvidenceProfileMatchesManifest` and ADR 0050 for why `model`,
+// `adapterVersion`, `transport`, `expectedRequests` and `credentials` are
+// deliberately not.
+const MANIFEST_MODEL_ADAPTER_KEYS = [
+  "provider",
+  "model",
+  "adapterVersion",
+  "transport",
+  "inputUsdPerMillionTokens",
+  "outputUsdPerMillionTokens",
+  "expectedRequests",
+  "paid",
+  "credentials",
+] as const;
+
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const PROFILE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const MAX_CASES = 64;
@@ -413,7 +431,12 @@ export function assertLiveEvidenceProfileMatchesManifest(
   // as "no constraint", because the repository is the field that decides which
   // real repository receives real effects.
   const manifestCases = manifest.cases.map((entry, index) => {
-    const decoded = entry as { readonly id?: unknown; readonly repository?: unknown };
+    const decoded = entry as {
+      readonly id?: unknown;
+      readonly repository?: unknown;
+      readonly modelAdapter?: unknown;
+      readonly budgets?: unknown;
+    };
     const id = text(decoded.id, `manifest.cases[${index}].id`);
     const repository = decoded.repository;
     if (typeof repository !== "object" || repository === null || Array.isArray(repository)) {
@@ -422,6 +445,29 @@ export function assertLiveEvidenceProfileMatchesManifest(
       );
     }
     const pinned = repository as Record<string, unknown>;
+    // The manifest also pins which model produces the evidence and how much the
+    // case may cost. Both are refused when absent, for the same reason the
+    // repository identity is: a missing pin must not read as no constraint.
+    const modelAdapter = record(
+      decoded.modelAdapter,
+      MANIFEST_MODEL_ADAPTER_KEYS,
+      `manifest.cases[${index}].modelAdapter`,
+    );
+    const budgets = decoded.budgets;
+    if (typeof budgets !== "object" || budgets === null || Array.isArray(budgets)) {
+      invalid(`manifest.cases[${index}].budgets must carry the authoritative case ceilings`);
+    }
+    const maxCostUsd = finiteNumber(
+      (budgets as Record<string, unknown>).maxCostUsd,
+      `manifest.cases[${index}].budgets.maxCostUsd`,
+    );
+    if (maxCostUsd < 0) {
+      invalid(`manifest.cases[${index}].budgets.maxCostUsd must not be negative`);
+    }
+    const paid = modelAdapter.paid;
+    if (typeof paid !== "boolean") {
+      invalid(`manifest.cases[${index}].modelAdapter.paid must be a boolean`);
+    }
     return {
       id,
       githubOwner: text(pinned.githubOwner, `manifest.cases[${index}].repository.githubOwner`),
@@ -430,6 +476,9 @@ export function assertLiveEvidenceProfileMatchesManifest(
         `manifest.cases[${index}].repository.githubRepository`,
       ),
       baseBranch: text(pinned.baseBranch, `manifest.cases[${index}].repository.baseBranch`),
+      providerKind: text(modelAdapter.provider, `manifest.cases[${index}].modelAdapter.provider`),
+      paid,
+      maxCostUsd,
     };
   });
   // Distinctness is an admission prerequisite this function establishes for
@@ -485,6 +534,42 @@ export function assertLiveEvidenceProfileMatchesManifest(
     ) {
       invalid(
         `profile case ${entry.caseId} targets ${landing.owner}/${landing.repository}@${landing.baseBranch}, but the offline manifest pins ${pinned.githubOwner}/${pinned.githubRepository}@${pinned.baseBranch}`,
+      );
+    }
+  }
+
+  // Repository identity decides WHICH repositories receive effects. These two
+  // decide WHICH MODEL produces the evidence and WHETHER REAL MONEY IS SPENT,
+  // and until now neither was compared at all: a profile carrying the exact
+  // reviewed manifest digest, the exact case ids, correct repository identities
+  // and a self-consistent digest-bound approval could pin a paid remote model
+  // at an arbitrary ceiling against a manifest declaring `paid: false`, zero
+  // token rates and `maxCostUsd: 0`. An approval that binds everything except
+  // the spend is not a spending authority.
+  for (const pinned of manifestCases) {
+    if (profile.provider.kind !== pinned.providerKind) {
+      invalid(
+        `profile pins provider ${profile.provider.kind}, but offline manifest case ${pinned.id} pins ${pinned.providerKind}`,
+      );
+    }
+    // `paid: false` is the manifest declaring this case costs nothing to run.
+    // A profile whose provider carries a non-zero rate contradicts that before
+    // a single token is generated. Null rates are the loopback case and are
+    // accepted: nothing is charged.
+    if (!pinned.paid) {
+      const rates = [
+        profile.provider.inputUsdPerMillionTokens,
+        profile.provider.outputUsdPerMillionTokens,
+      ];
+      if (rates.some((rate) => rate !== null && rate !== 0)) {
+        invalid(
+          `offline manifest case ${pinned.id} declares an unpaid model adapter, but the profile pins token rates ${JSON.stringify(rates)}`,
+        );
+      }
+    }
+    if (profile.budgets.maxSpendUsd > pinned.maxCostUsd) {
+      invalid(
+        `profile authorizes up to ${profile.budgets.maxSpendUsd} USD, above the ${pinned.maxCostUsd} USD ceiling offline manifest case ${pinned.id} pins`,
       );
     }
   }

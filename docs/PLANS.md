@@ -54,6 +54,16 @@ manifest case identities must be distinct, the authorization is frozen and the
 ledger copies it, and the effect chain order is bound per case. No live run was
 authorized from the reviewed head, and none is authorized by the fix.
 
+A fourth defect of the same class was then found by an adversarial planning pass
+over the merged tree, before it could matter, and closed under ADR 0050: the
+profile bound the manifest fields that decide which repositories are touched but
+never the ones that decide which model runs or whether money may be spent, so a
+profile with the exact reviewed digest, correct repository identities and a valid
+digest-bound approval could pin a paid remote model at an arbitrary ceiling
+against a manifest declaring `paid: false` and `maxCostUsd: 0`. Provider kind,
+unpaid-means-unpaid, and a spend ceiling bounded by the manifest's are now
+enforced at authorization.
+
 - [x] Define a versioned credential-gated live-evidence profile bound to the
       offline manifest digest and exact immutable case pins — `LiveEvidenceProfileV1`
       binds `offlineManifestDigest`, `benchmarkId`, `benchmarkRevision`, and a
@@ -76,8 +86,11 @@ authorized from the reviewed head, and none is authorized by the fix.
       ceilings that bound rather than report, and a completeness assertion) and
       was hardened 2026-08-21 after independent review (provider credential
       preflight, distinct manifest case identities, frozen authorization copied
-      by the ledger, bound landing-chain order). The case executor that drives
-      real repositories is NOT implemented
+      by the ledger, bound landing-chain order) and again 2026-08-21 under ADR
+      0050 (provider kind bound to the manifest, unpaid adapters refusing paid
+      token rates, spend ceiling bounded by the manifest's `maxCostUsd`, plus
+      this surface's first `scripts/security-check.mjs` assertion). The case
+      executor that drives real repositories is NOT implemented
 - [ ] Record 3/3 live evidence with passing complete checks, exact changed paths,
       unchanged source checkouts, reviewable draft PRs, matching immutable
       receipts, restart/reconciliation evidence, and exact candidate/live

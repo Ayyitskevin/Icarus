@@ -722,6 +722,20 @@ holding one performs no network call and authorizes no effect on its own.
   one. The uniqueness key matches `scripts/gate1-benchmark-contract.mjs`
   exactly, and is re-checked here rather than assumed of whichever caller
   supplied the manifest.
+- It binds the manifest fields that decide **which model runs and whether money
+  may be spent** (ADR 0050). `profile.provider.kind` must equal the case's
+  `modelAdapter.provider`; a case declaring `modelAdapter.paid: false` refuses a
+  profile whose token rates are anything but `null` or `0`; and
+  `profile.budgets.maxSpendUsd` must not exceed the case's
+  `budgets.maxCostUsd` — zero, in the committed manifest. A case carrying no
+  `modelAdapter` or no `budgets.maxCostUsd` is refused rather than skipped.
+  Deliberately NOT bound, because they describe how the offline replay was
+  performed rather than what a live run may do: `model` (the manifest names the
+  replay fixture `icarus-gate1-fixture-model-v1`, so binding it would make a
+  live run impossible), `adapterVersion`, `transport`, `expectedRequests` and
+  `credentials`. Reaching a paid model therefore requires editing the manifest,
+  which changes its digest and invalidates the approval — visibly, and by
+  design.
 - `authorizedEffects` must equal exactly `github.objects.upload`,
   `github.ref.create.absent_only`, `github.pull_request.create.draft`,
   `github.landing.receipt`, in that order. Neither an added nor a removed entry

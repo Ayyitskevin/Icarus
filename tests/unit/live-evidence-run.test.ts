@@ -14,28 +14,49 @@ import { providerCredentialEnvironmentName } from "../../packages/core/src/provi
 
 const MANIFEST_DIGEST = "a".repeat(64);
 
-const MANIFEST = {
-  benchmarkId: "icarus-gate1",
-  benchmarkRevision: "v1",
-  cases: [
-    {
-      id: "case-one",
-      repository: {
-        githubOwner: "ayyitskevin",
-        githubRepository: "icarus-gate1-one",
-        baseBranch: "main",
-      },
+// The manifest pins the provider kind, whether the adapter is paid, and the
+// case cost ceiling; the profile must agree with all three. Tests that exercise
+// a remote provider therefore build a manifest that pins that provider, because
+// a mismatched pair is now refused — which is the point of the binding.
+function manifestCase(
+  id: string,
+  repository: string,
+  pin: { providerKind?: string; paid?: boolean; maxCostUsd?: number } = {},
+) {
+  return {
+    id,
+    repository: {
+      githubOwner: "ayyitskevin",
+      githubRepository: repository,
+      baseBranch: "main",
     },
-    {
-      id: "case-two",
-      repository: {
-        githubOwner: "ayyitskevin",
-        githubRepository: "icarus-gate1-two",
-        baseBranch: "main",
-      },
+    modelAdapter: {
+      provider: pin.providerKind ?? "ollama",
+      model: "icarus-gate1-fixture-model-v1",
+      adapterVersion: "production-ollama-api-chat-v1",
+      transport: "deterministic-loopback-http",
+      inputUsdPerMillionTokens: 0,
+      outputUsdPerMillionTokens: 0,
+      expectedRequests: 2,
+      paid: pin.paid ?? false,
+      credentials: false,
     },
-  ],
-};
+    budgets: { maxCostUsd: pin.maxCostUsd ?? 10 },
+  };
+}
+
+function manifestFor(pin: { providerKind?: string; paid?: boolean; maxCostUsd?: number } = {}) {
+  return {
+    benchmarkId: "icarus-gate1",
+    benchmarkRevision: "v1",
+    cases: [
+      manifestCase("case-one", "icarus-gate1-one", pin),
+      manifestCase("case-two", "icarus-gate1-two", pin),
+    ],
+  };
+}
+
+const MANIFEST = manifestFor();
 
 function landingProfile(repository: string, credentialName: string): Record<string, unknown> {
   return {
@@ -251,6 +272,12 @@ describe("provider credential preflight", () => {
     inputUsdPerMillionTokens: 1,
     outputUsdPerMillionTokens: 2,
   };
+  // A remote pin only authorizes against a manifest that pins the same
+  // provider and declares it paid: the profile and the manifest must agree
+  // about who spends money.
+  const OPENAI_MANIFEST = manifestFor({ providerKind: "openai", paid: true });
+  const ANTHROPIC_MANIFEST = manifestFor({ providerKind: "anthropic", paid: true });
+
   const ANTHROPIC_PROVIDER = {
     kind: "anthropic",
     model: "claude-opus-5",
@@ -267,7 +294,7 @@ describe("provider credential preflight", () => {
     expect(() =>
       authorizeLiveEvidenceRun(
         approvedProfile({ provider: OPENAI_PROVIDER }),
-        MANIFEST,
+        OPENAI_MANIFEST,
         MANIFEST_DIGEST,
         PRESENT_ENV,
       ),
@@ -278,7 +305,7 @@ describe("provider credential preflight", () => {
     expect(() =>
       authorizeLiveEvidenceRun(
         approvedProfile({ provider: ANTHROPIC_PROVIDER }),
-        MANIFEST,
+        ANTHROPIC_MANIFEST,
         MANIFEST_DIGEST,
         PRESENT_ENV,
       ),
@@ -289,7 +316,7 @@ describe("provider credential preflight", () => {
     expect(() =>
       authorizeLiveEvidenceRun(
         approvedProfile({ provider: OPENAI_PROVIDER }),
-        MANIFEST,
+        OPENAI_MANIFEST,
         MANIFEST_DIGEST,
         {
           ...PRESENT_ENV,
@@ -305,7 +332,7 @@ describe("provider credential preflight", () => {
     const expected = providerCredentialEnvironmentName("openai");
     const authorization = authorizeLiveEvidenceRun(
       approvedProfile({ provider: OPENAI_PROVIDER }),
-      MANIFEST,
+      OPENAI_MANIFEST,
       MANIFEST_DIGEST,
       { ...PRESENT_ENV, OPENAI_API_KEY: "not-read-by-the-gate" },
     );
@@ -331,7 +358,7 @@ describe("provider credential preflight", () => {
     const secret = "sk-ThisMustNeverAppearAnywhere";
     const authorization = authorizeLiveEvidenceRun(
       approvedProfile({ provider: OPENAI_PROVIDER }),
-      MANIFEST,
+      OPENAI_MANIFEST,
       MANIFEST_DIGEST,
       { ...PRESENT_ENV, OPENAI_API_KEY: secret },
     );
