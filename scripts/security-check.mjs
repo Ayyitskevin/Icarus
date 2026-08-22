@@ -675,6 +675,32 @@ const assertions = {
     // whether money may be spent.
     liveEvidenceProfileSource.includes("liveEvidenceProfileApprovalDigest") &&
     liveEvidenceProfileSource.includes("does not apply to this profile") &&
+    // The manifest is bound by its BYTES. Taking a parsed object beside a digest
+    // string let the caller assert the correspondence between them, so an edited
+    // manifest carrying the reviewed manifest's digest was admitted and every
+    // comparison below ran against the edited one. Behaviour is proven in
+    // tests/security/live-evidence-manifest-binding.test.ts against the real
+    // committed manifest; these clauses stop the parameter pair coming back.
+    liveEvidenceProfileSource.includes("manifestBytes: Uint8Array") &&
+    liveEvidenceProfileSource.includes("sha256(manifestBytes)") &&
+    liveEvidenceProfileSource.includes("manifestBytes instanceof Uint8Array") &&
+    // The provider pin binds the HOST, not only the provider's name. It resolves
+    // the URL through the shared parser every consumer uses rather than
+    // re-deriving a weaker rule, requires HTTPS for a remote host, pins each
+    // hosted kind to its own API origin, and requires an `ollama` pin to be
+    // loopback — the locality the rest of the record assumes when it preflights
+    // no model key and accepts a zero spend ceiling. Behaviour is proven in
+    // tests/security/live-evidence-provider-origin.test.ts against the real
+    // createProviderConfig and gateway constructors.
+    liveEvidenceProfileSource.includes("parseProviderBaseUrl") &&
+    liveEvidenceProfileSource.includes("must be loopback for an ollama pin") &&
+    liveEvidenceProfileSource.includes("must be api.openai.com for an openai pin") &&
+    liveEvidenceProfileSource.includes("must be api.anthropic.com for an anthropic pin") &&
+    liveEvidenceProfileSource.includes("must use HTTPS for a remote host") &&
+    !/parsed\s*=\s*new URL\(baseUrl\)/.test(liveEvidenceProfileSource) &&
+    liveEvidenceProfileSource.includes("not valid UTF-8") &&
+    !liveEvidenceProfileSource.includes("manifestDigest: string") &&
+    !liveEvidenceRunSource.includes("manifestDigest: string") &&
     liveEvidenceProfileSource.includes("each case must land in its own repository") &&
     liveEvidenceProfileSource.includes("but the offline manifest pins") &&
     liveEvidenceProfileSource.includes("declares an unpaid model adapter") &&
