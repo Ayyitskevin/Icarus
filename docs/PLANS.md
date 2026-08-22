@@ -39,8 +39,9 @@ live-provider measurement, and deployment remain open.
 
 ## Headless H3a crash-tail reconciliation candidate
 
-Status: locally implemented under proposed ADR 0049; full local gate passed and
-non-author review remains open.
+Status: locally implemented under proposed ADR 0049; full local gate and
+non-author review passed. Risky-change research, live-provider measurement,
+and human shipping approval remain open.
 
 - [x] Parse one start/settlement lifecycle from the append-only event stream and
       reject malformed duplicate or out-of-order tails.
@@ -58,9 +59,44 @@ non-author review remains open.
 - [x] Run the full local gate: 1,005 unit/provider, 172 integration, 183
       security, and 7 supported offline evaluation cases passed; three Gate 1
       live-evidence cases remained explicitly not run.
-- [ ] Obtain one non-author review.
+- [x] Obtain one non-author review; GPT-5.6 Sol Max returned PASS after direct
+      malformed-history probes and the bounded-worker integration suite.
 - [ ] H3b: reconstruct and compare binding/provider/workspace/effect identity,
       then resume only a replay-safe or host-reconciled stage.
+
+## Headless H3b reconstruction plan
+
+Decision: the first H3b slice is evidence-only reconstruction and
+classification. It grants no continuation, replay, fork, provider, sandbox,
+workspace, Git, or model-tool authority.
+
+Classification policy is a closed, code-owned mapping over durable
+operation/event/receipt evidence. Provider, adapter, or controller assertions
+are evidence only and cannot authorize continuation. Unknown operation kinds,
+missing receipts, extra events, or contradictory identities classify as
+`ambiguous`. This slice adds no policy table or schema migration.
+
+Reconstruction is a pure read-only projection. Running it appends no event,
+creates or settles no operation, records no resume intent, and changes no
+SQLite state. Repeated reconstruction over the same durable bytes must return
+byte-identical canonical output.
+
+The closed evidence labels are `no_effect`, `durably_settled`, and `ambiguous`.
+They describe persisted history only. Neither positive label grants replay,
+resume, fork, or any other execution authority.
+
+- [ ] Recompute the complete H2a authority binding from current persisted inputs
+      and require the original H3a lifecycle binding digest exactly.
+- [ ] Reconstruct durable provider/workspace/effect identity without invoking
+      any effectful adapter or controller.
+- [ ] Classify each crash-tail effect as `no_effect`, `durably_settled`, or
+      `ambiguous`; fail closed on missing, contradictory, or extra evidence.
+- [ ] Emit a bounded, strict, metadata-only reconstruction result suitable for
+      later H3b continuation design but not itself usable as authority.
+- [ ] Prove with malformed-history and crash fixtures that classification never
+      records resume intent or executes an effect.
+- [ ] Keep exactly-once continuation in a later H3b slice after this evidence
+      boundary passes the full local gate and one non-author review.
 
 ## Accepted Gate 1 Slice 1 offline benchmark checkpoint
 
