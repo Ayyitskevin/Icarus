@@ -41,6 +41,8 @@ Decision records for the current milestone:
 
 | [0050](adr/0050-live-evidence-manifest-money-and-model-binding.md) | The Gate 1 live-evidence profile binds the manifest fields that decide which model runs and whether money may be spent — provider kind, unpaid-adapter declaration, and a spend ceiling bounded by the case's `maxCostUsd` — while `model`, `adapterVersion`, `transport`, `expectedRequests` and `credentials` are deliberately unbound because they describe the offline replay | Proposed — validation only; no live run is authorized and nothing it adds performs I/O |
 
+| [0051](adr/0051-pinned-candidate-commit-timestamp.md) | A landing may pin its candidate commit timestamp through an optional `PrepareLandingInput` field, applying to the commit instant alone; the coordinator's `now` seam is deliberately not used, because it would backdate every durable timestamp the run writes | Proposed — optional input, no default behaviour change |
+
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.
 

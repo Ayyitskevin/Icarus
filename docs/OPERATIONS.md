@@ -671,7 +671,20 @@ command can perform; the draft-PR POST is admitted at most once per landing,
 ever, and a lost or contradicted response is reconciled by reads, never
 retried. A landing holding at `reconciliation_required` waits for the
 operator with its honestly derived residue; `landed` is terminal and its
-receipt reloads byte-identically. Each request is admitted to the durable ledger
+receipt reloads byte-identically.
+
+A landing's candidate commit takes its timestamp from the clock unless the
+caller pins it. `PrepareLandingInput.commitEpochSeconds` is optional (ADR 0051);
+absent, nothing changes. It exists because a Git commit hashes its timestamp, so
+a Gate 1 live-evidence case cannot otherwise reproduce the candidate SHA-1 its
+manifest already pins. A pinned epoch must be a non-negative safe integer and
+must not be in the future — a commit dated after the moment it was created is a
+false claim about the past. The pin moves the commit instant and nothing else:
+admissions, settlements, events and state transitions continue to come from the
+clock, so the evidence trail still reports when things actually happened. The
+pinned value is recorded durably on the landing record exactly as an observed
+one is, so a reviewer can compare it against the run's own event timestamps and
+see that it was pinned. Each request is admitted to the durable ledger
 before its I/O and settled after; an interruption reconciles through fresh
 reads or byte-identical immutable replays, never a blind repeat. The
 operator-visible requirement is the profile's allowlisted

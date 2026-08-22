@@ -93,6 +93,51 @@ export interface PrepareLandingInput {
   readonly commitMessage: string;
   readonly pullRequestTitle: string;
   readonly pullRequestBodyPrefix: string;
+  /**
+   * Pin the candidate commit's timestamp instead of observing it. Absent, the
+   * clock decides, which is the ordinary path. See
+   * `resolveCommitEpochSeconds` for why this exists and what it refuses.
+   */
+  readonly commitEpochSeconds?: number;
+}
+
+/**
+ * A landing's commit timestamp is observed from the clock unless the caller
+ * pins it.
+ *
+ * Pinning exists for exactly one reason: a Gate 1 live-evidence case must
+ * reproduce a candidate commit whose SHA-1 the offline manifest already pins,
+ * and a Git commit hashes its timestamp, so a wall-clock commit can never
+ * match. This coordinator already takes a `now` seam, but pinning the commit
+ * through THAT would move every durable timestamp the run writes — admissions,
+ * settlements, events — and an evidence trail that misreports when things
+ * happened is a worse failure than a non-deterministic commit. So the pin is
+ * per landing and reaches nothing else.
+ *
+ * A pinned epoch may not be in the future. A commit dated after the moment it
+ * was created is a false claim about the past, and no legitimate caller needs
+ * one. The upper bound and the integer range are enforced downstream by
+ * `commitEpochToGitInstant`.
+ *
+ * The pinned value is recorded durably on the landing record exactly as an
+ * observed one is, so a reviewer comparing it against the run's own event
+ * timestamps can see that it was pinned. Nothing hides.
+ */
+function resolveCommitEpochSeconds(pinned: number | undefined, observed: number): number {
+  if (pinned === undefined) {
+    return observed;
+  }
+  invariant(
+    Number.isSafeInteger(pinned) && pinned >= 0,
+    "INVALID_LANDING_TIMESTAMP",
+    "Pinned landing commit epoch must be a non-negative safe integer",
+  );
+  invariant(
+    pinned <= observed,
+    "INVALID_LANDING_TIMESTAMP",
+    "Pinned landing commit epoch must not be in the future",
+  );
+  return pinned;
 }
 
 export interface LandingCoordinatorOptions {
@@ -2624,7 +2669,10 @@ export class LandingCoordinator {
         "INVALID_LANDING_TIMESTAMP",
         "Landing commit timestamp is invalid",
       );
-      const commitEpochSeconds = Math.floor(parsedNow / 1_000);
+      const commitEpochSeconds = resolveCommitEpochSeconds(
+        input.commitEpochSeconds,
+        Math.floor(parsedNow / 1_000),
+      );
       const commitIso8601 = commitEpochToGitInstant(commitEpochSeconds);
       const created = this.#store.createLanding(
         {
