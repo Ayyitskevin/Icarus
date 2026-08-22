@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { sha256 } from "../../packages/core/src/digest.js";
 import {
   assertLiveEvidenceProfileApproved,
   assertLiveEvidenceProfileMatchesManifest,
@@ -34,7 +35,7 @@ function profileWithoutApproval(overrides: Record<string, unknown> = {}): Record
     profileId: "gate1-live-v1",
     benchmarkId: "icarus-gate1",
     benchmarkRevision: "v1",
-    offlineManifestDigest: "a".repeat(64),
+    offlineManifestDigest: MANIFEST_SHA256,
     provider: {
       kind: "ollama",
       model: "qwen3.8:27b",
@@ -116,6 +117,27 @@ const MANIFEST = {
     manifestCase("react-node-repair", "icarus-gate1-react"),
   ],
 };
+
+function manifestBytesOf(manifest: unknown): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(manifest));
+}
+
+const MANIFEST_BYTES = manifestBytesOf(MANIFEST);
+const MANIFEST_SHA256 = sha256(MANIFEST_BYTES);
+
+/**
+ * A decoded profile pinned to exactly the bytes it will be handed.
+ *
+ * Every check below the digest gate is only reachable when the profile pins the
+ * manifest it receives, so a test aimed at one of those checks has to bind
+ * itself to the manifest it passes. That the gate stops everything else before
+ * those checks run is the property this binding exists to have.
+ */
+function boundTo(manifest: unknown, overrides: Record<string, unknown> = {}) {
+  return decodeLiveEvidenceProfileV1(
+    approvedProfile({ ...overrides, offlineManifestDigest: sha256(manifestBytesOf(manifest)) }),
+  );
+}
 
 describe("live-evidence profile decode", () => {
   it("accepts a complete profile", () => {
@@ -244,19 +266,18 @@ describe("approval binds to exact content", () => {
 });
 
 describe("manifest binding", () => {
-  const manifestDigest = "a".repeat(64);
-
   it("accepts a profile bound to the exact manifest and case set", () => {
     const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
-    expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST, manifestDigest),
-    ).not.toThrow();
+    expect(() => assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST_BYTES)).not.toThrow();
   });
 
-  it("rejects a changed manifest digest, so a profile cannot target work nobody reviewed", () => {
+  it("rejects manifest bytes whose digest is not the one the profile pins, so a profile cannot target work nobody reviewed", () => {
     const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
     expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST, "d".repeat(64)),
+      assertLiveEvidenceProfileMatchesManifest(
+        decoded,
+        manifestBytesOf({ ...MANIFEST, benchmarkRevision: "never-reviewed" }),
+      ),
     ).toThrowError(/does not match the offline manifest/);
   });
 
@@ -266,9 +287,9 @@ describe("manifest binding", () => {
         cases: [{ caseId: "typescript-library-repair", landingProfile: landingProfile() }],
       }),
     );
-    expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST, manifestDigest),
-    ).toThrowError(/exactly the offline manifest case set/);
+    expect(() => assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST_BYTES)).toThrowError(
+      /exactly the offline manifest case set/,
+    );
   });
 
   it("rejects an unknown case id", () => {
@@ -281,9 +302,9 @@ describe("manifest binding", () => {
         ],
       }),
     );
-    expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST, manifestDigest),
-    ).toThrowError(/exactly the offline manifest case set/);
+    expect(() => assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST_BYTES)).toThrowError(
+      /exactly the offline manifest case set/,
+    );
   });
 
   it("rejects a correctly approved profile that aims a case at an unreviewed repository, the finding that a matching case-id set alone cannot catch", () => {
@@ -308,9 +329,9 @@ describe("manifest binding", () => {
     const decoded = decodeLiveEvidenceProfileV1(swapped);
     // The approval genuinely binds this content — the old checks both passed.
     expect(() => assertLiveEvidenceProfileApproved(decoded)).not.toThrow();
-    expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST, manifestDigest),
-    ).toThrowError(/unreviewed-repository.*but the offline manifest pins/);
+    expect(() => assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST_BYTES)).toThrowError(
+      /unreviewed-repository.*but the offline manifest pins/,
+    );
   });
 
   it("rejects a swapped base branch, because the branch is part of the target identity", () => {
@@ -332,13 +353,12 @@ describe("manifest binding", () => {
         ],
       }),
     );
-    expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST, manifestDigest),
-    ).toThrowError(/but the offline manifest pins/);
+    expect(() => assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST_BYTES)).toThrowError(
+      /but the offline manifest pins/,
+    );
   });
 
   it("refuses a manifest case with no repository identity, so a missing pin cannot read as no constraint", () => {
-    const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
     const unpinned = {
       ...MANIFEST,
       cases: [
@@ -348,7 +368,7 @@ describe("manifest binding", () => {
       ],
     };
     expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(decoded, unpinned, manifestDigest),
+      assertLiveEvidenceProfileMatchesManifest(boundTo(unpinned), manifestBytesOf(unpinned)),
     ).toThrowError(/must carry the authoritative repository identity/);
   });
 
@@ -356,18 +376,6 @@ describe("manifest binding", () => {
     // Each case's own draft-pull-request count would stay at one while the
     // landing behind them received two POSTs, contradicting the durable
     // one_create_pr_post_per_landing index.
-    const collided = decodeLiveEvidenceProfileV1(
-      approvedProfile({
-        cases: [
-          { caseId: "typescript-library-repair", landingProfile: landingProfile() },
-          { caseId: "python-cli-repair", landingProfile: landingProfile() },
-          {
-            caseId: "react-node-repair",
-            landingProfile: landingProfile({ repository: "icarus-gate1-react" }),
-          },
-        ],
-      }),
-    );
     const collidedManifest = {
       ...MANIFEST,
       cases: [
@@ -376,13 +384,22 @@ describe("manifest binding", () => {
         manifestCase("react-node-repair", "icarus-gate1-react"),
       ],
     };
+    const collided = boundTo(collidedManifest, {
+      cases: [
+        { caseId: "typescript-library-repair", landingProfile: landingProfile() },
+        { caseId: "python-cli-repair", landingProfile: landingProfile() },
+        {
+          caseId: "react-node-repair",
+          landingProfile: landingProfile({ repository: "icarus-gate1-react" }),
+        },
+      ],
+    });
     expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(collided, collidedManifest, manifestDigest),
+      assertLiveEvidenceProfileMatchesManifest(collided, manifestBytesOf(collidedManifest)),
     ).toThrowError(/maps more than one case to repository ayyitskevin\/icarus-gate1-typescript/);
   });
 
   it("refuses a manifest with a duplicate case id rather than assuming the benchmark validator ran", () => {
-    const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
     const duplicated = {
       ...MANIFEST,
       cases: [
@@ -392,15 +409,13 @@ describe("manifest binding", () => {
       ],
     };
     expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(decoded, duplicated, manifestDigest),
+      assertLiveEvidenceProfileMatchesManifest(boundTo(duplicated), manifestBytesOf(duplicated)),
     ).toThrowError(/duplicate case id typescript-library-repair/);
   });
 
   it("still accepts the reviewed manifest, whose three cases hold three distinct repositories", () => {
     const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
-    expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST, manifestDigest),
-    ).not.toThrow();
+    expect(() => assertLiveEvidenceProfileMatchesManifest(decoded, MANIFEST_BYTES)).not.toThrow();
   });
 
   it("refuses the profile that binds everything except the spend: exact digest, exact case ids, correct repositories, valid approval, paid remote model", () => {
@@ -422,9 +437,9 @@ describe("manifest binding", () => {
     // The approval genuinely binds this content — the tamper is not there.
     expect(() => assertLiveEvidenceProfileApproved(paidRemote)).not.toThrow();
     // The manifest binding is what refuses it.
-    expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(paidRemote, MANIFEST, manifestDigest),
-    ).toThrowError(/pins provider anthropic, but offline manifest case .* pins ollama/);
+    expect(() => assertLiveEvidenceProfileMatchesManifest(paidRemote, MANIFEST_BYTES)).toThrowError(
+      /pins provider anthropic, but offline manifest case .* pins ollama/,
+    );
   });
 
   it("refuses a spend ceiling above the ceiling the manifest case pins", () => {
@@ -432,7 +447,7 @@ describe("manifest binding", () => {
       approvedProfile({ budgets: { maxSpendUsd: 0.01, maxRuntimeSeconds: 3600 } }),
     );
     expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(overspending, MANIFEST, manifestDigest),
+      assertLiveEvidenceProfileMatchesManifest(overspending, MANIFEST_BYTES),
     ).toThrowError(/authorizes up to 0.01 USD, above the 0 USD ceiling/);
   });
 
@@ -451,20 +466,17 @@ describe("manifest binding", () => {
         },
       }),
     );
-    expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(charged, MANIFEST, manifestDigest),
-    ).toThrowError(/declares an unpaid model adapter, but the profile pins token rates/);
+    expect(() => assertLiveEvidenceProfileMatchesManifest(charged, MANIFEST_BYTES)).toThrowError(
+      /declares an unpaid model adapter, but the profile pins token rates/,
+    );
   });
 
   it("accepts null token rates, because a loopback provider charges nothing", () => {
     const loopback = decodeLiveEvidenceProfileV1(approvedProfile());
-    expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(loopback, MANIFEST, manifestDigest),
-    ).not.toThrow();
+    expect(() => assertLiveEvidenceProfileMatchesManifest(loopback, MANIFEST_BYTES)).not.toThrow();
   });
 
   it("refuses a manifest case carrying no model adapter, so a missing pin cannot read as no constraint", () => {
-    const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
     const unpinned = {
       ...MANIFEST,
       cases: [
@@ -480,12 +492,11 @@ describe("manifest binding", () => {
       ],
     };
     expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(decoded, unpinned, manifestDigest),
+      assertLiveEvidenceProfileMatchesManifest(boundTo(unpinned), manifestBytesOf(unpinned)),
     ).toThrowError(/manifest.cases\[0\].modelAdapter must be an object/);
   });
 
   it("refuses a manifest case carrying no cost ceiling", () => {
-    const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
     const unpinned = {
       ...MANIFEST,
       cases: [
@@ -495,18 +506,16 @@ describe("manifest binding", () => {
       ],
     };
     expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(decoded, unpinned, manifestDigest),
+      assertLiveEvidenceProfileMatchesManifest(boundTo(unpinned), manifestBytesOf(unpinned)),
     ).toThrowError(/budgets.maxCostUsd must be a finite number/);
   });
 
   it("rejects a mismatched benchmark revision", () => {
-    const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
+    // Bound to the v2 bytes on purpose: the digest gate would otherwise refuse
+    // first, and this test exists to prove the revision comparison still fires.
+    const other = { ...MANIFEST, benchmarkRevision: "v2" };
     expect(() =>
-      assertLiveEvidenceProfileMatchesManifest(
-        decoded,
-        { ...MANIFEST, benchmarkRevision: "v2" },
-        manifestDigest,
-      ),
+      assertLiveEvidenceProfileMatchesManifest(boundTo(other), manifestBytesOf(other)),
     ).toThrowError(/benchmarkRevision does not match/);
   });
 });

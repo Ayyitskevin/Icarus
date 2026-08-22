@@ -390,6 +390,20 @@ future, separately reviewed work.
 
 ## Gate 1 live-evidence record
 
+ADR 0052 closes the defect that made the two records below unreachable. The
+manifest binding took the parsed manifest and its digest as two independent
+parameters and compared the profile's pin against the digest string, so nothing
+linked the string to the object: an edited manifest supplied with the reviewed
+manifest's digest was admitted, and every check beneath it — repository
+identity, provider kind, unpaid-means-unpaid, the spend ceiling — was evaluated
+against the edited manifest. ADR 0045's "changing the manifest invalidates the
+profile" and ADR 0050's money and model pins were therefore statements about a
+gate that did not gate. The manifest is now supplied as bytes whose digest is
+computed at the boundary, and parsed from those same bytes. Found by an
+adversarial sweep before any caller existed; no live run was ever authorized
+from the defective binding.
+
+
 ADR 0045 adds the offline live-evidence profile record and its validation. It
 authorizes no run by itself: a runner that consumes it, the operator's
 repository assessments and credential, the profile approval, and the 3/3 live

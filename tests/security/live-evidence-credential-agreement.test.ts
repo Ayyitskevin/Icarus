@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 
+import { sha256 } from "../../packages/core/src/digest.js";
 import { IcarusError } from "../../packages/core/src/errors.js";
 import {
   decodeLiveEvidenceProfileV1,
@@ -38,7 +39,6 @@ import { GithubGateway } from "../../packages/github-gateway/src/gateway.js";
  * constructor invariant, so nothing here contacts a provider or GitHub.
  */
 
-const MANIFEST_DIGEST = "a".repeat(64);
 const GITHUB_CREDENTIAL = "ICARUS_GITHUB_TOKEN_GATE1";
 
 function manifestCase(id: string, repository: string) {
@@ -70,6 +70,8 @@ const MANIFEST = {
   cases: [manifestCase("case-one", "icarus-gate1-one")],
 };
 
+const MANIFEST_BYTES = new TextEncoder().encode(JSON.stringify(MANIFEST));
+
 function landingProfile(repository: string): Record<string, unknown> {
   return {
     version: 1,
@@ -99,7 +101,7 @@ function approvedProfile() {
     profileId: "gate1-live-v1",
     benchmarkId: "icarus-gate1",
     benchmarkRevision: "v1",
-    offlineManifestDigest: MANIFEST_DIGEST,
+    offlineManifestDigest: sha256(MANIFEST_BYTES),
     provider: {
       kind: "ollama",
       model: "qwen3.8:27b",
@@ -164,7 +166,7 @@ const CORPUS: readonly (readonly [string, string])[] = [
  */
 function preflightAdmits(value: string): boolean {
   try {
-    authorizeLiveEvidenceRun(PROFILE, MANIFEST, MANIFEST_DIGEST, {
+    authorizeLiveEvidenceRun(PROFILE, MANIFEST_BYTES, {
       [GITHUB_CREDENTIAL]: value,
     });
     return true;
@@ -268,7 +270,7 @@ describe("the live-evidence credential preflight agrees with the consumers it pr
   test("a value that is not a string is refused, because the environment is untyped at runtime", () => {
     for (const value of [12345678, {}, [], new String(USABLE)]) {
       expect(() =>
-        authorizeLiveEvidenceRun(PROFILE, MANIFEST, MANIFEST_DIGEST, {
+        authorizeLiveEvidenceRun(PROFILE, MANIFEST_BYTES, {
           [GITHUB_CREDENTIAL]: value,
         } as unknown as NodeJS.ProcessEnv),
       ).toThrow(IcarusError);

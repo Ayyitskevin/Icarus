@@ -1,4 +1,5 @@
-import { digestJson } from "./digest.js";
+import { parseStrictJson } from "./canonical-json.js";
+import { digestJson, sha256 } from "./digest.js";
 import { IcarusError } from "./errors.js";
 import { decodeGitHubLandingProfileV1, type GitHubLandingProfileV1 } from "./landing-records.js";
 import type { JsonValue, ProviderKind } from "./types.js";
@@ -20,7 +21,9 @@ import type { JsonValue, ProviderKind } from "./types.js";
 //     and case ids, hold a self-consistent approval, and still aim a case at a
 //     repository nobody reviewed. Those identities must also be DISTINCT, so a
 //     single repository cannot receive the effects of two cases. Changing the
-//     manifest invalidates the profile.
+//     manifest invalidates the profile — and that is true because the manifest
+//     is supplied as BYTES whose digest is computed here, not as a parsed object
+//     beside a digest string the caller merely asserts corresponds to it.
 //  2. Its effect list is a CLOSED set, compared by equality rather than by
 //     subset. Authority cannot be widened by appending an effect, and the
 //     prohibitions (force update, ref deletion, merge, deployment,
@@ -194,6 +197,40 @@ function nullableRate(value: unknown, field: string): number | null {
   const decoded = finiteNumber(value, field);
   if (decoded < 0) invalid(`${field} must not be negative`);
   return decoded;
+}
+
+/**
+ * Decode the manifest from the exact bytes whose digest was just verified.
+ *
+ * Fatal UTF-8: a byte sequence that is not valid UTF-8 is refused rather than
+ * silently replaced, because a replacement character would change what is
+ * validated away from what was hashed.
+ */
+function decodeManifestBytes(manifestBytes: Uint8Array): {
+  readonly benchmarkId?: unknown;
+  readonly benchmarkRevision?: unknown;
+  readonly cases?: unknown;
+} {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(manifestBytes);
+  } catch {
+    invalid("offline manifest bytes are not valid UTF-8");
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseStrictJson(text);
+  } catch {
+    invalid("offline manifest bytes are not strict JSON");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    invalid("offline manifest must decode to an object");
+  }
+  return parsed as {
+    readonly benchmarkId?: unknown;
+    readonly benchmarkRevision?: unknown;
+    readonly cases?: unknown;
+  };
 }
 
 function decodeProvider(value: unknown): LiveEvidenceProviderPinV1 {
@@ -407,16 +444,30 @@ export function assertLiveEvidenceProfileApproved(profile: LiveEvidenceProfileV1
  */
 export function assertLiveEvidenceProfileMatchesManifest(
   profile: LiveEvidenceProfileV1,
-  manifest: {
-    readonly benchmarkId?: unknown;
-    readonly benchmarkRevision?: unknown;
-    readonly cases?: unknown;
-  },
-  manifestDigest: string,
+  manifestBytes: Uint8Array,
 ): void {
-  if (profile.offlineManifestDigest !== digest(manifestDigest, "manifestDigest")) {
+  // The manifest arrives as BYTES, and the digest is computed here.
+  //
+  // This function once took the parsed manifest and its digest as two separate
+  // parameters and compared the profile's pin against the digest STRING. That
+  // compared the caller's claim to the caller's other claim: nothing linked the
+  // digest to the object, so an edited manifest handed over with the reviewed
+  // manifest's digest was admitted, and every binding below — repository
+  // identity, provider kind, unpaid-means-unpaid, the spend ceiling — was then
+  // evaluated against the edited one. A digest passed alongside the thing it is
+  // supposed to authenticate authenticates nothing.
+  //
+  // Taking bytes removes the pair, so the mismatch is not merely detected, it is
+  // unrepresentable. The parse below reads THESE bytes, so what is validated is
+  // necessarily what was hashed. `scripts/gate1-benchmark.mjs:1024-1033` has
+  // always done exactly this; the authority function is what had drifted.
+  if (!(manifestBytes instanceof Uint8Array)) {
+    invalid("offline manifest must be supplied as the exact reviewed bytes");
+  }
+  if (profile.offlineManifestDigest !== sha256(manifestBytes)) {
     invalid("profile.offlineManifestDigest does not match the offline manifest");
   }
+  const manifest = decodeManifestBytes(manifestBytes);
   if (profile.benchmarkId !== manifest.benchmarkId) {
     invalid("profile.benchmarkId does not match the offline manifest");
   }

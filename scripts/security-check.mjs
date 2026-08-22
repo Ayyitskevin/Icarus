@@ -675,6 +675,18 @@ const assertions = {
     // whether money may be spent.
     liveEvidenceProfileSource.includes("liveEvidenceProfileApprovalDigest") &&
     liveEvidenceProfileSource.includes("does not apply to this profile") &&
+    // The manifest is bound by its BYTES. Taking a parsed object beside a digest
+    // string let the caller assert the correspondence between them, so an edited
+    // manifest carrying the reviewed manifest's digest was admitted and every
+    // comparison below ran against the edited one. Behaviour is proven in
+    // tests/security/live-evidence-manifest-binding.test.ts against the real
+    // committed manifest; these clauses stop the parameter pair coming back.
+    liveEvidenceProfileSource.includes("manifestBytes: Uint8Array") &&
+    liveEvidenceProfileSource.includes("sha256(manifestBytes)") &&
+    liveEvidenceProfileSource.includes("manifestBytes instanceof Uint8Array") &&
+    liveEvidenceProfileSource.includes("not valid UTF-8") &&
+    !liveEvidenceProfileSource.includes("manifestDigest: string") &&
+    !liveEvidenceRunSource.includes("manifestDigest: string") &&
     liveEvidenceProfileSource.includes("each case must land in its own repository") &&
     liveEvidenceProfileSource.includes("but the offline manifest pins") &&
     liveEvidenceProfileSource.includes("declares an unpaid model adapter") &&

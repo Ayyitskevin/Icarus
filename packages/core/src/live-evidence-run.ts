@@ -126,20 +126,21 @@ function isUsableCredentialValue(value: unknown): boolean {
  * Every precondition is checked before the caller can perform any effect:
  * the approval must bind to this exact profile content, the profile must
  * target the reviewed manifest and its complete case set, and every credential
- * the run will need must already be present in the environment.
+ * the run will need must already hold a value its gateway will accept.
+ *
+ * The manifest arrives as the exact reviewed BYTES, not as a parsed object
+ * beside a digest string. A caller that holds both can hand over one and
+ * describe the other, which is an authority the approval never granted; with
+ * bytes there is no pair to mismatch. A caller that needs the parsed manifest
+ * for its own work must parse these same bytes.
  */
 export function authorizeLiveEvidenceRun(
   profile: LiveEvidenceProfileV1,
-  manifest: {
-    readonly benchmarkId?: unknown;
-    readonly benchmarkRevision?: unknown;
-    readonly cases?: unknown;
-  },
-  manifestDigest: string,
+  manifestBytes: Uint8Array,
   environment: NodeJS.ProcessEnv,
 ): LiveEvidenceRunAuthorizationV1 {
   assertLiveEvidenceProfileApproved(profile);
-  assertLiveEvidenceProfileMatchesManifest(profile, manifest, manifestDigest);
+  assertLiveEvidenceProfileMatchesManifest(profile, manifestBytes);
 
   const credentialEnvironmentNames: string[] = [];
   const requireCredential = (name: string): void => {
