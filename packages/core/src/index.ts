@@ -190,7 +190,12 @@ export {
   UNSUPPORTED_PROBE_REASONS,
   unsupportedProbeResult,
 } from "./probe.js";
-export { createProviderConfig, parseProviderBaseUrl } from "./provider.js";
+export {
+  createProviderConfig,
+  parseProviderBaseUrl,
+  PROVIDER_CREDENTIAL_ENVIRONMENT_NAMES,
+  providerCredentialEnvironmentName,
+} from "./provider.js";
 export { createGateway } from "./providers.js";
 export {
   type ReadExclusion,

@@ -394,3 +394,10 @@ ADR 0045 adds the offline live-evidence profile record and its validation. It
 authorizes no run by itself: a runner that consumes it, the operator's
 repository assessments and credential, the profile approval, and the 3/3 live
 attempt all remain outstanding. Gate 1 still closes only on that run.
+
+Its authorization surface was reviewed independently after merge and held on
+four findings, fixed 2026-08-21: the pinned provider's credential is now
+preflighted alongside each landing credential, manifest case identities must be
+distinct, the returned authorization is frozen and the effect ledger copies
+rather than retains it, and the ledger binds the landing chain order per case.
+Runtime authority is enforced at runtime, not by `readonly`.

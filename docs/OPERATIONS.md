@@ -715,7 +715,13 @@ holding one performs no network call and authorizes no effect on its own.
   aiming a case at a repository the manifest does not pin is refused even when
   its digest, case ids, and approval are all internally consistent. A manifest
   case carrying no repository identity is refused rather than treated as
-  unconstrained.
+  unconstrained. Those manifest identities must also be DISTINCT: a manifest
+  mapping two case ids to one `owner/repository`, or repeating a case id, is
+  refused. Two cases sharing one repository would let a single landing receive
+  two draft-pull-request POSTs while each case's own ledger count stayed at
+  one. The uniqueness key matches `scripts/gate1-benchmark-contract.mjs`
+  exactly, and is re-checked here rather than assumed of whichever caller
+  supplied the manifest.
 - `authorizedEffects` must equal exactly `github.objects.upload`,
   `github.ref.create.absent_only`, `github.pull_request.create.draft`,
   `github.landing.receipt`, in that order. Neither an added nor a removed entry
@@ -738,6 +744,19 @@ only, never the value, so a credential cannot reach an error string, a log
 line, or durable state through the gate. A missing token refuses before any
 remote effect rather than halfway through the second case.
 
+That credential set is the pinned provider's key followed by each case's
+landing credential. An `openai` or `anthropic` profile requires its model key
+(`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) as well as the GitHub token; a
+loopback `ollama` profile requires no model key. The name is resolved through
+`providerCredentialEnvironmentName`, the same table `createGateway` reads, so
+the preflight cannot assert one variable while the run consumes another.
+
+The authorization it returns is FROZEN at every level. `readonly` is a
+compile-time annotation and the callers of this record are not all typed, so
+without the freeze a caller could append `github.ref.force_update` to
+`effects` or raise `budgets.maxSpendUsd` after the digest-bound approval that
+granted them, and the ledger would honour both.
+
 `LiveEvidenceEffectLedger` is the ledger the executor consults before every
 effect. It refuses unauthorized effects and unknown cases, admits
 `github.pull_request.create.draft` at most once per case (mirroring the durable
@@ -746,6 +765,22 @@ reading, never by a second POST), refuses the call that would exceed the spend
 or runtime ceiling rather than reporting the overage afterwards, and refuses to
 call a run complete unless every case recorded the full authorized chain, so
 partial evidence cannot be reported as passing.
+
+It also binds the CHAIN ORDER. The authorized effect list is the landing
+sequence — upload, then the absent-only ref, then the draft pull request, then
+the receipt — and each case must walk it forwards without skipping. Repeating
+the stage a case currently occupies stays admissible, because uploads
+legitimately recur; recording a receipt before anything was uploaded does not.
+Counting alone would let a runner report a complete multiset it never earned.
+
+The ledger re-checks and COPIES the authorization it is handed rather than
+retaining it, so its bounds hold whatever the caller does to that object next
+and whether or not the caller obtained it from `authorizeLiveEvidenceRun`. A
+hand-built authorization is refused at construction unless its effects are
+exactly the closed set in order, its case ids are non-empty and distinct, and
+its ceilings are real bounds — a `NaN` or `Infinity` ceiling is refused,
+because every `next > ceiling` comparison against one is false and the budget
+check would silently become a no-op.
 
 Neither performs I/O. They are the authority half of the live runner; the case
 executor that consumes them is not yet implemented.

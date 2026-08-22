@@ -3,11 +3,12 @@ import {
   calculateReportedCost,
   type ModelGateway,
   parseProviderBaseUrl,
+  providerCredentialEnvironmentName,
   type StructuredGenerationRequest,
   type StructuredGenerationResult,
 } from "./provider.js";
 import { sanitizeText } from "./redaction.js";
-import type { ProviderConfig } from "./types.js";
+import type { ProviderConfig, ProviderKind } from "./types.js";
 
 const MAX_PROVIDER_RESPONSE_BYTES = 1024 * 1024;
 
@@ -465,6 +466,11 @@ export class AnthropicMessagesGateway implements ModelGateway {
   }
 }
 
+function credentialValue(kind: ProviderKind, environment: NodeJS.ProcessEnv): string {
+  const name = providerCredentialEnvironmentName(kind);
+  return name === null ? "" : (environment[name] ?? "");
+}
+
 export function createGateway(
   config: ProviderConfig,
   environment: NodeJS.ProcessEnv,
@@ -473,7 +479,7 @@ export function createGateway(
     return new OllamaGateway(config);
   }
   if (config.kind === "anthropic") {
-    return new AnthropicMessagesGateway(config, environment.ANTHROPIC_API_KEY ?? "");
+    return new AnthropicMessagesGateway(config, credentialValue("anthropic", environment));
   }
-  return new OpenAIResponsesGateway(config, environment.OPENAI_API_KEY ?? "");
+  return new OpenAIResponsesGateway(config, credentialValue("openai", environment));
 }

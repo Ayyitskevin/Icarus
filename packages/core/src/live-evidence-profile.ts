@@ -18,7 +18,9 @@ import type { JsonValue, ProviderKind } from "./types.js";
 //     pinned by that manifest case. A matching case-id set alone is not a pin:
 //     without the identity comparison a profile could carry the exact digest
 //     and case ids, hold a self-consistent approval, and still aim a case at a
-//     repository nobody reviewed. Changing the manifest invalidates the profile.
+//     repository nobody reviewed. Those identities must also be DISTINCT, so a
+//     single repository cannot receive the effects of two cases. Changing the
+//     manifest invalidates the profile.
 //  2. Its effect list is a CLOSED set, compared by equality rather than by
 //     subset. Authority cannot be widened by appending an effect, and the
 //     prohibitions (force update, ref deletion, merge, deployment,
@@ -380,6 +382,10 @@ export function assertLiveEvidenceProfileApproved(profile: LiveEvidenceProfileV1
  * bytes, same benchmark identity, and a bijection with its case set. A profile
  * that covers only some cases cannot produce 3/3 evidence, and one that names
  * an unknown case is targeting work nobody reviewed.
+ *
+ * The manifest is untrusted input here, so its own well-formedness — distinct
+ * case ids, distinct `owner/repository` identities, a pinned identity on every
+ * case — is checked rather than assumed of whichever caller supplied it.
  */
 export function assertLiveEvidenceProfileMatchesManifest(
   profile: LiveEvidenceProfileV1,
@@ -426,6 +432,32 @@ export function assertLiveEvidenceProfileMatchesManifest(
       baseBranch: text(pinned.baseBranch, `manifest.cases[${index}].repository.baseBranch`),
     };
   });
+  // Distinctness is an admission prerequisite this function establishes for
+  // itself rather than assuming of its caller. `scripts/gate1-benchmark-
+  // contract.mjs` refuses a manifest whose case ids or `owner/name` GitHub
+  // identities repeat; that validator is separate, untyped from here, and may
+  // simply not have run. Two case ids aimed at one repository would let a
+  // single landing receive two draft-pull-request POSTs while each case's own
+  // ledger count stayed at one, contradicting the durable
+  // `one_create_pr_post_per_landing` index. The uniqueness key is
+  // `owner/repository`, matching that validator exactly so the two contracts
+  // cannot drift apart.
+  const seenManifestCaseIds = new Set<string>();
+  const seenGitHubIdentities = new Set<string>();
+  for (const entry of manifestCases) {
+    if (seenManifestCaseIds.has(entry.id)) {
+      invalid(`offline manifest contains duplicate case id ${entry.id}`);
+    }
+    seenManifestCaseIds.add(entry.id);
+    const identity = `${entry.githubOwner}/${entry.githubRepository}`;
+    if (seenGitHubIdentities.has(identity)) {
+      invalid(
+        `offline manifest maps more than one case to repository ${identity}; each case must land in its own repository`,
+      );
+    }
+    seenGitHubIdentities.add(identity);
+  }
+
   const profileCaseIds = profile.cases.map((entry) => entry.caseId);
   const sortedManifest = [...manifestCases.map((entry) => entry.id)].sort(asciiCompare);
   const sortedProfile = [...profileCaseIds].sort(asciiCompare);

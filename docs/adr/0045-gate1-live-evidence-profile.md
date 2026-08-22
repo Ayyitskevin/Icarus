@@ -3,7 +3,8 @@
 - Status: Proposed — offline record and validation only; no live run is
   authorized by this ADR, and no credential, network call, or remote effect is
   performed by anything it adds
-- Date: 2026-08-18
+- Date: 2026-08-18; amended 2026-08-21 with the post-merge review remediation
+  below
 - Related: [ADR 0027](0027-git-landing-authority.md) (git landing authority),
   [ADR 0043](0043-github-gateway-boundary.md) (GitHub gateway boundary),
   and draft ADR 0044 (headless workspace harness direction, authored by the
@@ -46,7 +47,9 @@ therefore mandatory input, not documentation.
 ## Decision
 
 Introduce `LiveEvidenceProfileV1`, an offline, strictly decoded record with
-three binding properties.
+three binding properties, admitted by an authorization function and consumed
+through an effect ledger that together add a fourth (see **Runtime authority
+boundary** below).
 
 1. **Manifest, case, and target binding.** The profile pins
    `offlineManifestDigest`, `benchmarkId`, and `benchmarkRevision`; its case set
@@ -65,6 +68,17 @@ three binding properties.
    repository identity is refused rather than treated as unconstrained —
    absence must not read as permission.
 
+   Those identities must also be **distinct**. A manifest mapping two case ids
+   to one `owner/repository` — or repeating a case id — is refused. Two cases
+   sharing one repository would let a single landing receive two
+   draft-pull-request POSTs while each case's own ledger count stayed at one,
+   contradicting the durable `one_create_pr_post_per_landing` index.
+   `scripts/gate1-benchmark-contract.mjs` already refuses such a manifest, but
+   it is a separate, untyped validator that may simply not have run: a public
+   authorization function establishes its own prerequisites rather than
+   assuming a caller established them. The uniqueness key is `owner/name`,
+   identical to that validator's, so the two contracts cannot drift.
+
 2. **Closed effect set.** `authorizedEffects` must equal
    `["github.objects.upload", "github.ref.create.absent_only",
    "github.pull_request.create.draft", "github.landing.receipt"]` exactly, by
@@ -77,6 +91,33 @@ three binding properties.
    the record with `approval` removed. Editing any pinned field after approval
    invalidates it. Approval attaches to exact content, never to a profile name —
    the same property plan-digest approvals already carry elsewhere.
+
+4. **Runtime authority boundary.** Authority is enforced at runtime, not by
+   type annotation. `readonly` disappears at compile time and the callers of
+   this record are not all typed, so the authorization returned by
+   `authorizeLiveEvidenceRun` is frozen at every level, and
+   `LiveEvidenceEffectLedger` re-checks and copies the authorization it is
+   handed instead of retaining it. A ledger that trusted its argument would
+   inherit whatever the caller did to that object afterwards, and would honour
+   a hand-built authorization naming an effect outside the closed set.
+
+   The same boundary covers the credential preflight and the effect sequence:
+
+   - The preflight requires the **pinned provider's** credential as well as
+     each case's landing credential. It resolves the name through
+     `providerCredentialEnvironmentName`, the table `createGateway` reads, so
+     the check cannot assert one variable while the run consumes another.
+     Presence only — the value is never read into a variable, compared, or
+     placed in a message.
+   - The authorized effect list is also the landing **chain**, in order. Each
+     case must walk it forwards without skipping; repeating the stage a case
+     occupies stays admissible because uploads legitimately recur. Counting
+     alone would let a runner report a complete multiset it never earned — a
+     receipt recorded before anything was uploaded is a claim about a landing
+     that did not happen.
+   - A ceiling that cannot bound anything is refused. `NaN` and `Infinity` make
+     every `next > ceiling` comparison false, which turns a stated budget into
+     a no-op that still reads as a bound.
 
 Each case embeds a full `GitHubLandingProfileV1`, decoded by the existing
 decoder. The automation assessment is thereby mandatory by construction rather
@@ -104,6 +145,31 @@ ceiling is valid, because a loopback provider genuinely costs nothing.
   exported from `landing-records.ts`. This keeps a large, recently changed file
   untouched at the cost of about forty repeated lines; factoring them into a
   shared decode module is a reasonable follow-up if a reviewer prefers it.
+
+## Post-merge review remediation (2026-08-21)
+
+An independent non-author review of the merged implementation
+(`70b0b95`, commits `b0abe18` and `af493d0`) returned HOLD with four findings,
+all reproduced by a probe against the exact merged head while the full release
+gate still exited 0. That is the useful part of the record: a 973-test suite
+and a green gate did not cover any of them, because the tests and the claim
+came from the same mental model.
+
+| Finding | Defect | Remedy |
+| --- | --- | --- |
+| 1 (High) | The preflight collected only each landing profile's GitHub credential, so an OpenAI or Anthropic profile authorized with no model key | Provider credential required, resolved through the shared table |
+| 2 (High) | Manifest case identities were bound per case but never required to be distinct | Distinct case ids and `owner/repository` identities, matching the benchmark validator |
+| 3 (High) | `effects` and `budgets` were returned by reference and retained by the ledger, so both were mutable after digest-bound approval | Frozen authorization; ledger re-checks and copies |
+| 4 (Medium) | The ledger checked membership and counts but never the chain order | Per-case monotonic chain with no skipped stage |
+
+Two boundaries were deliberately left where they are. Repeats of the stage a
+case occupies remain admissible for every effect except the draft POST, whose
+cap mirrors the durable index; a per-effect cap on ref creation or receipts
+would be a new constraint this review did not ask for and the landing schema
+does not state. And the ledger cannot validate that a budget it is handed is
+the budget a human approved — it has no access to the profile — so it checks
+only that the ceiling is a real bound. Binding budget provenance belongs with
+the case executor, which does hold both.
 
 ## Alternatives rejected
 

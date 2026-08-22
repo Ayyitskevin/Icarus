@@ -46,6 +46,14 @@ The record is offline only: it authorizes nothing by existing, and no runner
 consumes it yet. The operator items below remain open, and the 3/3 run is
 what closes Gate 1.
 
+An independent post-merge review of the authorization surface returned HOLD on
+2026-08-20 with four findings, all reproduced against the merged head while the
+full gate still exited 0. They are fixed as of 2026-08-21 (ADR 0045,
+"Post-merge review remediation"): the provider credential is preflighted,
+manifest case identities must be distinct, the authorization is frozen and the
+ledger copies it, and the effect chain order is bound per case. No live run was
+authorized from the reviewed head, and none is authorized by the fix.
+
 - [x] Define a versioned credential-gated live-evidence profile bound to the
       offline manifest digest and exact immutable case pins — `LiveEvidenceProfileV1`
       binds `offlineManifestDigest`, `benchmarkId`, `benchmarkRevision`, and a
@@ -65,8 +73,11 @@ what closes Gate 1.
 - [~] Consume the profile in a live runner — the authority half landed
       2026-08-18 (`authorizeLiveEvidenceRun` plus `LiveEvidenceEffectLedger`:
       pre-flight refusal, per-effect authorization, one-POST-per-case, budget
-      ceilings that bound rather than report, and a completeness assertion).
-      The case executor that drives real repositories is NOT implemented
+      ceilings that bound rather than report, and a completeness assertion) and
+      was hardened 2026-08-21 after independent review (provider credential
+      preflight, distinct manifest case identities, frozen authorization copied
+      by the ledger, bound landing-chain order). The case executor that drives
+      real repositories is NOT implemented
 - [ ] Record 3/3 live evidence with passing complete checks, exact changed paths,
       unchanged source checkouts, reviewable draft PRs, matching immutable
       receipts, restart/reconciliation evidence, and exact candidate/live

@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   decodeLiveEvidenceProfileV1,
   LIVE_EVIDENCE_AUTHORIZED_EFFECTS,
+  type LiveEvidenceEffect,
   liveEvidenceProfileApprovalDigest,
 } from "../../packages/core/src/live-evidence-profile.js";
 import {
   authorizeLiveEvidenceRun,
   LiveEvidenceEffectLedger,
 } from "../../packages/core/src/live-evidence-run.js";
+import { providerCredentialEnvironmentName } from "../../packages/core/src/provider.js";
 
 const MANIFEST_DIGEST = "a".repeat(64);
 
@@ -187,6 +189,10 @@ describe("effect ledger", () => {
 
   it("admits the draft pull request at most once per case, because a lost response is reconciled by reading and never by a second POST", () => {
     const entry = ledger();
+    for (const caseId of ["case-one", "case-two"]) {
+      entry.recordEffect(caseId, "github.objects.upload");
+      entry.recordEffect(caseId, "github.ref.create.absent_only");
+    }
     entry.recordEffect("case-one", "github.pull_request.create.draft");
     expect(() => entry.recordEffect("case-one", "github.pull_request.create.draft")).toThrowError(
       /never by a second POST/,
@@ -233,5 +239,263 @@ describe("effect ledger", () => {
     const summary = entry.summary();
     expect(summary.cases).toHaveLength(2);
     expect(summary.budgets.maxSpendUsd).toBe(10);
+  });
+});
+
+describe("provider credential preflight", () => {
+  const OPENAI_PROVIDER = {
+    kind: "openai",
+    model: "gpt-5.6",
+    baseUrl: "https://api.openai.com/v1/",
+    adapterVersion: "openai-adapter-v1",
+    inputUsdPerMillionTokens: 1,
+    outputUsdPerMillionTokens: 2,
+  };
+  const ANTHROPIC_PROVIDER = {
+    kind: "anthropic",
+    model: "claude-opus-5",
+    baseUrl: "https://api.anthropic.com/",
+    adapterVersion: "anthropic-adapter-v1",
+    inputUsdPerMillionTokens: 1,
+    outputUsdPerMillionTokens: 2,
+  };
+
+  it("refuses an OpenAI run whose model key is absent, before any repository is touched", () => {
+    // The landing credential is present; only the provider key is missing. Without
+    // this check the run is admitted and dies after case one has already uploaded
+    // objects and opened a pull request.
+    expect(() =>
+      authorizeLiveEvidenceRun(
+        approvedProfile({ provider: OPENAI_PROVIDER }),
+        MANIFEST,
+        MANIFEST_DIGEST,
+        PRESENT_ENV,
+      ),
+    ).toThrowError(/OPENAI_API_KEY, which is absent or empty; refusing before any remote effect/);
+  });
+
+  it("refuses an Anthropic run whose model key is absent", () => {
+    expect(() =>
+      authorizeLiveEvidenceRun(
+        approvedProfile({ provider: ANTHROPIC_PROVIDER }),
+        MANIFEST,
+        MANIFEST_DIGEST,
+        PRESENT_ENV,
+      ),
+    ).toThrowError(/ANTHROPIC_API_KEY, which is absent or empty/);
+  });
+
+  it("treats an empty provider key as absent", () => {
+    expect(() =>
+      authorizeLiveEvidenceRun(
+        approvedProfile({ provider: OPENAI_PROVIDER }),
+        MANIFEST,
+        MANIFEST_DIGEST,
+        {
+          ...PRESENT_ENV,
+          OPENAI_API_KEY: "",
+        },
+      ),
+    ).toThrowError(/OPENAI_API_KEY, which is absent or empty/);
+  });
+
+  it("requires exactly the variable the gateway will read, resolved from the shared table", () => {
+    // Asserted through the resolver rather than a literal: a preflight that
+    // hardcoded its own name could check a variable the gateway never reads.
+    const expected = providerCredentialEnvironmentName("openai");
+    const authorization = authorizeLiveEvidenceRun(
+      approvedProfile({ provider: OPENAI_PROVIDER }),
+      MANIFEST,
+      MANIFEST_DIGEST,
+      { ...PRESENT_ENV, OPENAI_API_KEY: "not-read-by-the-gate" },
+    );
+    expect(expected).not.toBeNull();
+    expect(authorization.credentialEnvironmentNames).toEqual([
+      expected,
+      "ICARUS_GITHUB_TOKEN_GATE1",
+    ]);
+  });
+
+  it("requires no model key for a loopback Ollama run", () => {
+    expect(providerCredentialEnvironmentName("ollama")).toBeNull();
+    const authorization = authorizeLiveEvidenceRun(
+      approvedProfile(),
+      MANIFEST,
+      MANIFEST_DIGEST,
+      PRESENT_ENV,
+    );
+    expect(authorization.credentialEnvironmentNames).toEqual(["ICARUS_GITHUB_TOKEN_GATE1"]);
+  });
+
+  it("never surfaces the provider credential value", () => {
+    const secret = "sk-ThisMustNeverAppearAnywhere";
+    const authorization = authorizeLiveEvidenceRun(
+      approvedProfile({ provider: OPENAI_PROVIDER }),
+      MANIFEST,
+      MANIFEST_DIGEST,
+      { ...PRESENT_ENV, OPENAI_API_KEY: secret },
+    );
+    expect(JSON.stringify(authorization)).not.toContain(secret);
+    expect(JSON.stringify(new LiveEvidenceEffectLedger(authorization).summary())).not.toContain(
+      secret,
+    );
+  });
+});
+
+describe("authority is immutable at runtime", () => {
+  function mutableAuthorization(): {
+    profileId: string;
+    caseIds: string[];
+    effects: LiveEvidenceEffect[];
+    budgets: { maxSpendUsd: number; maxRuntimeSeconds: number };
+    credentialEnvironmentNames: string[];
+  } {
+    return {
+      profileId: "gate1-live-v1",
+      caseIds: ["case-one", "case-two"],
+      effects: [...LIVE_EVIDENCE_AUTHORIZED_EFFECTS],
+      budgets: { maxSpendUsd: 10, maxRuntimeSeconds: 3600 },
+      credentialEnvironmentNames: [],
+    };
+  }
+
+  it("freezes the authorization, because readonly is a compile-time annotation and callers are not all typed", () => {
+    const authorization = authorizeLiveEvidenceRun(
+      approvedProfile(),
+      MANIFEST,
+      MANIFEST_DIGEST,
+      PRESENT_ENV,
+    );
+    expect(Object.isFrozen(authorization)).toBe(true);
+    expect(Object.isFrozen(authorization.effects)).toBe(true);
+    expect(Object.isFrozen(authorization.budgets)).toBe(true);
+    expect(Object.isFrozen(authorization.caseIds)).toBe(true);
+    expect(() =>
+      (authorization.effects as LiveEvidenceEffect[]).push(
+        "github.ref.force_update" as LiveEvidenceEffect,
+      ),
+    ).toThrowError(TypeError);
+    expect(() => {
+      (authorization.budgets as { maxSpendUsd: number }).maxSpendUsd = Number.MAX_SAFE_INTEGER;
+    }).toThrowError(TypeError);
+  });
+
+  it("copies before freezing, so authorizing does not freeze the caller's profile", () => {
+    const profile = approvedProfile();
+    authorizeLiveEvidenceRun(profile, MANIFEST, MANIFEST_DIGEST, PRESENT_ENV);
+    expect(Object.isFrozen(profile.authorizedEffects)).toBe(false);
+    expect(() =>
+      authorizeLiveEvidenceRun(profile, MANIFEST, MANIFEST_DIGEST, PRESENT_ENV),
+    ).not.toThrow();
+  });
+
+  it("refuses a hand-built authorization naming an effect outside the closed set", () => {
+    const forged = mutableAuthorization();
+    forged.effects.push("github.ref.force_update" as LiveEvidenceEffect);
+    expect(() => new LiveEvidenceEffectLedger(forged)).toThrowError(/must carry exactly/);
+  });
+
+  it("refuses an authorization whose effects are reordered, because the chain order is the authority", () => {
+    const forged = mutableAuthorization();
+    forged.effects.reverse();
+    expect(() => new LiveEvidenceEffectLedger(forged)).toThrowError(/in that order/);
+  });
+
+  it("copies the authorization, so widening it after the ledger exists changes nothing", () => {
+    const mutable = mutableAuthorization();
+    const entry = new LiveEvidenceEffectLedger(mutable);
+    mutable.effects.push("github.ref.force_update" as LiveEvidenceEffect);
+    mutable.budgets.maxSpendUsd = Number.MAX_SAFE_INTEGER;
+    expect(() =>
+      entry.recordEffect("case-one", "github.ref.force_update" as LiveEvidenceEffect),
+    ).toThrowError(/is not authorized by profile/);
+    expect(() => entry.recordSpend(1_000_000)).toThrowError(/spend ceiling of 10 USD/);
+  });
+
+  it("refuses a ceiling that cannot bound anything", () => {
+    // `next > NaN` is always false and Infinity is never exceeded: either would
+    // turn the budget checks into no-ops that still read as ceilings.
+    for (const maxSpendUsd of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      const forged = mutableAuthorization();
+      forged.budgets.maxSpendUsd = maxSpendUsd;
+      expect(() => new LiveEvidenceEffectLedger(forged)).toThrowError(
+        /non-negative finite spend ceiling/,
+      );
+    }
+    for (const maxRuntimeSeconds of [Number.NaN, Number.POSITIVE_INFINITY, 0, 1.5]) {
+      const forged = mutableAuthorization();
+      forged.budgets.maxRuntimeSeconds = maxRuntimeSeconds;
+      expect(() => new LiveEvidenceEffectLedger(forged)).toThrowError(
+        /positive integer runtime ceiling/,
+      );
+    }
+  });
+
+  it("refuses an authorization with no case or a repeated case", () => {
+    const empty = mutableAuthorization();
+    empty.caseIds = [];
+    expect(() => new LiveEvidenceEffectLedger(empty)).toThrowError(/at least one case/);
+    const repeated = mutableAuthorization();
+    repeated.caseIds = ["case-one", "case-one"];
+    expect(() => new LiveEvidenceEffectLedger(repeated)).toThrowError(/must not repeat a case id/);
+  });
+});
+
+describe("the ledger binds the landing chain order", () => {
+  function ledger(): LiveEvidenceEffectLedger {
+    return new LiveEvidenceEffectLedger(
+      authorizeLiveEvidenceRun(approvedProfile(), MANIFEST, MANIFEST_DIGEST, PRESENT_ENV),
+    );
+  }
+
+  it("refuses a receipt recorded before anything was uploaded, because counting alone cannot prove a landing happened", () => {
+    expect(() => ledger().recordEffect("case-one", "github.landing.receipt")).toThrowError(
+      /before github.objects.upload; the landing chain admits no skipped stage/,
+    );
+  });
+
+  it("refuses a skipped stage", () => {
+    const entry = ledger();
+    entry.recordEffect("case-one", "github.objects.upload");
+    expect(() => entry.recordEffect("case-one", "github.pull_request.create.draft")).toThrowError(
+      /before github.ref.create.absent_only/,
+    );
+  });
+
+  it("refuses a stage recorded after a later one, because the chain runs in one direction", () => {
+    const entry = ledger();
+    entry.recordEffect("case-one", "github.objects.upload");
+    entry.recordEffect("case-one", "github.ref.create.absent_only");
+    expect(() => entry.recordEffect("case-one", "github.objects.upload")).toThrowError(
+      /the landing chain runs in one direction/,
+    );
+  });
+
+  it("admits repeats of the stage a case is in, because uploads legitimately recur", () => {
+    const entry = ledger();
+    entry.recordEffect("case-one", "github.objects.upload");
+    expect(() => entry.recordEffect("case-one", "github.objects.upload")).not.toThrow();
+    expect(entry.summary().cases[0]?.effects["github.objects.upload"]).toBe(2);
+  });
+
+  it("tracks each case's position independently", () => {
+    const entry = ledger();
+    entry.recordEffect("case-one", "github.objects.upload");
+    entry.recordEffect("case-one", "github.ref.create.absent_only");
+    // case-two is still at the start of its own chain
+    expect(() => entry.recordEffect("case-two", "github.ref.create.absent_only")).toThrowError(
+      /before github.objects.upload/,
+    );
+    expect(() => entry.recordEffect("case-two", "github.objects.upload")).not.toThrow();
+  });
+
+  it("accepts the full chain in order for every case", () => {
+    const entry = ledger();
+    for (const caseId of ["case-one", "case-two"]) {
+      for (const effect of LIVE_EVIDENCE_AUTHORIZED_EFFECTS) {
+        entry.recordEffect(caseId, effect);
+      }
+    }
+    expect(() => entry.assertComplete()).not.toThrow();
   });
 });

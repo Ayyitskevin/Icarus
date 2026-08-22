@@ -2,10 +2,12 @@ import { IcarusError } from "./errors.js";
 import {
   assertLiveEvidenceProfileApproved,
   assertLiveEvidenceProfileMatchesManifest,
+  LIVE_EVIDENCE_AUTHORIZED_EFFECTS,
   type LiveEvidenceBudgetV1,
   type LiveEvidenceEffect,
   type LiveEvidenceProfileV1,
 } from "./live-evidence-profile.js";
+import { providerCredentialEnvironmentName } from "./provider.js";
 
 // Authorization and effect accounting for a Gate 1 live-evidence run (S3).
 //
@@ -23,16 +25,30 @@ import {
 // repository, not halfway through case two.
 //
 // Fail-closed is the rule throughout. An unknown case, an unauthorized effect,
-// a second draft-pull-request POST, or an exceeded budget throws rather than
-// returning a value the caller might ignore.
+// an out-of-order effect, a second draft-pull-request POST, or an exceeded
+// budget throws rather than returning a value the caller might ignore.
+//
+// Two properties are enforced at RUNTIME rather than by type annotation,
+// because `readonly` disappears at compile time and the callers of this module
+// are not all typed:
+//
+//  * The authorization this module returns is frozen, so effects and budgets
+//    cannot be widened after the digest-bound approval that granted them.
+//  * The ledger re-checks and COPIES the authorization it is handed instead of
+//    retaining it. A ledger that trusted its argument would inherit whatever
+//    the caller did to that object afterwards, and a hand-built authorization
+//    naming an effect outside the closed set would be honoured.
 
+/** Frozen at every level: the authority a run holds must not change after the
+ * approval that granted it. */
 export interface LiveEvidenceRunAuthorizationV1 {
   readonly profileId: string;
   readonly caseIds: readonly string[];
   readonly effects: readonly LiveEvidenceEffect[];
   readonly budgets: LiveEvidenceBudgetV1;
-  /** Deduplicated credential environment variable names, confirmed present.
-   * Names only — no value is ever read, stored, or surfaced. */
+  /** Deduplicated credential environment variable names, confirmed present:
+   * the pinned provider's key, then each case's landing credential. Names only
+   * — no value is ever read, stored, or surfaced. */
   readonly credentialEnvironmentNames: readonly string[];
 }
 
@@ -75,11 +91,22 @@ export function authorizeLiveEvidenceRun(
   assertLiveEvidenceProfileMatchesManifest(profile, manifest, manifestDigest);
 
   const credentialEnvironmentNames: string[] = [];
-  for (const entry of profile.cases) {
-    const name = entry.landingProfile.credentialRef.name;
+  const requireCredential = (name: string): void => {
     if (!credentialEnvironmentNames.includes(name)) {
       credentialEnvironmentNames.push(name);
     }
+  };
+  // The pinned provider's credential comes first. A live case pays a real model
+  // before it touches a repository, so a missing model key must refuse here and
+  // not after case one has already uploaded objects and opened a pull request.
+  // The name is resolved through the same table the gateway reads, so this
+  // preflight cannot assert one variable while the run consumes another.
+  const providerCredential = providerCredentialEnvironmentName(profile.provider.kind);
+  if (providerCredential !== null) {
+    requireCredential(providerCredential);
+  }
+  for (const entry of profile.cases) {
+    requireCredential(entry.landingProfile.credentialRef.name);
   }
   for (const name of credentialEnvironmentNames) {
     // Presence only. The value is never read into a variable, compared, or
@@ -93,13 +120,19 @@ export function authorizeLiveEvidenceRun(
     }
   }
 
-  return {
+  // Frozen, and copied before freezing so the caller's profile is not silently
+  // frozen with it. Without this, `authorization.effects.push(...)` or a raised
+  // `maxSpendUsd` would widen an authority that a human approved by digest.
+  return Object.freeze({
     profileId: profile.profileId,
-    caseIds: profile.cases.map((entry) => entry.caseId),
-    effects: profile.authorizedEffects,
-    budgets: profile.budgets,
-    credentialEnvironmentNames,
-  };
+    caseIds: Object.freeze(profile.cases.map((entry) => entry.caseId)),
+    effects: Object.freeze([...profile.authorizedEffects]),
+    budgets: Object.freeze({
+      maxSpendUsd: profile.budgets.maxSpendUsd,
+      maxRuntimeSeconds: profile.budgets.maxRuntimeSeconds,
+    }),
+    credentialEnvironmentNames: Object.freeze([...credentialEnvironmentNames]),
+  });
 }
 
 /**
@@ -110,18 +143,70 @@ export function authorizeLiveEvidenceRun(
  * schema: a lost or ambiguous response is reconciled by reading, never by a
  * second POST, so a ledger that permitted a retry here would contradict the
  * database that refuses it.
+ *
+ * The authorized effect list is also the landing CHAIN, in order: objects are
+ * uploaded, then the absent-only ref is created, then the draft pull request is
+ * opened, then the receipt is written. The ledger binds that sequence per case.
+ * Counting alone would let a runner report a complete multiset it never earned
+ * — a receipt recorded before anything was uploaded is a claim about a landing
+ * that did not happen. Repeating the stage a case is currently in stays
+ * admissible, because uploads legitimately recur; going backwards or skipping
+ * ahead does not.
+ *
+ * The authorization is re-checked and copied here rather than retained, so this
+ * ledger's bounds do not depend on what the caller does to that object next,
+ * nor on the caller having obtained it from `authorizeLiveEvidenceRun` at all.
  */
 export class LiveEvidenceEffectLedger {
-  readonly #authorization: LiveEvidenceRunAuthorizationV1;
+  readonly #profileId: string;
+  readonly #caseIds: readonly string[];
+  readonly #effects: readonly LiveEvidenceEffect[];
+  readonly #budgets: LiveEvidenceBudgetV1;
   readonly #counts: Map<string, Map<LiveEvidenceEffect, number>>;
+  /** Highest chain stage each case has reached; -1 before its first effect. */
+  readonly #reachedStage: Map<string, number>;
   #spendUsd = 0;
   #elapsedSeconds = 0;
 
   constructor(authorization: LiveEvidenceRunAuthorizationV1) {
-    this.#authorization = authorization;
+    const effects = [...authorization.effects];
+    // The closed set, in order, or nothing. This is what makes the ledger safe
+    // to hand an authorization from an untyped caller: a fabricated object
+    // naming `github.ref.force_update` cannot produce a ledger that admits it.
+    if (
+      effects.length !== LIVE_EVIDENCE_AUTHORIZED_EFFECTS.length ||
+      !effects.every((effect, index) => effect === LIVE_EVIDENCE_AUTHORIZED_EFFECTS[index])
+    ) {
+      refuse(
+        `live-evidence authorization must carry exactly ${JSON.stringify(LIVE_EVIDENCE_AUTHORIZED_EFFECTS)}, in that order`,
+      );
+    }
+    const caseIds = [...authorization.caseIds];
+    if (caseIds.length === 0) {
+      refuse("live-evidence authorization must name at least one case");
+    }
+    if (new Set(caseIds).size !== caseIds.length) {
+      refuse("live-evidence authorization must not repeat a case id");
+    }
+    const { maxSpendUsd, maxRuntimeSeconds } = authorization.budgets;
+    // A non-finite ceiling is not a ceiling: every `next > ceiling` comparison
+    // against NaN is false, and Infinity is never exceeded, so either would
+    // turn the budget checks below into no-ops.
+    if (!Number.isFinite(maxSpendUsd) || maxSpendUsd < 0) {
+      refuse("live-evidence authorization must carry a non-negative finite spend ceiling");
+    }
+    if (!Number.isInteger(maxRuntimeSeconds) || maxRuntimeSeconds <= 0) {
+      refuse("live-evidence authorization must carry a positive integer runtime ceiling");
+    }
+
+    this.#profileId = authorization.profileId;
+    this.#caseIds = Object.freeze(caseIds);
+    this.#effects = Object.freeze(effects);
+    this.#budgets = Object.freeze({ maxSpendUsd, maxRuntimeSeconds });
     this.#counts = new Map(
-      authorization.caseIds.map((caseId) => [caseId, new Map<LiveEvidenceEffect, number>()]),
+      caseIds.map((caseId) => [caseId, new Map<LiveEvidenceEffect, number>()]),
     );
+    this.#reachedStage = new Map(caseIds.map((caseId) => [caseId, -1]));
   }
 
   recordEffect(caseId: string, effect: LiveEvidenceEffect): void {
@@ -129,8 +214,20 @@ export class LiveEvidenceEffectLedger {
     if (caseCounts === undefined) {
       refuse(`live-evidence effect recorded for unknown case ${caseId}`);
     }
-    if (!this.#authorization.effects.includes(effect)) {
-      refuse(`effect ${effect} is not authorized by profile ${this.#authorization.profileId}`);
+    const stage = this.#effects.indexOf(effect);
+    if (stage === -1) {
+      refuse(`effect ${effect} is not authorized by profile ${this.#profileId}`);
+    }
+    const reached = this.#reachedStage.get(caseId) ?? -1;
+    if (stage < reached) {
+      refuse(
+        `case ${caseId} recorded ${effect} after reaching ${this.#effects[reached]}; the landing chain runs in one direction`,
+      );
+    }
+    if (stage > reached + 1) {
+      refuse(
+        `case ${caseId} recorded ${effect} before ${this.#effects[reached + 1]}; the landing chain admits no skipped stage`,
+      );
     }
     const previous = caseCounts.get(effect) ?? 0;
     if (effect === "github.pull_request.create.draft" && previous >= 1) {
@@ -139,6 +236,7 @@ export class LiveEvidenceEffectLedger {
       );
     }
     caseCounts.set(effect, previous + 1);
+    this.#reachedStage.set(caseId, stage);
   }
 
   /** Cumulative spend against the profile ceiling. Refuses on the call that
@@ -148,9 +246,9 @@ export class LiveEvidenceEffectLedger {
       refuse("live-evidence spend must be a non-negative finite number");
     }
     const next = this.#spendUsd + usd;
-    if (next > this.#authorization.budgets.maxSpendUsd) {
+    if (next > this.#budgets.maxSpendUsd) {
       refuse(
-        `live-evidence run would exceed its spend ceiling of ${this.#authorization.budgets.maxSpendUsd} USD`,
+        `live-evidence run would exceed its spend ceiling of ${this.#budgets.maxSpendUsd} USD`,
       );
     }
     this.#spendUsd = next;
@@ -162,9 +260,9 @@ export class LiveEvidenceEffectLedger {
       refuse("live-evidence elapsed time must be a non-negative finite number");
     }
     const next = this.#elapsedSeconds + seconds;
-    if (next > this.#authorization.budgets.maxRuntimeSeconds) {
+    if (next > this.#budgets.maxRuntimeSeconds) {
       refuse(
-        `live-evidence run would exceed its runtime ceiling of ${this.#authorization.budgets.maxRuntimeSeconds} seconds`,
+        `live-evidence run would exceed its runtime ceiling of ${this.#budgets.maxRuntimeSeconds} seconds`,
       );
     }
     this.#elapsedSeconds = next;
@@ -173,12 +271,14 @@ export class LiveEvidenceEffectLedger {
   /**
    * Every case must have completed the full authorized chain. A run where one
    * case uploaded objects but never opened its pull request is incomplete
-   * evidence, and incomplete evidence must not be reported as 3/3.
+   * evidence, and incomplete evidence must not be reported as 3/3. Ordering is
+   * already bound by `recordEffect`, so a case holding all four counts held
+   * them in the one admissible sequence.
    */
   assertComplete(): void {
-    for (const caseId of this.#authorization.caseIds) {
+    for (const caseId of this.#caseIds) {
       const caseCounts = this.#counts.get(caseId);
-      for (const effect of this.#authorization.effects) {
+      for (const effect of this.#effects) {
         if ((caseCounts?.get(effect) ?? 0) < 1) {
           refuse(`case ${caseId} did not record required effect ${effect}; evidence is incomplete`);
         }
@@ -188,17 +288,17 @@ export class LiveEvidenceEffectLedger {
 
   summary(): LiveEvidenceLedgerSummaryV1 {
     return {
-      profileId: this.#authorization.profileId,
-      cases: this.#authorization.caseIds.map((caseId) => {
+      profileId: this.#profileId,
+      cases: this.#caseIds.map((caseId) => {
         const caseCounts = this.#counts.get(caseId);
         const effects = Object.fromEntries(
-          this.#authorization.effects.map((effect) => [effect, caseCounts?.get(effect) ?? 0]),
+          this.#effects.map((effect) => [effect, caseCounts?.get(effect) ?? 0]),
         ) as Record<LiveEvidenceEffect, number>;
         return { caseId, effects };
       }),
       spendUsd: this.#spendUsd,
       elapsedSeconds: this.#elapsedSeconds,
-      budgets: this.#authorization.budgets,
+      budgets: this.#budgets,
     };
   }
 }
