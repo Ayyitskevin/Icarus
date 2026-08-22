@@ -24,6 +24,11 @@ const EVENT_POLL_INTERVAL_MS = 2_000;
 const EVENT_POLL_FIRST_BACKOFF_MS = 4_000;
 const HISTORICAL_EVENT_HIGH_WATER = 500;
 const HISTORICAL_EVENT_SENTINEL = "/private/browser-history-payload-sentinel";
+const RUN_SUMMARY_PAGE_SIZE = 12;
+const RUN_SUMMARY_MAX_PAGES = 4;
+const RUN_SUMMARY_FIXTURE_COUNT = RUN_SUMMARY_PAGE_SIZE * RUN_SUMMARY_MAX_PAGES;
+const RUN_SUMMARY_PRIVATE_SENTINEL = "/private/browser-run-summary-heavy-sentinel";
+const VALID_ARCHIVED_RUN_TASK = "Archived browser run 020";
 
 const Database = createRequire(new URL("../packages/core/package.json", import.meta.url))(
   "better-sqlite3",
@@ -92,6 +97,111 @@ async function fingerprint(repository) {
       .update(await readFile(path.join(repository, TARGET)))
       .digest("hex"),
   };
+}
+
+function persistenceSnapshot(stateRoot) {
+  const database = new Database(path.join(stateRoot, "icarus.sqlite3"));
+  try {
+    return {
+      repositories: database.prepare("SELECT * FROM repositories ORDER BY id").all(),
+      projects: database.prepare("SELECT * FROM projects ORDER BY id").all(),
+      runs: database.prepare("SELECT rowid AS cursor, * FROM runs ORDER BY rowid").all(),
+      events: database.prepare("SELECT * FROM run_events ORDER BY id").all(),
+      approvals: database.prepare("SELECT * FROM approvals ORDER BY id").all(),
+      operations: database.prepare("SELECT * FROM operations ORDER BY id").all(),
+      checkpoints: database.prepare("SELECT * FROM checkpoints ORDER BY run_id").all(),
+      sequences: database.prepare("SELECT * FROM sqlite_sequence ORDER BY name").all(),
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function runSummaryFixtureId(index) {
+  return `f0000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+}
+
+function insertRunSummaryFixtures(stateRoot, browserRunId) {
+  const database = new Database(path.join(stateRoot, "icarus.sqlite3"));
+  const cloneRun = database.prepare(
+    `INSERT INTO runs
+       (id, project_id, task, target, provider_json, state, resume_state, base_commit,
+        context_json, context_artifact_path, context_sha256, plan_json, plan_sha256,
+        edit_json, cache_path, worktree_path, baseline_base64, approved_base64, diff,
+        verification_json, tool_calls, input_tokens, output_tokens, active_runtime_ms,
+        estimated_cost_usd, reserved_cost_usd, error_code, error_message, version,
+        created_at, updated_at)
+     SELECT ?, project_id, ?, target, provider_json, 'completed', NULL, base_commit,
+            context_json, context_artifact_path, context_sha256, plan_json, plan_sha256,
+            edit_json, cache_path, worktree_path, baseline_base64, approved_base64, diff,
+            verification_json, tool_calls, input_tokens, output_tokens, active_runtime_ms,
+            estimated_cost_usd, reserved_cost_usd, error_code, error_message, version,
+            ?, ?
+     FROM runs WHERE id = ?`,
+  );
+  const corruptHeavyColumns = database.prepare(
+    `UPDATE runs
+     SET provider_json = ?, base_commit = ?, context_json = ?, context_artifact_path = ?,
+         context_sha256 = ?, plan_json = ?, plan_sha256 = ?, edit_json = ?, cache_path = ?,
+         worktree_path = ?, baseline_base64 = ?, approved_base64 = ?, diff = ?,
+         verification_json = ?, error_code = ?, error_message = ?
+     WHERE id = ?`,
+  );
+  try {
+    const addFixtures = database.transaction(() => {
+      for (let index = 1; index <= RUN_SUMMARY_FIXTURE_COUNT; index += 1) {
+        const id = runSummaryFixtureId(index);
+        const task = `Archived browser run ${String(index).padStart(3, "0")}`;
+        const timestamp = "2026-07-20T11:00:00.000Z";
+        const result = cloneRun.run(id, task, timestamp, timestamp, browserRunId);
+        assert.equal(result.changes, 1, `fixture run ${index} must clone the valid source run`);
+        if (task !== VALID_ARCHIVED_RUN_TASK) {
+          const privateValue = `${RUN_SUMMARY_PRIVATE_SENTINEL}:${index}`;
+          const corruptResult = corruptHeavyColumns.run(
+            `${privateValue}:provider`,
+            `${privateValue}:base`,
+            `${privateValue}:context`,
+            `${privateValue}:context-path`,
+            `${privateValue}:context-digest`,
+            `${privateValue}:plan`,
+            `${privateValue}:plan-digest`,
+            `${privateValue}:edit`,
+            `${privateValue}:cache`,
+            `${privateValue}:worktree`,
+            `${privateValue}:baseline`,
+            `${privateValue}:approved`,
+            `${privateValue}:diff`,
+            `${privateValue}:verification`,
+            `${privateValue}:error-code`,
+            `${privateValue}:error-message`,
+            id,
+          );
+          assert.equal(corruptResult.changes, 1, `fixture run ${index} must poison heavy columns`);
+        }
+      }
+      const moved = database
+        .prepare("UPDATE runs SET rowid = (SELECT MAX(rowid) + 1 FROM runs) WHERE id = ?")
+        .run(browserRunId);
+      assert.equal(moved.changes, 1, "the real browser run must remain on the newest summary page");
+    });
+    addFixtures();
+    const aggregate = database
+      .prepare(
+        `SELECT COUNT(*) AS count, MAX(rowid) AS snapshot,
+                SUM(CASE WHEN task = ? THEN 1 ELSE 0 END) AS valid_archived
+         FROM runs`,
+      )
+      .get(VALID_ARCHIVED_RUN_TASK);
+    assert.equal(aggregate.count, RUN_SUMMARY_FIXTURE_COUNT + 1);
+    assert.equal(aggregate.snapshot, RUN_SUMMARY_FIXTURE_COUNT + 2);
+    assert.equal(aggregate.valid_archived, 1);
+    return {
+      snapshot: aggregate.snapshot,
+      validArchivedRunId: runSummaryFixtureId(20),
+    };
+  } finally {
+    database.close();
+  }
 }
 
 function workspaceStateSnapshot(databasePath) {
@@ -488,6 +598,20 @@ class BrowserPage {
     assert.equal(clicked, true, `Could not click enabled button ${text}`);
   }
 
+  async clickButtonTwice(text) {
+    const clicked = await this.call((label) => {
+      const normalize = (value) => value.replaceAll(/\s+/g, " ").trim();
+      const button = Array.from(document.querySelectorAll("button")).find(
+        (candidate) => normalize(candidate.textContent ?? "") === label,
+      );
+      if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+      button.click();
+      button.click();
+      return true;
+    }, text);
+    assert.equal(clicked, true, `Could not contend enabled button ${text}`);
+  }
+
   async clickRecentRun(task) {
     const clicked = await this.call((taskText) => {
       const section = document.querySelector('section[aria-labelledby="all-runs-heading"]');
@@ -516,6 +640,20 @@ class BrowserPage {
 
   bodyText() {
     return this.call(() => document.body.innerText);
+  }
+
+  runPageTasks() {
+    return this.call(() =>
+      Array.from(document.querySelectorAll("#workspace-run-page .selection-list strong")).map(
+        (node) => node.textContent?.trim() ?? "",
+      ),
+    );
+  }
+
+  runPageStatus() {
+    return this.call(() =>
+      document.querySelector("#workspace-run-page .run-page__status")?.textContent?.trim(),
+    );
   }
 
   runFact(label) {
@@ -606,6 +744,67 @@ class BrowserPage {
     }, state);
     assert.equal(changed, true, `Could not set synthetic document visibility to ${state}`);
   }
+
+  async installDelayedRunPageSuccess(page) {
+    const installed = await this.call((payload) => {
+      if (window.__icarusDelayedRunPage !== undefined) return false;
+      const originalFetch = window.fetch;
+      const state = {
+        observed: false,
+        originalFetch,
+        release: null,
+      };
+      window.__icarusDelayedRunPage = state;
+      window.fetch = (input, init) => {
+        const raw =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const url = new URL(raw, window.location.origin);
+        if (
+          !state.observed &&
+          url.origin === window.location.origin &&
+          url.pathname === "/api/runs" &&
+          url.search.length > 0 &&
+          (init?.method ?? "GET") === "GET"
+        ) {
+          state.observed = true;
+          return new Promise((resolve) => {
+            state.release = () => {
+              window.fetch = originalFetch;
+              delete window.__icarusDelayedRunPage;
+              resolve(
+                new Response(JSON.stringify(payload), {
+                  status: 200,
+                  headers: { "content-type": "application/json; charset=utf-8" },
+                }),
+              );
+            };
+          });
+        }
+        return originalFetch.call(window, input, init);
+      };
+      return true;
+    }, page);
+    assert.equal(installed, true, "Could not install the delayed run-page success fixture");
+  }
+
+  delayedRunPageObserved() {
+    return this.call(() => window.__icarusDelayedRunPage?.observed === true);
+  }
+
+  async releaseDelayedRunPageSuccess() {
+    const released = await this.call(() => {
+      const state = window.__icarusDelayedRunPage;
+      if (state === undefined) return false;
+      if (state.release === null) {
+        window.fetch = state.originalFetch;
+        delete window.__icarusDelayedRunPage;
+        return false;
+      }
+      state.release();
+      return true;
+    });
+    assert.equal(released, true, "Could not release the delayed run-page success fixture");
+  }
 }
 
 async function createBrowserPage(chromium, workspaceUrl) {
@@ -628,9 +827,11 @@ async function createBrowserPage(chromium, workspaceUrl) {
   const browserErrors = [];
   let eventFailuresRemaining = 0;
   let eventHistoryFailuresRemaining = 0;
+  let runPageFailuresRemaining = 0;
   let repositoryStatusFailuresRemaining = 0;
   let eventRequestHold = null;
   let historyRequestHold = null;
+  let runPageRequestHold = null;
   let workspaceRequestHold = null;
   chromium.cdp.on(sessionId, "Network.requestWillBeSent", (event) => {
     networkRequestUrls.set(event.requestId, event.request?.url);
@@ -680,6 +881,7 @@ async function createBrowserPage(chromium, workspaceUrl) {
     let external = false;
     let localEventPoll = false;
     let localEventHistory = false;
+    let localRunPage = false;
     let localRepositoryStatus = false;
     let localWorkspaceRead = false;
     try {
@@ -695,6 +897,10 @@ async function createBrowserPage(chromium, workspaceUrl) {
         parsed.origin === workspaceUrl &&
         event.request?.method === "GET" &&
         parsed.pathname.endsWith("/events/history");
+      localRunPage =
+        parsed.origin === workspaceUrl &&
+        event.request?.method === "GET" &&
+        parsed.pathname === "/api/runs";
       localRepositoryStatus =
         parsed.origin === workspaceUrl &&
         event.request?.method === "GET" &&
@@ -740,13 +946,27 @@ async function createBrowserPage(chromium, workspaceUrl) {
       historyRequestHold.observed(observation);
       return;
     }
+    if (localRunPage && runPageRequestHold !== null && runPageRequestHold.event === null) {
+      const observation = {
+        requestId: event.requestId,
+        networkId: event.networkId ?? null,
+        url: requestUrl,
+        observedAt: Date.now(),
+      };
+      runPageRequestHold.event = event;
+      runPageRequestHold.observation = observation;
+      runPageRequestHold.observed(observation);
+      return;
+    }
     const failEventPoll = localEventPoll && eventFailuresRemaining > 0;
     const failEventHistory = localEventHistory && eventHistoryFailuresRemaining > 0;
+    const failRunPage = localRunPage && runPageFailuresRemaining > 0;
     const failRepositoryStatus = localRepositoryStatus && repositoryStatusFailuresRemaining > 0;
     if (failEventPoll) eventFailuresRemaining -= 1;
     if (failEventHistory) eventHistoryFailuresRemaining -= 1;
+    if (failRunPage) runPageFailuresRemaining -= 1;
     if (failRepositoryStatus) repositoryStatusFailuresRemaining -= 1;
-    if (failEventPoll || failEventHistory || failRepositoryStatus) {
+    if (failEventPoll || failEventHistory || failRunPage || failRepositoryStatus) {
       void chromium.cdp
         .send(
           "Fetch.fulfillRequest",
@@ -802,6 +1022,9 @@ async function createBrowserPage(chromium, workspaceUrl) {
     },
     failNextEventHistory: () => {
       eventHistoryFailuresRemaining += 1;
+    },
+    failNextRunPage: () => {
+      runPageFailuresRemaining += 1;
     },
     failNextRepositoryStatus: () => {
       repositoryStatusFailuresRemaining += 1;
@@ -942,6 +1165,74 @@ async function createBrowserPage(chromium, workspaceUrl) {
         finish,
       };
     },
+    holdNextRunPage: () => {
+      if (runPageRequestHold !== null) throw new Error("A run-page request is already held");
+      let markObserved;
+      const observed = new Promise((resolve) => {
+        markObserved = resolve;
+      });
+      const hold = {
+        event: null,
+        observation: null,
+        observed: markObserved,
+      };
+      runPageRequestHold = hold;
+      let finishPromise = null;
+      const finish = () => {
+        if (finishPromise !== null) return finishPromise;
+        finishPromise = (async () => {
+          if (runPageRequestHold === hold) runPageRequestHold = null;
+          const held = hold.event;
+          if (held === null) return "not_observed";
+          try {
+            await chromium.cdp.send(
+              "Fetch.continueRequest",
+              { requestId: held.requestId },
+              sessionId,
+            );
+            return "continued";
+          } catch (releaseError) {
+            const sawCancellation = () =>
+              held.networkId !== null &&
+              held.networkId !== undefined &&
+              networkFailures.some(
+                (failure) => failure.requestId === held.networkId && failure.canceled,
+              );
+            if (!sawCancellation()) {
+              await waitForObserved(
+                sawCancellation,
+                "the browser cancellation for an aborted held run-page request",
+                500,
+              ).catch(() => undefined);
+            }
+            if (sawCancellation()) return "cancelled";
+            try {
+              await chromium.cdp.send(
+                "Fetch.failRequest",
+                { requestId: held.requestId, errorReason: "Aborted" },
+                sessionId,
+              );
+              return "failed";
+            } catch (cleanupError) {
+              if (sawCancellation()) return "cancelled";
+              throw new Error(
+                `Could not release or fail the held run-page request: ${
+                  releaseError instanceof Error ? releaseError.message : String(releaseError)
+                }; cleanup failed: ${
+                  cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+                }`,
+              );
+            }
+          }
+        })();
+        return finishPromise;
+      };
+      return {
+        observed,
+        observation: () => hold.observation,
+        finish,
+      };
+    },
     holdNextWorkspaceRequest: () => {
       if (workspaceRequestHold !== null) throw new Error("A workspace request is already held");
       let markObserved;
@@ -993,6 +1284,7 @@ let chromium;
 let releaseProviderResponse;
 let finishHeldBrowserEventPoll;
 let finishHeldBrowserHistoryRequest;
+let finishHeldBrowserRunPageRequest;
 try {
   const repository = path.join(root, "repository");
   const stateRoot = path.join(root, "state");
@@ -1291,6 +1583,8 @@ try {
   } finally {
     historyDatabase.close();
   }
+
+  const runSummaryFixture = insertRunSummaryFixtures(stateRoot, browserRunId);
 
   await reloadPage(chromium, browserPage);
   await page.waitFor(
@@ -2133,11 +2427,10 @@ try {
   assert.equal((await page.bodyText()).includes(HISTORICAL_EVENT_SENTINEL), false);
 
   const projects = runtime.service.listProjects();
-  const runs = runtime.service.listRuns();
+  const run = runtime.service.getRun(browserRunId);
   assert.equal(projects.length, 2);
-  assert.equal(runs.length, 1);
-  assert.equal(runs[0]?.id, browserRunId);
-  assert.equal(runs[0]?.state, "awaiting_approval");
+  assert.equal(run.id, browserRunId);
+  assert.equal(run.state, "awaiting_approval");
   const after = await fingerprint(repository);
   assert.deepEqual(after, before);
 
@@ -2151,9 +2444,9 @@ try {
         validationErrors: ["invalid_check_argv", "missing_context_target", "invalid_provider_url"],
         projectId: projects[0]?.id,
         contextDigest: firstDigest,
-        runId: runs[0]?.id,
+        runId: run.id,
         draftSurvivedReload: true,
-        state: runs[0]?.state,
+        state: run.state,
         verification: "not_run",
         action: null,
         providerRequests: provider.requests.length,
@@ -2207,6 +2500,8 @@ try {
     )}\n`,
   );
 } finally {
+  await finishHeldBrowserRunPageRequest?.().catch(() => undefined);
+  finishHeldBrowserRunPageRequest = undefined;
   await finishHeldBrowserHistoryRequest?.().catch(() => undefined);
   finishHeldBrowserHistoryRequest = undefined;
   await finishHeldBrowserEventPoll?.().catch(() => undefined);

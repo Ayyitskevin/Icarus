@@ -4,6 +4,7 @@ import {
   presentRun,
   presentRunEventHistoryPage,
   presentRunEventPage,
+  presentWorkspaceRunPage,
   workspaceRunPhase,
 } from "../../packages/api/src/present.js";
 import type {
@@ -12,6 +13,7 @@ import type {
   RunPresentationSnapshot,
   RunRecord,
   RunState,
+  WorkspaceRunPage,
 } from "../../packages/core/src/types.js";
 import { UNIT_CEILING, UNIT_PROVIDER, UNIT_SANDBOX } from "../support/unit-fixtures.js";
 
@@ -61,6 +63,53 @@ function presentationSnapshot(history: RunHistory): RunPresentationSnapshot {
 describe("workspace run presentation", () => {
   test.each(states)("maps %s to the truthful workspace phase %s", (state, phase) => {
     expect(workspaceRunPhase(state)).toBe(phase);
+  });
+
+  test("allowlists fixed workspace run summary fields and derives phase", () => {
+    const page: WorkspaceRunPage = {
+      before: 43,
+      snapshot: 42,
+      nextBefore: 31,
+      hasMore: true,
+      runs: [
+        {
+          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          projectId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          task: "Review <script>alert(1)</script> as text",
+          target: "src/<private>.txt",
+          state: "awaiting_review",
+          createdAt: "2026-07-20T12:00:00.000Z",
+          updatedAt: "2026-07-20T12:01:00.000Z",
+        },
+      ],
+    };
+
+    const view = presentWorkspaceRunPage(page);
+
+    expect(Object.keys(view).sort()).toEqual(
+      ["before", "snapshot", "nextBefore", "hasMore", "runs"].sort(),
+    );
+    expect(view).toEqual({
+      before: 43,
+      snapshot: 42,
+      nextBefore: 31,
+      hasMore: true,
+      runs: [
+        {
+          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          projectId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          task: "Review <script>alert(1)</script> as text",
+          target: "src/<private>.txt",
+          state: "awaiting_review",
+          phase: "awaiting_approval",
+          createdAt: "2026-07-20T12:00:00.000Z",
+          updatedAt: "2026-07-20T12:01:00.000Z",
+        },
+      ],
+    });
+    expect(Object.keys((view.runs as Array<Record<string, unknown>>)[0] ?? {}).sort()).toEqual(
+      ["id", "projectId", "task", "target", "state", "phase", "createdAt", "updatedAt"].sort(),
+    );
   });
 
   test("allowlists run evidence and labels missing checks as not run", () => {

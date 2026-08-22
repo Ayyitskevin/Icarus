@@ -14,8 +14,8 @@ import {
 import {
   createFixtureRepository,
   git,
-  planResponse,
   PYTHON_IMAGE,
+  planResponse,
   repositoryFingerprint,
   startOllamaQueue,
 } from "../support/integration-cli.js";
@@ -66,6 +66,33 @@ function persistenceSnapshot(database: TestDatabase): Record<string, readonly un
     checkpoints: database.prepare("SELECT * FROM checkpoints ORDER BY run_id").all(),
     sequences: database.prepare("SELECT * FROM sqlite_sequence ORDER BY name").all(),
   };
+}
+
+function workspaceRunId(index: number): string {
+  return `10000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+}
+
+function insertWorkspaceRun(database: TestDatabase, projectId: string, index: number): void {
+  database
+    .prepare(
+      `INSERT INTO runs
+        (id, project_id, task, target, provider_json, state, base_commit, context_json,
+         context_artifact_path, context_sha256, diff, error_message, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'completed', '', ?, ?, '', ?, ?, ?, ?)`,
+    )
+    .run(
+      workspaceRunId(index),
+      projectId,
+      `Workspace task ${index}`,
+      `src/run-${index}.txt`,
+      "not-json:private-provider-sentinel",
+      "not-json:private-context-sentinel",
+      "/private/runtime/context-sentinel",
+      "+private diff sentinel",
+      "private error sentinel",
+      "2026-07-20T12:00:00.000Z",
+      "2026-07-20T12:01:00.000Z",
+    );
 }
 
 async function rawRequest(
@@ -153,7 +180,7 @@ describe("loopback local workspace API", () => {
         execution: { status: "unconfigured" },
       },
       projects: [],
-      runs: [],
+      runPage: { before: 1, snapshot: 0, nextBefore: 1, hasMore: false, runs: [] },
     });
 
     const createdResponse = await postJson(`${server.url}/api/projects`, {
@@ -268,7 +295,7 @@ describe("loopback local workspace API", () => {
     });
     expect(provider.requests).toHaveLength(0);
     const reopenedWorkspace = await responseJson(await fetch(`${server.url}/api/workspace`));
-    expect(reopenedWorkspace.runs).toEqual(
+    expect((reopenedWorkspace.runPage as Record<string, unknown>).runs).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: runId, phase: "draft" })]),
     );
 
@@ -416,6 +443,153 @@ describe("loopback local workspace API", () => {
     expect(await index.text()).toContain('id="root"');
   });
 
+  test("serves strict pinned workspace run pages with fixed work and no full-run hydration", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const projectResponse = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "run-page-fixture", path: fixture.repository },
+      project: {
+        name: "run-page-project",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    expect(projectResponse.status).toBe(201);
+    const projectId = String((await responseJson(projectResponse)).id);
+    const database = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    for (let index = 1; index <= 205; index += 1) {
+      insertWorkspaceRun(database, projectId, index);
+    }
+    database.prepare("DELETE FROM runs WHERE rowid = ?").run(100);
+    const persistenceBefore = persistenceSnapshot(database);
+    database.close();
+
+    const firstResponse = await fetch(`${server.url}/api/runs`);
+    expect(firstResponse.status).toBe(200);
+    const first = await responseJson(firstResponse);
+    expect(Object.keys(first).sort()).toEqual(
+      ["before", "snapshot", "nextBefore", "hasMore", "runs"].sort(),
+    );
+    expect(first).toMatchObject({ before: 206, snapshot: 205, nextBefore: 194, hasMore: true });
+    const firstRuns = first.runs as Array<Record<string, unknown>>;
+    expect(firstRuns).toHaveLength(12);
+    expect(firstRuns.map((run) => run.id)).toEqual(
+      Array.from({ length: 12 }, (_, index) => workspaceRunId(205 - index)),
+    );
+    expect(Object.keys(firstRuns[0] ?? {}).sort()).toEqual(
+      ["id", "projectId", "task", "target", "state", "phase", "createdAt", "updatedAt"].sort(),
+    );
+    expect(firstRuns[0]).toMatchObject({
+      task: "Workspace task 205",
+      state: "completed",
+      phase: "completed",
+    });
+    expect(JSON.stringify(first)).not.toMatch(
+      /private-provider|private-context|\/private\/runtime|private diff|private error/,
+    );
+
+    const second = await responseJson(
+      await fetch(`${server.url}/api/runs?before=${String(first.nextBefore)}&snapshot=205`),
+    );
+    expect(second).toMatchObject({ before: 194, snapshot: 205, nextBefore: 182, hasMore: true });
+    expect((second.runs as Array<Record<string, unknown>>).map((run) => run.id)).toEqual(
+      Array.from({ length: 12 }, (_, index) => workspaceRunId(193 - index)),
+    );
+    const acrossGap = await responseJson(
+      await fetch(`${server.url}/api/runs?before=105&snapshot=205`),
+    );
+    expect((acrossGap.runs as Array<Record<string, unknown>>).map((run) => run.id)).toEqual(
+      [104, 103, 102, 101, 99, 98, 97, 96, 95, 94, 93, 92].map(workspaceRunId),
+    );
+    const emptyPinned = await responseJson(
+      await fetch(`${server.url}/api/runs?before=1&snapshot=0`),
+    );
+    expect(emptyPinned).toEqual({
+      before: 1,
+      snapshot: 0,
+      nextBefore: 1,
+      hasMore: false,
+      runs: [],
+    });
+
+    const workspace = await responseJson(await fetch(`${server.url}/api/workspace`));
+    expect(Object.keys(workspace).sort()).toEqual(["capabilities", "projects", "runPage"].sort());
+    expect(workspace).not.toHaveProperty("runs");
+    expect(workspace.runPage).toEqual(first);
+
+    for (const query of [
+      "?before=206",
+      "?snapshot=205",
+      "?before=&snapshot=205",
+      "?before=0&snapshot=205",
+      "?before=-1&snapshot=205",
+      "?before=0.5&snapshot=205",
+      "?before=0206&snapshot=205",
+      "?before=2e2&snapshot=205",
+      "?before=9007199254740992&snapshot=205",
+      "?before=206&snapshot=9007199254740991",
+      "?before=206&before=206&snapshot=205",
+      "?before=206&snapshot=205&snapshot=205",
+      "?before=206&snapshot=205&extra=1",
+      "?before=207&snapshot=205",
+      "?before=100&snapshot=205",
+      "?before=208&snapshot=207",
+    ]) {
+      const invalidPage = await fetch(`${server.url}/api/runs${query}`);
+      expect(invalidPage.status).toBe(422);
+      expect(await responseJson(invalidPage)).toMatchObject({
+        error: { code: expect.any(String) },
+      });
+    }
+    const forbiddenPut = await fetch(`${server.url}/api/runs`, { method: "PUT" });
+    expect(forbiddenPut.status).toBe(404);
+
+    const afterInitialReads = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    expect(persistenceSnapshot(afterInitialReads)).toEqual(persistenceBefore);
+    afterInitialReads.close();
+
+    const createdResponse = await postJson(`${server.url}/api/runs`, {
+      projectId,
+      task: "Open a newer workspace page session.",
+      target: "src/greeting.txt",
+      provider: { model: "unused", baseUrl: "http://127.0.0.1:11434" },
+    });
+    expect(createdResponse.status).toBe(201);
+    const createdRunId = String((await responseJson(createdResponse)).id);
+    expect(
+      await responseJson(await fetch(`${server.url}/api/runs?before=206&snapshot=205`)),
+    ).toEqual(first);
+    const newest = await responseJson(await fetch(`${server.url}/api/runs`));
+    expect(newest).toMatchObject({ before: 207, snapshot: 206, hasMore: true });
+    expect((newest.runs as Array<Record<string, unknown>>)[0]).toMatchObject({
+      id: createdRunId,
+      phase: "draft",
+    });
+
+    const persistedAfterCreation = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    const afterCreation = persistenceSnapshot(persistedAfterCreation);
+    persistedAfterCreation.close();
+    await fetch(`${server.url}/api/runs`);
+    await fetch(`${server.url}/api/workspace`);
+    const finalObserver = new Database(path.join(fixture.stateRoot, "icarus.sqlite3"));
+    expect(persistenceSnapshot(finalObserver)).toEqual(afterCreation);
+    finalObserver.close();
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+  });
+
   test("serves bounded coherent run snapshots without decoding private event payloads", async () => {
     const fixture = await createFixtureRepository();
     cleanups.push(fixture.cleanup);
@@ -500,15 +674,15 @@ describe("loopback local workspace API", () => {
     expect(JSON.stringify(selected)).not.toContain("not-json");
 
     const workspace = await responseJson(await fetch(`${server.url}/api/workspace`));
-    const workspaceRun = (workspace.runs as Array<Record<string, unknown>>).find(
-      (run) => run.id === runId,
+    const workspaceRun = (
+      (workspace.runPage as Record<string, unknown>).runs as Array<Record<string, unknown>>
+    ).find((run) => run.id === runId);
+    expect(workspaceRun).toMatchObject({ id: runId, state: "preparing", phase: "draft" });
+    expect(Object.keys(workspaceRun ?? {}).sort()).toEqual(
+      ["id", "projectId", "task", "target", "state", "phase", "createdAt", "updatedAt"].sort(),
     );
-    expect(workspaceRun).toMatchObject({
-      action: { status: "reverted" },
-      eventCursor: 206,
-      timelineTotal: 206,
-    });
     expect(JSON.stringify(workspaceRun)).not.toContain(privateSentinel);
+    expect(JSON.stringify(workspaceRun)).not.toMatch(/action|eventCursor|timeline/);
 
     const newestHistoryResponse = await fetch(
       `${server.url}/api/runs/${runId}/events/history?snapshot=206&before=207`,

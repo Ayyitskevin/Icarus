@@ -55,6 +55,7 @@ import type {
   SandboxProfile,
   SunCeiling,
   VerificationEvidence,
+  WorkspaceRunPage,
 } from "./types.js";
 import { CONTEXT_AUDIT_POLICY_VERSION } from "./types.js";
 
@@ -557,6 +558,14 @@ export class IcarusService {
     const projectId =
       projectName === undefined ? undefined : this.#store.getProjectByName(projectName).id;
     return this.#store.listRuns(projectId);
+  }
+
+  openWorkspaceRunPage(): WorkspaceRunPage {
+    return this.#store.openWorkspaceRunPage();
+  }
+
+  listWorkspaceRunPage(before: number, snapshot: number): WorkspaceRunPage {
+    return this.#store.listWorkspaceRunPage(before, snapshot);
   }
 
   history(runId: string): RunHistory {

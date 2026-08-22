@@ -9,8 +9,8 @@ import {
   DEFAULT_SANDBOX_LIMITS,
   IcarusError,
   type IcarusRuntime,
-  parseProviderBaseUrl,
   type ProjectRecord,
+  parseProviderBaseUrl,
   type RepositoryRecord,
 } from "@icarus/core";
 
@@ -20,6 +20,7 @@ import {
   runDraftRequest,
   runEventHistoryQuery,
   runEventsQuery,
+  workspaceRunPageQuery,
 } from "./contracts.js";
 import {
   presentProject,
@@ -27,6 +28,7 @@ import {
   presentRun,
   presentRunEventHistoryPage,
   presentRunEventPage,
+  presentWorkspaceRunPage,
 } from "./present.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -290,7 +292,6 @@ function presentRunById(options: WorkspaceServerOptions, runId: string): Record<
 function workspaceSnapshot(options: WorkspaceServerOptions): Record<string, unknown> {
   const repositories = options.runtime.service.listRepositories();
   const projects = options.runtime.service.listProjects();
-  const runs = options.runtime.service.listRuns();
   return {
     capabilities: {
       server: { status: "available", binding: "loopback" },
@@ -313,10 +314,7 @@ function workspaceSnapshot(options: WorkspaceServerOptions): Record<string, unkn
     projects: projects.map((project) =>
       presentProject(project, findRepository(repositories, project.repositoryId)),
     ),
-    runs: runs.map((run) => {
-      const snapshot = options.runtime.service.presentationSnapshot(run.id);
-      return presentRun(findProject(projects, snapshot.run.projectId), snapshot);
-    }),
+    runPage: presentWorkspaceRunPage(options.runtime.service.openWorkspaceRunPage()),
   };
 }
 
@@ -398,6 +396,15 @@ async function routeApi(
     } finally {
       disconnect.dispose();
     }
+    return true;
+  }
+  if (method === "GET" && pathname === "/api/runs") {
+    const query = workspaceRunPageQuery(searchParams);
+    const page =
+      query.kind === "new"
+        ? options.runtime.service.openWorkspaceRunPage()
+        : options.runtime.service.listWorkspaceRunPage(query.before, query.snapshot);
+    json(response, 200, presentWorkspaceRunPage(page));
     return true;
   }
   if (method === "POST" && pathname === "/api/runs") {
