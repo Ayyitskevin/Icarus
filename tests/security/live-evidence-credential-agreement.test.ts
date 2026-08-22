@@ -72,6 +72,24 @@ const MANIFEST = {
 
 const MANIFEST_BYTES = new TextEncoder().encode(JSON.stringify(MANIFEST));
 
+const PAID_MANIFEST = {
+  ...MANIFEST,
+  cases: [
+    {
+      ...manifestCase("case-one", "icarus-gate1-one"),
+      modelAdapter: {
+        ...manifestCase("case-one", "icarus-gate1-one").modelAdapter,
+        provider: "openai",
+        paid: true,
+        inputUsdPerMillionTokens: 1,
+        outputUsdPerMillionTokens: 1,
+      },
+      budgets: { maxCostUsd: 1 },
+    },
+  ],
+};
+const PAID_MANIFEST_BYTES = new TextEncoder().encode(JSON.stringify(PAID_MANIFEST));
+
 function landingProfile(repository: string): Record<string, unknown> {
   return {
     version: 1,
@@ -91,26 +109,38 @@ function landingProfile(repository: string): Record<string, unknown> {
   };
 }
 
-// Pinned to loopback Ollama, which reads no credential of its own, so the only
-// credential the preflight examines is the landing token. The preflight applies
-// one predicate to every name it collects, so exercising it through the landing
-// token measures the same rule the provider key would meet.
-function approvedProfile() {
+// Two profiles, because the preflight collects TWO kinds of credential name: the
+// pinned provider's model key and each case's landing token. An earlier version
+// of this file pinned loopback Ollama — which reads no credential — and asserted
+// in a comment that one predicate covers both names. That premise was never
+// tested, and a one-line exemption of the provider key passed the whole gate.
+// The corpus now runs through both names.
+function approvedProfile(kind: "ollama" | "openai" = "ollama") {
+  const paid = kind !== "ollama";
   const base = {
     schemaVersion: 1,
     profileId: "gate1-live-v1",
     benchmarkId: "icarus-gate1",
     benchmarkRevision: "v1",
-    offlineManifestDigest: sha256(MANIFEST_BYTES),
-    provider: {
-      kind: "ollama",
-      model: "qwen3.8:27b",
-      baseUrl: "http://127.0.0.1:11434/",
-      adapterVersion: "ollama-adapter-v1",
-      inputUsdPerMillionTokens: null,
-      outputUsdPerMillionTokens: null,
-    },
-    budgets: { maxSpendUsd: 0, maxRuntimeSeconds: 3600 },
+    offlineManifestDigest: sha256(paid ? PAID_MANIFEST_BYTES : MANIFEST_BYTES),
+    provider: paid
+      ? {
+          kind: "openai",
+          model: "gpt-x",
+          baseUrl: "https://api.openai.com/",
+          adapterVersion: "openai-adapter-v1",
+          inputUsdPerMillionTokens: 1,
+          outputUsdPerMillionTokens: 1,
+        }
+      : {
+          kind: "ollama",
+          model: "qwen3.8:27b",
+          baseUrl: "http://127.0.0.1:11434/",
+          adapterVersion: "ollama-adapter-v1",
+          inputUsdPerMillionTokens: null,
+          outputUsdPerMillionTokens: null,
+        },
+    budgets: { maxSpendUsd: paid ? 1 : 0, maxRuntimeSeconds: 3600 },
     authorizedEffects: [...LIVE_EVIDENCE_AUTHORIZED_EFFECTS],
     cases: [{ caseId: "case-one", landingProfile: landingProfile("icarus-gate1-one") }],
   };
@@ -133,6 +163,7 @@ function approvedProfile() {
 }
 
 const PROFILE = approvedProfile();
+const PAID_PROFILE = approvedProfile("openai");
 const USABLE = `ghp_${"y".repeat(36)}`;
 
 /**
@@ -168,6 +199,26 @@ function preflightAdmits(value: string): boolean {
   try {
     authorizeLiveEvidenceRun(PROFILE, MANIFEST_BYTES, {
       [GITHUB_CREDENTIAL]: value,
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof IcarusError && error.code === "LIVE_EVIDENCE_REFUSED") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
+ * The same question, asked of the pinned provider's model key instead of the
+ * landing token. The landing token is held usable so the only thing under test
+ * is the provider name's own verdict.
+ */
+function preflightAdmitsProviderKey(value: string): boolean {
+  try {
+    authorizeLiveEvidenceRun(PAID_PROFILE, PAID_MANIFEST_BYTES, {
+      [GITHUB_CREDENTIAL]: USABLE,
+      OPENAI_API_KEY: value,
     });
     return true;
   } catch (error) {
@@ -265,6 +316,29 @@ describe("the live-evidence credential preflight agrees with the consumers it pr
         modelGatewayAccepts("anthropic", "https://api.anthropic.com", value),
       ),
     ).toEqual([]);
+  });
+
+  // Kills the one-line regression `name !== providerCredential && !isUsable(...)`,
+  // which exempts the model key while every other assertion here stays green.
+  test("the provider's model key meets the same predicate as the landing token", () => {
+    const disagreements = CORPUS.filter(
+      ([, value]) => preflightAdmits(value) !== preflightAdmitsProviderKey(value),
+    ).map(([label]) => label);
+    expect(disagreements).toEqual([]);
+  });
+
+  test("every model key it admits is one the OpenAI gateway will accept", () => {
+    const admittedButUnusable = CORPUS.filter(
+      ([, value]) =>
+        preflightAdmitsProviderKey(value) &&
+        !modelGatewayAccepts("openai", "https://api.openai.com", value),
+    ).map(([label]) => label);
+    expect(admittedButUnusable).toEqual([]);
+  });
+
+  test("the provider-key corpus also exercises both verdicts", () => {
+    expect(CORPUS.filter(([, v]) => preflightAdmitsProviderKey(v)).length).toBeGreaterThan(1);
+    expect(CORPUS.filter(([, v]) => !preflightAdmitsProviderKey(v)).length).toBeGreaterThan(1);
   });
 
   test("a value that is not a string is refused, because the environment is untyped at runtime", () => {

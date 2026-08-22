@@ -121,18 +121,28 @@ function approvedAgainstReviewed(overrides: Record<string, unknown> = {}) {
   });
 }
 
-/** The edit that made the original defect worth a blocker. */
-function manifestRedirectedAndPaid() {
-  const edited = JSON.parse(new TextDecoder().decode(REVIEWED_BYTES)) as typeof REVIEWED;
-  for (const entry of edited.cases) {
-    entry.repository.githubOwner = "attacker";
-    entry.modelAdapter.provider = "anthropic";
-    entry.modelAdapter.paid = true;
-    entry.modelAdapter.inputUsdPerMillionTokens = 15;
-    entry.modelAdapter.outputUsdPerMillionTokens = 75;
-    entry.budgets.maxCostUsd = 500;
+/**
+ * The edit that made the original defect worth a blocker, applied to the RAW
+ * TEXT rather than by re-serializing the parsed object.
+ *
+ * Re-serializing would produce bytes that differ from the committed
+ * pretty-printed fixture by formatting alone, so the digest would change before
+ * any semantic edit was considered and this file could not honestly claim the
+ * dangerous change is what is refused. These replacements preserve every byte of
+ * whitespace and key order; only the values that decide where effects land and
+ * what may be spent move.
+ */
+function redirectedAndPaidBytes(): Uint8Array {
+  const text = new TextDecoder().decode(REVIEWED_BYTES);
+  const edited = text
+    .replaceAll('"githubOwner": "icarus-gate1-benchmark"', '"githubOwner": "attacker-org"')
+    .replaceAll('"provider": "ollama"', '"provider": "anthropic"')
+    .replaceAll('"paid": false', '"paid": true')
+    .replaceAll('"maxCostUsd": 0', '"maxCostUsd": 500');
+  if (edited === text) {
+    throw new Error("the manifest fixture no longer contains the values this test edits");
   }
-  return edited;
+  return new TextEncoder().encode(edited);
 }
 
 describe("the live-evidence manifest binding binds the manifest", () => {
@@ -163,7 +173,8 @@ describe("the live-evidence manifest binding binds the manifest", () => {
   });
 
   test("an edited manifest cannot borrow the reviewed manifest's digest", () => {
-    const edited = manifestRedirectedAndPaid();
+    const editedBytes = redirectedAndPaidBytes();
+    const edited = JSON.parse(new TextDecoder().decode(editedBytes)) as typeof REVIEWED;
     // Exactly the profile the operator approved: it pins the REVIEWED digest.
     // Previously this call received the edited object plus that digest string
     // and admitted the run, so every case below aimed real effects at
@@ -188,20 +199,38 @@ describe("the live-evidence manifest binding binds the manifest", () => {
       })),
     });
 
-    expect(sha256(encode(edited))).not.toBe(REVIEWED_DIGEST);
-    expect(() => assertLiveEvidenceProfileMatchesManifest(profile, encode(edited))).toThrowError(
+    // Same length, same formatting, same key order — only the values that decide
+    // which repositories receive effects and what may be spent are different.
+    expect(editedBytes.length).toBeGreaterThan(0);
+    expect(sha256(editedBytes)).not.toBe(REVIEWED_DIGEST);
+    expect(() => assertLiveEvidenceProfileMatchesManifest(profile, editedBytes)).toThrowError(
       /does not match the offline manifest/,
     );
   });
 
   test("a profile approved against edited bytes cannot be replayed against the reviewed ones", () => {
-    const edited = manifestRedirectedAndPaid();
     const profile = approvedAgainstReviewed({
-      offlineManifestDigest: sha256(encode(edited)),
+      offlineManifestDigest: sha256(redirectedAndPaidBytes()),
     });
     expect(() => assertLiveEvidenceProfileMatchesManifest(profile, REVIEWED_BYTES)).toThrowError(
       /does not match the offline manifest/,
     );
+  });
+
+  // States what this binding does NOT do, so nobody mistakes it for a semantic
+  // one: it authenticates bytes. A reformat that changes no meaning still fails,
+  // which is why the edited fixture above is a byte-minimal text substitution
+  // rather than a re-serialization — otherwise that test would pass on
+  // formatting and prove nothing about the dangerous edit inside it.
+  test("a semantically identical reformat is also refused, because the binding is over bytes", () => {
+    const reformatted = encode(REVIEWED);
+    expect(new TextDecoder().decode(reformatted)).not.toBe(
+      new TextDecoder().decode(REVIEWED_BYTES),
+    );
+    expect(JSON.parse(new TextDecoder().decode(reformatted))).toEqual(REVIEWED);
+    expect(() =>
+      assertLiveEvidenceProfileMatchesManifest(approvedAgainstReviewed(), reformatted),
+    ).toThrowError(/does not match the offline manifest/);
   });
 
   test("a single flipped byte invalidates the binding", () => {

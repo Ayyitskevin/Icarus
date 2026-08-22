@@ -84,9 +84,8 @@ function refuse(message: string): never {
  * admit a value one of them would later reject.
  *
  * Deliberately one predicate rather than a per-provider dispatch. A dispatch
- * would be a fourth place where the rule that decides the blast radius is
- * re-derived, which is the defect class this surface has already produced three
- * times. `tests/security/live-evidence-credential-agreement.test.ts` measures
+ * would be another place where the rule that decides the blast radius is
+ * re-derived, which is the defect class this surface keeps producing. `tests/security/live-evidence-credential-agreement.test.ts` measures
  * the relation against the real constructors, so a consumer that tightens its
  * rule fails that test rather than silently outgrowing this one.
  */
