@@ -130,8 +130,11 @@ network request, GitHub effect, migration, merge, or deployment. The bounded
 GitHub gateway is now consumed by the durable landing coordinator. ADR 0055 adds
 a one-shot headless layer above it: one reviewed completed run per manifest
 case, durable-admission effect replay, and all three cases under one exact resume
-id. It adds no daemon, queue, plugin path, merge, or deployment. Gate 1 remains
-incomplete until the separately approved live 3/3 evidence run.
+id. It adds no daemon, queue, plugin path, merge, or deployment. The separately
+approved live 3/3 evidence run completed on 2026-08-23 and is recorded in
+`docs/evals/2026-08-23-gate1-live-3of3.md`. This closes Gate 1's live-evidence
+requirement but does not grant merge, deployment, or unattended
+active-repository authority.
 
 The API presenter allowlists product evidence instead of returning `RunRecord`
 or history rows. It omits raw context/source blobs and private cache, worktree,

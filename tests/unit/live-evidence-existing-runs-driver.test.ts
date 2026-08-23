@@ -254,6 +254,19 @@ describe("existing-runs live-evidence driver", () => {
     expect(service.resumeLanding).toHaveBeenCalledTimes(1);
   });
 
+  it("rounds runtime up to canonical whole seconds", async () => {
+    const { driver, context, service } = fixture(landingStatus("local_ready"));
+    const current = service.getRun();
+    service.getRun.mockReturnValue({
+      ...current,
+      usage: { ...current.usage, activeRuntimeMs: 1_001 },
+    });
+
+    await expect(driver.observe(context("start"))).resolves.toMatchObject({
+      elapsedSeconds: 2,
+    });
+  });
+
   it("refuses a run created before the adapter-version approval", async () => {
     const { driver, context, service } = fixture(landingStatus("local_ready"));
     const current = service.getRun();

@@ -1,6 +1,6 @@
 # ADR 0055: Gate 1 uses a one-shot, exact-resume live-evidence executor
 
-- Status: Accepted — operator decision 2026-08-23; implementation candidate awaiting independent review and a separately approved live run
+- Status: Accepted — operator decision 2026-08-23; credential-gated live 3/3 recorded 2026-08-23 under explicit operator review override
 - Date: 2026-08-23
 - Related: [ADR 0027](0027-git-landing-authority.md), [ADR 0045](0045-gate1-live-evidence-profile.md), [ADR 0054](0054-gate1-effect-approval-and-recovery-semantics.md)
 
@@ -84,13 +84,16 @@ effect.
   machine-readable terminal result and exact resume id.
 - The executor composes normal reviewed Icarus runs; it does not become another
   provider runner or accept arbitrary runtime extensions.
-- The first live attempt still requires an independently reviewed build,
-  operator-produced repository-automation assessments, usable credentials, and
-  separate human approval for three disposable private repositories.
-- This ADR and its simulated measurement do not close Gate 1, authorize merge,
-  or count as 3/3 live evidence.
+- The first live attempt used operator-produced repository-automation
+  assessments, usable credentials, separate human approval, and three
+  disposable private repositories. The operator explicitly waived the
+  otherwise-required independent review for this slice.
+- The credential-gated live record closes Gate 1's 3/3 evidence requirement.
+  It does not authorize merge of the three draft pull requests, deployment, or
+  unattended execution against an active repository.
 
 ## Evidence
 
 - [20-process offline executor fault campaign](../evals/2026-08-23-gate1-headless-executor.md)
 - [ADR 0054 approval CLI measurement](../evals/2026-08-23-gate1-approval-cli.md)
+- [Credential-gated live 3/3 record](../evals/2026-08-23-gate1-live-3of3.md)

@@ -16,7 +16,7 @@ The current sequence is:
 | Gate | Product outcome | Exit evidence |
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
-| 1 | Verified Change Gate | populated closed three-stack offline input contract present; a separate human-approved, credential-gated live-evidence profile must bind its digest and immutable case pins, real provider/model and budgets, operator-assessed repository automation, named remote effects, operator digest approval through the CLI or an equal surface, deterministic candidate commit, absent-only `icarus/<run-id>` reference, bounded GitHub REST object upload, draft PR, and reconciliation receipt, then succeed 3/3; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
+| 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
 | 2 | Context and agent quality | measured explanation/security/refactor evals, retrieval recall ≥0.90 and precision ≥0.60, first-pass plan acceptance ≥80% |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
@@ -326,8 +326,9 @@ package is merged; the S2b-ii slices wire the landing coordinator to it through
 `landed`: read-only preflight, immutable object upload, one absent-only remote
 reference, and the one-POST-ever draft pull request with its immutable receipt.
 S2b-iii presents the receipt read-only through the shared CLI/API/browser
-projection. Packet 4's credential-gated live
-evidence, live-state migration, and Gate 1 completion remain incomplete.
+projection. Packet 4's credential-gated live 3/3 evidence completed on
+2026-08-23. Live-state migration and the supervised active-repository canary
+remain incomplete.
 
 Slice 1 adds the populated closed input contract at
 `fixtures/evals/gate1/manifest.v1.json`, the focused `pnpm benchmark:gate1`
@@ -347,18 +348,13 @@ runner reopens the production runtime and replays a harness-only candidate
 journal into a new local controller; it does not execute browser reload,
 foreground-server restart, or durable landing coordination.
 
-Gate 1 still requires a separate versioned, human-approved, credential-gated
-live-evidence profile bound to the offline manifest digest and exact immutable
-case/task/check/source/expected-change/candidate pins. It must pin a real
-provider/model and adapter version, captured pricing and budgets, and an
-operator-produced repository-automation assessment with disposition and raw
-assessment digest. It may authorize only named, separately approved Git object
-upload, absent-only remote-ref creation, draft-PR creation, and receipt effects,
-and must succeed 3/3 against approved real repositories with exact candidate and
-live identities. Mock or synthetic model, GitHub, automation, or receipt results
-cannot satisfy that gate. No credential, paid model, external network, remote
-mutation, live state migration, force-push, merge, deployment, or public release
-is authorized or performed by the offline contract runner.
+Gate 1's separate versioned, human-approved, credential-gated live-evidence
+profile completed 3/3 on 2026-08-23 with exact immutable case, provider, budget,
+candidate, branch, draft-PR, and receipt identities. The durable record is
+`docs/evals/2026-08-23-gate1-live-3of3.md`. The run authorized only Git object
+upload, absent-only remote-ref creation, draft-PR creation, and receipt effects.
+It did not authorize live-state migration, force-push, merge, deployment, or
+public release.
 
 The merged Change Rooms implementation is available as a read-only observation
 surface, but ADR 0041 remains Proposed until an independent review is recorded.
@@ -415,10 +411,10 @@ adversarial sweep before any caller existed; no live run was ever authorized
 from the defective binding.
 
 
-ADR 0045 adds the offline live-evidence profile record and its validation. It
-authorizes no run by itself: a runner that consumes it, the operator's
-repository assessments and credential, the profile approval, and the 3/3 live
-attempt all remain outstanding. Gate 1 still closes only on that run.
+ADR 0045 adds the live-evidence profile record and its validation. The approved
+instance, operator repository assessments, credential-gated executor, and 3/3
+live attempt completed on 2026-08-23; the exact record is
+`docs/evals/2026-08-23-gate1-live-3of3.md`.
 
 Its authorization surface was reviewed independently after merge and held on
 four findings, fixed 2026-08-21: the pinned provider's credential is now
@@ -443,5 +439,5 @@ was unreachable on the live path. It is now an optional per-landing pin that
 moves the commit instant and nothing else. ADR 0054 resolves the approval
 ambiguity: one digest-bound approval covers the exact four named effects, the
 manifest governs durable recovery, and CLI presentation is equal to a browser.
-The remote case executor and its 3/3 live evidence remain a separately gated,
-unimplemented slice.
+The remote case executor and its 3/3 live evidence are implemented and recorded.
+The next separately gated rollout step is a supervised active-repository canary.

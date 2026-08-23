@@ -39,14 +39,17 @@ Packet 2's separate browser-authority record appears below.
       `contract-only-unassessed`, not as evidence about automation configured on
       a real repository
 
-### Gate 1 live-evidence hold
+### Gate 1 live-evidence record
 
 Record and validation landed 2026-08-18 (ADR 0045, `LiveEvidenceProfileV1`).
-The record authorizes nothing merely by existing. ADR 0055's one-shot executor
-now consumes an approved profile and three already-completed Icarus runs, but
-its implementation candidate remains offline-only evidence until independent
-review and a separately approved live attempt. The operator items below remain
-open, and only the 3/3 live run closes Gate 1.
+The record authorizes nothing merely by existing. On 2026-08-23 ADR 0055's
+one-shot executor consumed one approved profile and three completed Icarus runs
+against disposable private repositories with Actions disabled. All three cases
+landed as reviewable draft pull requests, and a fresh credential-free process
+replayed the exact successful terminal receipt. This closes Gate 1's live 3/3
+requirement under the operator's explicit review-stage override. It does not
+authorize merging those drafts, deployment, or unattended use against an active
+repository; a supervised active-repository canary is the next rollout gate.
 
 ### Headless live-executor decision log
 
@@ -106,14 +109,14 @@ enforced at authorization.
       exact manifest bytes and constructs no runtime state — ADR 0054; measured
       18/18 real CLI processes in
       `docs/evals/2026-08-23-gate1-approval-cli.md`
-- [ ] Separately approve an instance of that profile (operator; approval is
+- [x] Separately approve an instance of that profile (operator; approval is
       digest-bound, so it must be produced against final pinned content)
 - [x] Provide the fields pinning real provider/model and adapter version,
       captured pricing, and spend/runtime budgets; the per-repository
       branch/PR-triggered automation assessment is mandatory by construction
       because each case embeds a decoded `GitHubLandingProfileV1` carrying
       `derivativeEffects` (disposition plus operator evidence digest)
-- [ ] Produce the actual assessments and pins for three real repositories (operator)
+- [x] Produce the actual assessments and pins for three real repositories (operator)
 - [x] Authorize only named Git object upload, absent-only remote-ref creation,
       draft-PR creation, and receipt effects, as a closed set compared by exact
       ordered equality; every force-push, update/delete, merge, deployment, and
@@ -139,10 +142,10 @@ enforced at authorization.
       The pin moves the commit instant alone; every other durable timestamp
       still comes from the clock, proven by difference against an unpinned
       landing
-- [ ] Record 3/3 live evidence with passing complete checks, exact changed paths,
+- [x] Record 3/3 live evidence with passing complete checks, exact changed paths,
       unchanged source checkouts, reviewable draft PRs, matching immutable
       receipts, restart/reconciliation evidence, and exact candidate/live
-      identities
+      identities — recorded in `docs/evals/2026-08-23-gate1-live-3of3.md`
 
 ### Slice 1 candidate-tree verification (recorded 2026-08-02 at `9c5ba19`)
 
@@ -599,8 +602,9 @@ protected API mappings, and the compiled guarded-action workflow in
 native run `30760619650`, then rebase-merged as
 `ba38856a0e0e63d1045500185b2158a0859469d1`. After a timing-only smoke-harness
 correction, implementation head `3683087066efb65255f05b2493fd31051c3ad7c6`
-passed hosted run `30761189188` and native run `30761192370`. This closes only
-Packet 2's eight guarded Linux browser action kinds; Gate 1 remains incomplete.
+passed hosted run `30761189188` and native run `30761192370`. At that checkpoint
+this closed only Packet 2's eight guarded Linux browser action kinds; Gate 1
+remained incomplete.
 
 ADR 0027 and its normative v1 record companion are accepted after independent
 P0/P1 authority reviews. PR #20 implements the exact landing schema and
@@ -609,10 +613,11 @@ construction, and an absent-only local `refs/heads/icarus/<run-id>` reference.
 PR #23 completes Packet 3's durable landing persistence, service coordination,
 digest-bound decision transaction, CLI/browser presentation, interruption
 reconciliation, and real-process crash matrix on that foundation; its record
-appears below. The provider gateway package merged separately as Packet 4a and
-is imported by nothing. Remote landing coordination, the remote branch, the
-draft pull request, the metadata-only receipt, credential-gated live evidence,
-and Gate 1 completion remain incomplete. No live state migration was run.
+appears below. At that checkpoint the provider gateway package had merged
+separately as Packet 4a and was imported by nothing. Remote landing
+coordination, the remote branch, the draft pull request, the metadata-only
+receipt, credential-gated live evidence, and Gate 1 completion remained
+incomplete. No live state migration was run.
 
 The local server now closes mutation admission, drains registered handlers, and
 closes SQLite last. Fresh handler, API, and real-browser suites prove action

@@ -660,7 +660,13 @@ export class GithubGateway {
       "GitHub returned a pull request whose head is not the requested head",
       { status: response.status, responseSha256: response.bodySha256 },
     );
-    return this.#readPullRequest({ ...response, value: first }, coordinates, headRef, baseBranch);
+    return this.#readPullRequest(
+      { ...response, value: first },
+      coordinates,
+      headRef,
+      baseBranch,
+      true,
+    );
   }
 
   #readPullRequest(
@@ -668,6 +674,7 @@ export class GithubGateway {
     coordinates: GithubRepositoryCoordinates,
     headRef: string,
     baseBranch: string,
+    listedSameRepositoryHead = false,
   ): GithubPullRequestReceipt {
     const object = asObject(response, "GitHub pull request response");
     const number = object.number;
@@ -721,7 +728,9 @@ export class GithubGateway {
     );
     const maintainerCanModify = object.maintainer_can_modify;
     invariant(
-      typeof maintainerCanModify === "boolean",
+      typeof maintainerCanModify === "boolean" ||
+        (listedSameRepositoryHead &&
+          (maintainerCanModify === null || maintainerCanModify === undefined)),
       "GITHUB_PROTOCOL_ERROR",
       "GitHub pull request response has no maintainer-modify flag",
       { status: response.status, number, responseSha256: response.bodySha256 },
@@ -739,7 +748,10 @@ export class GithubGateway {
       titleSha256: sha256Hex(title),
       bodySha256: sha256Hex(bodyText),
       markerCount: countLandingMarkers(bodyText),
-      maintainerCanModify,
+      // GitHub currently omits this field from the list endpoint for a
+      // same-repository head, where maintainer modification is not applicable.
+      // The create response must still prove the requested false value.
+      maintainerCanModify: maintainerCanModify ?? false,
       // Reconstructed from validated inputs rather than echoed, so no upstream
       // byte reaches the receipt.
       htmlUrl: `https://github.com/${coordinates.owner}/${coordinates.repository}/pull/${number}`,

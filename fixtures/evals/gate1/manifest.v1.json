@@ -350,7 +350,7 @@
       "task": {
         "path": "fixtures/evals/gate1/tasks/python-cli.md",
         "encoding": "raw-utf8",
-        "sha256": "2c360f239a017080a2614edac41bcb8462f52bc280f2f766a53090bbb8a085dd"
+        "sha256": "3ab58b7e213a6bcb4e4d1aa3fa730fa1c50bf0892f18db07e5323259124b34cb"
       },
       "prompt": {
         "planRevision": "icarus-service-plan-v1",

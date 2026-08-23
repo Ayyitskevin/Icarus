@@ -49,11 +49,12 @@ that later roadmap features already exist.
 > absent-only remote ref, and the one-POST-ever draft PR with its immutable
 > receipt), and S2b-iii presents that receipt read-only through the CLI, the
 > API run projection, and the workspace landing panel.
-> Packet 4's credential-gated live-evidence profile, live-state migration,
-> deployment, and
-> Gate 1 completion remain incomplete. No GitHub or
-> other external landing, migration, deployment, or public-release authority was
-> authorized by this local acceptance.
+> Packet 4's credential-gated live-evidence profile completed 3/3 on 2026-08-23
+> against disposable private repositories with Actions disabled, producing
+> three reviewable draft pull requests and immutable landing receipts. This
+> closes the Gate 1 live-evidence requirement. Live-state migration, deployment,
+> and unattended use against an active repository remain held behind a
+> supervised canary; the live record authorized no merge or deployment.
 
 ## Current scope
 
@@ -92,9 +93,10 @@ after restart. The accepted Gate 1 browser transport binds exact `127.0.0.1`
 and uses a fresh 128-bit `.localhost` public origin plus an independent
 authenticated mutation session. That path is supported only in real-accepted
 Chromium-family browsers. Its exact-head technical evidence now passes; the
-Gate 1 release remains held because the remaining slices are incomplete, while
-the operator-controlled browser/resolver/proxy residual risk was explicitly
-accepted on 2026-07-31. On Linux, an accepted Chromium-family mutation session
+operator-controlled browser/resolver/proxy residual risk was explicitly
+accepted on 2026-07-31. The Gate 1 live 3/3 requirement later completed on
+2026-08-23, while unattended active-repository use remains held behind a
+supervised canary. On Linux, an accepted Chromium-family mutation session
 now exposes exactly eight server-derived, descriptor-bound lifecycle actions:
 egress approval, plan approval, review accept/reject, rollback, restore, resume,
 and cancellation. Effects stay inside the existing private-worktree, provider,
@@ -325,8 +327,9 @@ hosts-file edit, or browser resolver injection. The client removes the
 fragment before render, every non-GET/HEAD request requires the exact session
 headers, and no cross-origin access is enabled. The native technical gate has
 passed, and the residual operator-controlled browser/resolver/proxy risk was
-accepted as an interim boundary on 2026-07-31. Gate 1 remains incomplete and
-unreleased. Importing and previewing a repository reads its committed Git objects;
+accepted as an interim boundary on 2026-07-31. Gate 1's live-evidence
+requirement is complete; unattended active-repository use remains unreleased.
+Importing and previewing a repository reads its committed Git objects;
 it does not copy, edit, check, commit, or push the source. Planning is available
 through the authenticated mutation session only when the chosen model is served by
 loopback Ollama. Until an endpoint and model are entered, the workspace clearly

@@ -341,6 +341,34 @@ describe("GithubGateway HTTP contract", () => {
     expect(request.body).toBe("");
   });
 
+  it("normalizes GitHub's omitted maintainer flag when listing a same-repository head", async () => {
+    const entry = pullRequestEntry({ number: 10 });
+    delete entry.maintainer_can_modify;
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, [entry]);
+    });
+
+    const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
+
+    expect(receipt).toMatchObject({ number: 10, maintainerCanModify: false });
+  });
+
+  it("still requires the create response to confirm the maintainer flag", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 201, pullRequestEntry({ maintainer_can_modify: null }));
+    });
+
+    await expectCode(
+      gatewayFor(server).createDraftPullRequest(coordinates, {
+        title: "t",
+        body: "b",
+        headRef: ref,
+        baseBranch: "main",
+      }),
+      "GITHUB_PROTOCOL_ERROR",
+    );
+  });
+
   it("still finds an Icarus pull request a human marked ready for review", async () => {
     // Reconciliation must locate the existing pull request rather than refuse
     // it, or an interrupted attempt would open a second one.

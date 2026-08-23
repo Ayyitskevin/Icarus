@@ -218,8 +218,9 @@ adding general execution authority:
    browser authority.
 7. These actions reuse existing private-worktree, provider, checkpoint, and
    sandbox operations. They add no commit, push, Git-ref, pull-request, merge,
-   deployment, or imported source-checkout mutation authority. Gate 1 remains
-   incomplete, and live landing evidence is a separate human-approved slice.
+   deployment, or imported source-checkout mutation authority. At this Packet 2
+   checkpoint Gate 1 remained incomplete, and live landing evidence was a
+   separate human-approved slice.
 
 ## Second M3 read-only observation slice
 
@@ -680,13 +681,15 @@ receipt identities, and unchanged source checkouts on the approved repositories.
 Mock or synthetic model, GitHub, automation, or receipt evidence cannot complete
 the gate.
 
-ADR 0055 provides the headless execution candidate for that profile. A one-shot
+ADR 0055 provides the headless executor for that profile. A one-shot
 Linux CLI binds three distinct reviewed Icarus runs, processes them serially in
 manifest order, emits NDJSON terminal receipts, and resumes only from an
 owner-only durable journal under the exact resume id. Missing credentials,
 remote drift, or ambiguity blocks and exits; it never waits or silently retries.
-Its simulated compiled-process evidence does not satisfy the live requirement
-above.
+Its credential-gated 3/3 record completed on 2026-08-23 against three disposable
+private repositories and is preserved in
+`docs/evals/2026-08-23-gate1-live-3of3.md`. That evidence does not grant merge,
+deployment, or unattended active-repository authority.
 
 ## Current-slice exclusions and durable non-goals
 

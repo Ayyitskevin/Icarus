@@ -389,7 +389,9 @@ export class ExistingRunsLiveEvidenceCaseDriver implements LiveEvidenceCaseDrive
       const { run, status } = await this.#validated(context);
       const accounting = {
         spendUsd: run.usage.estimatedCostUsd,
-        elapsedSeconds: run.usage.activeRuntimeMs / 1_000,
+        // Journals use integer-only canonical JSON. Round up so sub-second
+        // runtime is recorded and the approved ceiling remains conservative.
+        elapsedSeconds: Math.ceil(run.usage.activeRuntimeMs / 1_000),
       };
       if (status === null) {
         return {
