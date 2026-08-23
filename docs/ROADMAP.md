@@ -16,7 +16,7 @@ The current sequence is:
 | Gate | Product outcome | Exit evidence |
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
-| 1 | Verified Change Gate | populated closed three-stack offline input contract present; a separate human-approved, credential-gated live-evidence profile must bind its digest and immutable case pins, real provider/model and budgets, operator-assessed repository automation, named remote effects, browser digest approvals, deterministic candidate commit, absent-only `icarus/<run-id>` reference, bounded GitHub REST object upload, draft PR, and reconciliation receipt, then succeed 3/3; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
+| 1 | Verified Change Gate | populated closed three-stack offline input contract present; a separate human-approved, credential-gated live-evidence profile must bind its digest and immutable case pins, real provider/model and budgets, operator-assessed repository automation, named remote effects, operator digest approval through the CLI or an equal surface, deterministic candidate commit, absent-only `icarus/<run-id>` reference, bounded GitHub REST object upload, draft PR, and reconciliation receipt, then succeed 3/3; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
 | 2 | Context and agent quality | measured explanation/security/refactor evals, retrieval recall ≥0.90 and precision ≥0.60, first-pass plan acceptance ≥80% |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
@@ -440,6 +440,8 @@ manifest pins the candidate commit's SHA-1, a Git commit hashes its timestamp,
 and `prepareLanding` derived that timestamp from the clock — so the
 deterministic candidate `candidate_commit_and_absent_only_branch_exact` requires
 was unreachable on the live path. It is now an optional per-landing pin that
-moves the commit instant and nothing else. What remains genuinely unsized is the
-approval surface the manifest's `separate_approval_for_each_external_mutation`
-condition names.
+moves the commit instant and nothing else. ADR 0054 resolves the approval
+ambiguity: one digest-bound approval covers the exact four named effects, the
+manifest governs durable recovery, and CLI presentation is equal to a browser.
+The remote case executor and its 3/3 live evidence remain a separately gated,
+unimplemented slice.

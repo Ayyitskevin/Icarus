@@ -2,6 +2,7 @@ import { parseStrictJson } from "./canonical-json.js";
 import { digestJson, sha256 } from "./digest.js";
 import { IcarusError } from "./errors.js";
 import { decodeGitHubLandingProfileV1, type GitHubLandingProfileV1 } from "./landing-records.js";
+import { assertOperatorActor } from "./policy.js";
 import { parseProviderBaseUrl } from "./provider.js";
 import type { JsonValue, ProviderKind, ProviderLocality } from "./types.js";
 
@@ -87,7 +88,7 @@ export interface LiveEvidenceApprovalV1 {
   readonly profileDigestSha256: string;
 }
 
-export interface LiveEvidenceProfileV1 {
+export interface LiveEvidenceProfileDraftV1 {
   readonly schemaVersion: typeof LIVE_EVIDENCE_PROFILE_SCHEMA_VERSION;
   readonly profileId: string;
   readonly benchmarkId: string;
@@ -97,6 +98,9 @@ export interface LiveEvidenceProfileV1 {
   readonly budgets: LiveEvidenceBudgetV1;
   readonly authorizedEffects: readonly LiveEvidenceEffect[];
   readonly cases: readonly LiveEvidenceCasePinV1[];
+}
+
+export interface LiveEvidenceProfileV1 extends LiveEvidenceProfileDraftV1 {
   readonly approval: LiveEvidenceApprovalV1;
 }
 
@@ -400,9 +404,7 @@ function decodeApproval(value: unknown): LiveEvidenceApprovalV1 {
  * signs off on, so any later edit to a pinned field invalidates the approval
  * rather than silently inheriting it.
  */
-export function liveEvidenceProfileApprovalDigest(
-  profile: Omit<LiveEvidenceProfileV1, "approval">,
-): string {
+export function liveEvidenceProfileApprovalDigest(profile: LiveEvidenceProfileDraftV1): string {
   const approvable = {
     schemaVersion: profile.schemaVersion,
     profileId: profile.profileId,
@@ -433,23 +435,9 @@ export function liveEvidenceProfileApprovalDigest(
 /** Decode an untrusted value into a profile. Structure only; see
  * `assertLiveEvidenceProfileApproved` and
  * `assertLiveEvidenceProfileMatchesManifest` for the binding checks. */
-export function decodeLiveEvidenceProfileV1(value: unknown): LiveEvidenceProfileV1 {
-  const decoded = record(
-    value,
-    [
-      "schemaVersion",
-      "profileId",
-      "benchmarkId",
-      "benchmarkRevision",
-      "offlineManifestDigest",
-      "provider",
-      "budgets",
-      "authorizedEffects",
-      "cases",
-      "approval",
-    ],
-    "profile",
-  );
+function decodeLiveEvidenceProfileDraftRecord(
+  decoded: Record<string, unknown>,
+): LiveEvidenceProfileDraftV1 {
   if (decoded.schemaVersion !== LIVE_EVIDENCE_PROFILE_SCHEMA_VERSION) {
     invalid(`profile.schemaVersion must equal ${LIVE_EVIDENCE_PROFILE_SCHEMA_VERSION}`);
   }
@@ -467,8 +455,62 @@ export function decodeLiveEvidenceProfileV1(value: unknown): LiveEvidenceProfile
     budgets: decodeBudgets(decoded.budgets),
     authorizedEffects: decodeEffects(decoded.authorizedEffects),
     cases: decodeCases(decoded.cases),
+  };
+}
+
+const LIVE_EVIDENCE_PROFILE_DRAFT_KEYS = [
+  "schemaVersion",
+  "profileId",
+  "benchmarkId",
+  "benchmarkRevision",
+  "offlineManifestDigest",
+  "provider",
+  "budgets",
+  "authorizedEffects",
+  "cases",
+] as const;
+
+/** Decode an untrusted value into a profile. Structure only; see
+ * `assertLiveEvidenceProfileApproved` and
+ * `assertLiveEvidenceProfileMatchesManifest` for the binding checks. */
+export function decodeLiveEvidenceProfileV1(value: unknown): LiveEvidenceProfileV1 {
+  const decoded = record(value, [...LIVE_EVIDENCE_PROFILE_DRAFT_KEYS, "approval"], "profile");
+  return {
+    ...decodeLiveEvidenceProfileDraftRecord(decoded),
     approval: decodeApproval(decoded.approval),
   };
+}
+
+/** Decode the exact content an operator may approve; approval is never inferred. */
+export function decodeLiveEvidenceProfileDraftV1(value: unknown): LiveEvidenceProfileDraftV1 {
+  return decodeLiveEvidenceProfileDraftRecord(
+    record(value, LIVE_EVIDENCE_PROFILE_DRAFT_KEYS, "profile"),
+  );
+}
+
+/**
+ * Produce the approval envelope only after the draft is proven to match the
+ * exact reviewed manifest bytes. This records authority; it does not execute
+ * any effect and does not mint reusable session authority.
+ */
+export function approveLiveEvidenceProfileV1(
+  value: unknown,
+  manifestBytes: Uint8Array,
+  actorInput: string,
+  approvedAtInput: string,
+): LiveEvidenceProfileV1 {
+  const draft = decodeLiveEvidenceProfileDraftV1(value);
+  assertLiveEvidenceProfileMatchesManifest(draft, manifestBytes);
+  const actor = text(actorInput, "profile.approval.actor");
+  assertOperatorActor(actor, "INVALID_LIVE_EVIDENCE_PROFILE");
+  const approval = decodeApproval({
+    actor,
+    approvedAt: approvedAtInput,
+    profileDigestSha256: liveEvidenceProfileApprovalDigest(draft),
+  });
+  const profile = decodeLiveEvidenceProfileV1({ ...draft, approval });
+  assertLiveEvidenceProfileApproved(profile);
+  return profile;
 }
 
 /** Approval must bind to exact content. */
@@ -492,7 +534,7 @@ export function assertLiveEvidenceProfileApproved(profile: LiveEvidenceProfileV1
  * case — is checked rather than assumed of whichever caller supplied it.
  */
 export function assertLiveEvidenceProfileMatchesManifest(
-  profile: LiveEvidenceProfileV1,
+  profile: LiveEvidenceProfileDraftV1,
   manifestBytes: Uint8Array,
 ): void {
   // The manifest arrives as BYTES, and the digest is computed here.

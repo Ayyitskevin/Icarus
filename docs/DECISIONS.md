@@ -43,6 +43,8 @@ Decision records for the current milestone:
 
 | [0051](adr/0051-pinned-candidate-commit-timestamp.md) | A landing may pin its candidate commit timestamp through an optional `PrepareLandingInput` field, applying to the commit instant alone; the coordinator's `now` seam is deliberately not used, because it would backdate every durable timestamp the run writes | Proposed — optional input, no default behaviour change |
 
+| [0054](adr/0054-gate1-effect-approval-and-recovery-semantics.md) | Gate 1 uses one digest-bound approval for the exact four named effects, follows manifest-defined recovery, and accepts CLI presentation as equal to browser presentation | Accepted — operator decision 2026-08-23; approval tooling only, no live executor authority |
+
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.
 

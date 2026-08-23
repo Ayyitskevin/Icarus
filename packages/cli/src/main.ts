@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
-import { realpathSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  approveLiveEvidenceProfileV1,
   assertExpectedChangeHandoffPreview,
+  assertLiveEvidenceProfileApproved,
+  assertLiveEvidenceProfileMatchesManifest,
   assertRegistrationStateSeparation,
   BROWSER_ACTION_LEDGER_MIGRATION,
   buildChangeHandoffPreview,
@@ -16,6 +19,7 @@ import {
   CHANGE_HANDOFF_RESULT_MAX_BYTES,
   type ChangeRoomAnnotationTarget,
   type CheckProfile,
+  canonicalJsonLine,
   createChangeHandoffExportResult,
   createGateway,
   createIcarusRuntime,
@@ -23,6 +27,8 @@ import {
   createProviderConfig,
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
+  decodeLiveEvidenceProfileDraftV1,
+  decodeLiveEvidenceProfileV1,
   encodeChangeHandoffExportResult,
   type Gate1MigrationToken,
   type GitHubLandingProfileV1,
@@ -31,7 +37,9 @@ import {
   inspectChangeHandoffDocuments,
   isUnsupportedProbeKind,
   LANDING_LEDGER_MIGRATION,
+  liveEvidenceProfileApprovalDigest,
   migrateGate1Schema,
+  parseStrictJson,
   presentLandingStatusV1,
   type RunRecord,
   readChangeHandoffSource,
@@ -52,6 +60,7 @@ export interface CliMainOptions {
   readonly args?: readonly string[];
   readonly platform?: NodeJS.Platform;
   readonly createRuntime?: typeof createIcarusRuntime;
+  readonly now?: () => string;
 }
 
 function fail(code: string, message: string): never {
@@ -375,6 +384,108 @@ function dispatchFileOnlyHandoff(args: readonly string[]): boolean {
   return true;
 }
 
+const LIVE_EVIDENCE_INPUT_MAX_BYTES = 2 * 1024 * 1024;
+
+function readStableOwnedInput(input: string, requireNonSharedWrite = true): Buffer {
+  const absolute = path.resolve(input);
+  let descriptor: number;
+  try {
+    descriptor = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    fail("INVALID_LIVE_EVIDENCE_FILE", `Cannot safely open ${absolute}`);
+  }
+  try {
+    const before = fstatSync(descriptor);
+    const uid = process.getuid?.();
+    if (!before.isFile() || before.nlink !== 1 || (uid !== undefined && before.uid !== uid)) {
+      fail(
+        "INVALID_LIVE_EVIDENCE_FILE",
+        "Input must be a regular, singly linked, operator-owned file",
+      );
+    }
+    if (requireNonSharedWrite && (before.mode & 0o022) !== 0) {
+      fail("INVALID_LIVE_EVIDENCE_FILE", "Input must not be group- or world-writable");
+    }
+    if (before.size > LIVE_EVIDENCE_INPUT_MAX_BYTES) {
+      fail("INVALID_LIVE_EVIDENCE_FILE", "Input exceeds the live-evidence file-size ceiling");
+    }
+    const bytes = readFileSync(descriptor);
+    const after = fstatSync(descriptor);
+    if (
+      before.size !== after.size ||
+      before.mtimeMs !== after.mtimeMs ||
+      bytes.length !== after.size
+    ) {
+      fail("INVALID_LIVE_EVIDENCE_FILE", "Input changed while it was being read");
+    }
+    return bytes;
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function parseLiveEvidenceJson(input: string): unknown {
+  const bytes = readStableOwnedInput(input);
+  let source: string;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    fail("INVALID_LIVE_EVIDENCE_FILE", "Input is not valid UTF-8");
+  }
+  return parseStrictJson(source);
+}
+
+function writeCanonical(value: unknown): void {
+  process.stdout.write(canonicalJsonLine(value));
+}
+
+function dispatchFileOnlyLiveEvidence(args: readonly string[], now: () => string): boolean {
+  const [group, action, ...rest] = args;
+  if (group !== "live-evidence") return false;
+  if (action !== "digest" && action !== "approve" && action !== "inspect" && action !== "verify") {
+    usage();
+  }
+  if (action === "digest") {
+    const options = parseOptions(rest, ["--input"]);
+    noPositionals(options);
+    const draft = decodeLiveEvidenceProfileDraftV1(
+      parseLiveEvidenceJson(required(options, "--input")),
+    );
+    writeCanonical({ profileDigestSha256: liveEvidenceProfileApprovalDigest(draft) });
+    return true;
+  }
+  if (action === "approve") {
+    const options = parseOptions(rest, ["--input", "--manifest", "--actor"]);
+    noPositionals(options);
+    writeCanonical(
+      approveLiveEvidenceProfileV1(
+        parseLiveEvidenceJson(required(options, "--input")),
+        readStableOwnedInput(required(options, "--manifest"), false),
+        required(options, "--actor"),
+        now(),
+      ),
+    );
+    return true;
+  }
+  const options = parseOptions(rest, ["--input", "--manifest"]);
+  noPositionals(options);
+  const profile = decodeLiveEvidenceProfileV1(parseLiveEvidenceJson(required(options, "--input")));
+  const manifestBytes = readStableOwnedInput(required(options, "--manifest"), false);
+  assertLiveEvidenceProfileApproved(profile);
+  assertLiveEvidenceProfileMatchesManifest(profile, manifestBytes);
+  writeCanonical({
+    status: action === "verify" ? "verified" : "approved",
+    profileId: profile.profileId,
+    profileDigestSha256: profile.approval.profileDigestSha256,
+    actor: profile.approval.actor,
+    approvedAt: profile.approval.approvedAt,
+    authorizedEffects: profile.authorizedEffects,
+    caseIds: profile.cases.map((entry) => entry.caseId),
+    executionAuthority: "none",
+  });
+  return true;
+}
+
 function handoffRequest(options: ParsedOptions): {
   readonly correlationId: string;
   readonly externalTaskRef: string | null;
@@ -444,6 +555,10 @@ function usage(): never {
       "icarus run handoff-export RUN --correlation-id ID [--external-task-ref REF] --expected-preview-sha256 SHA --output-dir DIR",
       "icarus handoff verify --input FILE",
       "icarus handoff inspect --input FILE",
+      "icarus live-evidence digest --input PROFILE_DRAFT",
+      "icarus live-evidence approve --input PROFILE_DRAFT --manifest MANIFEST --actor ACTOR",
+      "icarus live-evidence inspect --input APPROVED_PROFILE --manifest MANIFEST",
+      "icarus live-evidence verify --input APPROVED_PROFILE --manifest MANIFEST",
       "icarus run review RUN --decision approve|reject --diff-sha SHA --actor ACTOR",
       "icarus run rollback RUN --diff-sha SHA --actor ACTOR",
       "icarus run restore RUN --checkpoint-sha SHA --actor ACTOR",
@@ -828,6 +943,7 @@ export async function runCliMain(options: CliMainOptions = {}): Promise<void> {
     if (dispatchFileOnlyHandoff(args)) return;
     if (await dispatchProbe(args, controller.signal)) return;
     assertLandingMutationPlatform(args, options.platform ?? process.platform);
+    if (dispatchFileOnlyLiveEvidence(args, options.now ?? (() => new Date().toISOString()))) return;
     const root = stateRoot();
     if (dispatchReadOnlyRunHandoff(args, root)) return;
     const registrationPath = registrationPathForPreflight(args);

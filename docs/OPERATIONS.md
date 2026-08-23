@@ -763,13 +763,13 @@ holding one performs no network call and authorizes no effect on its own.
   creating a head reference or opening a same-repo draft pull request runs the
   head branch's own automation with repository secrets.
 
-`authorizeLiveEvidenceRun(profile, manifest, manifestDigest, environment)`
-decides whether a run may begin. It asserts the approval binds this exact
-profile content, asserts the manifest and complete case set match, and confirms
-every credential environment variable the run will need is present — presence
-only, never the value, so a credential cannot reach an error string, a log
-line, or durable state through the gate. A missing token refuses before any
-remote effect rather than halfway through the second case.
+`authorizeLiveEvidenceRun(profile, manifestBytes, environment)` decides whether
+a run may begin. It asserts the approval binds this exact profile content,
+computes and checks the digest of the exact manifest bytes, asserts the complete
+case set matches, and confirms every credential environment variable the run
+will need is usable by the same predicate as its consumer. The value is never
+returned, logged, or written to durable state through the gate. A missing, blank,
+or placeholder token refuses before any remote effect.
 
 That credential set is the pinned provider's key followed by each case's
 landing credential. An `openai` or `anthropic` profile requires its model key
@@ -811,8 +811,21 @@ its ceilings are real bounds — a `NaN` or `Infinity` ceiling is refused,
 because every `next > ceiling` comparison against one is false and the budget
 check would silently become a no-op.
 
-Neither performs I/O. They are the authority half of the live runner; the case
-executor that consumes them is not yet implemented.
+The authorization and ledger perform no I/O. The case executor that consumes
+them is not yet implemented.
+
+ADR 0054 adds a file-only, surface-neutral approval path:
+
+```sh
+icarus live-evidence digest --input PROFILE_DRAFT
+icarus live-evidence approve --input PROFILE_DRAFT --manifest MANIFEST --actor ACTOR
+icarus live-evidence inspect --input APPROVED_PROFILE --manifest MANIFEST
+icarus live-evidence verify --input APPROVED_PROFILE --manifest MANIFEST
+```
+
+These verbs run before runtime construction. They do not open SQLite, resolve
+credential values, contact a provider or GitHub, or execute an authorized
+effect. `inspect` and `verify` explicitly report `executionAuthority: "none"`.
 
 **Operator guidance for a first live attempt:** use disposable repositories you
 own with automation disabled, so the assessment is an honest

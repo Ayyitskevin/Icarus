@@ -68,6 +68,10 @@ enforced at authorization.
       offline manifest digest and exact immutable case pins — `LiveEvidenceProfileV1`
       binds `offlineManifestDigest`, `benchmarkId`, `benchmarkRevision`, and a
       bijection with the manifest case set
+- [x] Provide a file-only digest/approve/inspect/verify surface that binds the
+      exact manifest bytes and constructs no runtime state — ADR 0054; measured
+      18/18 real CLI processes in
+      `docs/evals/2026-08-23-gate1-approval-cli.md`
 - [ ] Separately approve an instance of that profile (operator; approval is
       digest-bound, so it must be produced against final pinned content)
 - [x] Provide the fields pinning real provider/model and adapter version,

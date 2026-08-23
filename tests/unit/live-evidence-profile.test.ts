@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { sha256 } from "../../packages/core/src/digest.js";
 import {
+  approveLiveEvidenceProfileV1,
   assertLiveEvidenceProfileApproved,
   assertLiveEvidenceProfileMatchesManifest,
+  decodeLiveEvidenceProfileDraftV1,
   decodeLiveEvidenceProfileV1,
   LIVE_EVIDENCE_AUTHORIZED_EFFECTS,
   liveEvidenceProfileApprovalDigest,
@@ -140,6 +142,12 @@ function boundTo(manifest: unknown, overrides: Record<string, unknown> = {}) {
 }
 
 describe("live-evidence profile decode", () => {
+  it("decodes the approvable draft without manufacturing approval", () => {
+    const draft = decodeLiveEvidenceProfileDraftV1(profileWithoutApproval());
+    expect(draft.profileId).toBe("gate1-live-v1");
+    expect("approval" in draft).toBe(false);
+  });
+
   it("accepts a complete profile", () => {
     const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
     expect(decoded.profileId).toBe("gate1-live-v1");
@@ -224,6 +232,44 @@ describe("authorized effects are a closed set", () => {
 });
 
 describe("approval binds to exact content", () => {
+  it("authors approval only after binding the draft to the reviewed manifest bytes", () => {
+    const approved = approveLiveEvidenceProfileV1(
+      profileWithoutApproval(),
+      MANIFEST_BYTES,
+      "kevin",
+      "2026-08-23T12:00:00.000Z",
+    );
+
+    expect(approved.approval).toEqual({
+      actor: "kevin",
+      approvedAt: "2026-08-23T12:00:00.000Z",
+      profileDigestSha256: liveEvidenceProfileApprovalDigest(approved),
+    });
+    expect(() => assertLiveEvidenceProfileApproved(approved)).not.toThrow();
+  });
+
+  it("refuses approval when the supplied manifest is not the pinned manifest", () => {
+    expect(() =>
+      approveLiveEvidenceProfileV1(
+        profileWithoutApproval(),
+        new TextEncoder().encode(JSON.stringify({ ...MANIFEST, benchmarkRevision: "v2" })),
+        "kevin",
+        "2026-08-23T12:00:00.000Z",
+      ),
+    ).toThrowError(/does not match the offline manifest/);
+  });
+
+  it("refuses an approver identity containing control characters", () => {
+    expect(() =>
+      approveLiveEvidenceProfileV1(
+        profileWithoutApproval(),
+        MANIFEST_BYTES,
+        `kevin${String.fromCharCode(0)}admin`,
+        "2026-08-23T12:00:00.000Z",
+      ),
+    ).toThrowError();
+  });
+
   it("accepts an untampered approved profile", () => {
     const decoded = decodeLiveEvidenceProfileV1(approvedProfile());
     expect(() => assertLiveEvidenceProfileApproved(decoded)).not.toThrow();

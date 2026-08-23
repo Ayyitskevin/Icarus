@@ -141,12 +141,15 @@ export type {
   LiveEvidenceBudgetV1,
   LiveEvidenceCasePinV1,
   LiveEvidenceEffect,
+  LiveEvidenceProfileDraftV1,
   LiveEvidenceProfileV1,
   LiveEvidenceProviderPinV1,
 } from "./live-evidence-profile.js";
 export {
+  approveLiveEvidenceProfileV1,
   assertLiveEvidenceProfileApproved,
   assertLiveEvidenceProfileMatchesManifest,
+  decodeLiveEvidenceProfileDraftV1,
   decodeLiveEvidenceProfileV1,
   LIVE_EVIDENCE_AUTHORIZED_EFFECTS,
   LIVE_EVIDENCE_PROFILE_SCHEMA_VERSION,
