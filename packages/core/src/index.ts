@@ -136,6 +136,32 @@ export type {
   LandingReceiptV1,
   LocalRefFactV1,
 } from "./landing-records.js";
+export { RunLeaseManager } from "./lease.js";
+export type {
+  LiveEvidenceCaseCompletionV1,
+  LiveEvidenceCaseContext,
+  LiveEvidenceCaseDriver,
+  LiveEvidenceCaseObservation,
+  LiveEvidenceExecutionEventV1,
+  LiveEvidenceExecutionJournalV1,
+  LiveEvidenceJournalStore,
+  LiveEvidenceTerminalReceiptV1,
+  RunLiveEvidenceExecutorOptions,
+} from "./live-evidence-executor.js";
+export { runLiveEvidenceExecutor } from "./live-evidence-executor.js";
+export type {
+  LiveEvidenceCaseRunBindingV1,
+  LiveEvidenceCaseRunMapV1,
+} from "./live-evidence-existing-runs-driver.js";
+export {
+  decodeLiveEvidenceCaseRunMapV1,
+  ExistingRunsLiveEvidenceCaseDriver,
+  LIVE_EVIDENCE_PROVIDER_ADAPTER_VERSIONS,
+} from "./live-evidence-existing-runs-driver.js";
+export {
+  decodeLiveEvidenceExecutionJournalV1,
+  FileLiveEvidenceJournalStore,
+} from "./live-evidence-journal.js";
 export type {
   LiveEvidenceApprovalV1,
   LiveEvidenceBudgetV1,
@@ -195,8 +221,8 @@ export {
 } from "./probe.js";
 export {
   createProviderConfig,
-  parseProviderBaseUrl,
   PROVIDER_CREDENTIAL_ENVIRONMENT_NAMES,
+  parseProviderBaseUrl,
   providerCredentialEnvironmentName,
 } from "./provider.js";
 export { createGateway } from "./providers.js";

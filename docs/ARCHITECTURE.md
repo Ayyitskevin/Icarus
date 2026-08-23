@@ -126,10 +126,12 @@ against rollback, cold startup is inert until explicit resume, and interruption
 recovery is derived from durable intent and observation rather than blind
 replay. CLI, API, and browser presentation share one bounded projection. The
 source checkout remains unchanged and this slice performs no credential lookup,
-network request, GitHub effect, migration, merge, or deployment. Packet 4a's
-bounded GitHub gateway package exists in `packages/github-gateway` but no
-runtime module imports it, so the landing coordinator still stops at
-`local_ready`. Packet 4 and Gate 1 remain incomplete.
+network request, GitHub effect, migration, merge, or deployment. The bounded
+GitHub gateway is now consumed by the durable landing coordinator. ADR 0055 adds
+a one-shot headless layer above it: one reviewed completed run per manifest
+case, durable-admission effect replay, and all three cases under one exact resume
+id. It adds no daemon, queue, plugin path, merge, or deployment. Gate 1 remains
+incomplete until the separately approved live 3/3 evidence run.
 
 The API presenter allowlists product evidence instead of returning `RunRecord`
 or history rows. It omits raw context/source blobs and private cache, worktree,

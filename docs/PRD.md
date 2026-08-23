@@ -680,13 +680,21 @@ receipt identities, and unchanged source checkouts on the approved repositories.
 Mock or synthetic model, GitHub, automation, or receipt evidence cannot complete
 the gate.
 
+ADR 0055 provides the headless execution candidate for that profile. A one-shot
+Linux CLI binds three distinct reviewed Icarus runs, processes them serially in
+manifest order, emits NDJSON terminal receipts, and resumes only from an
+owner-only durable journal under the exact resume id. Missing credentials,
+remote drift, or ambiguity blocks and exits; it never waits or silently retries.
+Its simulated compiled-process evidence does not satisfy the live requirement
+above.
+
 ## Current-slice exclusions and durable non-goals
 
 The current implementation has no public signup, billing, teams, browser-held
-provider keys, semantic retrieval, end-to-end landing, remote pushes,
-deployments, application previews, remote API exposure, customer-data access,
-production access, distributed execution, accounts, telemetry, or arbitrary
-provider-native tool path. Packet 2's local guarded lifecycle actions do not
+provider keys, semantic retrieval, automatic merge, deployments, application
+previews, remote API exposure, customer-data access, production access,
+distributed execution, accounts, telemetry, or arbitrary provider-native tool
+path. Packet 2's local guarded lifecycle actions do not
 widen Git, landing, deployment, credential, provider-native-tool, or public
 authority. Packet 2 is release-accepted at implementation head
 `3683087066efb65255f05b2493fd31051c3ad7c6`, which was published on `main` and

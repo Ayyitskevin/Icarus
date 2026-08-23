@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 
 import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import os from "node:os";
@@ -27,9 +28,12 @@ import {
   createProviderConfig,
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
+  decodeLiveEvidenceCaseRunMapV1,
   decodeLiveEvidenceProfileDraftV1,
   decodeLiveEvidenceProfileV1,
+  ExistingRunsLiveEvidenceCaseDriver,
   encodeChangeHandoffExportResult,
+  FileLiveEvidenceJournalStore,
   type Gate1MigrationToken,
   type GitHubLandingProfileV1,
   IcarusError,
@@ -41,9 +45,11 @@ import {
   migrateGate1Schema,
   parseStrictJson,
   presentLandingStatusV1,
+  RunLeaseManager,
   type RunRecord,
   readChangeHandoffSource,
   readSecureHandoffFile,
+  runLiveEvidenceExecutor,
   runProbe,
   unsupportedProbeResult,
   verifyChangeHandoffDocuments,
@@ -254,7 +260,8 @@ function registrationPathForPreflight(args: readonly string[]): string | undefin
 function assertLandingMutationPlatform(args: readonly string[], platform: NodeJS.Platform): void {
   const [group, action] = args;
   if (
-    group === "landing" &&
+    (group === "landing" ||
+      (group === "live-evidence" && (action === "execute" || action === "resume"))) &&
     action !== undefined &&
     action !== "profile-show" &&
     action !== "status" &&
@@ -442,6 +449,7 @@ function writeCanonical(value: unknown): void {
 function dispatchFileOnlyLiveEvidence(args: readonly string[], now: () => string): boolean {
   const [group, action, ...rest] = args;
   if (group !== "live-evidence") return false;
+  if (action === "execute" || action === "resume") return false;
   if (action !== "digest" && action !== "approve" && action !== "inspect" && action !== "verify") {
     usage();
   }
@@ -558,6 +566,8 @@ function usage(): never {
       "icarus live-evidence digest --input PROFILE_DRAFT",
       "icarus live-evidence approve --input PROFILE_DRAFT --manifest MANIFEST --actor ACTOR",
       "icarus live-evidence inspect --input APPROVED_PROFILE --manifest MANIFEST",
+      "icarus live-evidence execute --input APPROVED_PROFILE --manifest MANIFEST --runs RUN_MAP",
+      "icarus live-evidence resume RESUME_ID --input APPROVED_PROFILE --manifest MANIFEST --runs RUN_MAP",
       "icarus live-evidence verify --input APPROVED_PROFILE --manifest MANIFEST",
       "icarus run review RUN --decision approve|reject --diff-sha SHA --actor ACTOR",
       "icarus run rollback RUN --diff-sha SHA --actor ACTOR",
@@ -624,6 +634,45 @@ async function dispatchProbe(args: readonly string[], signal: AbortSignal): Prom
   }
   const provider = createProviderConfig({ kind, model, baseUrl });
   print(await runProbe(createGateway(provider, process.env), request, {}, signal));
+  return true;
+}
+
+async function dispatchLiveEvidenceExecution(
+  runtime: IcarusRuntime,
+  args: readonly string[],
+  root: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const [group, action, ...rest] = args;
+  if (group !== "live-evidence" || (action !== "execute" && action !== "resume")) return false;
+  const options = parseOptions(rest, ["--input", "--manifest", "--runs"]);
+  const resumeId = action === "resume" ? oneRunId(options) : randomUUID();
+  if (action === "execute") noPositionals(options);
+  const profile = decodeLiveEvidenceProfileV1(parseLiveEvidenceJson(required(options, "--input")));
+  const manifestBytes = readStableOwnedInput(required(options, "--manifest"), false);
+  const runMap = decodeLiveEvidenceCaseRunMapV1(
+    parseLiveEvidenceJson(required(options, "--runs")),
+    profile,
+    manifestBytes,
+  );
+  const leases = new RunLeaseManager(root);
+  await leases.initialize();
+  const terminal = await leases.withLease(resumeId, () =>
+    runLiveEvidenceExecutor({
+      mode: action === "execute" ? "start" : "resume",
+      ...(action === "execute" ? { createResumeId: () => resumeId } : { resumeId }),
+      profile,
+      manifestBytes,
+      environment: process.env,
+      journalStore: new FileLiveEvidenceJournalStore(root),
+      driver: new ExistingRunsLiveEvidenceCaseDriver(runtime.service, runMap, manifestBytes),
+      eventSink: (event) => process.stdout.write(canonicalJsonLine(event)),
+      signal,
+    }),
+  );
+  if (terminal.outcome === "blocked") process.exitCode = 3;
+  if (terminal.outcome === "interrupted") process.exitCode = 130;
+  if (terminal.outcome === "failed") process.exitCode = 1;
   return true;
 }
 
@@ -963,6 +1012,7 @@ export async function runCliMain(options: CliMainOptions = {}): Promise<void> {
       allowAnnotationMigration: migrationApproval.annotation,
       landingCredentialEnvironmentNames: landingCredentialEnvironmentAllowlist(),
     });
+    if (await dispatchLiveEvidenceExecution(runtime, args, root, controller.signal)) return;
     await dispatch(runtime, args, controller.signal);
   } catch (error) {
     const code = error instanceof IcarusError ? error.code : "INTERNAL_ERROR";

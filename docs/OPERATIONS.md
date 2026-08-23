@@ -811,8 +811,17 @@ its ceilings are real bounds — a `NaN` or `Infinity` ceiling is refused,
 because every `next > ceiling` comparison against one is false and the budget
 check would silently become a no-op.
 
-The authorization and ledger perform no I/O. The case executor that consumes
-them is not yet implemented.
+The authorization and ledger perform no I/O. ADR 0055's Linux-only case
+executor consumes them only after runtime construction and under one kernel
+lease for the exact resume id. It binds an approved profile and manifest to a
+strict run map containing one distinct, completed Icarus run per manifest case.
+The existing run must still match the pinned task, provider, adapter, selected
+paths, checks, changed paths, clean source revision, landing profile, and
+candidate identities. Because `RunRecord` has no selectable adapter-version
+field, the supported adapter label is fixed in the executor and a bound run must
+have been created after the profile approval; older evidence cannot silently
+inherit a later adapter approval. A run map is a binding, never an authority
+grant.
 
 ADR 0054 adds a file-only, surface-neutral approval path:
 
@@ -827,11 +836,59 @@ These verbs run before runtime construction. They do not open SQLite, resolve
 credential values, contact a provider or GitHub, or execute an authorized
 effect. `inspect` and `verify` explicitly report `executionAuthority: "none"`.
 
+The execution verbs are:
+
+```sh
+export ICARUS_GITHUB_TOKEN_ALLOWLIST=ICARUS_GITHUB_TOKEN_GATE1
+export ICARUS_GITHUB_TOKEN_GATE1=... # operator-owned secret; never place it in a file
+
+icarus live-evidence execute \
+  --input APPROVED_PROFILE \
+  --manifest MANIFEST \
+  --runs RUN_MAP
+
+icarus live-evidence resume RESUME_ID \
+  --input APPROVED_PROFILE \
+  --manifest MANIFEST \
+  --runs RUN_MAP
+```
+
+`RUN_MAP` is strict JSON with schema version 1, the approved `profileId`, the
+manifest SHA-256, and `cases` in manifest order, each containing exactly
+`caseId` and a distinct completed Icarus `runId`. Execution never creates or
+runs the model job itself; it validates normal Icarus run evidence and drives
+the already-reviewed landing state.
+
+stdout is canonical NDJSON: zero or more case observations followed by one
+terminal receipt. Diagnostics go to stderr. Exit `0` means the full effect
+ledger completed, `3` means blocked/refused with an exact durable resume id,
+`130` means interrupted, `1` means internal or invariant failure, and `2` is
+invalid file-only CLI input. Missing credentials, changed repository state, or
+ambiguous remote outcomes never wait or poll. They persist a blocked receipt;
+an ambiguity caused by a mutation in the current process cannot reconcile until
+a later explicit `resume` invocation.
+
+An already-successful resume id is read-only: Icarus revalidates its exact
+profile, manifest, completed-case prefix, budgets, and full effect ledger, then
+returns the same receipt without requiring credentials that no effect will use.
+
+Journal files live under `$ICARUS_HOME/live-evidence` (or the normal Icarus
+state root). They are owner-only, canonical, append-only in logical progress,
+published with fsynced atomic filesystem operations, and refused when linked,
+shared-readable, non-canonical, mismatched, or concurrently unsafe. Never edit
+them manually.
+
 **Operator guidance for a first live attempt:** use disposable repositories you
 own with automation disabled, so the assessment is an honest
 `inert-repository`. Do not aim a first 3/3 at a project whose PR automation you
 have not read. A loopback provider is a valid pin and makes `maxSpendUsd: 0`
 truthful rather than aspirational.
+
+Offline recovery measurement is reproducible with
+`pnpm measure:gate1-executor`; 20/20 compiled processes passed on 2026-08-23.
+That campaign uses simulated drivers and an empty-runtime CLI refusal. It does
+not contact GitHub or a model provider and does not count toward Gate 1's live
+3/3 evidence.
 
 ## Runbook
 

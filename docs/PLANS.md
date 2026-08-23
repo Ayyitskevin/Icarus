@@ -42,9 +42,43 @@ Packet 2's separate browser-authority record appears below.
 ### Gate 1 live-evidence hold
 
 Record and validation landed 2026-08-18 (ADR 0045, `LiveEvidenceProfileV1`).
-The record is offline only: it authorizes nothing by existing, and no runner
-consumes it yet. The operator items below remain open, and the 3/3 run is
-what closes Gate 1.
+The record authorizes nothing merely by existing. ADR 0055's one-shot executor
+now consumes an approved profile and three already-completed Icarus runs, but
+its implementation candidate remains offline-only evidence until independent
+review and a separately approved live attempt. The operator items below remain
+open, and only the 3/3 live run closes Gate 1.
+
+### Headless live-executor decision log
+
+- **Invocation (owner decision 2026-08-23):** Gate 1 uses a one-shot,
+  crash-resumable CLI backed by durable receipts. Each agent invocation owns one
+  bounded run. No daemon, submission API, queue service, or always-on listener
+  belongs in this slice.
+
+- **Blocked execution (owner decision 2026-08-23):** Missing authority,
+  unavailable credentials, changed remote state, or ambiguity writes a durable
+  blocked receipt, exits nonzero, and returns an exact resume id. The process
+  never waits on stdin, polls for approval, or remains resident.
+
+- **Automation output (owner decision 2026-08-23):** stdout is an NDJSON event
+  stream ending with one authoritative terminal receipt. Diagnostics belong on
+  stderr. Stable exit codes distinguish success, blocked/refused execution,
+  interruption, and internal failure.
+
+- **Extensibility (owner decision 2026-08-23):** Gate 1 keeps fixed execution
+  stages behind typed internal seams for the provider, GitHub gateway, sandbox,
+  and event sink. Runtime-loaded plugins and hooks cannot join or alter the
+  authority path.
+
+- **Case scheduling (owner decision 2026-08-23):** One invocation executes the
+  approved profile's three cases sequentially in manifest order. Every stage is
+  durably checkpointed, and resume continues from the exact unfinished stage;
+  Gate 1 does not parallelize cases.
+
+- **First live rollout (owner decision 2026-08-23):** Prove crash and ambiguous
+  response recovery against simulated gateways first. A separately approved
+  3/3 attempt then uses disposable private repositories owned by the operator
+  with repository automation disabled; active projects are excluded.
 
 An independent post-merge review of the authorization surface returned HOLD on
 2026-08-20 with four findings, all reproduced against the merged head while the
@@ -84,7 +118,7 @@ enforced at authorization.
       draft-PR creation, and receipt effects, as a closed set compared by exact
       ordered equality; every force-push, update/delete, merge, deployment, and
       source-checkout mutation prohibition is retained and remains inexpressible
-- [~] Consume the profile in a live runner — the authority half landed
+- [x] Consume the profile in a live runner — the authority half landed
       2026-08-18 (`authorizeLiveEvidenceRun` plus `LiveEvidenceEffectLedger`:
       pre-flight refusal, per-effect authorization, one-POST-per-case, budget
       ceilings that bound rather than report, and a completeness assertion) and
@@ -93,8 +127,11 @@ enforced at authorization.
       by the ledger, bound landing-chain order) and again 2026-08-21 under ADR
       0050 (provider kind bound to the manifest, unpaid adapters refusing paid
       token rates, spend ceiling bounded by the manifest's `maxCostUsd`, plus
-      this surface's first `scripts/security-check.mjs` assertion). The case
-      executor that drives real repositories is NOT implemented
+      this surface's first `scripts/security-check.mjs` assertion). ADR 0055
+      adds the one-shot, serial, exact-resume case executor, strict completed-run
+      binding, owner-only crash-safe journal, NDJSON receipts, and stable exit
+      codes. Its offline compiled-process fault campaign passed 20/20; this is
+      implementation evidence, not permission to perform the live 3/3
 - [x] Make the pinned candidate commit reproducible on the live path — ADR 0051
       adds an optional `PrepareLandingInput.commitEpochSeconds`. A Git commit
       hashes its timestamp, so `candidate_commit_and_absent_only_branch_exact`

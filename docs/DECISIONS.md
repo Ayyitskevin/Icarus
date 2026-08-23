@@ -45,6 +45,8 @@ Decision records for the current milestone:
 
 | [0054](adr/0054-gate1-effect-approval-and-recovery-semantics.md) | Gate 1 uses one digest-bound approval for the exact four named effects, follows manifest-defined recovery, and accepts CLI presentation as equal to browser presentation | Accepted — operator decision 2026-08-23; approval tooling only, no live executor authority |
 
+| [0055](adr/0055-headless-live-evidence-executor.md) | Gate 1 uses a one-shot serial CLI over strictly bound completed runs, a crash-safe exact-resume journal, durable admission-derived effects, and NDJSON terminal receipts | Accepted — operator decision 2026-08-23; implementation candidate passed offline measurement, independent review and live 3/3 still required |
+
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.
 
