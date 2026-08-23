@@ -2367,6 +2367,101 @@ describe("loopback local workspace API", () => {
     }
     expect(persistenceSnapshot(database)).toEqual(persistenceBeforeReviewOnlyMethods);
   });
+  test("admits a loopback Vulcan draft, defaults a kindless draft to Ollama, denies the rest", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const workspaceDist = path.join(fixture.root, "workspace-dist");
+    await mkdir(workspaceDist);
+    await writeFile(path.join(workspaceDist, "index.html"), "<!doctype html>");
+    const runtime = await createIcarusRuntime(fixture.stateRoot);
+    cleanups.push(async () => runtime.close());
+    const server = await startWorkspaceServer(
+      { runtime, stateRoot: fixture.stateRoot, workspaceDist },
+      0,
+    );
+    cleanups.push(server.close);
+
+    const createdProject = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "fixture", path: fixture.repository },
+      project: {
+        name: "golden",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    expect(createdProject.status).toBe(201);
+    const projectId = String((await responseJson(createdProject)).id);
+    // One active run per project, so the Ollama-default draft needs its own.
+    const secondProject = await postJson(`${server.url}/api/projects`, {
+      repository: { name: "fixture", path: fixture.repository },
+      project: {
+        name: "second",
+        baseRef: "main",
+        sandboxImage: PYTHON_IMAGE,
+        checks: [{ id: "verify", name: "Verify", argv: ["python", "checks/verify.py"] }],
+      },
+    });
+    expect(secondProject.status).toBe(201);
+    const secondProjectId = String((await responseJson(secondProject)).id);
+
+    // Vulcan is a credential-free loopback gateway, the same boundary class as
+    // Ollama, so the workspace slice admits it by kind.
+    const vulcanDraft = await postJson(`${server.url}/api/runs`, {
+      projectId,
+      task: "Draft planned later against the loopback Vulcan gateway.",
+      targets: ["src/greeting.txt"],
+      provider: { kind: "vulcan", model: "code", baseUrl: "http://127.0.0.1:8140/v1/" },
+    });
+    expect(vulcanDraft.status).toBe(201);
+    expect(await responseJson(vulcanDraft)).toMatchObject({
+      phase: "draft",
+      state: "preparing",
+      provider: { kind: "vulcan", model: "code", locality: "loopback" },
+    });
+
+    // A draft without a kind keeps the original Ollama default, so existing
+    // browser clients are unchanged.
+    const kindlessDraft = await postJson(`${server.url}/api/runs`, {
+      projectId: secondProjectId,
+      task: "Draft planned later against the default Ollama provider.",
+      targets: ["src/greeting.txt"],
+      provider: { model: "contract-model", baseUrl: "http://127.0.0.1:11434/" },
+    });
+    expect(kindlessDraft.status).toBe(201);
+    expect(await responseJson(kindlessDraft)).toMatchObject({
+      provider: { kind: "ollama", model: "contract-model" },
+    });
+
+    // The loopback rule binds Vulcan exactly as it binds Ollama.
+    const remoteVulcan = await postJson(`${server.url}/api/runs`, {
+      projectId,
+      task: "Do not send this task remotely.",
+      targets: ["src/greeting.txt"],
+      provider: { kind: "vulcan", model: "code", baseUrl: "https://vulcan.example.invalid/v1/" },
+    });
+    expect(remoteVulcan.status).toBe(422);
+    expect(JSON.stringify(await responseJson(remoteVulcan))).toContain(
+      "WORKSPACE_REMOTE_PROVIDER_DENIED",
+    );
+
+    // Credential-bearing kinds stay out of the browser slice entirely.
+    const cloudKind = await postJson(`${server.url}/api/runs`, {
+      projectId,
+      task: "Do not admit a credential-bearing provider kind.",
+      targets: ["src/greeting.txt"],
+      provider: { kind: "openai", model: "gpt-5-mini", baseUrl: "http://127.0.0.1:8140/v1/" },
+    });
+    expect(cloudKind.status).toBe(422);
+    expect(JSON.stringify(await responseJson(cloudKind))).toContain("INVALID_REQUEST");
+
+    expect(
+      runtime.service
+        .listRuns()
+        .map((run) => run.provider.kind)
+        .sort(),
+    ).toEqual(["ollama", "vulcan"]);
+  });
   test.runIf(process.platform === "linux")(
     "routes every guarded action kind through one exact fixed-actor service identity",
     async () => {

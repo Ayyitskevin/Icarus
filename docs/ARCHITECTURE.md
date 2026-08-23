@@ -25,7 +25,7 @@ CLI ------------------------\
 React workspace -> HTTP API/                          |-- SQLite run store
                                                      |-- artifact/Git controllers
                                                      |-- deterministic context
-                                                     |-- Ollama/OpenAI/Anthropic adapters
+                                                     |-- Ollama/OpenAI/Anthropic/Vulcan adapters
                                                      `-- Docker check runner
 ```
 
@@ -369,7 +369,8 @@ visible in usage. No other productive operation receives that exception.
    filtered metadata without persisting source text or touching the checkout.
 4. Task submission persists a `preparing` run before provider work. A separate
    plan request runs the existing context/planning service with explicit
-   loopback Ollama configuration and lands at the real guarded approval state.
+   loopback Ollama or Vulcan configuration and lands at the real guarded
+   approval state.
    Linux, macOS, and Windows use the same SQLite started-operation admission
    before provider work.
 5. Restarted API processes rediscover a draft before planning and can then plan
@@ -829,11 +830,20 @@ Milestone 1 adapters:
   API version, bounded output, and one forced schema tool whose input is treated
   only as structured response transport. It does not grant provider-native tool
   authority to a run.
+- Vulcan: loopback-only OpenAI-subset `POST /v1/chat/completions` (default
+  `http://127.0.0.1:8140/v1/`). The gateway holds no credential — the loopback
+  bind is the boundary — and its closed request contract admits no
+  `response_format` or `tools` field, so the schema travels in the system
+  message and the response text faces the same downstream validators as every
+  other adapter. Every request carries `seat: "icarus"` for attribution; model
+  IDs are Vulcan's stable aliases and pass through verbatim, and hosted aliases
+  are metered by Vulcan's own budget ledger rather than by Icarus pricing.
 
 The browser narrows that provider contract: draft planning accepts only an
-explicitly configured Ollama endpoint that classifies as loopback. Remote, LAN,
-Tailscale, public, OpenAI, and other cloud planning endpoints are rejected by
-the workspace route before a draft is persisted; CLI egress policy is unchanged.
+explicitly configured Ollama or Vulcan endpoint that classifies as loopback.
+Remote, LAN, Tailscale, public, OpenAI, and other cloud planning endpoints are
+rejected by the workspace route before a draft is persisted; CLI egress policy
+is unchanged.
 
 The CLI session loop continues to use typed structured generation rather than
 provider-native tool authority. Its response schema is a closed batch of at most

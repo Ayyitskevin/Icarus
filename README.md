@@ -63,7 +63,8 @@ roadmap contracts plus repeatable quality gates. The Milestone 1 slice supplies:
 - local repository registration and project metadata;
 - deterministic pinned-tree maps and target-applicable `AGENTS.md` context;
 - an explicit persisted run state machine;
-- Ollama, OpenAI Responses, and Anthropic Messages planning adapters;
+- Ollama, OpenAI Responses, Anthropic Messages, and Vulcan chat-completions
+  planning adapters;
 - explicit cloud-context approval before remote egress;
 - a plan-digest approval step before private workspace creation or code mutation;
 - an Icarus-private Git cache and detached worktree;
