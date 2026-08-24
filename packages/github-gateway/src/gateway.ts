@@ -12,6 +12,7 @@ import {
   assertIcarusRef,
   assertObjectSha,
   assertOwner,
+  assertRepository,
   assertTitle,
   assertTreePath,
   branchNameForRef,
@@ -660,12 +661,27 @@ export class GithubGateway {
       "GitHub returned a pull request whose head is not the requested head",
       { status: response.status, responseSha256: response.bodySha256 },
     );
+    // Whether the head actually lives in THIS repository, established from the
+    // response rather than assumed from the query. The `head=<owner>:<branch>`
+    // filter scopes by head USER, not head repository, so a fork owned by the
+    // same account reaches this line too — and for a fork, maintainer
+    // modification is a real, meaningful permission rather than an
+    // inapplicable one. `full_name` carries GitHub's canonical casing while
+    // coordinates are exact-lowercase by `assertOwner`/`assertRepository`, so
+    // the response side is lowered, matching `read_actor`'s login comparison.
+    // Absent or unusable `head.repo` (a deleted head repository reports null)
+    // is NOT this repository: it fails closed into the strict branch below.
+    const headFullName = readHeadRepositoryFullName(first, response);
+    const sameRepositoryHead =
+      headFullName !== null &&
+      headFullName.toLowerCase() ===
+        `${assertOwner(coordinates.owner)}/${assertRepository(coordinates.repository)}`;
     return this.#readPullRequest(
       { ...response, value: first },
       coordinates,
       headRef,
       baseBranch,
-      true,
+      sameRepositoryHead,
     );
   }
 
@@ -748,9 +764,14 @@ export class GithubGateway {
       titleSha256: sha256Hex(title),
       bodySha256: sha256Hex(bodyText),
       markerCount: countLandingMarkers(bodyText),
-      // GitHub currently omits this field from the list endpoint for a
-      // same-repository head, where maintainer modification is not applicable.
-      // The create response must still prove the requested false value.
+      // GitHub's pull-request LIST endpoint returns the simple representation,
+      // which omits this field. Defaulting is admissible only for a head in
+      // this same repository, where maintainer modification is inapplicable and
+      // `false` is the only value it could have had. For any other head the
+      // invariant above has already refused, because there the flag is a real
+      // permission and synthesizing `false` would put an observation that was
+      // never made into a record that pins it as a literal. The create response
+      // must still prove the requested false value.
       maintainerCanModify: maintainerCanModify ?? false,
       // Reconstructed from validated inputs rather than echoed, so no upstream
       // byte reaches the receipt.
@@ -836,6 +857,23 @@ function readHeadBranch(value: unknown, response: GithubHttpResponse): string {
     { status: response.status, responseSha256: response.bodySha256 },
   );
   return ref;
+}
+
+/**
+ * The head repository's `full_name`, or null when the response does not carry a
+ * usable one. Null is a deliberate value rather than a throw: a pull request
+ * whose head repository was deleted legitimately reports `head.repo: null`, and
+ * the caller's question is only ever "is this head in the same repository",
+ * whose honest answer there is no.
+ */
+function readHeadRepositoryFullName(value: unknown, response: GithubHttpResponse): string | null {
+  const head = nestedMember(value, "head", response);
+  const repo = head.repo;
+  if (typeof repo !== "object" || repo === null) {
+    return null;
+  }
+  const fullName = (repo as Record<string, unknown>).full_name;
+  return typeof fullName === "string" && fullName.length > 0 ? fullName : null;
 }
 
 function nestedMember(
