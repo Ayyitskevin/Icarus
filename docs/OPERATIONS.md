@@ -658,6 +658,55 @@ controller directories. Before probing a large local model, verify host memory
 headroom first — loading a model that does not fit can destabilize the host,
 and the probe does not check for room.
 
+## Model comparisons
+
+`icarus bench compare --target PROVIDER:MODEL [--target ...] [--kind KIND ...]`
+runs one probe battery across several models and prints a single
+schema-versioned comparison document (`schemaVersion: 1`). It is measurement
+only: the same blast radius as the probes it composes — no repository code, no
+worktree or sandbox, no approval or grant. Live code-change benchmarking is
+deliberately **not** here; that requires its own eval-scoped execution grant,
+because an "approve everything for the benchmark" flag would be exactly the
+digest-unbound authority widening this repository refuses elsewhere.
+
+The document exists to make rows COMPARABLE, which is a stronger claim than
+collecting them. One `ProbeRequest` is built per kind and applied to every
+target, recorded once in `requests`, and each row is checked against the
+request it actually ran; a row that answered a different question raises
+`BENCH_REQUEST_DRIFT` and the whole document is refused rather than emitted
+with a footnote. This is the defect the packet exists to remove: one fleet model
+was recorded at five different token rates across four hand-rolled harnesses
+because none of them wrote down what it had asked.
+
+- `--target` is `<provider>:<model>`, split on the FIRST colon — provider kinds
+  contain none and model names often do (`ollama:qwen3.8:27b`). Base URLs
+  default per kind; `--base-url` overrides for the whole battery and is refused
+  when the targets span more than one provider kind, because one URL cannot be
+  correct for two providers and applying it to both would silently point half
+  the document at the wrong machine. Every target's resolved `baseUrl` is
+  recorded in the document, so a reader can always see which machine answered.
+- `--kind` repeats and defaults to every supported probe kind. An unknown kind
+  is an operator error and refuses immediately rather than becoming a fabricated
+  failed row beside real results.
+- A duplicate target refuses: printed twice, one measurement reads as two
+  independent measurements agreeing.
+- Targets run **sequentially, never in parallel**. Concurrent local model calls
+  contend for one accelerator, so a parallel battery measures the contention
+  instead of the models — the exact harness artifact this command removes.
+- Every target produces a row. A target that fails is recorded as `failed` with
+  its code and detail, never dropped: a document reporting "two models measured"
+  while silently omitting the third reads as complete, and the missing model is
+  usually the interesting one. `attempted`, `measured`, `unsupported` and
+  `failed` are all reported so an empty result is never read as "all clear"
+  without its denominator.
+- A target whose every attempt failed is `failed`, not `measured`, even though
+  the underlying probe returns a well-formed result — zero successful attempts
+  is not a measurement, and averaging over nothing is how a false number gets
+  published. The probe result stays attached so the reason remains inspectable.
+
+Host memory headroom is the operator's responsibility here exactly as it is for
+a single probe: a battery loads each target in turn and does not check for room.
+
 ## GitHub gateway (Packet 4a package; S2b-ii coordinator wiring)
 
 `packages/github-gateway` is imported by `@icarus/core`'s landing coordinator.
