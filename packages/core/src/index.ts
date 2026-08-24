@@ -198,6 +198,20 @@ export {
   readableManifestDigest,
 } from "./policy.js";
 export type {
+  BenchComparisonV1,
+  BenchRowV1,
+  BenchRuntime,
+  BenchTargetV1,
+  RunBenchComparisonOptions,
+} from "./bench.js";
+export {
+  assertBenchKinds,
+  assertBenchTargets,
+  assertRowAnsweredTheSharedRequest,
+  BENCH_COMPARISON_SCHEMA_VERSION,
+  runBenchComparison,
+} from "./bench.js";
+export type {
   ContextCorpus,
   ProbeAggregate,
   ProbeAttempt,

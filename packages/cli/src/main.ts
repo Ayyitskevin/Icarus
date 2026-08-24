@@ -22,10 +22,13 @@ import {
   type CheckProfile,
   canonicalJsonLine,
   createChangeHandoffExportResult,
+  type BenchTargetV1,
   createGateway,
   createIcarusRuntime,
   createProbeRequest,
   createProviderConfig,
+  PROBE_KINDS,
+  runBenchComparison,
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
   decodeLiveEvidenceCaseRunMapV1,
@@ -563,6 +566,7 @@ function usage(): never {
       "icarus run handoff-export RUN --correlation-id ID [--external-task-ref REF] --expected-preview-sha256 SHA --output-dir DIR",
       "icarus handoff verify --input FILE",
       "icarus handoff inspect --input FILE",
+      "icarus bench compare --target PROVIDER:MODEL [--target ...] [--kind KIND ...] [--base-url URL] [--repeat N]",
       "icarus live-evidence digest --input PROFILE_DRAFT",
       "icarus live-evidence approve --input PROFILE_DRAFT --manifest MANIFEST --actor ACTOR",
       "icarus live-evidence inspect --input APPROVED_PROFILE --manifest MANIFEST",
@@ -634,6 +638,108 @@ async function dispatchProbe(args: readonly string[], signal: AbortSignal): Prom
   }
   const provider = createProviderConfig({ kind, model, baseUrl });
   print(await runProbe(createGateway(provider, process.env), request, {}, signal));
+  return true;
+}
+
+const PROBE_PROVIDER_KINDS = ["ollama", "openai", "anthropic", "vulcan"] as const;
+
+type ProbeProviderKind = (typeof PROBE_PROVIDER_KINDS)[number];
+
+const PROBE_DEFAULT_BASE_URLS: Record<ProbeProviderKind, string> = {
+  ollama: "http://127.0.0.1:11434/",
+  openai: "https://api.openai.com/v1/",
+  anthropic: "https://api.anthropic.com/v1/",
+  vulcan: "http://127.0.0.1:8140/v1/",
+};
+
+/**
+ * `--target <provider>:<model>`, split on the FIRST colon only.
+ *
+ * Provider kinds are a closed set containing no colon, and model names very
+ * often do (`qwen3.8:27b`), so first-colon is the only split that reads both
+ * halves correctly. Splitting on the last colon would silently retarget
+ * `ollama:qwen3.8:27b` at a provider named `ollama:qwen3.8`.
+ *
+ * Base URL defaults per kind. `--base-url` overrides it for the whole battery
+ * and is refused when the targets span more than one provider kind, because one
+ * URL cannot be correct for two different providers and silently applying it to
+ * both would point half the document at the wrong machine.
+ */
+function parseBenchTarget(raw: string, baseUrlOverride: string | undefined): BenchTargetV1 {
+  const separator = raw.indexOf(":");
+  if (separator <= 0 || separator === raw.length - 1) {
+    fail("INVALID_BENCH_TARGET", `--target must be <provider>:<model>, got ${raw}`);
+  }
+  const kind = raw.slice(0, separator);
+  const model = raw.slice(separator + 1);
+  if (!(PROBE_PROVIDER_KINDS as readonly string[]).includes(kind)) {
+    fail(
+      "INVALID_BENCH_TARGET",
+      `--target provider must be one of ${PROBE_PROVIDER_KINDS.join(", ")}`,
+    );
+  }
+  return {
+    kind,
+    baseUrl: baseUrlOverride ?? PROBE_DEFAULT_BASE_URLS[kind as ProbeProviderKind],
+    model,
+  };
+}
+
+async function dispatchBench(args: readonly string[], signal: AbortSignal): Promise<boolean> {
+  const [group, action, ...rest] = args;
+  if (group !== "bench" || action !== "compare") {
+    return false;
+  }
+  const options = parseOptions(rest, [
+    "--target",
+    "--kind",
+    "--base-url",
+    "--repeat",
+    "--max-output-tokens",
+    "--timeout-ms",
+    "--target-input-tokens",
+  ]);
+  noPositionals(options);
+  const rawTargets = options.values.get("--target") ?? [];
+  if (rawTargets.length === 0) {
+    fail("INVALID_BENCH_TARGET", "bench compare needs at least one --target <provider>:<model>");
+  }
+  const baseUrlOverride = optional(options, "--base-url");
+  if (baseUrlOverride !== undefined) {
+    const kinds = new Set(rawTargets.map((raw) => raw.slice(0, Math.max(raw.indexOf(":"), 0))));
+    if (kinds.size > 1) {
+      fail(
+        "INVALID_BENCH_TARGET",
+        "--base-url applies to every target, so it cannot be used with mixed provider kinds",
+      );
+    }
+  }
+  const targets = rawTargets.map((raw) => parseBenchTarget(raw, baseUrlOverride));
+  const kinds = options.values.get("--kind") ?? [...PROBE_KINDS];
+  print(
+    await runBenchComparison({
+      targets,
+      kinds,
+      request: {
+        repeat: numberOption(options, "--repeat"),
+        maxOutputTokens: numberOption(options, "--max-output-tokens"),
+        timeoutMs: numberOption(options, "--timeout-ms"),
+        targetInputTokens: numberOption(options, "--target-input-tokens") ?? null,
+      },
+      // Constructed per row so a credential or pricing policy failure for one
+      // target is that row's recorded failure, not a refusal of the battery.
+      gatewayFor: (target) =>
+        createGateway(
+          createProviderConfig({
+            kind: target.kind as ProbeProviderKind,
+            model: target.model,
+            baseUrl: target.baseUrl,
+          }),
+          process.env,
+        ),
+      signal,
+    }),
+  );
   return true;
 }
 
@@ -991,6 +1097,7 @@ export async function runCliMain(options: CliMainOptions = {}): Promise<void> {
     const args = options.args ?? process.argv.slice(2);
     if (dispatchFileOnlyHandoff(args)) return;
     if (await dispatchProbe(args, controller.signal)) return;
+    if (await dispatchBench(args, controller.signal)) return;
     assertLandingMutationPlatform(args, options.platform ?? process.platform);
     if (dispatchFileOnlyLiveEvidence(args, options.now ?? (() => new Date().toISOString()))) return;
     const root = stateRoot();
