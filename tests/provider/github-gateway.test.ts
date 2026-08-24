@@ -32,7 +32,13 @@ function pullRequestEntry(overrides: Record<string, unknown> = {}): Record<strin
     title: "Icarus candidate",
     body: "evidence",
     maintainer_can_modify: false,
-    head: { ref: `icarus/${runId}`, sha: commitSha },
+    head: {
+      ref: `icarus/${runId}`,
+      sha: commitSha,
+      // GitHub reports the head repository; Icarus's own heads live in the
+      // repository being landed into. Tests that vary this say so explicitly.
+      repo: { full_name: `${coordinates.owner}/${coordinates.repository}` },
+    },
     base: { ref: "main", sha: treeSha },
     ...overrides,
   };
@@ -351,6 +357,91 @@ describe("GithubGateway HTTP contract", () => {
     const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
 
     expect(receipt).toMatchObject({ number: 10, maintainerCanModify: false });
+  });
+
+  it("still normalizes when GitHub reports the head repository in canonical casing", async () => {
+    // Coordinates are exact-lowercase; `full_name` echoes the repository's own
+    // casing. Comparing them raw would classify a same-repository head as a
+    // fork and refuse every real reconciliation.
+    const entry = pullRequestEntry({
+      number: 11,
+      head: {
+        ref: `icarus/${runId}`,
+        sha: commitSha,
+        repo: { full_name: "AyyitsKevin/Icarus" },
+      },
+    });
+    delete entry.maintainer_can_modify;
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, [entry]);
+    });
+
+    const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
+
+    expect(receipt).toMatchObject({ number: 11, maintainerCanModify: false });
+  });
+
+  it("refuses to synthesize the maintainer flag for a fork head", async () => {
+    // The `head=<owner>:<branch>` filter scopes by head USER, so a fork owned by
+    // the same account reaches this path. There maintainer modification is a
+    // real permission, and defaulting it to false would record an observation
+    // that was never made in a field the landing record pins as a literal.
+    const entry = pullRequestEntry({
+      number: 12,
+      head: {
+        ref: `icarus/${runId}`,
+        sha: commitSha,
+        repo: { full_name: `${coordinates.owner}/icarus-fork` },
+      },
+    });
+    delete entry.maintainer_can_modify;
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, [entry]);
+    });
+
+    await expectCode(
+      gatewayFor(server).readPullRequestByHead(coordinates, ref, "main"),
+      "GITHUB_PROTOCOL_ERROR",
+    );
+  });
+
+  it("refuses to synthesize the maintainer flag when the head repository is gone", async () => {
+    // A deleted head repository reports head.repo: null. "Is this head in the
+    // same repository" has no affirmative answer there, so it fails closed.
+    const entry = pullRequestEntry({
+      number: 13,
+      head: { ref: `icarus/${runId}`, sha: commitSha, repo: null },
+    });
+    delete entry.maintainer_can_modify;
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, [entry]);
+    });
+
+    await expectCode(
+      gatewayFor(server).readPullRequestByHead(coordinates, ref, "main"),
+      "GITHUB_PROTOCOL_ERROR",
+    );
+  });
+
+  it("still reports a genuine maintainer flag from a fork head rather than defaulting it", async () => {
+    // The relaxation must not swallow a real value: a boolean is carried
+    // through untouched regardless of which repository the head is in.
+    const entry = pullRequestEntry({
+      number: 14,
+      maintainer_can_modify: true,
+      head: {
+        ref: `icarus/${runId}`,
+        sha: commitSha,
+        repo: { full_name: `${coordinates.owner}/icarus-fork` },
+      },
+    });
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, [entry]);
+    });
+
+    const receipt = await gatewayFor(server).readPullRequestByHead(coordinates, ref, "main");
+
+    expect(receipt).toMatchObject({ number: 14, maintainerCanModify: true });
   });
 
   it("still requires the create response to confirm the maintainer flag", async () => {
