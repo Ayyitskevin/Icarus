@@ -30,10 +30,16 @@ class FakeGateway implements ModelGateway {
   readonly #fail: boolean;
   readonly #onCall: (() => void) | undefined;
   readonly #hold: (() => Promise<void>) | undefined;
+  readonly #outputTokens: (() => number) | undefined;
 
   constructor(
     model: string,
-    options: { fail?: boolean; onCall?: () => void; hold?: () => Promise<void> } = {},
+    options: {
+      fail?: boolean;
+      onCall?: () => void;
+      hold?: () => Promise<void>;
+      outputTokens?: () => number;
+    } = {},
   ) {
     this.config = createProviderConfig({
       kind: "ollama",
@@ -43,6 +49,7 @@ class FakeGateway implements ModelGateway {
     this.#fail = options.fail ?? false;
     this.#onCall = options.onCall;
     this.#hold = options.hold;
+    this.#outputTokens = options.outputTokens;
   }
 
   async generateStructured(
@@ -55,7 +62,7 @@ class FakeGateway implements ModelGateway {
     // The gateway returns TEXT; the probe parses it against its own schema.
     return {
       text: JSON.stringify({ answer: "ok", start: "0", middle: "0", end: "0" }),
-      usage: usage(),
+      usage: usage(this.#outputTokens === undefined ? {} : { outputTokens: this.#outputTokens() }),
     };
   }
 }
@@ -255,6 +262,49 @@ describe("runBenchComparison", () => {
     // corpus anchors derived from it, are therefore byte-identical.
     expect(doc.rows.map((row) => row.result?.probeId)).toEqual([shared, shared]);
     expect(doc.measured).toBe(2);
+  });
+
+  it("marks a row whose attempts generated wildly different output lengths", async () => {
+    // The sixth honesty property, held for it by cross-seat review. A rate is
+    // tokens over wall clock, and wall clock carries a fixed per-request cost a
+    // short generation cannot amortise — so a mean over [13, 512] is part decode
+    // speed and part startup overhead, with nothing in the number saying so.
+    let call = 0;
+    const doc = await runBenchComparison({
+      targets: [TARGET_A],
+      kinds: ["throughput"],
+      request: { repeat: 4 },
+      gatewayFor: () =>
+        new FakeGateway("model-a", {
+          // 512, 13, 512, 13 — the shape observed live from a real model.
+          outputTokens: () => {
+            call += 1;
+            return call % 2 === 1 ? 512 : 13;
+          },
+        }),
+      runtime: RUNTIME,
+    });
+
+    const spread = doc.rows[0]?.outputSpread;
+    expect(spread).toEqual({ minOutputTokens: 13, maxOutputTokens: 512, uniform: false });
+    // It FLAGS rather than corrects: the row still measures, the mean is still
+    // reported, and the reader is told not to trust it as throughput.
+    expect(doc.rows[0]?.outcome).toBe("measured");
+  });
+
+  it("marks a row with steady output lengths as uniform", async () => {
+    const doc = await runBenchComparison({
+      targets: [TARGET_A],
+      kinds: ["throughput"],
+      request: { repeat: 3 },
+      gatewayFor: () => new FakeGateway("model-a", { outputTokens: () => 512 }),
+      runtime: RUNTIME,
+    });
+    expect(doc.rows[0]?.outputSpread).toEqual({
+      minOutputTokens: 512,
+      maxOutputTokens: 512,
+      uniform: true,
+    });
   });
 
   it("records interrupted rows rather than truncating the document", async () => {

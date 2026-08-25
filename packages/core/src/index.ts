@@ -199,6 +199,7 @@ export {
 } from "./policy.js";
 export type {
   BenchComparisonV1,
+  BenchOutputSpreadV1,
   BenchRowV1,
   BenchRuntime,
   BenchTargetV1,

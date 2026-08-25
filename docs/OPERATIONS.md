@@ -699,6 +699,14 @@ because none of them wrote down what it had asked.
   usually the interesting one. `attempted`, `measured`, `unsupported` and
   `failed` are all reported so an empty result is never read as "all clear"
   without its denominator.
+- Each row carries an `outputSpread` over its successful attempts. A rate is
+  output tokens over wall clock, and wall clock includes a fixed per-request
+  cost a short generation cannot amortise, so a row whose attempts generated 13
+  and 512 tokens yields a mean that is part decode speed and part startup
+  overhead. `uniform: false` says so; **that row's mean is not a throughput
+  figure.** It flags and does not correct — recomputing a "clean" mean would be
+  the tool deciding which attempts count, and the per-attempt data is already in
+  the document for a reader who wants to.
 - A target whose every attempt failed is `failed`, not `measured`, even though
   the underlying probe returns a well-formed result — zero successful attempts
   is not a measurement, and averaging over nothing is how a false number gets
