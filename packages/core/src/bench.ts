@@ -52,6 +52,30 @@ export interface BenchTargetV1 {
   readonly model: string;
 }
 
+/**
+ * Whether a row's successful attempts are comparable to each other.
+ *
+ * A rate is output tokens over wall clock, and wall clock includes a fixed
+ * per-request cost that a short generation cannot amortise. `runProbe` counts
+ * any positive output as a successful attempt and averages every reported rate,
+ * so a row whose attempts generated 13 and 512 tokens produces a mean that is
+ * part decode speed and part startup overhead — and nothing in the number says
+ * so. Measured live: one model averaged 10.87 tok/s across attempts of
+ * [48, 48, 512, 13, 512] tokens, while its two full-length attempts alone ran
+ * 12.16 and 12.18 — level with the model it appeared 11% slower than.
+ *
+ * This FLAGS, it does not correct. Recomputing a "clean" mean would be this
+ * module deciding which attempts count, which is exactly the editorial move
+ * that makes a benchmark unfalsifiable. The reader gets the spread and the
+ * verdict, and can go to the per-attempt data the document already carries.
+ */
+export interface BenchOutputSpreadV1 {
+  readonly minOutputTokens: number;
+  readonly maxOutputTokens: number;
+  /** False when the shortest successful attempt is under half the longest. */
+  readonly uniform: boolean;
+}
+
 /** One (target, kind) cell of the comparison. Every cell attempted produces a row,
  * including failures — see `runBenchComparison` for why none are dropped. */
 export interface BenchRowV1 {
@@ -62,6 +86,9 @@ export interface BenchRowV1 {
   readonly outcome: "measured" | "unsupported" | "failed";
   readonly failureCode: string | null;
   readonly failureDetail: string | null;
+  /** Null when no attempt succeeded or the provider reported no token counts.
+   * When `uniform` is false, this row's mean rate is NOT a throughput figure. */
+  readonly outputSpread: BenchOutputSpreadV1 | null;
   readonly result: ProbeResultV1 | null;
 }
 
@@ -111,6 +138,27 @@ export interface RunBenchComparisonOptions {
 
 function invalid(message: string): never {
   throw new IcarusError("INVALID_BENCH_REQUEST", message);
+}
+
+/** Shortest successful generation under half the longest is the threshold: it
+ * is deliberately loose, because the goal is to catch the case where startup
+ * cost dominates one sample and not another, not to police ordinary variance. */
+const UNIFORM_OUTPUT_RATIO = 0.5;
+
+function outputSpread(result: ProbeResultV1 | null): BenchOutputSpreadV1 | null {
+  if (result === null) return null;
+  const lengths = result.attempts
+    .filter((attempt) => attempt.ok)
+    .map((attempt) => attempt.usage.outputTokens)
+    .filter((value): value is number => value !== null && value > 0);
+  if (lengths.length === 0) return null;
+  const min = Math.min(...lengths);
+  const max = Math.max(...lengths);
+  return {
+    minOutputTokens: min,
+    maxOutputTokens: max,
+    uniform: min >= max * UNIFORM_OUTPUT_RATIO,
+  };
 }
 
 function targetKey(target: BenchTargetV1): string {
@@ -254,6 +302,7 @@ export async function runBenchComparison(
           outcome: "failed",
           failureCode: "BENCH_INTERRUPTED",
           failureDetail: "interrupted before this row ran",
+          outputSpread: null,
           result: null,
         });
         continue;
@@ -266,6 +315,7 @@ export async function runBenchComparison(
           outcome: "unsupported",
           failureCode: null,
           failureDetail: null,
+          outputSpread: null,
           result: unsupportedProbeResult(shared, target, runtime),
         });
         continue;
@@ -297,6 +347,7 @@ export async function runBenchComparison(
             ? (result.attempts.find((attempt) => !attempt.ok)?.detail ??
               "every probe attempt failed")
             : null,
+          outputSpread: outputSpread(result),
           result,
         });
       } catch (error) {
@@ -310,6 +361,7 @@ export async function runBenchComparison(
           outcome: "failed",
           failureCode: error instanceof IcarusError ? error.code : "BENCH_TARGET_FAILED",
           failureDetail: errorMessage(error),
+          outputSpread: null,
           result: null,
         });
       }
