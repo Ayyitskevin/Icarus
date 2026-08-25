@@ -24,6 +24,7 @@ import {
   createChangeHandoffExportResult,
   type BenchTargetV1,
   createGateway,
+  createHeadlessHistoryLines,
   createIcarusRuntime,
   createProbeRequest,
   createProviderConfig,
@@ -39,10 +40,12 @@ import {
   FileLiveEvidenceJournalStore,
   type Gate1MigrationToken,
   type GitHubLandingProfileV1,
+  type HeadlessHostProviderProfileV1,
   IcarusError,
   type IcarusRuntime,
   inspectChangeHandoffDocuments,
   isUnsupportedProbeKind,
+  type JsonValue,
   LANDING_LEDGER_MIGRATION,
   liveEvidenceProfileApprovalDigest,
   migrateGate1Schema,
@@ -144,6 +147,18 @@ function optional(options: ParsedOptions, name: string): string | undefined {
     fail("INVALID_ARGUMENT", `${name} may be provided at most once`);
   }
   return values[0];
+}
+
+function boundedJsonOption(options: ParsedOptions, name: string, maximumBytes: number): unknown {
+  const value = required(options, name);
+  if (Buffer.byteLength(value, "utf8") > maximumBytes) {
+    fail("INVALID_ARGUMENT", `${name} exceeds its byte ceiling`);
+  }
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    fail("INVALID_ARGUMENT", `${name} must be valid JSON`);
+  }
 }
 
 function numberOption(options: ParsedOptions, name: string): number | undefined {
@@ -559,9 +574,11 @@ function usage(): never {
       "icarus run plan --project NAME --task TEXT --target PATH [--target PATH ...] --provider ollama|openai|anthropic|vulcan --model MODEL [provider options]",
       "icarus run approve-egress RUN --context-sha SHA --actor ACTOR",
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
+      "icarus run approve-headless RUN --plan-sha SHA --actor ACTOR --profile-json JSON --provider-catalog-json JSON",
+      "icarus run reconcile-headless RUN",
       "icarus run status RUN",
       "icarus run list [--project NAME]",
-      "icarus run history RUN",
+      "icarus run history RUN [--format json|jsonl]",
       "icarus run handoff-preview RUN --correlation-id ID [--external-task-ref REF]",
       "icarus run handoff-export RUN --correlation-id ID [--external-task-ref REF] --expected-preview-sha256 SHA --output-dir DIR",
       "icarus handoff verify --input FILE",
@@ -989,6 +1006,50 @@ async function dispatch(
     );
     return;
   }
+  if (action === "approve-headless") {
+    const options = parseOptions(rest, [
+      "--plan-sha",
+      "--actor",
+      "--profile-json",
+      "--provider-catalog-json",
+    ]);
+    const providerCatalog = boundedJsonOption(options, "--provider-catalog-json", 256 * 1024);
+    if (!Array.isArray(providerCatalog)) {
+      fail("INVALID_ARGUMENT", "--provider-catalog-json must be a JSON array");
+    }
+    const result = await runtime.service.approveHeadlessPlan(
+      oneRunId(options),
+      required(options, "--plan-sha"),
+      required(options, "--actor"),
+      boundedJsonOption(options, "--profile-json", 256 * 1024),
+      providerCatalog as readonly HeadlessHostProviderProfileV1[],
+      signal,
+    );
+    const history = runtime.service.history(result.run.id);
+    const lines = createHeadlessHistoryLines(
+      history.run.id,
+      publicRun(history.run) as JsonValue,
+      history.approvals,
+      history.events,
+    );
+    for (const line of lines) process.stdout.write(canonicalJsonLine(line));
+    process.exitCode = result.settlement.exitCode;
+    return;
+  }
+  if (action === "reconcile-headless") {
+    const options = parseOptions(rest, []);
+    const result = await runtime.service.reconcileHeadlessWorker(oneRunId(options));
+    const history = runtime.service.history(result.run.id);
+    const lines = createHeadlessHistoryLines(
+      history.run.id,
+      publicRun(history.run) as JsonValue,
+      history.approvals,
+      history.events,
+    );
+    for (const line of lines) process.stdout.write(canonicalJsonLine(line));
+    process.exitCode = result.settlement.exitCode;
+    return;
+  }
   if (action === "status") {
     const options = parseOptions(rest, [], ["--json"]);
     print(publicRun(runtime.service.getRun(oneRunId(options))));
@@ -1001,8 +1062,22 @@ async function dispatch(
     return;
   }
   if (action === "history") {
-    const options = parseOptions(rest, []);
+    const options = parseOptions(rest, ["--format"]);
+    const format = optional(options, "--format") ?? "json";
+    if (format !== "json" && format !== "jsonl") {
+      fail("INVALID_ARGUMENT", "--format must be json or jsonl");
+    }
     const history = runtime.service.history(oneRunId(options));
+    if (format === "jsonl") {
+      const lines = createHeadlessHistoryLines(
+        history.run.id,
+        publicRun(history.run) as JsonValue,
+        history.approvals,
+        history.events,
+      );
+      for (const line of lines) process.stdout.write(canonicalJsonLine(line));
+      return;
+    }
     print({
       run: publicRun(history.run),
       approvals: history.approvals,

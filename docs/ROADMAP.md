@@ -26,6 +26,12 @@ The current sequence is:
 | 5 | Supabase change packs | isolated migrations/RLS/Auth/Storage/Realtime/functions, rollback/restore and smoke evidence, separate production approval |
 | 6 | Delivery and scale | five concurrent branch-pinned tasks, idempotent worker recovery, signed evidence, explicit public-effect approvals |
 
+## Headless workspace harness (active shift)
+
+ADR 0044 establishes a headless-first workstream for Mickey-like AI workspaces. Icarus remains the authority kernel. H0 is the versioned, checksum-terminated `icarus.headless.history.v1` JSONL trajectory export. H1's offline contract is implemented under proposed ADR 0046: strict source profiles select a host provider ID, an explicit closed-tool subset, tightening budgets, JSONL output, and a one-task/no-child/no-schedule worker policy; host resolution refuses selections outside the project ceiling or approved plan and emits a mapping-sensitive digest. H2a's pure contract is implemented under proposed ADR 0047: it recomputes the complete persisted plan authority, requires exact plan and remote-egress approvals, rejects provider remapping, and emits a run-specific binding digest. The local H2b candidate under proposed ADR 0048 now approves and reconstructs H2a before the first effect under the existing run lease, applies tighter cumulative ceilings and the session tool filter, records durable start/settlement events, emits checksum-terminated JSONL, and returns explicit non-success exit codes. Independent H2b review passed locally. The local H3a candidate under proposed ADR 0049 now closes a killed worker's open operation and event tail under the run lease, emits a distinct interruption settlement, remains idempotent, and blocks ordinary unbound resume. H3b binding/effect reconstruction, risky-change research, live-provider measurement, H4 isolated children, H5 external/research adapters, and any Mickey deployment remain open.
+
+DeepSeek Harness is a reference implementation and optional benchmark worker, not a replacement or default dependency. The full comparison and exit gates are in [`DEEPSEEK_HARNESS_COMPARISON.md`](DEEPSEEK_HARNESS_COMPARISON.md). This shift does not absorb Gate 1 remote-mutation work or authorize a Mickey deployment.
+
 Gate C2 begins only after Gates 1–3 and the read-only Council evidence. It pulls
 the single-operator collaboration contracts in ADR 0033 and ADR 0038 forward.
 ADR 0034 retains Athena task envelopes and standing-policy pre-approvals for

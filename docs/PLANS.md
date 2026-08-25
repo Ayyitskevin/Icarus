@@ -1,5 +1,103 @@
 # Implementation plans
 
+## Headless H2b bounded worker candidate
+
+Status: locally implemented and settlement-hardened under proposed ADR 0048;
+the full local gate and non-author review passed. Risky-change research,
+live-provider measurement, and deployment remain open.
+
+- [x] Add an approve-and-run entry point that holds the existing Linux lease
+      across ordinary plan approval, H2a reconstruction, first effect, and
+      settlement.
+- [x] Apply the profile's tighter cumulative `SunCeiling` in service
+      calculations and ordinary SQLite operation admission; refuse widened or
+      already-exceeded ceilings.
+- [x] Apply the profile tool list as an additional metered ADR 0026 session
+      filter without creating grants.
+- [x] Persist exactly one start and quiescent settlement lifecycle; emit the
+      checksum-terminated H0 JSONL trajectory and explicit exit semantics.
+- [x] Derive explicit failed/unavailable verification errors so non-passing
+      initial checks settle durably with exit 1, while unexplained terminal
+      failures remain fail-closed incomplete settlements.
+- [x] Measure 14 realistic local cases plus focused unit/security contracts in
+      `docs/evals/2026-08-21-headless-worker.md`.
+- [x] Re-run the full local release gate after settlement hardening: 1,000
+      unit/provider, 171 integration, 181 security, and 7 supported offline
+      evaluation cases passed; three Gate 1 live-evidence cases remained
+      explicitly not run.
+- [x] Obtain one non-author round-table review of the hardened candidate; GLM
+      returned PASS and its non-blocking explicit rolled-back-state test was
+      added.
+- [x] H3a: reconcile a killed worker's open operation and append a fail-closed
+      interruption settlement without truncation or execution replay (ADR 0049
+      local candidate).
+- [ ] H3b: reconstruct the exact binding and effect receipt before
+      exactly-once resume/fork after process death.
+- [ ] H4: isolated child runs with depth, write-set, tool, and budget limits.
+- [ ] H5: separately governed external/research adapters. SearXNG and DeepAPI
+      are not part of H2b.
+
+## Headless H3a crash-tail reconciliation candidate
+
+Status: locally implemented under proposed ADR 0049; full local gate and
+non-author review passed. Risky-change research, live-provider measurement,
+and human shipping approval remain open.
+
+- [x] Parse one start/settlement lifecycle from the append-only event stream and
+      reject malformed duplicate or out-of-order tails.
+- [x] Add explicit, lease-held `run reconcile-headless RUN` recovery.
+- [x] Reuse conservative ordinary-operation interruption accounting before
+      worker settlement.
+- [x] Keep `icarus.headless.worker.v1` closed; use the distinct
+      `icarus.headless.worker-interruption.v1` payload for crash settlement.
+- [x] Make repeated recovery idempotent and preserve checksum-terminated H0
+      history.
+- [x] Refuse ordinary resume before any resume event or execution effect.
+- [x] Kill a real CLI subprocess during a loopback provider operation and prove
+      one interruption, one settlement, no third provider request, and unchanged
+      source Git state.
+- [x] Run the full local gate: 1,005 unit/provider, 172 integration, 183
+      security, and 7 supported offline evaluation cases passed; three Gate 1
+      live-evidence cases remained explicitly not run.
+- [x] Obtain one non-author review; GPT-5.6 Sol Max returned PASS after direct
+      malformed-history probes and the bounded-worker integration suite.
+- [ ] H3b: reconstruct and compare binding/provider/workspace/effect identity,
+      then resume only a replay-safe or host-reconciled stage.
+
+## Headless H3b reconstruction plan
+
+Decision: the first H3b slice is evidence-only reconstruction and
+classification. It grants no continuation, replay, fork, provider, sandbox,
+workspace, Git, or model-tool authority.
+
+Classification policy is a closed, code-owned mapping over durable
+operation/event/receipt evidence. Provider, adapter, or controller assertions
+are evidence only and cannot authorize continuation. Unknown operation kinds,
+missing receipts, extra events, or contradictory identities classify as
+`ambiguous`. This slice adds no policy table or schema migration.
+
+Reconstruction is a pure read-only projection. Running it appends no event,
+creates or settles no operation, records no resume intent, and changes no
+SQLite state. Repeated reconstruction over the same durable bytes must return
+byte-identical canonical output.
+
+The closed evidence labels are `no_effect`, `durably_settled`, and `ambiguous`.
+They describe persisted history only. Neither positive label grants replay,
+resume, fork, or any other execution authority.
+
+- [ ] Recompute the complete H2a authority binding from current persisted inputs
+      and require the original H3a lifecycle binding digest exactly.
+- [ ] Reconstruct durable provider/workspace/effect identity without invoking
+      any effectful adapter or controller.
+- [ ] Classify each crash-tail effect as `no_effect`, `durably_settled`, or
+      `ambiguous`; fail closed on missing, contradictory, or extra evidence.
+- [ ] Emit a bounded, strict, metadata-only reconstruction result suitable for
+      later H3b continuation design but not itself usable as authority.
+- [ ] Prove with malformed-history and crash fixtures that classification never
+      records resume intent or executes an effect.
+- [ ] Keep exactly-once continuation in a later H3b slice after this evidence
+      boundary passes the full local gate and one non-author review.
+
 ## Accepted Gate 1 Slice 1 offline benchmark checkpoint
 
 Status: the versioned, deterministic, zero-external-effect offline benchmark

@@ -112,6 +112,63 @@ export {
   LANDING_LEDGER_SCHEMA,
   migrateGate1Schema,
 } from "./gate1-schema.js";
+export {
+  createHeadlessHistoryLines,
+  HEADLESS_HISTORY_SCHEMA,
+  type HeadlessHistoryApprovalLine,
+  type HeadlessHistoryContentLine,
+  type HeadlessHistoryEndLine,
+  type HeadlessHistoryEventLine,
+  type HeadlessHistoryLine,
+  type HeadlessHistoryRunLine,
+  headlessHistoryContentSha256,
+} from "./headless-history.js";
+export type {
+  HeadlessExecutionApprovalV1,
+  HeadlessExecutionBindingAuthorityV1,
+  HeadlessExecutionBindingV1,
+} from "./headless-binding.js";
+export {
+  bindHeadlessExecutionV1,
+  HEADLESS_EXECUTION_BINDING_SCHEMA,
+} from "./headless-binding.js";
+export type {
+  HeadlessHostProviderProfileV1,
+  HeadlessProfileAuthorityV1,
+  HeadlessProfileBudgetsV1,
+  HeadlessProfileOutputV1,
+  HeadlessProfileV1,
+  HeadlessProfileWorkerPolicyV1,
+  ResolvedHeadlessProfileV1,
+} from "./headless-profile.js";
+export {
+  decodeHeadlessProfileV1,
+  HEADLESS_PROFILE_RESOLUTION_SCHEMA,
+  HEADLESS_PROFILE_SCHEMA_VERSION,
+  headlessProfileDigest,
+  resolveHeadlessProfileV1,
+} from "./headless-profile.js";
+export type {
+  ActiveHeadlessExecutionV1,
+  DurableHeadlessWorkerSettlementV1,
+  HeadlessWorkerExecutionV1,
+  HeadlessWorkerExitCodeV1,
+  HeadlessWorkerLifecycleV1,
+  HeadlessWorkerOutcomeV1,
+  HeadlessWorkerReconciliationV1,
+  HeadlessWorkerSettlementV1,
+  InterruptedHeadlessWorkerSettlementV1,
+} from "./headless-worker.js";
+export {
+  assertHeadlessWorkerBudgetAvailable,
+  createInterruptedHeadlessWorkerSettlementV1,
+  createHeadlessWorkerSettlementV1,
+  HEADLESS_WORKER_INTERRUPTION_SCHEMA,
+  HEADLESS_WORKER_SCHEMA,
+  headlessWorkerSettledPayload,
+  headlessWorkerStartedPayload,
+  inspectHeadlessWorkerLifecycleV1,
+} from "./headless-worker.js";
 export type {
   LandingProfileRecordV1,
   LandingRunProjectionSnapshotV1,
@@ -313,6 +370,7 @@ export type {
   CheckpointCardBody,
   EventRecord,
   EventSummaryRecord,
+  JsonValue,
   LandingReceiptPresentationV1,
   ModelCapabilities,
   PatchsetActionStatus,

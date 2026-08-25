@@ -140,6 +140,8 @@ export interface SessionLoopDeps {
    */
   readonly callProvider: (prompt: string) => Promise<unknown>;
   readonly toolContext: ToolContext;
+  /** Optional headless-profile filter. The plan grant remains independently required. */
+  readonly enabledTools?: ReadonlySet<ToolName>;
   /** Calls already charged against a capability, read from the durable ledger. */
   readonly callsSoFar: (kind: CapabilityKind) => number;
   /**
@@ -177,6 +179,7 @@ function parseToolCalls(value: unknown): readonly ToolCall[] {
 }
 
 const MODEL_CORRECTABLE_TOOL_ERRORS = new Set([
+  "TOOL_NOT_ENABLED",
   "TOOL_NOT_GRANTED",
   "TOOL_GRANT_EXHAUSTED",
   "READ_NOT_GRANTED",
@@ -307,6 +310,11 @@ export async function runSessionLoop(
               grants: deps.toolContext.grants,
               callsSoFar: priorCalls,
             });
+            invariant(
+              deps.enabledTools === undefined || deps.enabledTools.has(call.name),
+              "TOOL_NOT_ENABLED",
+              `Tool ${call.name} is disabled by the headless execution profile`,
+            );
             const toolResult = await executeToolCall(call, deps.toolContext, actionSignal);
             return toolResult;
           } catch (error) {
