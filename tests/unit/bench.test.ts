@@ -29,8 +29,12 @@ class FakeGateway implements ModelGateway {
   readonly calls: StructuredGenerationRequest[] = [];
   readonly #fail: boolean;
   readonly #onCall: (() => void) | undefined;
+  readonly #hold: (() => Promise<void>) | undefined;
 
-  constructor(model: string, options: { fail?: boolean; onCall?: () => void } = {}) {
+  constructor(
+    model: string,
+    options: { fail?: boolean; onCall?: () => void; hold?: () => Promise<void> } = {},
+  ) {
     this.config = createProviderConfig({
       kind: "ollama",
       model,
@@ -38,12 +42,14 @@ class FakeGateway implements ModelGateway {
     });
     this.#fail = options.fail ?? false;
     this.#onCall = options.onCall;
+    this.#hold = options.hold;
   }
 
   async generateStructured(
     request: StructuredGenerationRequest,
   ): Promise<StructuredGenerationResult> {
     this.#onCall?.();
+    if (this.#hold !== undefined) await this.#hold();
     if (this.#fail) throw new IcarusError("PROVIDER_UNREACHABLE", "connection refused");
     this.calls.push(request);
     // The gateway returns TEXT; the probe parses it against its own schema.
@@ -189,17 +195,28 @@ describe("runBenchComparison", () => {
   it("runs targets sequentially so the battery measures models, not contention", async () => {
     // Concurrent local model calls contend for one accelerator, which is
     // exactly the harness artifact this packet exists to remove.
+    // The counter must stay raised ACROSS an await, or it can never observe
+    // overlap: incrementing and decrementing in one synchronous callback makes
+    // maxInFlight 1 even under Promise.all, so the test would pass on a fully
+    // parallel implementation. Hold the turn open instead.
     let inFlight = 0;
     let maxInFlight = 0;
+    const release: Array<() => void> = [];
     const doc = await runBenchComparison({
       targets: [TARGET_A, TARGET_B],
       kinds: ["throughput", "structured"],
       request: { repeat: 1 },
       gatewayFor: (t) =>
         new FakeGateway(t.model, {
-          onCall: () => {
+          hold: async () => {
             inFlight += 1;
             maxInFlight = Math.max(maxInFlight, inFlight);
+            // Yield to the microtask queue: a parallel runner would start its
+            // next call here while this one is still counted in flight.
+            await new Promise<void>((resolve) => {
+              release.push(resolve);
+              setTimeout(resolve, 0);
+            });
             inFlight -= 1;
           },
         }),
@@ -208,6 +225,36 @@ describe("runBenchComparison", () => {
 
     expect(maxInFlight).toBe(1);
     expect(doc.attempted).toBe(4);
+  });
+
+  it("gives every target the SAME probe id, so their prompt bytes are identical", async () => {
+    // Deliberately NOT using RUNTIME here. RUNTIME pins createId to a constant,
+    // which makes every row share an id whether or not the executor binds one —
+    // so a test built on it cannot fail when the binding is removed (that is how
+    // this defect survived until cross-seat review found it). A counter that
+    // hands out a fresh id per call is what makes the binding observable.
+    let issued = 0;
+    const doc = await runBenchComparison({
+      targets: [TARGET_A, TARGET_B],
+      kinds: ["throughput"],
+      request: { repeat: 2 },
+      gatewayFor: (t) => new FakeGateway(t.model),
+      runtime: {
+        now: () => new Date("2026-08-24T12:00:00Z"),
+        createId: () => {
+          issued += 1;
+          return `id-${issued}`;
+        },
+      },
+    });
+
+    expect(doc.probeIds).toHaveLength(1);
+    const shared = doc.probeIds[0];
+    expect(shared).toBeDefined();
+    // Both rows ran under the one id — the prompts, and for `context` the
+    // corpus anchors derived from it, are therefore byte-identical.
+    expect(doc.rows.map((row) => row.result?.probeId)).toEqual([shared, shared]);
+    expect(doc.measured).toBe(2);
   });
 
   it("records interrupted rows rather than truncating the document", async () => {
@@ -241,10 +288,10 @@ describe("assertRowAnsweredTheSharedRequest", () => {
     targetInputTokens: null,
   } as const;
 
-  function resultWith(probe: unknown) {
+  function resultWith(probe: unknown, probeId = "p") {
     return {
       schemaVersion: 1,
-      probeId: "p",
+      probeId,
       startedAt: "2026-08-24T12:00:00Z",
       status: "measured",
       unsupportedReason: null,
@@ -261,9 +308,9 @@ describe("assertRowAnsweredTheSharedRequest", () => {
     } as never;
   }
 
-  it("passes when the row ran the shared request", () => {
+  it("passes when the row ran the shared request under the shared probe id", () => {
     expect(() =>
-      assertRowAnsweredTheSharedRequest(resultWith({ ...shared }), shared),
+      assertRowAnsweredTheSharedRequest(resultWith({ ...shared }), shared, "p"),
     ).not.toThrow();
   });
 
@@ -272,10 +319,25 @@ describe("assertRowAnsweredTheSharedRequest", () => {
     // repeat=3 and the rest with repeat=2 is not a comparison, and reporting it
     // as one is how a model ends up with five different recorded token rates.
     expect(() =>
-      assertRowAnsweredTheSharedRequest(resultWith({ ...shared, repeat: 3 }), shared),
+      assertRowAnsweredTheSharedRequest(resultWith({ ...shared, repeat: 3 }), shared, "p"),
     ).toThrowError(/not comparable/);
     expect(() =>
-      assertRowAnsweredTheSharedRequest(resultWith({ ...shared, maxOutputTokens: 129 }), shared),
+      assertRowAnsweredTheSharedRequest(
+        resultWith({ ...shared, maxOutputTokens: 129 }),
+        shared,
+        "p",
+      ),
     ).toThrowError(/not comparable/);
+  });
+
+  it("refuses a row that ran under a different probe id, even with an identical request", () => {
+    // The case a request-only check could never see, and the one that matters
+    // most: `context` seeds its corpus from the probe id, so two rows with
+    // byte-identical ProbeRequests can carry different anchors and therefore
+    // different correct answers. Found by cross-seat review of PR #53, not by
+    // this suite — which is why it is pinned here now.
+    expect(() =>
+      assertRowAnsweredTheSharedRequest(resultWith({ ...shared }, "other-id"), shared, "p"),
+    ).toThrowError(/different probe id/);
   });
 });

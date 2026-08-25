@@ -39,17 +39,21 @@ import type { JsonValue } from "./types.js";
 // an "approve everything for the benchmark" flag would be exactly the
 // digest-unbound authority widening this repository refuses everywhere else.
 
+/** Schema version of the comparison document. Bump when a field's meaning changes. */
 export const BENCH_COMPARISON_SCHEMA_VERSION = 1;
 
 /** Targets are capped so one command cannot fan out into an unbounded sweep. */
 const MAX_TARGETS = 16;
 
+/** One model under comparison: a provider kind, its base URL, and the model name. */
 export interface BenchTargetV1 {
   readonly kind: string;
   readonly baseUrl: string;
   readonly model: string;
 }
 
+/** One (target, kind) cell of the comparison. Every cell attempted produces a row,
+ * including failures — see `runBenchComparison` for why none are dropped. */
 export interface BenchRowV1 {
   /** Index into `targets`; rows never restate the target, so it cannot drift. */
   readonly targetIndex: number;
@@ -61,6 +65,9 @@ export interface BenchRowV1 {
   readonly result: ProbeResultV1 | null;
 }
 
+/** The comparison document: the shared question, who answered it, and every row.
+ * Its claim is that the rows are COMPARABLE, which `assertRowAnsweredTheSharedRequest`
+ * enforces per row rather than assuming from a single request object. */
 export interface BenchComparisonV1 {
   readonly schemaVersion: typeof BENCH_COMPARISON_SCHEMA_VERSION;
   readonly benchId: string;
@@ -69,6 +76,8 @@ export interface BenchComparisonV1 {
   /** One request per kind, in `kinds` order — the question every target answered. */
   readonly requests: readonly ProbeRequest[];
   readonly kinds: readonly string[];
+  /** The probe id every target used for `kinds[i]`; prompt bytes derive from it. */
+  readonly probeIds: readonly string[];
   readonly targets: readonly BenchTargetV1[];
   readonly rows: readonly BenchRowV1[];
   /** Denominator first: an empty `measured` set is not "all clear" without it. */
@@ -78,11 +87,14 @@ export interface BenchComparisonV1 {
   readonly failed: number;
 }
 
+/** Injected clock and id source, so a comparison is reproducible under test. */
 export interface BenchRuntime {
   readonly now?: () => Date;
   readonly createId?: () => string;
 }
 
+/** Inputs to one battery. `gatewayFor` is called per row so a per-target
+ * credential or pricing failure becomes that row's failure, not the batch's. */
 export interface RunBenchComparisonOptions {
   readonly targets: readonly BenchTargetV1[];
   readonly kinds: readonly string[];
@@ -121,6 +133,7 @@ function targetKey(target: BenchTargetV1): string {
 export function assertRowAnsweredTheSharedRequest(
   result: ProbeResultV1,
   shared: ProbeRequest,
+  sharedProbeId: string,
 ): void {
   invariant(
     canonicalJson(result.probe as unknown as JsonValue) ===
@@ -128,8 +141,23 @@ export function assertRowAnsweredTheSharedRequest(
     "BENCH_REQUEST_DRIFT",
     "A bench row did not run the comparison's shared request; the rows are not comparable",
   );
+  // The ProbeRequest DESCRIBES the question; it is not the question. Every probe
+  // kind interpolates its probeId into the bytes the model actually receives —
+  // throughput and structured carry it in the prompt, and `context` SEEDS ITS
+  // CORPUS from it, so a per-row id hands each target different anchors and
+  // therefore a different correct answer. Comparing request objects alone passed
+  // happily while the rows answered different questions: exactly the defect this
+  // module exists to prevent, reproduced inside it. Binding the id is what turns
+  // a shared request into a shared QUESTION.
+  invariant(
+    result.probeId === sharedProbeId,
+    "BENCH_REQUEST_DRIFT",
+    "A bench row ran under a different probe id, so its prompt bytes differ; the rows are not comparable",
+  );
 }
 
+/** Validate the target set: non-empty, within the fan-out cap, and free of
+ * duplicates, which would read as two measurements agreeing. */
 export function assertBenchTargets(targets: readonly BenchTargetV1[]): void {
   if (targets.length === 0) invalid("bench comparison needs at least one target");
   if (targets.length > MAX_TARGETS) {
@@ -155,6 +183,8 @@ export function assertBenchTargets(targets: readonly BenchTargetV1[]): void {
   }
 }
 
+/** Validate the requested probe kinds: non-empty, unique, and each recognized.
+ * An unknown kind refuses here rather than becoming a fabricated failed row. */
 export function assertBenchKinds(kinds: readonly string[]): void {
   if (kinds.length === 0) invalid("bench comparison needs at least one probe kind");
   const seen = new Set<string>();
@@ -201,13 +231,22 @@ export async function runBenchComparison(
   );
 
   const benchId = createId();
+  // One probe id per KIND, shared by every target answering that kind, so all
+  // targets receive byte-identical prompts. Attempt number still varies within
+  // a row exactly as it does for a single probe run.
+  const probeIds = options.kinds.map(() => createId());
   const startedAt = now().toISOString();
   const rows: BenchRowV1[] = [];
 
   for (const [targetIndex, target] of options.targets.entries()) {
     for (const [kindIndex, kind] of options.kinds.entries()) {
       const shared = requests[kindIndex];
-      invariant(shared !== undefined, "INVALID_BENCH_REQUEST", "Missing bench request");
+      const sharedProbeId = probeIds[kindIndex];
+      invariant(
+        shared !== undefined && sharedProbeId !== undefined,
+        "INVALID_BENCH_REQUEST",
+        "Missing bench request",
+      );
       if (options.signal?.aborted === true) {
         rows.push({
           targetIndex,
@@ -233,8 +272,13 @@ export async function runBenchComparison(
       }
       try {
         const gateway = options.gatewayFor(target);
-        const result = await runProbe(gateway, shared, runtime, options.signal);
-        assertRowAnsweredTheSharedRequest(result, shared);
+        const result = await runProbe(
+          gateway,
+          shared,
+          { ...runtime, createId: () => sharedProbeId },
+          options.signal,
+        );
+        assertRowAnsweredTheSharedRequest(result, shared, sharedProbeId);
         // `runProbe` records a failed attempt rather than throwing, so a target
         // that refused every single attempt still returns a well-formed result.
         // Counting that as `measured` would put a model with no answers into
@@ -279,6 +323,7 @@ export async function runBenchComparison(
     completedAt: now().toISOString(),
     requests,
     kinds: [...options.kinds],
+    probeIds: [...probeIds],
     targets: options.targets.map((target) => ({
       kind: target.kind,
       baseUrl: target.baseUrl,
@@ -292,4 +337,5 @@ export async function runBenchComparison(
   };
 }
 
+/** Re-exported so a caller can name a kind without importing the probe module. */
 export type { ProbeKind };
