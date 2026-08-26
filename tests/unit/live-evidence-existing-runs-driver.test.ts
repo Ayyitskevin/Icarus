@@ -8,6 +8,7 @@ import type { LiveEvidenceCaseContext } from "../../packages/core/src/live-evide
 import {
   decodeLiveEvidenceCaseRunMapV1,
   ExistingRunsLiveEvidenceCaseDriver,
+  LIVE_EVIDENCE_PROVIDER_ADAPTER_VERSIONS,
 } from "../../packages/core/src/live-evidence-existing-runs-driver.js";
 import {
   decodeLiveEvidenceProfileV1,
@@ -309,6 +310,13 @@ describe("existing-runs live-evidence driver", () => {
       durableStage: "case.preflight",
       errorCode: "LIVE_EVIDENCE_CASE_MISMATCH",
     });
+  });
+
+  it("keeps vulcan out of the adapter-version map so the kind exclusion cannot vanish silently", () => {
+    // Review follow-up (PR #56): the driver guard at the provider-kind lookup is
+    // pinned by tsc today, but widening the decoder plus adding a vulcan entry
+    // here would erase both walls at once. Pin the absence directly.
+    expect(Object.keys(LIVE_EVIDENCE_PROVIDER_ADAPTER_VERSIONS)).not.toContain("vulcan");
   });
 
   it("does not count an operation that has no durable GitHub POST admission", async () => {
