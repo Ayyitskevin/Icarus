@@ -28,11 +28,33 @@ export interface HeadlessProfileOutputV1 {
   readonly format: "jsonl";
 }
 
+/** H4: the governed alternative to the closed `childRuns: "deny"` default. */
+export interface HeadlessChildRunsAllowV1 {
+  /** v1 admits direct children of the root worker only. */
+  readonly maxDepth: 1;
+  readonly maxChildren: number;
+}
+
 export interface HeadlessProfileWorkerPolicyV1 {
   readonly mode: "one_task";
   readonly maxConcurrency: 1;
-  readonly childRuns: "deny";
+  readonly childRuns: "deny" | HeadlessChildRunsAllowV1;
   readonly scheduledRuns: "deny";
+}
+
+/**
+ * H4: one operator-declared child run. Every field can only narrow the
+ * parent worker's authority: targets stay within the parent's approved plan
+ * targets, tools within the parent's resolved set, and budgets within the
+ * parent's profile budgets (checked at resolution) and remaining envelope
+ * (checked at spawn).
+ */
+export interface HeadlessChildSpecV1 {
+  readonly childId: string;
+  readonly task: string;
+  readonly targets: readonly string[];
+  readonly toolIds: readonly ToolName[];
+  readonly budgets: HeadlessProfileBudgetsV1;
 }
 
 export interface HeadlessProfileV1 {
@@ -45,6 +67,8 @@ export interface HeadlessProfileV1 {
   readonly budgets: HeadlessProfileBudgetsV1;
   readonly output: HeadlessProfileOutputV1;
   readonly worker: HeadlessProfileWorkerPolicyV1;
+  /** H4: operator-declared child runs. Absent means none are admitted. */
+  readonly children?: readonly HeadlessChildSpecV1[];
 }
 
 /** Provider material supplied by the host, never by the profile. */
@@ -75,6 +99,9 @@ export interface ResolvedHeadlessProfileV1 {
 }
 
 const PROFILE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+export const HEADLESS_CHILD_LIMIT = 8;
+export const HEADLESS_CHILD_TARGET_LIMIT = 64;
+export const HEADLESS_CHILD_TASK_MAX_BYTES = 8 * 1024;
 const SUN_CEILING_KEYS = [
   "maxToolCalls",
   "maxActiveRuntimeMs",
@@ -210,6 +237,25 @@ function decodeOutput(value: unknown): HeadlessProfileOutputV1 {
   return { format: "jsonl" };
 }
 
+function decodeChildRuns(value: unknown): "deny" | HeadlessChildRunsAllowV1 {
+  if (value === "deny") return "deny";
+  const decoded = record(value, ["maxChildren", "maxDepth"], "profile.worker.childRuns");
+  if (decoded.maxDepth !== 1) {
+    invalid("profile.worker.childRuns.maxDepth must equal 1");
+  }
+  if (
+    typeof decoded.maxChildren !== "number" ||
+    !Number.isSafeInteger(decoded.maxChildren) ||
+    decoded.maxChildren < 1 ||
+    decoded.maxChildren > HEADLESS_CHILD_LIMIT
+  ) {
+    invalid(
+      `profile.worker.childRuns.maxChildren must be an integer between 1 and ${HEADLESS_CHILD_LIMIT}`,
+    );
+  }
+  return { maxDepth: 1, maxChildren: decoded.maxChildren };
+}
+
 function decodeWorker(value: unknown): HeadlessProfileWorkerPolicyV1 {
   const decoded = record(
     value,
@@ -220,30 +266,100 @@ function decodeWorker(value: unknown): HeadlessProfileWorkerPolicyV1 {
   if (decoded.maxConcurrency !== 1) {
     invalid("profile.worker.maxConcurrency must equal 1");
   }
-  if (decoded.childRuns !== "deny") invalid("profile.worker.childRuns must equal deny");
   if (decoded.scheduledRuns !== "deny") {
     invalid("profile.worker.scheduledRuns must equal deny");
   }
-  return { mode: "one_task", maxConcurrency: 1, childRuns: "deny", scheduledRuns: "deny" };
+  return {
+    mode: "one_task",
+    maxConcurrency: 1,
+    childRuns: decodeChildRuns(decoded.childRuns),
+    scheduledRuns: "deny",
+  };
 }
 
+function decodeChildSpec(value: unknown, index: number): HeadlessChildSpecV1 {
+  const field = `profile.children[${index}]`;
+  const decoded = record(value, ["budgets", "childId", "targets", "task", "toolIds"], field);
+  const task = decoded.task;
+  if (
+    typeof task !== "string" ||
+    !isWellFormedUnicode(task) ||
+    task.length === 0 ||
+    Buffer.byteLength(task, "utf8") > HEADLESS_CHILD_TASK_MAX_BYTES
+  ) {
+    invalid(`${field}.task must be a non-empty string within its byte ceiling`);
+  }
+  const targets = decoded.targets;
+  if (
+    !Array.isArray(targets) ||
+    targets.length === 0 ||
+    targets.length > HEADLESS_CHILD_TARGET_LIMIT ||
+    !targets.every(
+      (target) =>
+        typeof target === "string" &&
+        target.length > 0 &&
+        Buffer.byteLength(target, "utf8") <= 1024 &&
+        !/[\r\n\0]/.test(target),
+    ) ||
+    new Set(targets).size !== targets.length
+  ) {
+    invalid(`${field}.targets must be a non-empty unique bounded path list`);
+  }
+  return {
+    childId: canonicalId(decoded.childId, `${field}.childId`),
+    task,
+    targets: targets as readonly string[],
+    toolIds: decodeToolIds(decoded.toolIds),
+    budgets: decodeBudgets(decoded.budgets),
+  };
+}
+
+function decodeChildren(value: unknown): readonly HeadlessChildSpecV1[] {
+  if (!Array.isArray(value)) invalid("profile.children must be an array");
+  if (value.length > HEADLESS_CHILD_LIMIT) {
+    invalid(`profile.children must not exceed ${HEADLESS_CHILD_LIMIT} entries`);
+  }
+  const specs = value.map((entry, index) => decodeChildSpec(entry, index));
+  if (new Set(specs.map((spec) => spec.childId)).size !== specs.length) {
+    invalid("profile.children must not contain duplicate child IDs");
+  }
+  return specs;
+}
+
+const PROFILE_REQUIRED_KEYS = [
+  "schemaVersion",
+  "profileId",
+  "providerProfileId",
+  "toolIds",
+  "budgets",
+  "output",
+  "worker",
+] as const;
+
 export function decodeHeadlessProfileV1(value: unknown): HeadlessProfileV1 {
-  const decoded = record(
+  const hasChildren =
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.hasOwn(value, "children");
+  const base = record(
     value,
-    ["schemaVersion", "profileId", "providerProfileId", "toolIds", "budgets", "output", "worker"],
+    hasChildren ? [...PROFILE_REQUIRED_KEYS, "children"] : PROFILE_REQUIRED_KEYS,
     "profile",
   );
-  if (decoded.schemaVersion !== HEADLESS_PROFILE_SCHEMA_VERSION) {
+  const children = base.children === undefined ? [] : decodeChildren(base.children);
+  if (base.schemaVersion !== HEADLESS_PROFILE_SCHEMA_VERSION) {
     invalid(`profile.schemaVersion must equal ${HEADLESS_PROFILE_SCHEMA_VERSION}`);
   }
   return {
     schemaVersion: HEADLESS_PROFILE_SCHEMA_VERSION,
-    profileId: canonicalId(decoded.profileId, "profile.profileId"),
-    providerProfileId: canonicalId(decoded.providerProfileId, "profile.providerProfileId"),
-    toolIds: decodeToolIds(decoded.toolIds),
-    budgets: decodeBudgets(decoded.budgets),
-    output: decodeOutput(decoded.output),
-    worker: decodeWorker(decoded.worker),
+    profileId: canonicalId(base.profileId, "profile.profileId"),
+    providerProfileId: canonicalId(base.providerProfileId, "profile.providerProfileId"),
+    toolIds: decodeToolIds(base.toolIds),
+    budgets: decodeBudgets(base.budgets),
+    output: decodeOutput(base.output),
+    worker: decodeWorker(base.worker),
+    ...(children.length === 0 ? {} : { children }),
   };
 }
 
@@ -302,6 +418,49 @@ function assertBudgetWithinAuthority(
   }
   if (budgets.iterationCeiling > approvedPlan.iterationCeiling) {
     denied("profile.budgets.iterationCeiling exceeds the approved plan");
+  }
+}
+
+function assertChildrenWithinAuthority(
+  profile: HeadlessProfileV1,
+  provider: ProviderConfig,
+  approvedPlan: PlanProposal,
+): void {
+  const children = profile.children ?? [];
+  if (children.length === 0) return;
+  if (profile.worker.childRuns === "deny") {
+    denied("profile.children requires worker.childRuns to allow child runs");
+  }
+  if (children.length > profile.worker.childRuns.maxChildren) {
+    denied("profile.children exceeds the worker child-run ceiling");
+  }
+  if (provider.capabilities.locality !== "loopback") {
+    // A child's context-egress approval can never be operator-reviewed; v1
+    // admits children under loopback providers only.
+    denied("profile.children requires a loopback provider");
+  }
+  for (const [index, spec] of children.entries()) {
+    const field = `profile.children[${index}]`;
+    for (const toolId of spec.toolIds) {
+      if (!profile.toolIds.includes(toolId)) {
+        denied(`${field}.toolIds must not exceed the parent tool set`);
+      }
+    }
+    for (const key of SUN_CEILING_KEYS) {
+      if (spec.budgets[key] > profile.budgets[key]) {
+        denied(`${field}.budgets.${key} exceeds the parent profile budget`);
+      }
+    }
+    if (spec.budgets.iterationCeiling > profile.budgets.iterationCeiling) {
+      denied(`${field}.budgets.iterationCeiling exceeds the parent profile budget`);
+    }
+    for (const target of spec.targets) {
+      if (!approvedPlan.targets.includes(target)) {
+        denied(`${field}.targets must stay within the approved plan targets`);
+      }
+    }
+    // The derived child profile ID must remain a canonical identifier.
+    canonicalId(`${profile.profileId}-c-${spec.childId}`, `${field}.childId`);
   }
 }
 
@@ -393,6 +552,7 @@ export function resolveHeadlessProfileV1(
   assertBudgetWithinAuthority(profile.budgets, authority.projectCeiling, authority.approvedPlan);
   const provider = resolveProvider(profile.providerProfileId, authority.providerProfiles);
   const tools = resolveTools(profile.toolIds, authority.approvedPlan);
+  assertChildrenWithinAuthority(profile, provider, authority.approvedPlan);
   const profileDigestSha256 = digestJson(profileJson(profile));
   const resolution = {
     schema: HEADLESS_PROFILE_RESOLUTION_SCHEMA,

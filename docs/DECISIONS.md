@@ -57,6 +57,8 @@ Decision records for the current milestone:
 
 | [0058](adr/0058-headless-exactly-once-continuation.md) | H3b continuation resumes a reconciled crashed worker exactly once under the run lease: reconstruction equality, closed classification, and replay-safe stage intent are proven before one digest-bound resume intent and one distinct continuation settlement | Proposed — no fork, session-turn continuation, or deployment authority |
 
+| [0059](adr/0059-headless-isolated-child-runs.md) | H4 admits operator-declared child runs only: ordinary runs with recorded lineage, sequential under the parent lease in isolated worktrees, with depth, cumulative budget, tool, and write-set ceilings, and the parent's settlement gated on child quiescence | Proposed — no fork, concurrency, remote-provider children, model-initiated children, or deployment authority |
+
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.
 

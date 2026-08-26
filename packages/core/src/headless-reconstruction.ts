@@ -94,6 +94,7 @@ const NO_EFFECT_OPERATION_KINDS: ReadonlySet<string> = new Set([
 
 /** The closed enumeration of operation kinds the runtime can begin. */
 const KNOWN_OPERATION_KINDS: ReadonlySet<string> = new Set([
+  "headless.child",
   "context.prepare",
   "egress.validate",
   "approval.validate",
@@ -139,6 +140,10 @@ const STARTED_EVENT_MEMBERS = [
   "toolIds",
   "worker",
 ] as const;
+
+// H4: profiles that declare children carry them in the durable start payload;
+// older payloads simply omit the member.
+const STARTED_EVENT_CHILD_MEMBER = "children";
 
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -330,7 +335,13 @@ function durableStartedProfile(
     "Headless worker start event is missing from the durable tail",
   );
   const payload = payloadObject(started, "Headless worker start");
-  assertExactMembers(payload, STARTED_EVENT_MEMBERS, "Headless worker start");
+  assertExactMembers(
+    payload,
+    Object.hasOwn(payload, STARTED_EVENT_CHILD_MEMBER)
+      ? [...STARTED_EVENT_MEMBERS, STARTED_EVENT_CHILD_MEMBER]
+      : STARTED_EVENT_MEMBERS,
+    "Headless worker start",
+  );
   // The durable start payload carries every operator-selectable profile field;
   // schemaVersion and output are fixed by the H1 v1 grammar. Rebuilding the
   // source profile from these bytes and requiring its digest keeps the
@@ -343,6 +354,7 @@ function durableStartedProfile(
     budgets: payload.budgets,
     output: { format: "jsonl" },
     worker: payload.worker,
+    ...(Object.hasOwn(payload, STARTED_EVENT_CHILD_MEMBER) ? { children: payload.children } : {}),
   };
   return {
     profile,

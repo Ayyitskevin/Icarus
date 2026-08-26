@@ -1233,7 +1233,7 @@ const assertions = {
     cliSource.includes('approval === "readable-manifest-v3"') &&
     // One token approves one migration; the tokens are not combinable.
     cliSource.includes(
-      "approvalIndex: false,\n    patchSet: false,\n    readableManifest: false,\n    annotation: false,\n    gate1: null,",
+      "approvalIndex: false,\n    patchSet: false,\n    readableManifest: false,\n    annotation: false,\n    headlessChildren: false,\n    gate1: null,",
     ),
   annotationMigrationHumanGated:
     coreSchemaSource.includes("export const ICARUS_ANNOTATION_SCHEMA") &&
@@ -1244,6 +1244,17 @@ const assertions = {
     storeSource.includes('"DATABASE_MIGRATION_REQUIRED"') &&
     cliSource.includes('approval === "run-annotations-v1"') &&
     cliSource.includes("allowAnnotationMigration: migrationApproval.annotation"),
+  headlessChildMigrationHumanGated:
+    coreSchemaSource.includes("export const ICARUS_HEADLESS_CHILD_MIGRATION_SCHEMA") &&
+    coreSchemaSource.includes("headless_parent_run_id IS NULL") &&
+    storeSource.includes("function inspectHeadlessChildSchema(") &&
+    storeSource.includes(
+      'headlessChildStatus === "missing" && options.allowHeadlessChildMigration !== true',
+    ) &&
+    storeSource.includes('"DATABASE_MIGRATION_REQUIRED"') &&
+    storeSource.includes("#headlessChildParentRunId(runId)") &&
+    cliSource.includes('approval === "headless-children-v1"') &&
+    cliSource.includes("allowHeadlessChildMigration: migrationApproval.headlessChildren"),
   persistedReadableManifestIsDigestVerified:
     storeSource.includes("readableManifest(runId: string): ReadableManifest | null") &&
     storeSource.includes("readableManifestDigest(manifest) ===") &&
