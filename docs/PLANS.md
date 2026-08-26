@@ -234,6 +234,33 @@ fails closed with `INVALID_HEADLESS_STREAM`.
       cases explicitly not run (`pnpm check` exit 0).
 - [ ] Obtain one non-author round-table review of the stream candidate.
 
+## Landlock sandbox profiles candidate
+
+Status: implemented under proposed ADR 0062. Kernel enforcement, CLI
+re-execution, and skip-guarded tests are in the tree; one non-author review
+remains open.
+
+Decision: three named profiles (`workspace` default, `read-only`, `strict`)
+map to Landlock filesystem rulesets applied by re-executing the CLI under a
+freshly compiled helper before headless worker execution. Grants stay the
+policy layer; the profile is the kernel backstop beneath them. Unsupported
+hosts degrade to a documented no-op with one canonical stderr notice.
+
+- [x] Map profiles to digest-bound, subsumption-pruned rulesets in core with
+      pure support detection (Linux, kernel >= 5.13, probed ABI).
+- [x] Apply via CLI re-execution under a per-run compiled helper
+      (`packages/core/native/landlock-sandbox.c`), exactly once, with
+      `ICARUS_LANDLOCK_APPLIED` and a confined `TMPDIR`.
+- [x] Wire `--sandbox-profile workspace|read-only|strict|off` on
+      `run approve-headless` and `run resume-headless` with the conservative
+      `workspace` default; grant pipeline semantics unchanged.
+- [x] Prove kernel enforcement (write confinement, read allowlist, meta
+      lifecycle, SQLite WAL survival) and a full headless run settling
+      review-ready under `strict`; skip guarded off supported hosts.
+- [ ] Obtain one non-author round-table review of the sandbox candidate.
+- [ ] Remainder: record the applied spec digest in durable run evidence,
+      Landlock network scoping, scheduled-run coverage.
+
 ## Accepted Gate 1 Slice 1 offline benchmark checkpoint
 
 Status: the versioned, deterministic, zero-external-effect offline benchmark

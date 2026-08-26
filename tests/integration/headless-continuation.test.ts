@@ -43,7 +43,14 @@ afterEach(async () => {
 function spawnCli(stateRoot: string, args: readonly string[], extraEnv: NodeJS.ProcessEnv = {}) {
   const child = spawn(process.execPath, ["packages/cli/dist/main.js", ...args], {
     cwd: process.cwd(),
-    env: { ...process.env, ...extraEnv, ICARUS_HOME: stateRoot },
+    env: {
+      ...process.env,
+      ...extraEnv,
+      // Crash-fidelity tests kill the worker by pid; the ADR 0062 sandbox
+      // wrapper would orphan the real worker grandchild, so they run unsandboxed.
+      ICARUS_SANDBOX_PROFILE: "off",
+      ICARUS_HOME: stateRoot,
+    },
     shell: false,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -258,6 +265,20 @@ async function spawnHeadlessWorker(
   );
 }
 
+/** ADR 0062: hosts without Landlock emit one canonical no-op notice on stderr. */
+function stderrWithoutLandlockNotices(stderr: string): string {
+  return stderr
+    .split("\n")
+    .filter((line) => {
+      try {
+        return (JSON.parse(line) as { schema?: unknown }).schema !== "icarus.landlock-notice.v1";
+      } catch {
+        return true;
+      }
+    })
+    .join("\n");
+}
+
 function historyLines(stdout: string): readonly Record<string, unknown>[] {
   return stdout
     .trimEnd()
@@ -311,7 +332,7 @@ describe("headless exactly-once continuation", () => {
     );
     const resumed = await runCli(fixture.stateRoot, ["run", "resume-headless", planned.id]);
     expect(resumed.exitCode).toBe(0);
-    expect(resumed.stderr).toBe("");
+    expect(stderrWithoutLandlockNotices(resumed.stderr)).toBe("");
     const lines = historyLines(resumed.stdout);
     expect(lines.every((line) => line.schema === HEADLESS_HISTORY_SCHEMA)).toBe(true);
     const events = lines.filter((line) => line.kind === "event");

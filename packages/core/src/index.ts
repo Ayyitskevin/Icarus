@@ -195,6 +195,30 @@ export {
 } from "./headless-worker.js";
 export { assertHeadlessContinuationReplaySafeV1 } from "./headless-continuation.js";
 export type {
+  LandlockProfileName,
+  LandlockRuleAccess,
+  LandlockRuleV1,
+  LandlockSandboxContextV1,
+  LandlockSandboxSpecV1,
+  LandlockSupportV1,
+} from "./landlock.js";
+export {
+  buildLandlockSandboxSpec,
+  defaultLandlockHelperSourcePath,
+  detectLandlockSupport,
+  isLandlockProfileName,
+  LANDLOCK_APPLIED_ENV,
+  LANDLOCK_DEFAULT_PROFILE,
+  LANDLOCK_MINIMUM_KERNEL,
+  LANDLOCK_NOTICE_SCHEMA,
+  LANDLOCK_PROFILE_ENV,
+  LANDLOCK_PROFILE_NAMES,
+  LANDLOCK_SANDBOX_SPEC_SCHEMA,
+  landlockHelperArgv,
+  landlockUnavailableNotice,
+  parseKernelMajorMinor,
+} from "./landlock.js";
+export type {
   HeadlessContinuationReconstructionV1,
   HeadlessCrashTailEffectV1,
   HeadlessEffectDispositionV1,

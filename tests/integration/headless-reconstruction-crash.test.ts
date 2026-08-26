@@ -92,7 +92,13 @@ async function interruptibleProvider(): Promise<{
 function spawnCli(stateRoot: string, args: readonly string[]) {
   const child = spawn(process.execPath, ["packages/cli/dist/main.js", ...args], {
     cwd: process.cwd(),
-    env: { ...process.env, ICARUS_HOME: stateRoot },
+    env: {
+      ...process.env,
+      // Crash-fidelity tests kill the worker by pid; the ADR 0062 sandbox
+      // wrapper would orphan the real worker grandchild, so they run unsandboxed.
+      ICARUS_SANDBOX_PROFILE: "off",
+      ICARUS_HOME: stateRoot,
+    },
     shell: false,
     stdio: ["ignore", "pipe", "pipe"],
   });
