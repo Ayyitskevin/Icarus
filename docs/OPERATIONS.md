@@ -53,6 +53,46 @@ checks repository/state containment in both directions before creating or
 opening the requested state root. A rejected path therefore leaves both the
 repository and prospective state path untouched.
 
+## Landlock sandbox profiles (ADR 0062)
+
+Headless worker execution (`run approve-headless`, `run resume-headless`)
+runs beneath a kernel-enforced Landlock ruleset as a second layer below the
+grant pipeline: grants remain the policy layer that refuses violations, and
+the profile makes whole classes of violation impossible. The CLI re-executes
+itself under a small helper compiled fresh on every run
+(`packages/core/native/landlock-sandbox.c`, host C compiler, no other
+dependencies) before the runtime exists; the domain is one-way and inherited
+across exec and fork, so everything the run spawns stays confined.
+
+Select the profile with `--sandbox-profile workspace|read-only|strict|off`
+(default `workspace`, overridable via `ICARUS_SANDBOX_PROFILE`):
+
+- `workspace` — read-write beneath the state root, read-only beneath `/`.
+  A run can never write outside Icarus state.
+- `read-only` — the same write confinement, with the read surface reduced
+  to an explicit allowlist (system paths, the state root, the interpreter,
+  the Icarus installation tree, the registered source checkout).
+- `strict` — additionally confines file-content writes to the current run's
+  scratch plus the event store, snapshots, artifacts, locks, and
+  `tmp/`; other runs' trees become content-immutable. The state root itself
+  is metadata-only: SQLite WAL sidecars and run directories can come and go,
+  but no file contents outside the writable set change.
+
+Degradation is loud, never silent: on non-Linux hosts, kernels older than
+5.13, or without a C compiler, the profile is a documented no-op and the CLI
+emits exactly one canonical stderr record
+(`{"schema":"icarus.landlock-notice.v1","status":"unavailable",...}`) before
+proceeding. When enforcement applies, the history stream and stderr are
+byte-identical to an unsandboxed run. Sandboxed runs add `tmp/` to the state
+layout above and point `TMPDIR` at it, because the store's exact-schema
+startup check snapshots the database into `os.tmpdir()`.
+
+Limits in v1: filesystem confinement only (network is grant-governed, not
+kernel-scoped); the Docker check sandbox is daemon-side and unaffected; the
+`strict` state-root metadata class permits creating and deleting — but never
+writing — files beneath it; the sandbox selection is not yet recorded in
+durable run evidence.
+
 ## Local workspace runbook
 
 Use Node 22.23 and pnpm 9.15 from a trusted local checkout. Choose a dedicated

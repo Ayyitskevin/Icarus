@@ -1,7 +1,18 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 
-import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync } from "node:fs";
+import { spawn } from "node:child_process";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +25,7 @@ import {
   assertRegistrationStateSeparation,
   BROWSER_ACTION_LEDGER_MIGRATION,
   buildChangeHandoffPreview,
+  buildLandlockSandboxSpec,
   CHANGE_HANDOFF_FILENAME,
   CHANGE_HANDOFF_MAX_BYTES,
   CHANGE_HANDOFF_RESULT_FILENAME,
@@ -29,13 +41,13 @@ import {
   createIcarusRuntime,
   createProbeRequest,
   createProviderConfig,
-  PROBE_KINDS,
-  runBenchComparison,
   DEFAULT_CEILING,
   DEFAULT_SANDBOX_LIMITS,
   decodeLiveEvidenceCaseRunMapV1,
   decodeLiveEvidenceProfileDraftV1,
   decodeLiveEvidenceProfileV1,
+  defaultLandlockHelperSourcePath,
+  detectLandlockSupport,
   ExistingRunsLiveEvidenceCaseDriver,
   encodeChangeHandoffExportResult,
   FileLiveEvidenceJournalStore,
@@ -45,17 +57,26 @@ import {
   IcarusError,
   type IcarusRuntime,
   inspectChangeHandoffDocuments,
+  isLandlockProfileName,
   isUnsupportedProbeKind,
   type JsonValue,
   LANDING_LEDGER_MIGRATION,
+  LANDLOCK_APPLIED_ENV,
+  LANDLOCK_DEFAULT_PROFILE,
+  LANDLOCK_PROFILE_ENV,
+  type LandlockProfileName,
+  landlockHelperArgv,
+  landlockUnavailableNotice,
   liveEvidenceProfileApprovalDigest,
   migrateGate1Schema,
   parseStrictJson,
   presentLandingStatusV1,
+  PROBE_KINDS,
   RunLeaseManager,
   type RunRecord,
   readChangeHandoffSource,
   readSecureHandoffFile,
+  runBenchComparison,
   runLiveEvidenceExecutor,
   runProbe,
   unsupportedProbeResult,
@@ -266,6 +287,233 @@ function schemaMigrationApproval(): {
     "INVALID_DATABASE_CONFIGURATION",
     "ICARUS_APPROVE_SCHEMA_MIGRATION must equal one documented one-shot migration token",
   );
+}
+
+// ── Landlock sandbox profiles (ADR 0062) ────────────────────────────────
+// Kernel-enforced backstop beneath the grant pipeline. For headless worker
+// execution the CLI re-executes itself under a compiled Landlock helper
+// before any tool action runs; grants stay the policy layer unchanged. On
+// non-Linux, old kernels, or missing toolchains the profile is a documented
+// no-op with one canonical stderr notice.
+
+interface LandlockReexecDecision {
+  readonly profile: LandlockProfileName | "off";
+  readonly runId: string | null;
+}
+
+function landlockReexecDecision(args: readonly string[]): LandlockReexecDecision | null {
+  const [group, action, ...rest] = args;
+  if (group !== "run" || (action !== "approve-headless" && action !== "resume-headless")) {
+    return null;
+  }
+  const options = parseOptions(
+    rest,
+    action === "approve-headless"
+      ? [
+          "--plan-sha",
+          "--actor",
+          "--profile-json",
+          "--provider-catalog-json",
+          "--output-format",
+          "--sandbox-profile",
+        ]
+      : ["--output-format", "--sandbox-profile"],
+  );
+  const flag = optional(options, "--sandbox-profile");
+  const environment = process.env[LANDLOCK_PROFILE_ENV];
+  const selected =
+    flag ?? (environment !== undefined && environment.length > 0 ? environment : undefined);
+  const profile = selected ?? LANDLOCK_DEFAULT_PROFILE;
+  if (profile !== "off" && !isLandlockProfileName(profile)) {
+    fail("INVALID_ARGUMENT", "--sandbox-profile must be workspace, read-only, strict, or off");
+  }
+  return {
+    profile,
+    runId: options.positionals.length === 1 ? (options.positionals[0] ?? null) : null,
+  };
+}
+
+function landlockNotice(profile: LandlockProfileName, reason: string): void {
+  process.stderr.write(canonicalJsonLine(landlockUnavailableNotice(profile, reason)));
+}
+
+function spawnAndWait(
+  command: string,
+  argv: readonly string[],
+  options: { readonly env?: NodeJS.ProcessEnv; readonly captureOutput?: boolean },
+): Promise<{ readonly code: number | null; readonly output: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, argv, {
+      shell: false,
+      stdio: options.captureOutput === true ? ["ignore", "pipe", "pipe"] : "inherit",
+      ...(options.env === undefined ? {} : { env: options.env }),
+    });
+    const chunks: Buffer[] = [];
+    if (options.captureOutput === true) {
+      child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+    }
+    child.once("error", reject);
+    child.once("close", (code) =>
+      resolve({ code, output: Buffer.concat(chunks).toString("utf8") }),
+    );
+  });
+}
+
+/** Compiles the helper fresh for every sandboxed run: no cached binary to tamper with. */
+async function compileLandlockHelper(
+  directory: string,
+): Promise<{ readonly helperPath: string } | { readonly error: string }> {
+  const helperPath = path.join(directory, "landlock-sandbox");
+  const compiler =
+    process.env.CC !== undefined && process.env.CC.length > 0 ? process.env.CC : "cc";
+  try {
+    const result = await spawnAndWait(
+      compiler,
+      ["-O2", "-Wall", "-Wextra", "-o", helperPath, defaultLandlockHelperSourcePath()],
+      { captureOutput: true },
+    );
+    if (result.code !== 0) {
+      return { error: `compiler exited ${result.code}: ${result.output.slice(0, 4096)}` };
+    }
+    return { helperPath };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function probeLandlockAbi(helperPath: string): Promise<number | null> {
+  try {
+    const result = await spawnAndWait(helperPath, ["--probe"], { captureOutput: true });
+    if (result.code !== 0) return null;
+    const abi = Number(result.output.trim());
+    return Number.isSafeInteger(abi) ? abi : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Re-executes this CLI under the selected Landlock profile and returns true
+ * when the caller must stop (the sandboxed child became the real run). Any
+ * degradation is a one-line canonical stderr notice and an unsandboxed
+ * process — the documented no-op path, never a silent one.
+ */
+async function maybeReexecUnderLandlock(
+  args: readonly string[],
+  root: string,
+  migrationApproval: ReturnType<typeof schemaMigrationApproval>,
+): Promise<boolean> {
+  const decision = landlockReexecDecision(args);
+  if (decision === null || decision.profile === "off") return false;
+  if (process.env[LANDLOCK_APPLIED_ENV] !== undefined) return false;
+  const profile = decision.profile;
+
+  const directory = mkdtempSync(path.join(os.tmpdir(), "icarus-landlock-"));
+  try {
+    // Platform and kernel gate first so unsupported hosts never invoke a compiler.
+    const staticSupport = detectLandlockSupport({
+      platform: process.platform,
+      kernelRelease: os.release(),
+      abi: 1,
+    });
+    if (staticSupport.status === "unsupported") {
+      landlockNotice(profile, staticSupport.reason);
+      return false;
+    }
+    const compiled = await compileLandlockHelper(directory);
+    if (!("helperPath" in compiled)) {
+      landlockNotice(
+        profile,
+        `the Landlock sandbox helper could not be built or run (${compiled.error})`,
+      );
+      return false;
+    }
+    const helperPath = compiled.helperPath;
+    const abi = await probeLandlockAbi(helperPath);
+    const support = detectLandlockSupport({
+      platform: process.platform,
+      kernelRelease: os.release(),
+      abi,
+    });
+    if (support.status === "unsupported") {
+      landlockNotice(profile, support.reason);
+      return false;
+    }
+
+    let sourceRepository: string | undefined;
+    if (profile !== "workspace") {
+      // Confined read surfaces must name the registered source checkout, and
+      // the strict profile additionally needs the state root fully laid out
+      // (marker, directories, database) before enforcement begins. Both come
+      // from one pre-init of the ordinary runtime.
+      const preflight = await createIcarusRuntime(root, {
+        allowApprovalIndexMigration: migrationApproval.approvalIndex,
+        allowPatchSetMigration: migrationApproval.patchSet,
+        allowReadableManifestMigration: migrationApproval.readableManifest,
+        allowAnnotationMigration: migrationApproval.annotation,
+        allowHeadlessChildMigration: migrationApproval.headlessChildren,
+        landingCredentialEnvironmentNames: landingCredentialEnvironmentAllowlist(),
+      });
+      try {
+        if (decision.runId === null) {
+          fail("INVALID_ARGUMENT", "Exactly one run ID is required");
+        }
+        const run = preflight.service.getRun(decision.runId);
+        const project = preflight.service.getProject(run.projectId);
+        const repository = preflight.service
+          .listRepositories()
+          .find((entry) => entry.id === project.repositoryId);
+        if (repository === undefined) {
+          fail("INVALID_DATABASE_CONFIGURATION", "Run project repository is not registered");
+        }
+        sourceRepository = repository.path;
+      } finally {
+        preflight.close();
+      }
+    }
+    if (profile === "strict") {
+      if (decision.runId === null) {
+        fail("INVALID_ARGUMENT", "Exactly one run ID is required");
+      }
+      // The helper can only reference existing paths; lay out every directory
+      // the strict ruleset names before enforcement begins.
+      for (const directory of ["snapshots", "artifacts", "controller-home", "tmp", "locks"]) {
+        mkdirSync(path.join(root, directory), { recursive: true, mode: 0o700 });
+      }
+      mkdirSync(path.join(root, "runs", decision.runId), { recursive: true, mode: 0o700 });
+      // SQLite removes WAL sidecars on a clean close; the helper can only
+      // reference paths that exist, so the sidecar rules need placeholders.
+      const databasePath = path.join(root, "icarus.sqlite3");
+      for (const suffix of ["-wal", "-shm"]) {
+        closeSync(openSync(`${databasePath}${suffix}`, "a"));
+      }
+    }
+
+    const entryPath = realpathSync(fileURLToPath(import.meta.url));
+    // The store's exact-schema check snapshots the database into os.tmpdir();
+    // confine that scratch inside the state root for every profile.
+    const temporaryRoot = path.join(root, "tmp");
+    mkdirSync(temporaryRoot, { recursive: true, mode: 0o700 });
+    // packages/cli/dist/main.js → the installation root; the confined read
+    // surfaces must admit it or the re-executed CLI cannot read its own code.
+    const installationRoot = realpathSync(path.resolve(path.dirname(entryPath), "..", "..", ".."));
+    const spec = buildLandlockSandboxSpec(profile, {
+      stateRoot: root,
+      executablePath: realpathSync(process.execPath),
+      extraReadOnlyPaths: [installationRoot],
+      ...(decision.runId === null ? {} : { runId: decision.runId }),
+      ...(sourceRepository === undefined ? {} : { sourceRepository }),
+    });
+    const argv = landlockHelperArgv(helperPath, spec, [process.execPath, entryPath, ...args]);
+    const result = await spawnAndWait(helperPath, argv.slice(1), {
+      env: { ...process.env, [LANDLOCK_APPLIED_ENV]: spec.digestSha256, TMPDIR: temporaryRoot },
+    });
+    process.exitCode = result.code ?? 1;
+    return true;
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 function registrationPathForPreflight(args: readonly string[]): string | undefined {
@@ -615,10 +863,10 @@ function usage(): never {
       "icarus run plan --project NAME --task TEXT --target PATH [--target PATH ...] --provider ollama|openai|anthropic|vulcan --model MODEL [provider options]",
       "icarus run approve-egress RUN --context-sha SHA --actor ACTOR",
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
-      "icarus run approve-headless RUN --plan-sha SHA --actor ACTOR --profile-json JSON --provider-catalog-json JSON [--output-format history|stream-json]",
+      "icarus run approve-headless RUN --plan-sha SHA --actor ACTOR --profile-json JSON --provider-catalog-json JSON [--output-format history|stream-json] [--sandbox-profile workspace|read-only|strict|off]",
       "icarus run reconcile-headless RUN [--output-format history|stream-json]",
       "icarus run reconstruct-headless RUN",
-      "icarus run resume-headless RUN [--output-format history|stream-json]",
+      "icarus run resume-headless RUN [--output-format history|stream-json] [--sandbox-profile workspace|read-only|strict|off]",
       "icarus run status RUN",
       "icarus run list [--project NAME]",
       "icarus run history RUN [--format json|jsonl|stream-json]",
@@ -1056,6 +1304,7 @@ async function dispatch(
       "--profile-json",
       "--provider-catalog-json",
       "--output-format",
+      "--sandbox-profile",
     ]);
     const providerCatalog = boundedJsonOption(options, "--provider-catalog-json", 256 * 1024);
     if (!Array.isArray(providerCatalog)) {
@@ -1094,7 +1343,7 @@ async function dispatch(
     return;
   }
   if (action === "resume-headless") {
-    const options = parseOptions(rest, ["--output-format"]);
+    const options = parseOptions(rest, ["--output-format", "--sandbox-profile"]);
     const outputFormat = headlessOutputFormat(options);
     // H3b governed continuation (ADR 0058): the service holds the run lease,
     // proves reconstruction and replay safety, records resume intent, and
@@ -1238,6 +1487,13 @@ export async function runCliMain(options: CliMainOptions = {}): Promise<void> {
       migrateGate1Schema(path.join(root, "icarus.sqlite3"), migrationApproval.gate1);
       print({ migration: migrationApproval.gate1, status: "applied" });
       return;
+    }
+    // ADR 0062: headless worker execution re-executes under the selected
+    // Landlock profile before the runtime exists. Only the real process entry
+    // point re-executes; injected runtimes and argument lists drive the
+    // service directly so tests observe the unsandboxed dispatch.
+    if (options.args === undefined && options.createRuntime === undefined) {
+      if (await maybeReexecUnderLandlock(args, root, migrationApproval)) return;
     }
     runtime = await (options.createRuntime ?? createIcarusRuntime)(root, {
       allowApprovalIndexMigration: migrationApproval.approvalIndex,

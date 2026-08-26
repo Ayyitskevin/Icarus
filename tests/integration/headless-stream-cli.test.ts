@@ -24,6 +24,20 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
 });
 
+/** ADR 0062: hosts without Landlock emit one canonical no-op notice on stderr. */
+function stderrWithoutLandlockNotices(stderr: string): string {
+  return stderr
+    .split("\n")
+    .filter((line) => {
+      try {
+        return (JSON.parse(line) as { schema?: unknown }).schema !== "icarus.landlock-notice.v1";
+      } catch {
+        return true;
+      }
+    })
+    .join("\n");
+}
+
 function streamLines(stdout: string): readonly Record<string, unknown>[] {
   return stdout
     .trimEnd()
@@ -189,7 +203,7 @@ describe("headless stream CLI", () => {
       fixture.stateRoot,
       approveHeadlessArgs(planned, provider.baseUrl, ["--output-format", "stream-json"]),
     );
-    expect(approved.stderr).toBe("");
+    expect(stderrWithoutLandlockNotices(approved.stderr)).toBe("");
     expect(approved.exitCode).toBe(0);
 
     const lines = streamLines(approved.stdout);
@@ -285,7 +299,7 @@ describe("headless stream CLI", () => {
       fixture.stateRoot,
       approveHeadlessArgs(planned, provider.baseUrl),
     );
-    expect(approved.stderr).toBe("");
+    expect(stderrWithoutLandlockNotices(approved.stderr)).toBe("");
     expect(approved.exitCode).toBe(0);
     const lines = streamLines(approved.stdout);
     expect(lines.every((line) => line.schema === HEADLESS_HISTORY_SCHEMA)).toBe(true);

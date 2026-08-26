@@ -125,6 +125,8 @@ describe("headless continuation security contract", () => {
     expect(command.indexOf("headlessOutputFormat(options)")).toBeLessThan(
       command.indexOf("resumeHeadlessWorker("),
     );
-    expect(cli).toContain('"icarus run resume-headless RUN [--output-format history|stream-json]"');
+    expect(cli).toContain(
+      '"icarus run resume-headless RUN [--output-format history|stream-json] [--sandbox-profile workspace|read-only|strict|off]"',
+    );
   });
 });
