@@ -122,7 +122,7 @@ function providerDigest(provider: RunRecord["provider"]): string {
   return digestJson(json(provider));
 }
 
-export function bindHeadlessExecutionV1(
+function bindHeadlessExecutionCurrentV1(
   profile: unknown,
   authority: HeadlessExecutionBindingAuthorityV1,
 ): HeadlessExecutionBindingV1 {
@@ -136,7 +136,6 @@ export function bindHeadlessExecutionV1(
   if (run.projectId !== project.id) {
     denied("run and project identities do not match");
   }
-  assertPristineRunningRun(run);
   if (run.plan === null || run.planSha256 === null) {
     denied("headless execution binding requires a persisted plan and digest");
   }
@@ -189,4 +188,27 @@ export function bindHeadlessExecutionV1(
     bindingDigestSha256: digestJson(json(payload)),
     resolution,
   };
+}
+
+export function bindHeadlessExecutionV1(
+  profile: unknown,
+  authority: HeadlessExecutionBindingAuthorityV1,
+): HeadlessExecutionBindingV1 {
+  assertPristineRunningRun(authority.run);
+  return bindHeadlessExecutionCurrentV1(profile, authority);
+}
+
+/**
+ * H3b evidence reconstruction (ADR 0056). Recomputes the identical H2a
+ * identity over current persisted inputs without requiring the pristine
+ * pre-worker snapshot: after process death the run legitimately carries
+ * workspace, patch, verification, or error state. The result remains
+ * self-checking metadata only — it is not approval, a lease, or execution
+ * authority, and it grants no continuation.
+ */
+export function reconstructHeadlessExecutionBindingV1(
+  profile: unknown,
+  authority: HeadlessExecutionBindingAuthorityV1,
+): HeadlessExecutionBindingV1 {
+  return bindHeadlessExecutionCurrentV1(profile, authority);
 }

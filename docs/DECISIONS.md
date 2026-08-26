@@ -53,6 +53,7 @@ Decision records for the current milestone:
 | [0055](adr/0055-headless-live-evidence-executor.md) | Gate 1 uses a one-shot serial CLI over strictly bound completed runs, a crash-safe exact-resume journal, durable admission-derived effects, and NDJSON terminal receipts | Accepted — operator decision 2026-08-23; implementation candidate passed offline measurement, independent review and live 3/3 still required |
 
 | [0056](adr/0056-vulcan-kind-on-evidence-surfaces.md) | Change Room and Handoff Pack evidence projections recognize every persistable provider kind including `vulcan`, while the Gate 1 live-evidence profile/driver and the headless host catalog deliberately keep their reviewed kind sets | Proposed |
+| [0056](adr/0056-headless-evidence-reconstruction.md) | H3b evidence-only reconstruction recomputes the exact H2a binding from persisted inputs and classifies each crash-tail effect `no_effect`/`durably_settled`/`ambiguous` without recording resume intent or executing anything | Proposed — read-only projection only; no continuation, replay, fork, or deployment authority |
 
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.

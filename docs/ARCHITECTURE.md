@@ -315,6 +315,20 @@ without changing run state or re-entering execution. Repeated reconciliation
 returns the existing settlement. Ordinary resume refuses any headless lifecycle;
 binding reconstruction and exactly-once continuation remain H3b work.
 
+The first H3b slice (ADR 0056) is evidence-only. `run reconstruct-headless`
+reads the persisted run, project, approvals, events, and readable manifest —
+holding no lease and writing nothing — rebuilds the source profile from the
+durable start payload, re-resolves it against the plan-digest-pinned provider
+identity, and recomputes the complete ADR 0047 binding, requiring the recorded
+profile, resolution, and binding digests exactly. Each crash-tail operation is
+classified `durably_settled` only with an intact finished receipt, `no_effect`
+only for the two closed read-only kinds, and `ambiguous` for anything missing,
+contradictory, extra, or unknown. The command emits one canonical
+`icarus.headless.reconstruction.v1` metadata record; repeated runs over the
+same durable bytes are byte-identical. The record is evidence for a later
+continuation design and grants no resume, replay, fork, or execution
+authority.
+
 ## Guarded CLI golden-path sequence
 
 1. State-root initialization first rejects a location inside any Git checkout,

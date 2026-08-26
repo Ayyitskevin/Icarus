@@ -92,6 +92,10 @@ and human shipping approval remain open.
 
 ## Headless H3b reconstruction plan
 
+Status: the evidence-only reconstruction and classification slice is
+implemented under proposed ADR 0056; the full local gate passed. One
+non-author review and the later exactly-once continuation slice remain open.
+
 Decision: the first H3b slice is evidence-only reconstruction and
 classification. It grants no continuation, replay, fork, provider, sandbox,
 workspace, Git, or model-tool authority.
@@ -111,15 +115,15 @@ The closed evidence labels are `no_effect`, `durably_settled`, and `ambiguous`.
 They describe persisted history only. Neither positive label grants replay,
 resume, fork, or any other execution authority.
 
-- [ ] Recompute the complete H2a authority binding from current persisted inputs
+- [x] Recompute the complete H2a authority binding from current persisted inputs
       and require the original H3a lifecycle binding digest exactly.
-- [ ] Reconstruct durable provider/workspace/effect identity without invoking
+- [x] Reconstruct durable provider/workspace/effect identity without invoking
       any effectful adapter or controller.
-- [ ] Classify each crash-tail effect as `no_effect`, `durably_settled`, or
+- [x] Classify each crash-tail effect as `no_effect`, `durably_settled`, or
       `ambiguous`; fail closed on missing, contradictory, or extra evidence.
-- [ ] Emit a bounded, strict, metadata-only reconstruction result suitable for
+- [x] Emit a bounded, strict, metadata-only reconstruction result suitable for
       later H3b continuation design but not itself usable as authority.
-- [ ] Prove with malformed-history and crash fixtures that classification never
+- [x] Prove with malformed-history and crash fixtures that classification never
       records resume intent or executes an effect.
 - [ ] Keep exactly-once continuation in a later H3b slice after this evidence
       boundary passes the full local gate and one non-author review.
