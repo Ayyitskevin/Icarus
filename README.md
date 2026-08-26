@@ -506,6 +506,23 @@ JSONL, and exits `1`. Repeating it returns the same history. It never resumes
 execution; ordinary `run resume` is refused until H3b can reconstruct the exact
 headless binding.
 
+To inspect what a crashed or settled headless worker durably proves, run the
+evidence-only H3b projection:
+
+```text
+node packages/cli/dist/main.js run reconstruct-headless <run-id>
+```
+
+The command mutates nothing: it holds no lease, appends no event, and records
+no resume intent. It recomputes the exact ADR 0047 binding from current
+persisted authority and requires the recorded profile, resolution, and binding
+digests, then classifies every crash-tail operation as `durably_settled`,
+`no_effect`, or `ambiguous`. The single canonical
+`icarus.headless.reconstruction.v1` record is metadata for a later
+continuation design; it grants no resume, replay, fork, or execution
+authority, and repeating the command over unchanged durable bytes prints
+byte-identical output.
+
 Use `run list [--project <name>]` to rediscover persisted run IDs and `run
 history <run-id>` to inspect the append-only transition and approval record.
 

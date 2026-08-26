@@ -576,6 +576,7 @@ function usage(): never {
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
       "icarus run approve-headless RUN --plan-sha SHA --actor ACTOR --profile-json JSON --provider-catalog-json JSON",
       "icarus run reconcile-headless RUN",
+      "icarus run reconstruct-headless RUN",
       "icarus run status RUN",
       "icarus run list [--project NAME]",
       "icarus run history RUN [--format json|jsonl]",
@@ -1048,6 +1049,15 @@ async function dispatch(
     );
     for (const line of lines) process.stdout.write(canonicalJsonLine(line));
     process.exitCode = result.settlement.exitCode;
+    return;
+  }
+  if (action === "reconstruct-headless") {
+    const options = parseOptions(rest, []);
+    // H3b evidence reconstruction is a pure projection: it reads the durable
+    // snapshot and prints one canonical metadata record without appending an
+    // event, settling an operation, or recording resume intent (ADR 0057).
+    const result = runtime.service.reconstructHeadlessEvidence(oneRunId(options));
+    process.stdout.write(canonicalJsonLine(result as unknown as JsonValue));
     return;
   }
   if (action === "status") {

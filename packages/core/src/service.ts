@@ -21,6 +21,10 @@ import { errorMessage, IcarusError, invariant } from "./errors.js";
 import type { GitController, RepositoryInspection, WorktreeFileWrite } from "./git.js";
 import { bindHeadlessExecutionV1, type HeadlessExecutionBindingV1 } from "./headless-binding.js";
 import {
+  type HeadlessReconstructionV1,
+  reconstructHeadlessEvidenceV1,
+} from "./headless-reconstruction.js";
+import {
   type HeadlessHostProviderProfileV1,
   resolveHeadlessProfileV1,
 } from "./headless-profile.js";
@@ -1289,6 +1293,23 @@ export class IcarusService {
       });
       this.#store.recordHeadlessWorkerSettled(runId, settlement);
       return { settlement, run: this.#store.getRun(runId) };
+    });
+  }
+
+  /**
+   * H3b evidence-only reconstruction (ADR 0057). Pure read path: no lease, no
+   * appended event, no operation or state change, and no provider, sandbox,
+   * Git, or model-tool invocation. The result is metadata only and grants no
+   * continuation authority.
+   */
+  reconstructHeadlessEvidence(runId: string): HeadlessReconstructionV1 {
+    const history = this.#store.getRunHistory(runId);
+    return reconstructHeadlessEvidenceV1({
+      run: history.run,
+      project: this.#store.getProject(history.run.projectId),
+      approvals: history.approvals,
+      events: history.events,
+      readableManifest: this.#store.readableManifest(runId),
     });
   }
 

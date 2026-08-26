@@ -131,6 +131,7 @@ export type {
 export {
   bindHeadlessExecutionV1,
   HEADLESS_EXECUTION_BINDING_SCHEMA,
+  reconstructHeadlessExecutionBindingV1,
 } from "./headless-binding.js";
 export type {
   HeadlessHostProviderProfileV1,
@@ -169,6 +170,19 @@ export {
   headlessWorkerStartedPayload,
   inspectHeadlessWorkerLifecycleV1,
 } from "./headless-worker.js";
+export type {
+  HeadlessCrashTailEffectV1,
+  HeadlessEffectDispositionV1,
+  HeadlessReconstructionAuthorityV1,
+  HeadlessReconstructionProviderV1,
+  HeadlessReconstructionV1,
+  HeadlessReconstructionWorkspaceV1,
+} from "./headless-reconstruction.js";
+export {
+  HEADLESS_RECONSTRUCTION_EFFECT_LIMIT,
+  HEADLESS_RECONSTRUCTION_SCHEMA,
+  reconstructHeadlessEvidenceV1,
+} from "./headless-reconstruction.js";
 export type {
   LandingProfileRecordV1,
   LandingRunProjectionSnapshotV1,
