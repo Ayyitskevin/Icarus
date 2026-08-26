@@ -210,6 +210,24 @@ export {
   reconstructHeadlessEvidenceV1,
 } from "./headless-reconstruction.js";
 export type {
+  HeadlessStreamCheckEntryV1,
+  HeadlessStreamCheckLineV1,
+  HeadlessStreamContentLineV1,
+  HeadlessStreamGrantLineV1,
+  HeadlessStreamInitLineV1,
+  HeadlessStreamLineV1,
+  HeadlessStreamPatchSetLineV1,
+  HeadlessStreamPlanLineV1,
+  HeadlessStreamReceiptLineV1,
+  HeadlessStreamResultLineV1,
+  HeadlessStreamSourceV1,
+} from "./headless-stream.js";
+export {
+  createHeadlessStreamLines,
+  HEADLESS_STREAM_SCHEMA,
+  headlessStreamContentSha256,
+} from "./headless-stream.js";
+export type {
   LandingProfileRecordV1,
   LandingRunProjectionSnapshotV1,
   LandingRunProjectionV1,

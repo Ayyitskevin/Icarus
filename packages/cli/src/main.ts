@@ -25,6 +25,7 @@ import {
   type BenchTargetV1,
   createGateway,
   createHeadlessHistoryLines,
+  createHeadlessStreamLines,
   createIcarusRuntime,
   createProbeRequest,
   createProviderConfig,
@@ -381,6 +382,43 @@ function publicRun(run: RunRecord): Record<string, unknown> {
 function print(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
+
+/**
+ * Opt-in headless output surface (ADR 0061): `history` is the checksum-
+ * terminated H0 trajectory and stays the default; `stream-json` is the typed
+ * receipt-bound NDJSON projection of the same authoritative snapshot.
+ */
+type HeadlessOutputFormat = "history" | "stream-json";
+
+function headlessOutputFormat(options: ParsedOptions): HeadlessOutputFormat {
+  const value = optional(options, "--output-format") ?? "history";
+  if (value !== "history" && value !== "stream-json") {
+    fail("INVALID_ARGUMENT", "--output-format must be history or stream-json");
+  }
+  return value;
+}
+
+function emitRunTrajectory(
+  runtime: IcarusRuntime,
+  runId: string,
+  format: HeadlessOutputFormat,
+): void {
+  const history = runtime.service.history(runId);
+  if (format === "stream-json") {
+    for (const line of createHeadlessStreamLines(history)) {
+      process.stdout.write(canonicalJsonLine(line));
+    }
+    return;
+  }
+  const lines = createHeadlessHistoryLines(
+    history.run.id,
+    publicRun(history.run) as JsonValue,
+    history.approvals,
+    history.events,
+  );
+  for (const line of lines) process.stdout.write(canonicalJsonLine(line));
+}
+
 function handoffInputPair(input: string): {
   readonly payload: Buffer;
   readonly result: Buffer;
@@ -577,13 +615,13 @@ function usage(): never {
       "icarus run plan --project NAME --task TEXT --target PATH [--target PATH ...] --provider ollama|openai|anthropic|vulcan --model MODEL [provider options]",
       "icarus run approve-egress RUN --context-sha SHA --actor ACTOR",
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
-      "icarus run approve-headless RUN --plan-sha SHA --actor ACTOR --profile-json JSON --provider-catalog-json JSON",
-      "icarus run reconcile-headless RUN",
+      "icarus run approve-headless RUN --plan-sha SHA --actor ACTOR --profile-json JSON --provider-catalog-json JSON [--output-format history|stream-json]",
+      "icarus run reconcile-headless RUN [--output-format history|stream-json]",
       "icarus run reconstruct-headless RUN",
-      "icarus run resume-headless RUN",
+      "icarus run resume-headless RUN [--output-format history|stream-json]",
       "icarus run status RUN",
       "icarus run list [--project NAME]",
-      "icarus run history RUN [--format json|jsonl]",
+      "icarus run history RUN [--format json|jsonl|stream-json]",
       "icarus run handoff-preview RUN --correlation-id ID [--external-task-ref REF]",
       "icarus run handoff-export RUN --correlation-id ID [--external-task-ref REF] --expected-preview-sha256 SHA --output-dir DIR",
       "icarus handoff verify --input FILE",
@@ -1017,11 +1055,15 @@ async function dispatch(
       "--actor",
       "--profile-json",
       "--provider-catalog-json",
+      "--output-format",
     ]);
     const providerCatalog = boundedJsonOption(options, "--provider-catalog-json", 256 * 1024);
     if (!Array.isArray(providerCatalog)) {
       fail("INVALID_ARGUMENT", "--provider-catalog-json must be a JSON array");
     }
+    // An invalid output format is an argument error and must fail before any
+    // execution effect, never after the worker has settled.
+    const outputFormat = headlessOutputFormat(options);
     const result = await runtime.service.approveHeadlessPlan(
       oneRunId(options),
       required(options, "--plan-sha"),
@@ -1030,28 +1072,15 @@ async function dispatch(
       providerCatalog as readonly HeadlessHostProviderProfileV1[],
       signal,
     );
-    const history = runtime.service.history(result.run.id);
-    const lines = createHeadlessHistoryLines(
-      history.run.id,
-      publicRun(history.run) as JsonValue,
-      history.approvals,
-      history.events,
-    );
-    for (const line of lines) process.stdout.write(canonicalJsonLine(line));
+    emitRunTrajectory(runtime, result.run.id, outputFormat);
     process.exitCode = result.settlement.exitCode;
     return;
   }
   if (action === "reconcile-headless") {
-    const options = parseOptions(rest, []);
+    const options = parseOptions(rest, ["--output-format"]);
+    const outputFormat = headlessOutputFormat(options);
     const result = await runtime.service.reconcileHeadlessWorker(oneRunId(options));
-    const history = runtime.service.history(result.run.id);
-    const lines = createHeadlessHistoryLines(
-      history.run.id,
-      publicRun(history.run) as JsonValue,
-      history.approvals,
-      history.events,
-    );
-    for (const line of lines) process.stdout.write(canonicalJsonLine(line));
+    emitRunTrajectory(runtime, result.run.id, outputFormat);
     process.exitCode = result.settlement.exitCode;
     return;
   }
@@ -1065,19 +1094,13 @@ async function dispatch(
     return;
   }
   if (action === "resume-headless") {
-    const options = parseOptions(rest, []);
+    const options = parseOptions(rest, ["--output-format"]);
+    const outputFormat = headlessOutputFormat(options);
     // H3b governed continuation (ADR 0058): the service holds the run lease,
     // proves reconstruction and replay safety, records resume intent, and
     // settles exactly once. A settled worker returns its durable settlement.
     const result = await runtime.service.resumeHeadlessWorker(oneRunId(options), signal);
-    const history = runtime.service.history(result.run.id);
-    const lines = createHeadlessHistoryLines(
-      history.run.id,
-      publicRun(history.run) as JsonValue,
-      history.approvals,
-      history.events,
-    );
-    for (const line of lines) process.stdout.write(canonicalJsonLine(line));
+    emitRunTrajectory(runtime, result.run.id, outputFormat);
     process.exitCode = result.settlement.exitCode;
     return;
   }
@@ -1095,20 +1118,18 @@ async function dispatch(
   if (action === "history") {
     const options = parseOptions(rest, ["--format"]);
     const format = optional(options, "--format") ?? "json";
-    if (format !== "json" && format !== "jsonl") {
-      fail("INVALID_ARGUMENT", "--format must be json or jsonl");
+    if (format !== "json" && format !== "jsonl" && format !== "stream-json") {
+      fail("INVALID_ARGUMENT", "--format must be json, jsonl, or stream-json");
     }
-    const history = runtime.service.history(oneRunId(options));
-    if (format === "jsonl") {
-      const lines = createHeadlessHistoryLines(
-        history.run.id,
-        publicRun(history.run) as JsonValue,
-        history.approvals,
-        history.events,
+    if (format === "jsonl" || format === "stream-json") {
+      emitRunTrajectory(
+        runtime,
+        oneRunId(options),
+        format === "stream-json" ? "stream-json" : "history",
       );
-      for (const line of lines) process.stdout.write(canonicalJsonLine(line));
       return;
     }
+    const history = runtime.service.history(oneRunId(options));
     print({
       run: publicRun(history.run),
       approvals: history.approvals,

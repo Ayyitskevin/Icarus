@@ -116,9 +116,15 @@ describe("headless continuation security contract", () => {
   test("the CLI command emits checksum-terminated history and the settlement exit code", () => {
     const command = body(cli, 'if (action === "resume-headless")', 'if (action === "status")');
     expect(command).toContain("resumeHeadlessWorker(oneRunId(options)");
-    expect(command).toContain("createHeadlessHistoryLines(");
-    expect(command).toContain("canonicalJsonLine(line)");
+    expect(command).toContain("emitRunTrajectory(runtime, result.run.id");
     expect(command).toContain("process.exitCode = result.settlement.exitCode");
-    expect(cli).toContain('"icarus run resume-headless RUN"');
+    // The shared emitter keeps the H0 history as the default output format.
+    const emitter = body(cli, "function emitRunTrajectory(", "function handoffInputPair(");
+    expect(emitter).toContain("createHeadlessHistoryLines(");
+    expect(emitter).toContain("canonicalJsonLine(line)");
+    expect(command.indexOf("headlessOutputFormat(options)")).toBeLessThan(
+      command.indexOf("resumeHeadlessWorker("),
+    );
+    expect(cli).toContain('"icarus run resume-headless RUN [--output-format history|stream-json]"');
   });
 });

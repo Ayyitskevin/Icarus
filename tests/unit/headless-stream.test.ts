@@ -1,0 +1,523 @@
+import { describe, expect, test } from "vitest";
+import { canonicalJsonLine } from "../../packages/core/src/canonical-json.js";
+import { digestJson } from "../../packages/core/src/digest.js";
+import {
+  createHeadlessStreamLines,
+  HEADLESS_STREAM_SCHEMA,
+  type HeadlessStreamContentLineV1,
+  headlessStreamContentSha256,
+} from "../../packages/core/src/headless-stream.js";
+import type {
+  ApprovalRecord,
+  EventRecord,
+  JsonValue,
+  PatchSet,
+  RunHistory,
+  RunRecord,
+} from "../../packages/core/src/types.js";
+import { CONTEXT_AUDIT_POLICY_VERSION } from "../../packages/core/src/types.js";
+
+const RUN_ID = "11111111-1111-4111-8111-111111111111";
+const BASE_COMMIT = "b".repeat(40);
+const CONTEXT_SHA = "c".repeat(64);
+const PLAN_SHA = "d".repeat(64);
+const BINDING_DIGEST = "e".repeat(64);
+const DIFF_SHA = "f".repeat(64);
+const CHECKPOINT_SHA = "a".repeat(64);
+const APPROVED_SHA = "1".repeat(64);
+
+const PATCH_SET: PatchSet = {
+  summary: "Fix the greeting",
+  edits: [
+    {
+      op: "modify",
+      path: "src/greeting.txt",
+      expectedPreimageSha256: "2".repeat(64),
+      replacements: [{ findText: "Icrus", replaceText: "Icarus" }],
+      rationale: "Correct the typo",
+    },
+  ],
+};
+
+function run(overrides: Partial<RunRecord> = {}): RunRecord {
+  return {
+    id: RUN_ID,
+    projectId: "project-1",
+    task: "Fix the greeting",
+    target: "src/greeting.txt",
+    provider: {
+      kind: "ollama",
+      model: "contract-model",
+      baseUrl: "http://127.0.0.1:11434/",
+      inputUsdPerMillionTokens: null,
+      outputUsdPerMillionTokens: null,
+      capabilities: {
+        contextSize: null,
+        toolSupport: false,
+        visionSupport: false,
+        structuredOutputSupport: true,
+        streamingSupport: false,
+        costClass: "local",
+        latencyClass: "local",
+        privacyClass: "local_process",
+        reasoningQuality: "unknown",
+        locality: "loopback",
+      },
+    },
+    state: "awaiting_review",
+    resumeState: null,
+    baseCommit: BASE_COMMIT,
+    context: {
+      auditPolicyVersion: CONTEXT_AUDIT_POLICY_VERSION,
+      baseCommit: BASE_COMMIT,
+      targets: ["src/greeting.txt"],
+      repositoryMap: [],
+      entries: [],
+      totalBytes: 0,
+    },
+    contextArtifactPath: "runs/1/context.json",
+    contextSha256: CONTEXT_SHA,
+    plan: {
+      summary: "Fix the greeting",
+      steps: ["edit"],
+      risks: [],
+      target: "src/greeting.txt",
+      targets: ["src/greeting.txt"],
+      iterationCeiling: 0,
+      checkIds: ["verify"],
+      grants: [{ kind: "exec.check", scope: ["verify"], maxCalls: 1 }],
+    },
+    planSha256: PLAN_SHA,
+    patchSet: PATCH_SET,
+    cachePath: null,
+    worktreePath: null,
+    baselineBase64: null,
+    approvedBase64: null,
+    diff: null,
+    verification: {
+      outcome: "passed",
+      checks: [
+        {
+          checkId: "verify",
+          argv: ["python", "checks/verify.py"],
+          exitCode: 0,
+          signal: null,
+          durationMs: 12,
+          stdout: "ok",
+          stderr: "",
+          truncated: false,
+          outcome: "passed",
+        },
+      ],
+      changedPaths: ["src/greeting.txt"],
+      diffSha256: DIFF_SHA,
+      checkpointSha256: CHECKPOINT_SHA,
+    },
+    usage: {
+      toolCalls: 0,
+      inputTokens: 10,
+      outputTokens: 5,
+      activeRuntimeMs: 100,
+      estimatedCostUsd: 0,
+      reservedCostUsd: 0,
+    },
+    lastError: null,
+    createdAt: "2026-08-26T12:00:00.000Z",
+    updatedAt: "2026-08-26T12:01:00.000Z",
+    ...overrides,
+  };
+}
+
+function approvals(): readonly ApprovalRecord[] {
+  return [
+    {
+      runId: RUN_ID,
+      kind: "plan",
+      digest: PLAN_SHA,
+      actor: "operator",
+      decision: "approve",
+      createdAt: "2026-08-26T12:00:10.000Z",
+    },
+  ];
+}
+
+function event(
+  sequence: number,
+  type: string,
+  payload: JsonValue,
+  createdAt = `2026-08-26T12:00:${String(10 + sequence).padStart(2, "0")}.000Z`,
+): EventRecord {
+  return { sequence, runId: RUN_ID, type, payload, createdAt };
+}
+
+function headlessEvents(): readonly EventRecord[] {
+  return [
+    event(1, "run.created", { state: "preparing", target: "src/greeting.txt" }),
+    event(2, "base.pinned", { baseCommit: BASE_COMMIT }),
+    event(3, "context.assembled", {
+      from: "preparing",
+      to: "planned",
+      contextSha256: CONTEXT_SHA,
+    }),
+    event(4, "plan.created", {
+      from: "planned",
+      to: "awaiting_approval",
+      planSha256: PLAN_SHA,
+      readableFiles: 0,
+    }),
+    event(5, "headless.worker.started", {
+      schema: "icarus.headless.worker.v1",
+      bindingDigestSha256: BINDING_DIGEST,
+      profileDigestSha256: "3".repeat(64),
+      resolutionDigestSha256: "4".repeat(64),
+      profileId: "local-headless",
+      providerProfileId: "local-provider",
+      toolIds: [],
+      budgets: {},
+      worker: { mode: "one_task" },
+    }),
+    event(6, "patch_set.intent_recorded", {
+      paths: ["src/greeting.txt"],
+      operations: ["modify"],
+    }),
+    event(7, "edit.materialized", {
+      from: "running",
+      to: "verifying",
+      detail: {
+        target: "src/greeting.txt",
+        approvedSha256: APPROVED_SHA,
+      },
+    }),
+    event(8, "verification.completed", {
+      from: "verifying",
+      to: "awaiting_review",
+      outcome: "passed",
+      diffSha256: DIFF_SHA,
+      diff: "diff-bytes",
+      verification: {
+        outcome: "passed",
+        checks: [
+          {
+            checkId: "verify",
+            argv: ["python", "checks/verify.py"],
+            exitCode: 0,
+            signal: null,
+            durationMs: 12,
+            stdout: "ok",
+            stderr: "",
+            truncated: false,
+            outcome: "passed",
+          },
+        ],
+        changedPaths: ["src/greeting.txt"],
+        diffSha256: DIFF_SHA,
+        checkpointSha256: CHECKPOINT_SHA,
+      },
+    }),
+    event(9, "headless.worker.settled", {
+      schema: "icarus.headless.worker.v1",
+      runId: RUN_ID,
+      bindingDigestSha256: BINDING_DIGEST,
+      outcome: "review_ready",
+      exitCode: 0,
+      finalState: "awaiting_review",
+      verificationOutcome: "passed",
+      usage: {
+        toolCalls: 0,
+        inputTokens: 10,
+        outputTokens: 5,
+        activeRuntimeMs: 100,
+        estimatedCostUsd: 0,
+        reservedCostUsd: 0,
+      },
+      error: null,
+    }),
+  ];
+}
+
+function history(overrides: Partial<RunHistory> = {}): RunHistory {
+  return { run: run(), approvals: approvals(), events: headlessEvents(), ...overrides };
+}
+
+describe("headless receipt stream", () => {
+  test("projects a settled headless run into a receipt-bound, checksum-terminated stream", () => {
+    const lines = createHeadlessStreamLines(history());
+
+    expect(lines.every((line) => line.schema === HEADLESS_STREAM_SCHEMA)).toBe(true);
+    expect(lines.map((line) => line.sequence)).toEqual(lines.map((_, index) => index + 1));
+    expect(lines.map((line) => line.kind)).toEqual([
+      "init",
+      "grant",
+      "plan",
+      "init",
+      "patchset",
+      "patchset",
+      "check",
+      "receipt",
+      "result",
+    ]);
+
+    const [initRun, grant, plan, initWorker, intent, materialized, check, receipt, result] =
+      lines as [
+        Extract<(typeof lines)[number], { kind: "init" }>,
+        Extract<(typeof lines)[number], { kind: "grant" }>,
+        Extract<(typeof lines)[number], { kind: "init" }>,
+        Extract<(typeof lines)[number], { kind: "plan" }>,
+        Extract<(typeof lines)[number], { kind: "patchset" }>,
+        Extract<(typeof lines)[number], { kind: "patchset" }>,
+        Extract<(typeof lines)[number], { kind: "check" }>,
+        Extract<(typeof lines)[number], { kind: "receipt" }>,
+        Extract<(typeof lines)[number], { kind: "result" }>,
+      ];
+
+    expect(initRun).toMatchObject({
+      phase: "run_created",
+      baseCommit: BASE_COMMIT,
+      contextSha256: CONTEXT_SHA,
+      bindingDigestSha256: null,
+      source: { type: "event", sequence: 1, eventType: "run.created" },
+    });
+    expect(grant).toMatchObject({
+      approvalKind: "plan",
+      digest: PLAN_SHA,
+      actor: "operator",
+      decision: "approve",
+      source: { type: "approval", approvalKind: "plan", digest: PLAN_SHA },
+    });
+    expect(initWorker).toMatchObject({
+      phase: "worker_started",
+      bindingDigestSha256: BINDING_DIGEST,
+      profileId: "local-headless",
+      providerProfileId: "local-provider",
+      source: { type: "event", sequence: 5, eventType: "headless.worker.started" },
+    });
+    expect(plan).toMatchObject({
+      planSha256: PLAN_SHA,
+      targets: ["src/greeting.txt"],
+      checkIds: ["verify"],
+      grants: [{ kind: "exec.check", scope: ["verify"], maxCalls: 1 }],
+      iterationCeiling: 0,
+      source: { type: "event", sequence: 4, eventType: "plan.created" },
+    });
+    // The surviving patch set is digest-bound exactly as the store digests it.
+    expect(intent).toMatchObject({
+      action: "intent_recorded",
+      patchSetSha256: digestJson(PATCH_SET as unknown as JsonValue),
+      paths: ["src/greeting.txt"],
+      operations: ["modify"],
+      source: { type: "event", sequence: 6, eventType: "patch_set.intent_recorded" },
+    });
+    expect(materialized).toMatchObject({
+      action: "materialized",
+      approvedSha256: APPROVED_SHA,
+      source: { type: "event", sequence: 7, eventType: "edit.materialized" },
+    });
+    // Check lines are metadata-only: no check stdout/stderr leaves the store.
+    expect(check).toMatchObject({
+      outcome: "passed",
+      diffSha256: DIFF_SHA,
+      checkpointSha256: CHECKPOINT_SHA,
+      checks: [
+        {
+          checkId: "verify",
+          outcome: "passed",
+          exitCode: 0,
+          signal: null,
+          durationMs: 12,
+          truncated: false,
+        },
+      ],
+      source: { type: "event", sequence: 8, eventType: "verification.completed" },
+    });
+    expect(JSON.stringify(check)).not.toContain("ok");
+    expect(receipt).toMatchObject({
+      receiptKind: "worker",
+      settlementSchema: "icarus.headless.worker.v1",
+      outcome: "review_ready",
+      exitCode: 0,
+      bindingDigestSha256: BINDING_DIGEST,
+      source: { type: "event", sequence: 9, eventType: "headless.worker.settled" },
+    });
+    expect(result).toMatchObject({
+      finalState: "awaiting_review",
+      verificationOutcome: "passed",
+      settlement: {
+        schema: "icarus.headless.worker.v1",
+        outcome: "review_ready",
+        exitCode: 0,
+        bindingDigestSha256: BINDING_DIGEST,
+      },
+      approvalCount: 1,
+      eventCount: 9,
+      lastEventSequence: 9,
+      source: { type: "snapshot" },
+    });
+    expect(result.contentSha256).toBe(
+      headlessStreamContentSha256(lines.slice(0, -1) as readonly HeadlessStreamContentLineV1[]),
+    );
+    expect(Buffer.concat(lines.map(canonicalJsonLine))).toEqual(
+      Buffer.concat(createHeadlessStreamLines(history()).map(canonicalJsonLine)),
+    );
+  });
+
+  test("binds superseded patch-set digests to their intents in order", () => {
+    const supersededDigest = "5".repeat(64);
+    const lines = createHeadlessStreamLines(
+      history({
+        events: [
+          event(1, "run.created", { state: "preparing", target: "src/greeting.txt" }),
+          event(2, "patch_set.intent_recorded", {
+            paths: ["src/greeting.txt"],
+            operations: ["modify"],
+          }),
+          event(3, "patch_set.superseded", {
+            digest: supersededDigest,
+            paths: ["src/greeting.txt"],
+          }),
+          event(4, "patch_set.intent_recorded", {
+            paths: ["src/greeting.txt"],
+            operations: ["modify"],
+          }),
+        ],
+      }),
+    );
+    const patchsets = lines.filter((line) => line.kind === "patchset");
+    expect(patchsets).toHaveLength(3);
+    expect(patchsets[0]).toMatchObject({
+      action: "intent_recorded",
+      patchSetSha256: supersededDigest,
+    });
+    expect(patchsets[1]).toMatchObject({ action: "superseded", patchSetSha256: supersededDigest });
+    expect(patchsets[2]).toMatchObject({
+      action: "intent_recorded",
+      patchSetSha256: digestJson(PATCH_SET as unknown as JsonValue),
+    });
+  });
+
+  test("projects child settlements as receipts bound to the child run", () => {
+    const lines = createHeadlessStreamLines(
+      history({
+        events: [
+          event(1, "run.created", { state: "preparing", target: "src/greeting.txt" }),
+          event(2, "headless.child.settled", {
+            schema: "icarus.headless.child-settlement.v1",
+            runId: RUN_ID,
+            childId: "child-1",
+            childRunId: "22222222-2222-4222-8222-222222222222",
+            outcome: "review_ready",
+            exitCode: 0,
+            childBindingDigestSha256: "6".repeat(64),
+            error: null,
+          }),
+        ],
+      }),
+    );
+    const receipt = lines.find((line) => line.kind === "receipt");
+    expect(receipt).toMatchObject({
+      receiptKind: "child",
+      settlementSchema: "icarus.headless.child-settlement.v1",
+      bindingDigestSha256: "6".repeat(64),
+      childRunId: "22222222-2222-4222-8222-222222222222",
+    });
+  });
+
+  test("projects an interactive run without worker evidence", () => {
+    const lines = createHeadlessStreamLines(
+      history({
+        run: run({ state: "completed", patchSet: null }),
+        events: [
+          event(1, "run.created", { state: "preparing", target: "src/greeting.txt" }),
+          event(2, "plan.created", {
+            from: "planned",
+            to: "awaiting_approval",
+            planSha256: PLAN_SHA,
+            readableFiles: 0,
+          }),
+        ],
+      }),
+    );
+    expect(lines.map((line) => line.kind)).toEqual(["init", "grant", "plan", "result"]);
+    const result = lines.at(-1);
+    expect(result).toMatchObject({ finalState: "completed", settlement: null });
+  });
+
+  test("fails closed when a snapshot contains another run's approval", () => {
+    expect(() =>
+      createHeadlessStreamLines(
+        history({
+          approvals: [
+            {
+              runId: "22222222-2222-4222-8222-222222222222",
+              kind: "plan",
+              digest: PLAN_SHA,
+              actor: "operator",
+              decision: "approve",
+              createdAt: "2026-08-26T12:00:10.000Z",
+            },
+          ],
+        }),
+      ),
+    ).toThrow("Headless stream approval belongs to a different run");
+  });
+
+  test("fails closed when event order is not strictly increasing", () => {
+    const events = headlessEvents().map((entry) =>
+      entry.sequence === 2 ? { ...entry, sequence: 1 } : entry,
+    );
+    expect(() => createHeadlessStreamLines(history({ events }))).toThrow(
+      "Headless stream event sequence must be positive and strictly increasing",
+    );
+  });
+
+  test("fails closed without exactly one run creation", () => {
+    expect(() => createHeadlessStreamLines(history({ events: [] }))).toThrow(
+      "Headless stream history must contain exactly one run creation",
+    );
+  });
+
+  test("fails closed on a supersession without its intent", () => {
+    expect(() =>
+      createHeadlessStreamLines(
+        history({
+          events: [
+            event(1, "run.created", { state: "preparing", target: "src/greeting.txt" }),
+            event(2, "patch_set.superseded", {
+              digest: "5".repeat(64),
+              paths: ["src/greeting.txt"],
+            }),
+          ],
+        }),
+      ),
+    ).toThrow("Headless stream patch-set supersession lacks its intent");
+  });
+
+  test("fails closed on an unbound intent when no patch set survives", () => {
+    expect(() =>
+      createHeadlessStreamLines(
+        history({
+          run: run({ patchSet: null }),
+          events: [
+            event(1, "run.created", { state: "preparing", target: "src/greeting.txt" }),
+            event(2, "patch_set.intent_recorded", {
+              paths: ["src/greeting.txt"],
+              operations: ["modify"],
+            }),
+          ],
+        }),
+      ),
+    ).toThrow("Headless stream patch-set intent lacks its digest");
+  });
+
+  test("fails closed on a malformed check payload", () => {
+    expect(() =>
+      createHeadlessStreamLines(
+        history({
+          events: [
+            event(1, "run.created", { state: "preparing", target: "src/greeting.txt" }),
+            event(2, "verification.completed", { from: "verifying", to: "awaiting_review" }),
+          ],
+        }),
+      ),
+    ).toThrow("Check payload verification is malformed");
+  });
+});

@@ -59,6 +59,8 @@ Decision records for the current milestone:
 
 | [0059](adr/0059-headless-isolated-child-runs.md) | H4 admits operator-declared child runs only: ordinary runs with recorded lineage, sequential under the parent lease in isolated worktrees, with depth, cumulative budget, tool, and write-set ceilings, and the parent's settlement gated on child quiescence | Proposed — no fork, concurrency, remote-provider children, model-initiated children, or deployment authority |
 
+| [0061](adr/0061-headless-receipt-event-stream.md) | A typed `icarus.headless.stream.v1` NDJSON stream (init/grant/plan/patchset/check/receipt/result) is projected from the same durable run history snapshot the H0 export reads, every line bound to its plan-approval, patch-set, binding, or settlement identity, wired as an opt-in `--format stream-json` / `--output-format stream-json` mode with the H0 default byte-identical | Proposed — read-only projection only; no execution, approval, resume, fork, or deployment authority |
+
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.
 
