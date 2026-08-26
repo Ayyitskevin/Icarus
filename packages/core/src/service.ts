@@ -583,6 +583,19 @@ export type {
   PrepareLandingInput,
 } from "./landing-coordinator.js";
 
+/**
+ * Determinism seams for fixture-controlled boundaries (AGENTS.md injection
+ * conventions). Production leaves every member undefined.
+ */
+export interface IcarusInstrumentation {
+  /**
+   * Invoked once patch-set intent is durable and before materialization
+   * begins — the exact edit-boundary crash point. Test seam only; it lets a
+   * crash fixture hold the worker at the boundary instead of racing it.
+   */
+  readonly afterPatchSetIntent?: (runId: string) => Promise<void>;
+}
+
 export interface IcarusServiceOptions {
   readonly stateRoot: string;
   readonly store: IcarusStore;
@@ -600,6 +613,8 @@ export interface IcarusServiceOptions {
   readonly now?: () => string;
   /** Test seam only; production always defaults to the live Node platform. */
   readonly platform?: NodeJS.Platform;
+  /** Test seam only; production performs every boundary without pausing. */
+  readonly instrumentation?: IcarusInstrumentation;
 }
 
 export interface BrowserActionExecutionResult {
@@ -658,6 +673,7 @@ export class IcarusService {
   readonly #platform: NodeJS.Platform;
   readonly #browserActionContexts = new Map<string, BrowserActionExecutionContext>();
   readonly #headlessExecutionContexts = new Map<string, ActiveHeadlessExecutionV1>();
+  readonly #instrumentation: IcarusInstrumentation;
 
   constructor(options: IcarusServiceOptions) {
     this.#stateRoot = path.resolve(options.stateRoot);
@@ -671,6 +687,7 @@ export class IcarusService {
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#leases = new RunLeaseManager(this.#stateRoot);
     this.#platform = options.platform ?? process.platform;
+    this.#instrumentation = options.instrumentation ?? {};
     this.#landing = new LandingCoordinator({
       stateRoot: this.#stateRoot,
       store: this.#store,
@@ -2562,6 +2579,9 @@ export class IcarusService {
         };
       });
       run = this.#store.recordPatchSetIntent(runId, patchSet, files);
+      if (this.#instrumentation.afterPatchSetIntent !== undefined) {
+        await this.#instrumentation.afterPatchSetIntent(runId);
+      }
     }
 
     const checkpointFiles = this.#store.listCheckpointFiles(runId);

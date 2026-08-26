@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ArtifactStore } from "./artifacts.js";
-import { invariant } from "./errors.js";
+import { IcarusError, invariant } from "./errors.js";
 import { GitController } from "./git.js";
 import { LandingGitController } from "./landing-git.js";
 import { DockerSandboxRunner } from "./sandbox.js";
@@ -16,6 +16,42 @@ export interface IcarusRuntime {
 }
 
 const STATE_MARKER = '{"application":"icarus","format":1}\n';
+
+/**
+ * Test seam only: when `ICARUS_TEST_PAUSE_AFTER_PATCH_SET_INTENT_FILE` names a
+ * file, the worker suspends at the exact edit boundary — patch-set intent
+ * durable, materialization not started — until that file appears. Crash
+ * fixtures use this to position a kill deterministically instead of racing a
+ * sub-millisecond window (CI failure run 32964785992). A bounded ceiling keeps
+ * a leaked pause fail-closed rather than hung.
+ */
+const TEST_PAUSE_ENV = "ICARUS_TEST_PAUSE_AFTER_PATCH_SET_INTENT_FILE";
+const TEST_PAUSE_CEILING_MS = 10 * 60_000;
+
+async function pauseUntilFileExists(filePath: string): Promise<void> {
+  invariant(
+    filePath.length > 0 && path.isAbsolute(filePath),
+    "INVALID_INSTRUMENTATION",
+    "Test pause file must be an absolute path",
+  );
+  const deadline = Date.now() + TEST_PAUSE_CEILING_MS;
+  for (;;) {
+    if (
+      await lstat(filePath).then(
+        () => true,
+        () => false,
+      )
+    )
+      return;
+    if (Date.now() > deadline) {
+      throw new IcarusError(
+        "INVALID_INSTRUMENTATION",
+        "Test pause file did not appear before its ceiling",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
 
 function isStrictlyOutside(base: string, candidate: string): boolean {
   const relative = path.relative(base, candidate);
@@ -249,6 +285,7 @@ export async function createIcarusRuntime(
   const git = new GitController(controllerHome, runsRoot);
   const landingGit = new LandingGitController(controllerHome, runsRoot);
   const checks = new DockerSandboxRunner(root, git, options.dockerBinary ?? "docker");
+  const testPauseFile = process.env[TEST_PAUSE_ENV];
   const service = new IcarusService({
     stateRoot: root,
     store,
@@ -258,6 +295,13 @@ export async function createIcarusRuntime(
     landingCredentialEnvironmentNames: options.landingCredentialEnvironmentNames ?? [],
     checks,
     ...(options.gatewayFactory === undefined ? {} : { gatewayFactory: options.gatewayFactory }),
+    ...(testPauseFile === undefined
+      ? {}
+      : {
+          instrumentation: {
+            afterPatchSetIntent: () => pauseUntilFileExists(testPauseFile),
+          },
+        }),
   });
   try {
     await service.initialize();

@@ -40,10 +40,10 @@ afterEach(async () => {
   }
 });
 
-function spawnCli(stateRoot: string, args: readonly string[]) {
+function spawnCli(stateRoot: string, args: readonly string[], extraEnv: NodeJS.ProcessEnv = {}) {
   const child = spawn(process.execPath, ["packages/cli/dist/main.js", ...args], {
     cwd: process.cwd(),
-    env: { ...process.env, ICARUS_HOME: stateRoot },
+    env: { ...process.env, ...extraEnv, ICARUS_HOME: stateRoot },
     shell: false,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -117,13 +117,12 @@ async function killAfter(
 }
 
 /**
- * Kill the worker in the one clean crash window of the single-shot path:
- * after the provider edit is durably finished and its patch-set intent is
- * persisted, before materialization begins. The window is sub-millisecond,
- * so the worker is stopped as soon as the edit finish is visible and its
- * exact durable position is verified while frozen; a scenario that lost the
- * race (materialization already started) is reported so the caller retries
- * with a fresh fixture rather than asserting on a contaminated tail.
+ * Deterministic clean-crash kill at the exact edit boundary. The worker is
+ * spawned with `ICARUS_TEST_PAUSE_AFTER_PATCH_SET_INTENT_FILE` naming a
+ * sentinel the fixture never creates, so the runtime's test-seam hook suspends
+ * it after patch-set intent is durable and before materialization can begin —
+ * no wall-clock race, on any runner speed. The durable sighting plus the
+ * frozen-position assertion below prove the kill landed in the boundary.
  */
 async function killAtCleanEditBoundary(
   poll: IcarusStore,
@@ -132,37 +131,23 @@ async function killAtCleanEditBoundary(
     readonly child: { kill(signal: NodeJS.Signals): boolean };
     output(): { readonly stdout: string; readonly stderr: string };
   },
-): Promise<"killed" | "lost"> {
-  const isEditFinished = (events: readonly EventRecord[]) =>
-    events.some(
-      (event) =>
-        event.type === "operation.finished" &&
-        (event.payload as { readonly kind?: unknown }).kind === "provider.edit",
-    );
+): Promise<void> {
   const deadline = Date.now() + 120_000;
   for (;;) {
     const events = poll.listEvents(runId);
-    if (isEditFinished(events)) {
+    if (events.some((event) => event.type === "patch_set.intent_recorded")) {
       expect(child.child.kill("SIGSTOP")).toBe(true);
       const frozen = poll.listEvents(runId);
-      const intentPersisted = frozen.some((event) => event.type === "patch_set.intent_recorded");
-      const materializeStarted = frozen.some(
-        (event) =>
-          event.type === "operation.started" &&
-          (event.payload as { readonly kind?: unknown }).kind === "edit.materialize",
-      );
-      if (materializeStarted) {
-        child.child.kill("SIGKILL");
-        return "lost";
-      }
-      if (intentPersisted) {
-        expect(child.child.kill("SIGKILL")).toBe(true);
-        return "killed";
-      }
-      // Intent not yet committed: resume the worker and re-freeze on the
-      // next poll sighting until the intent lands inside the window.
-      expect(child.child.kill("SIGCONT")).toBe(true);
-      continue;
+      expect(frozen.some((event) => event.type === "patch_set.intent_recorded")).toBe(true);
+      expect(
+        frozen.some(
+          (event) =>
+            event.type === "operation.started" &&
+            (event.payload as { readonly kind?: unknown }).kind === "edit.materialize",
+        ),
+      ).toBe(false);
+      expect(child.child.kill("SIGKILL")).toBe(true);
+      return;
     }
     if (Date.now() > deadline) {
       const seen = events.map((event) => `${event.sequence}:${event.type}`);
@@ -229,7 +214,12 @@ async function setupRun(
   );
 }
 
-async function spawnHeadlessWorker(stateRoot: string, planned: RunRecord, providerBaseUrl: string) {
+async function spawnHeadlessWorker(
+  stateRoot: string,
+  planned: RunRecord,
+  providerBaseUrl: string,
+  extraEnv: NodeJS.ProcessEnv = {},
+) {
   const profile = {
     schemaVersion: 1,
     profileId: "local-headless",
@@ -249,19 +239,23 @@ async function spawnHeadlessWorker(stateRoot: string, planned: RunRecord, provid
       outputUsdPerMillionTokens: null,
     },
   ];
-  return spawnCli(stateRoot, [
-    "run",
-    "approve-headless",
-    planned.id,
-    "--plan-sha",
-    planned.planSha256 ?? "",
-    "--actor",
-    "integration-test",
-    "--profile-json",
-    JSON.stringify(profile),
-    "--provider-catalog-json",
-    JSON.stringify(catalog),
-  ]);
+  return spawnCli(
+    stateRoot,
+    [
+      "run",
+      "approve-headless",
+      planned.id,
+      "--plan-sha",
+      planned.planSha256 ?? "",
+      "--actor",
+      "integration-test",
+      "--profile-json",
+      JSON.stringify(profile),
+      "--provider-catalog-json",
+      JSON.stringify(catalog),
+    ],
+    extraEnv,
+  );
 }
 
 function historyLines(stdout: string): readonly Record<string, unknown>[] {
@@ -273,41 +267,28 @@ function historyLines(stdout: string): readonly Record<string, unknown>[] {
 
 describe("headless exactly-once continuation", () => {
   test("resumes a reconciled crash exactly once, then returns byte-identical evidence", async () => {
-    // The clean crash window is sub-millisecond; retry the scenario with fresh
-    // fixtures if the freeze loses the race against materialization.
-    let fixture: Awaited<ReturnType<typeof createFixtureRepository>> | undefined;
-    let provider: Awaited<ReturnType<typeof startOllamaQueue>> | undefined;
-    let planned: RunRecord | undefined;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const candidateFixture = await createFixtureRepository();
-      const preimageSha = sha256("Hello, world!\n");
-      const candidateProvider = await startOllamaQueue([planResponse(), editResponse(preimageSha)]);
-      const candidatePlan = await setupRun(candidateProvider, candidateFixture);
-      const poll = openPollStore(candidateFixture.stateRoot);
-      const worker = await spawnHeadlessWorker(
-        candidateFixture.stateRoot,
-        candidatePlan,
-        candidateProvider.baseUrl,
-      );
-      const outcome = await killAtCleanEditBoundary(poll, candidatePlan.id, worker);
-      poll.close();
-      await worker.exit;
-      if (outcome === "lost") {
-        await candidateProvider.close();
-        await candidateFixture.cleanup();
-        continue;
-      }
-      fixture = candidateFixture;
-      provider = candidateProvider;
-      planned = candidatePlan;
-      break;
-    }
-    if (fixture === undefined || provider === undefined || planned === undefined) {
-      throw new Error("Lost the crash-boundary race five times in a row");
-    }
+    const fixture = await createFixtureRepository();
     cleanups.push(fixture.cleanup);
+    const preimageSha = sha256("Hello, world!\n");
+    const provider = await startOllamaQueue([planResponse(), editResponse(preimageSha)]);
     cleanups.push(provider.close);
     const sourceBefore = await repositoryFingerprint(fixture.repository);
+    const planned = await setupRun(provider, fixture);
+    expect(provider.requests).toHaveLength(1);
+
+    // Deterministic clean crash: the runtime's test-seam hook suspends the
+    // worker at the exact edit boundary (intent durable, materialization not
+    // started) because the sentinel file is never created.
+    const poll = openPollStore(fixture.stateRoot);
+    const worker = await spawnHeadlessWorker(fixture.stateRoot, planned, provider.baseUrl, {
+      ICARUS_TEST_PAUSE_AFTER_PATCH_SET_INTENT_FILE: path.join(fixture.stateRoot, "pause-sentinel"),
+    });
+    try {
+      await killAtCleanEditBoundary(poll, planned.id, worker);
+    } finally {
+      poll.close();
+    }
+    expect(await worker.exit).toEqual({ code: null, signal: "SIGKILL" });
     expect(provider.requests).toHaveLength(2);
 
     const reconciled = await runCli(fixture.stateRoot, ["run", "reconcile-headless", planned.id]);
@@ -442,46 +423,20 @@ describe("headless exactly-once continuation", () => {
   }, 180_000);
 
   test("closes a crashed continuation once and refuses a second resume", async () => {
-    // Same bounded retry for the sub-millisecond clean crash window.
-    let fixture: Awaited<ReturnType<typeof createFixtureRepository>> | undefined;
-    let provider: Awaited<ReturnType<typeof startOllamaQueue>> | undefined;
-    let planned: RunRecord | undefined;
-    let poll: IcarusStore | undefined;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const candidateFixture = await createFixtureRepository();
-      const preimageSha = sha256("Hello, world!\n");
-      const candidateProvider = await startOllamaQueue([planResponse(), editResponse(preimageSha)]);
-      const candidatePlan = await setupRun(candidateProvider, candidateFixture);
-      const candidatePoll = openPollStore(candidateFixture.stateRoot);
-      const worker = await spawnHeadlessWorker(
-        candidateFixture.stateRoot,
-        candidatePlan,
-        candidateProvider.baseUrl,
-      );
-      const outcome = await killAtCleanEditBoundary(candidatePoll, candidatePlan.id, worker);
-      await worker.exit;
-      if (outcome === "lost") {
-        candidatePoll.close();
-        await candidateProvider.close();
-        await candidateFixture.cleanup();
-        continue;
-      }
-      fixture = candidateFixture;
-      provider = candidateProvider;
-      planned = candidatePlan;
-      poll = candidatePoll;
-      break;
-    }
-    if (
-      fixture === undefined ||
-      provider === undefined ||
-      planned === undefined ||
-      poll === undefined
-    ) {
-      throw new Error("Lost the crash-boundary race five times in a row");
-    }
+    const fixture = await createFixtureRepository();
     cleanups.push(fixture.cleanup);
+    const preimageSha = sha256("Hello, world!\n");
+    const provider = await startOllamaQueue([planResponse(), editResponse(preimageSha)]);
     cleanups.push(provider.close);
+    const planned = await setupRun(provider, fixture);
+
+    // Same deterministic boundary kill for the first crash.
+    const poll = openPollStore(fixture.stateRoot);
+    const worker = await spawnHeadlessWorker(fixture.stateRoot, planned, provider.baseUrl, {
+      ICARUS_TEST_PAUSE_AFTER_PATCH_SET_INTENT_FILE: path.join(fixture.stateRoot, "pause-sentinel"),
+    });
+    await killAtCleanEditBoundary(poll, planned.id, worker);
+    expect(await worker.exit).toEqual({ code: null, signal: "SIGKILL" });
     expect(
       (await runCli(fixture.stateRoot, ["run", "reconcile-headless", planned.id])).exitCode,
     ).toBe(1);
