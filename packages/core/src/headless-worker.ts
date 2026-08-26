@@ -5,6 +5,8 @@ import type { EventRecord, JsonValue, RunRecord, SunCeiling } from "./types.js";
 
 export const HEADLESS_WORKER_SCHEMA = "icarus.headless.worker.v1";
 export const HEADLESS_WORKER_INTERRUPTION_SCHEMA = "icarus.headless.worker-interruption.v1";
+export const HEADLESS_WORKER_CONTINUATION_SCHEMA = "icarus.headless.worker-continuation.v1";
+export const HEADLESS_WORKER_RESUME_SCHEMA = "icarus.headless.worker-resume.v1";
 
 export type HeadlessWorkerOutcomeV1 =
   | "review_ready"
@@ -44,9 +46,43 @@ export interface InterruptedHeadlessWorkerSettlementV1 {
   };
 }
 
+/**
+ * Terminal settlement of a governed H3b continuation epoch (ADR 0058). The
+ * `continuation` member binds the exact resume-intent event, the interrupted
+ * settlement it continues, and the reconstruction digest the admission gate
+ * was proven against. Ordinary `icarus.headless.worker.v1` consumers remain
+ * closed: a continuation never uses that schema.
+ */
+export interface ContinuedHeadlessWorkerSettlementV1 {
+  readonly schema: typeof HEADLESS_WORKER_CONTINUATION_SCHEMA;
+  readonly runId: string;
+  readonly bindingDigestSha256: string;
+  readonly outcome: HeadlessWorkerOutcomeV1;
+  readonly exitCode: HeadlessWorkerExitCodeV1;
+  readonly finalState: RunRecord["state"];
+  readonly verificationOutcome: "passed" | "failed" | "unavailable" | null;
+  readonly usage: RunRecord["usage"];
+  readonly error: { readonly code: string; readonly message: string } | null;
+  readonly continuation: {
+    readonly resumeEventSequence: number;
+    readonly interruptedSettlementSequence: number;
+    readonly reconstructionDigestSha256: string;
+  };
+}
+
+/** Explicit resume intent recorded by the governed H3b continuation path. */
+export interface HeadlessWorkerResumeRequestV1 {
+  readonly schema: typeof HEADLESS_WORKER_RESUME_SCHEMA;
+  readonly runId: string;
+  readonly bindingDigestSha256: string;
+  readonly reconstructionDigestSha256: string;
+  readonly startedEventSequence: number;
+}
+
 export type DurableHeadlessWorkerSettlementV1 =
   | HeadlessWorkerSettlementV1
-  | InterruptedHeadlessWorkerSettlementV1;
+  | InterruptedHeadlessWorkerSettlementV1
+  | ContinuedHeadlessWorkerSettlementV1;
 
 export type HeadlessWorkerLifecycleV1 =
   | { readonly status: "absent" }
@@ -54,12 +90,20 @@ export type HeadlessWorkerLifecycleV1 =
       readonly status: "started";
       readonly bindingDigestSha256: string;
       readonly startedEventSequence: number;
+      /** Set when the open epoch is a crashed continuation (ADR 0058). */
+      readonly continuationRequest: {
+        readonly resumeEventSequence: number;
+        readonly reconstructionDigestSha256: string;
+      } | null;
     }
   | {
       readonly status: "settled";
       readonly bindingDigestSha256: string;
       readonly startedEventSequence: number;
+      /** The final settlement: the only one, or the continuation-era one. */
       readonly settlement: DurableHeadlessWorkerSettlementV1;
+      /** The interrupted crash settlement when a continuation followed it. */
+      readonly interruptedSettlement: InterruptedHeadlessWorkerSettlementV1 | null;
     };
 
 export interface HeadlessWorkerExecutionV1 {
@@ -190,6 +234,16 @@ const ORDINARY_SETTLEMENT_MEMBERS = [
 ] as const;
 
 const INTERRUPTED_SETTLEMENT_MEMBERS = [...ORDINARY_SETTLEMENT_MEMBERS, "reconciliation"] as const;
+
+const CONTINUATION_SETTLEMENT_MEMBERS = [...ORDINARY_SETTLEMENT_MEMBERS, "continuation"] as const;
+
+const RESUME_REQUEST_MEMBERS = [
+  "bindingDigestSha256",
+  "reconstructionDigestSha256",
+  "runId",
+  "schema",
+  "startedEventSequence",
+] as const;
 
 function assertExactMembers(
   value: Readonly<Record<string, JsonValue>>,
@@ -330,6 +384,10 @@ function decodeSettlement(
   expectedBindingDigest: string,
   expectedStartedEventSequence: number,
   events: readonly EventRecord[],
+  continuationEvidence: {
+    readonly resumeEvent: EventRecord;
+    readonly interruptedSettlement: EventRecord;
+  } | null,
 ): DurableHeadlessWorkerSettlementV1 {
   const payload = eventPayload(event, "Headless worker settlement");
   const outcomeValue = payload.outcome;
@@ -348,15 +406,32 @@ function decodeSettlement(
     "Headless worker settlement outcome is malformed",
   );
   const outcome = outcomeValue as keyof typeof expectedExitCodes;
+  const schema = payload.schema;
+  invariant(
+    schema === HEADLESS_WORKER_SCHEMA ||
+      schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA ||
+      schema === HEADLESS_WORKER_CONTINUATION_SCHEMA,
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker settlement schema is malformed",
+  );
+  const isInterrupted = schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA;
+  const isContinuation = schema === HEADLESS_WORKER_CONTINUATION_SCHEMA;
+  invariant(
+    (outcome === "interrupted") === isInterrupted,
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker settlement outcome is malformed",
+  );
   assertExactMembers(
     payload,
-    outcome === "interrupted" ? INTERRUPTED_SETTLEMENT_MEMBERS : ORDINARY_SETTLEMENT_MEMBERS,
+    isInterrupted
+      ? INTERRUPTED_SETTLEMENT_MEMBERS
+      : isContinuation
+        ? CONTINUATION_SETTLEMENT_MEMBERS
+        : ORDINARY_SETTLEMENT_MEMBERS,
     "Headless worker settlement",
   );
   invariant(
-    (outcome === "interrupted"
-      ? payload.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA
-      : payload.schema === HEADLESS_WORKER_SCHEMA) && payload.runId === runId,
+    payload.runId === runId,
     "INVALID_HEADLESS_WORKER_HISTORY",
     "Headless worker settlement identity is malformed",
   );
@@ -418,7 +493,8 @@ function decodeSettlement(
       .filter(
         (candidate) =>
           candidate.type === "operation.interrupted" &&
-          candidate.sequence > expectedStartedEventSequence,
+          candidate.sequence > expectedStartedEventSequence &&
+          candidate.sequence < event.sequence,
       )
       .map((candidate) => {
         const operationId = eventPayload(candidate, "Interrupted operation").operationId;
@@ -462,6 +538,53 @@ function decodeSettlement(
     "INVALID_HEADLESS_WORKER_HISTORY",
     "Headless worker settlement outcome does not match its evidence",
   );
+  if (isContinuation) {
+    const continuation = payload.continuation;
+    invariant(
+      typeof continuation === "object" &&
+        continuation !== null &&
+        !Array.isArray(continuation) &&
+        continuationEvidence !== null,
+      "INVALID_HEADLESS_WORKER_HISTORY",
+      "Continued headless worker settlement lacks continuation evidence",
+    );
+    assertExactMembers(
+      continuation,
+      ["interruptedSettlementSequence", "reconstructionDigestSha256", "resumeEventSequence"],
+      "Continued headless worker continuation",
+    );
+    const { resumeEventSequence, interruptedSettlementSequence, reconstructionDigestSha256 } =
+      continuation;
+    const resumePayload = eventPayload(continuationEvidence.resumeEvent, "Headless worker resume");
+    invariant(
+      Number.isSafeInteger(resumeEventSequence) &&
+        resumeEventSequence === continuationEvidence.resumeEvent.sequence &&
+        Number.isSafeInteger(interruptedSettlementSequence) &&
+        interruptedSettlementSequence === continuationEvidence.interruptedSettlement.sequence &&
+        typeof reconstructionDigestSha256 === "string" &&
+        /^[a-f0-9]{64}$/.test(reconstructionDigestSha256) &&
+        resumePayload.schema === HEADLESS_WORKER_RESUME_SCHEMA &&
+        resumePayload.reconstructionDigestSha256 === reconstructionDigestSha256,
+      "INVALID_HEADLESS_WORKER_HISTORY",
+      "Continued headless worker settlement does not match its resume intent",
+    );
+    return {
+      schema: HEADLESS_WORKER_CONTINUATION_SCHEMA,
+      runId,
+      bindingDigestSha256: digest,
+      outcome,
+      exitCode: expectedExitCodes[outcome],
+      finalState,
+      verificationOutcome,
+      usage,
+      error,
+      continuation: {
+        resumeEventSequence: continuationEvidence.resumeEvent.sequence,
+        interruptedSettlementSequence: continuationEvidence.interruptedSettlement.sequence,
+        reconstructionDigestSha256,
+      },
+    };
+  }
   return {
     schema: HEADLESS_WORKER_SCHEMA,
     runId,
@@ -475,17 +598,54 @@ function decodeSettlement(
   };
 }
 
+function decodeResumeRequest(
+  runId: string,
+  event: EventRecord,
+  expectedBindingDigest: string,
+  expectedStartedEventSequence: number,
+): { readonly resumeEventSequence: number; readonly reconstructionDigestSha256: string } {
+  invariant(
+    event.runId === runId && event.sequence > expectedStartedEventSequence,
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker resume request identity is malformed",
+  );
+  const payload = eventPayload(event, "Headless worker resume");
+  assertExactMembers(payload, RESUME_REQUEST_MEMBERS, "Headless worker resume");
+  const { startedEventSequence, reconstructionDigestSha256 } = payload;
+  invariant(
+    payload.schema === HEADLESS_WORKER_RESUME_SCHEMA &&
+      payload.runId === runId &&
+      Number.isSafeInteger(startedEventSequence) &&
+      startedEventSequence === expectedStartedEventSequence &&
+      typeof reconstructionDigestSha256 === "string" &&
+      /^[a-f0-9]{64}$/.test(reconstructionDigestSha256),
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker resume request is malformed",
+  );
+  const digest = bindingDigest(payload, "Headless worker resume");
+  invariant(
+    digest === expectedBindingDigest,
+    "HEADLESS_WORKER_IDENTITY_CHANGED",
+    "Headless worker binding changed before resume",
+  );
+  return {
+    resumeEventSequence: event.sequence,
+    reconstructionDigestSha256,
+  };
+}
+
 export function inspectHeadlessWorkerLifecycleV1(
   runId: string,
   events: readonly EventRecord[],
 ): HeadlessWorkerLifecycleV1 {
   const starts = events.filter((event) => event.type === "headless.worker.started");
   const settlements = events.filter((event) => event.type === "headless.worker.settled");
+  const resumes = events.filter((event) => event.type === "headless.worker.resume_requested");
   if (starts.length === 0) {
     invariant(
-      settlements.length === 0,
+      settlements.length === 0 && resumes.length === 0,
       "INVALID_HEADLESS_WORKER_HISTORY",
-      "Headless worker settlement exists without a start",
+      "Headless worker evidence exists without a start",
     );
     return { status: "absent" };
   }
@@ -495,9 +655,14 @@ export function inspectHeadlessWorkerLifecycleV1(
     "Headless worker history must contain exactly one start",
   );
   invariant(
-    settlements.length <= 1,
+    resumes.length <= 1,
     "INVALID_HEADLESS_WORKER_HISTORY",
-    "Headless worker history contains more than one settlement",
+    "Headless worker history contains more than one resume request",
+  );
+  invariant(
+    settlements.length <= 2,
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker history contains more than two settlements",
   );
   const started = starts[0];
   invariant(
@@ -516,18 +681,73 @@ export function inspectHeadlessWorkerLifecycleV1(
     bindingDigestSha256: digest,
     startedEventSequence: started.sequence,
   };
-  const settled = settlements[0];
-  if (settled === undefined) return { status: "started", ...base };
+  const resume = resumes[0];
+  const continuationRequest =
+    resume === undefined ? null : decodeResumeRequest(runId, resume, digest, started.sequence);
+  const first = settlements[0];
+  const second = settlements[1];
+  if (first === undefined) {
+    invariant(
+      continuationRequest === null,
+      "INVALID_HEADLESS_WORKER_HISTORY",
+      "Headless worker resume request exists without an interrupted settlement",
+    );
+    return { status: "started", ...base, continuationRequest: null };
+  }
   invariant(
-    settled.runId === runId && settled.sequence > started.sequence,
+    first.runId === runId && first.sequence > started.sequence,
     "INVALID_HEADLESS_WORKER_HISTORY",
     "Headless worker settlement precedes its start",
   );
+  const firstSettlement = decodeSettlement(runId, first, digest, started.sequence, events, null);
+  if (continuationRequest !== null) {
+    invariant(
+      firstSettlement.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA &&
+        resume !== undefined &&
+        resume.sequence > first.sequence,
+      "INVALID_HEADLESS_WORKER_HISTORY",
+      "Headless worker resume request must follow an interrupted settlement",
+    );
+  }
+  if (second === undefined) {
+    if (continuationRequest !== null) {
+      // A crashed continuation epoch: operations may still be open; H3a
+      // reconciliation closes this tail before anything else may act.
+      return { status: "started", ...base, continuationRequest };
+    }
+    assertQuiescent(events);
+    return {
+      status: "settled",
+      ...base,
+      settlement: firstSettlement,
+      interruptedSettlement: null,
+    };
+  }
+  invariant(
+    continuationRequest !== null && resume !== undefined,
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker continuation settlement exists without resume intent",
+  );
+  invariant(
+    second.runId === runId && second.sequence > resume.sequence,
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker continuation settlement precedes its resume intent",
+  );
   assertQuiescent(events);
+  const secondSettlement = decodeSettlement(runId, second, digest, started.sequence, events, {
+    resumeEvent: resume,
+    interruptedSettlement: first,
+  });
+  invariant(
+    firstSettlement.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA,
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker continuation must follow an interrupted settlement",
+  );
   return {
     status: "settled",
     ...base,
-    settlement: decodeSettlement(runId, settled, digest, started.sequence, events),
+    settlement: secondSettlement,
+    interruptedSettlement: firstSettlement,
   };
 }
 
@@ -667,4 +887,90 @@ export function headlessWorkerSettledPayload(
   settlement: DurableHeadlessWorkerSettlementV1,
 ): JsonValue {
   return settlement as unknown as JsonValue;
+}
+
+export function headlessWorkerResumeRequestedPayload(
+  request: HeadlessWorkerResumeRequestV1,
+): JsonValue {
+  return request as unknown as JsonValue;
+}
+
+/**
+ * Builds the terminal settlement of a governed continuation epoch (ADR 0058).
+ * The settlement reuses the H2b outcome mapping and additionally binds the
+ * exact resume-intent event and interrupted settlement it continues, so a
+ * forged or drifting continuation is rejected by the lifecycle grammar.
+ */
+export function createContinuedHeadlessWorkerSettlementV1(input: {
+  readonly binding: HeadlessExecutionBindingV1;
+  readonly run: RunRecord;
+  readonly events: readonly EventRecord[];
+  readonly resumeEventSequence: number;
+  readonly interruptedSettlementSequence: number;
+  readonly reconstructionDigestSha256: string;
+  readonly error?: { readonly code: string; readonly message: string } | null;
+}): ContinuedHeadlessWorkerSettlementV1 {
+  invariant(
+    input.run.id === input.binding.runId,
+    "HEADLESS_WORKER_IDENTITY_CHANGED",
+    "Headless worker run identity changed before settlement",
+  );
+  invariant(
+    QUIESCENT_STATES.has(input.run.state),
+    "HEADLESS_WORKER_NOT_QUIESCENT",
+    `Headless worker stopped in non-quiescent state ${input.run.state}`,
+  );
+  invariant(
+    Number.isSafeInteger(input.resumeEventSequence) &&
+      input.resumeEventSequence > 0 &&
+      Number.isSafeInteger(input.interruptedSettlementSequence) &&
+      input.interruptedSettlementSequence > 0 &&
+      input.interruptedSettlementSequence < input.resumeEventSequence &&
+      /^[a-f0-9]{64}$/.test(input.reconstructionDigestSha256),
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker continuation linkage is malformed",
+  );
+  const resume = input.events.find(
+    (event) =>
+      event.sequence === input.resumeEventSequence &&
+      event.type === "headless.worker.resume_requested",
+  );
+  invariant(
+    resume !== undefined,
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker continuation lacks its resume intent",
+  );
+  const resumePayload = eventPayload(resume, "Headless worker resume");
+  invariant(
+    resumePayload.schema === HEADLESS_WORKER_RESUME_SCHEMA &&
+      resumePayload.bindingDigestSha256 === input.binding.bindingDigestSha256 &&
+      resumePayload.reconstructionDigestSha256 === input.reconstructionDigestSha256,
+    "HEADLESS_WORKER_IDENTITY_CHANGED",
+    "Headless worker continuation does not match its resume intent",
+  );
+  assertQuiescent(input.events);
+  const { outcome, exitCode } = outcomeFor(input.run, input.events);
+  const error = input.error ?? (outcome === "failed" ? verificationFailureFor(input.run) : null);
+  if (outcome === "failed" && error === null) {
+    throw new IcarusError(
+      "INCOMPLETE_HEADLESS_WORKER_SETTLEMENT",
+      "Failed headless worker settlement requires an explicit error",
+    );
+  }
+  return {
+    schema: HEADLESS_WORKER_CONTINUATION_SCHEMA,
+    runId: input.run.id,
+    bindingDigestSha256: input.binding.bindingDigestSha256,
+    outcome,
+    exitCode,
+    finalState: input.run.state,
+    verificationOutcome: input.run.verification?.outcome ?? null,
+    usage: { ...input.run.usage },
+    error,
+    continuation: {
+      resumeEventSequence: input.resumeEventSequence,
+      interruptedSettlementSequence: input.interruptedSettlementSequence,
+      reconstructionDigestSha256: input.reconstructionDigestSha256,
+    },
+  };
 }

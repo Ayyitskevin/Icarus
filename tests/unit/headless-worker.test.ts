@@ -96,6 +96,7 @@ describe("headless worker settlement", () => {
       status: "started",
       bindingDigestSha256: binding.bindingDigestSha256,
       startedEventSequence: 1,
+      continuationRequest: null,
     });
   });
 

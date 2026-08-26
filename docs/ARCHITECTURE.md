@@ -329,6 +329,20 @@ same durable bytes are byte-identical. The record is evidence for a later
 continuation design and grants no resume, replay, fork, or execution
 authority.
 
+The second H3b slice (ADR 0058) adds the governed continuation command
+`run resume-headless`. Under the same run lease it requires the ADR 0057
+reconstruction to hold against current persisted inputs, refuses any ambiguous
+or replay-unsafe crash tail (settled workspace/provider/sandbox effects must
+retain their durable successor intent; session-turn and foreign kinds are
+refused), records exactly one digest-bound `headless.worker.resume_requested`
+event, re-establishes the profile ceiling and tool filter, and re-drives only
+replay-safe stages. It proves quiescence and appends exactly one
+`icarus.headless.worker-continuation.v1` settlement. A worker that already
+settled returns its durable settlement unchanged; a crash during continuation
+is closed by the unchanged H3a reconciliation, after which the spent
+continuation allowance refuses a second resume. Ordinary `run resume` still
+refuses every headless lifecycle.
+
 ## Guarded CLI golden-path sequence
 
 1. State-root initialization first rejects a location inside any Git checkout,

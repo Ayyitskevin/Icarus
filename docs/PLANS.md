@@ -87,14 +87,14 @@ and human shipping approval remain open.
       live-evidence cases remained explicitly not run.
 - [x] Obtain one non-author review; GPT-5.6 Sol Max returned PASS after direct
       malformed-history probes and the bounded-worker integration suite.
-- [ ] H3b: reconstruct and compare binding/provider/workspace/effect identity,
+- [x] H3b: reconstruct and compare binding/provider/workspace/effect identity,
       then resume only a replay-safe or host-reconciled stage.
 
 ## Headless H3b reconstruction plan
 
 Status: the evidence-only reconstruction and classification slice is
-implemented under proposed ADR 0057; the full local gate passed. One
-non-author review and the later exactly-once continuation slice remain open.
+implemented under proposed ADR 0057; the full local gate and one non-author
+review passed. The exactly-once continuation slice below is its successor.
 
 Decision: the first H3b slice is evidence-only reconstruction and
 classification. It grants no continuation, replay, fork, provider, sandbox,
@@ -125,8 +125,43 @@ resume, fork, or any other execution authority.
       later H3b continuation design but not itself usable as authority.
 - [x] Prove with malformed-history and crash fixtures that classification never
       records resume intent or executes an effect.
-- [ ] Keep exactly-once continuation in a later H3b slice after this evidence
+- [x] Keep exactly-once continuation in a later H3b slice after this evidence
       boundary passes the full local gate and one non-author review.
+
+## Headless H3b exactly-once continuation candidate
+
+Status: locally implemented under proposed ADR 0058. The full local gate ran
+green; one non-author review, risky-change research, and live-provider
+measurement remain open.
+
+Decision: `run resume-headless RUN` continues a reconciled crashed worker
+exactly once. Admission requires the ADR 0057 reconstruction to hold against
+current persisted inputs, every crash-tail effect to be `durably_settled` or
+`no_effect`, and every settled workspace/provider/sandbox effect to retain its
+durable successor intent so stage re-entry cannot re-execute it. Session-turn
+tails, foreign kinds, missing successor intent, identity drift, and exhausted
+budgets fail closed before any resume intent is recorded. The path records
+exactly one digest-bound `headless.worker.resume_requested` event and appends
+exactly one `icarus.headless.worker-continuation.v1` settlement; a crash
+during continuation is closed by the unchanged H3a reconciliation and the
+single continuation allowance is then spent.
+
+- [x] Widen the worker lifecycle grammar to one start, at most one resume
+      intent after an interrupted settlement, and at most two settlements,
+      with interruption linkage decoded per epoch.
+- [x] Add the lease-held `run resume-headless RUN` path with the full
+      admission chain (reconstruction equality, classification, replay-safe
+      stage intent, budget headroom) durable before the first new effect.
+- [x] Re-establish the profile ceiling and tool filter for the continued
+      execution and settle with the distinct continuation schema.
+- [x] Keep ordinary `run resume` refusing every headless lifecycle;
+      interactive non-headless resume is behaviorally unchanged.
+- [x] Prove with real-SIGKILL fixtures: exactly-once resume without
+      re-executing the settled provider edit, byte-identical double resume,
+      ambiguous-tail refusal with no resume intent, and crashed-continuation
+      closure with second-resume refusal.
+- [ ] Obtain one non-author round-table review of the continuation candidate.
+- [ ] H3b remainder: fork, and session-turn exactly-once continuation.
 
 ## Accepted Gate 1 Slice 1 offline benchmark checkpoint
 

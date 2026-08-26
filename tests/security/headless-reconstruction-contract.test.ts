@@ -63,7 +63,7 @@ describe("headless reconstruction security contract", () => {
   test("the recomputed binding must equal the durable lifecycle digest before any result", () => {
     const projection = body(
       reconstruction,
-      "export function reconstructHeadlessEvidenceV1(",
+      "function reconstructHeadlessCore(",
       "reconstructionDigestSha256: digestJson",
     );
     const bindingCall = projection.indexOf("reconstructHeadlessExecutionBindingV1(");
@@ -88,7 +88,11 @@ describe("headless reconstruction security contract", () => {
   });
 
   test("the service read path holds no lease and mutates nothing", () => {
-    const method = body(service, "reconstructHeadlessEvidence(runId: string)", "async review(");
+    const method = body(
+      service,
+      "reconstructHeadlessEvidence(runId: string)",
+      "async resumeHeadlessWorker(",
+    );
     expect(method).not.toContain("withLease");
     expect(method).not.toMatch(
       /recordResumeRequested|markStartedOperationsInterrupted|beginOperation|recordHeadlessWorker|appendEvent|approvePlan|approveEgress|#execute\(/,
@@ -98,7 +102,11 @@ describe("headless reconstruction security contract", () => {
   });
 
   test("the CLI command emits one canonical record and keeps exit 0", () => {
-    const command = body(cli, 'if (action === "reconstruct-headless")', 'if (action === "status")');
+    const command = body(
+      cli,
+      'if (action === "reconstruct-headless")',
+      'if (action === "resume-headless")',
+    );
     expect(command).toContain("reconstructHeadlessEvidence(oneRunId(options))");
     expect(command).toContain("canonicalJsonLine(result as unknown as JsonValue)");
     expect(command).not.toContain("process.exitCode");

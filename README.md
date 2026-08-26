@@ -523,6 +523,26 @@ continuation design; it grants no resume, replay, fork, or execution
 authority, and repeating the command over unchanged durable bytes prints
 byte-identical output.
 
+To continue a reconciled crashed worker exactly once, run the governed H3b
+continuation:
+
+```text
+node packages/cli/dist/main.js run resume-headless <run-id>
+```
+
+The command holds the run lease, recomputes the exact binding from current
+persisted authority, and admits continuation only when every crash-tail effect
+is durably settled or provably effect-free and each settled
+workspace/provider/sandbox effect retains its durable successor intent, so
+nothing already settled is re-executed. It records one digest-bound
+`headless.worker.resume_requested` event, re-drives only replay-safe stages,
+and appends one `icarus.headless.worker-continuation.v1` settlement with the
+H2b exit semantics. Repeating it returns byte-identical history. An ambiguous
+tail, session-turn tail, drifted identity, or missing successor intent fails
+closed before any resume intent is recorded, and a crashed continuation is
+closed by `run reconcile-headless`, after which a second resume is refused.
+Ordinary `run resume` still refuses every headless lifecycle.
+
 Use `run list [--project <name>]` to rediscover persisted run IDs and `run
 history <run-id>` to inspect the append-only transition and approval record.
 
