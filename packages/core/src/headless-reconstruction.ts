@@ -1,6 +1,9 @@
 import { digestJson } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
-import { reconstructHeadlessExecutionBindingV1 } from "./headless-binding.js";
+import {
+  type HeadlessExecutionBindingV1,
+  reconstructHeadlessExecutionBindingV1,
+} from "./headless-binding.js";
 import {
   decodeHeadlessProfileV1,
   type HeadlessHostProviderProfileV1,
@@ -198,13 +201,21 @@ function eventOperationIdentity(
 ): { readonly operationId: string; readonly kind: string } {
   const payload = payloadObject(event, label);
   const { operationId, kind } = payload;
+  // Identity strings share the store's operation-kind discipline: bounded and
+  // free of control characters so a hostile payload cannot grow the result.
   invariant(
-    typeof operationId === "string" && operationId.length > 0,
+    typeof operationId === "string" &&
+      operationId.length > 0 &&
+      Buffer.byteLength(operationId, "utf8") <= 128 &&
+      !/[\r\n\0]/.test(operationId),
     "INVALID_HEADLESS_RECONSTRUCTION_HISTORY",
     `${label} operation identity is malformed`,
   );
   invariant(
-    typeof kind === "string" && kind.length > 0,
+    typeof kind === "string" &&
+      kind.length > 0 &&
+      Buffer.byteLength(kind, "utf8") <= 128 &&
+      !/[\r\n\0]/.test(kind),
     "INVALID_HEADLESS_RECONSTRUCTION_HISTORY",
     `${label} operation kind is malformed`,
   );
@@ -344,9 +355,19 @@ function durableStartedProfile(
   };
 }
 
-export function reconstructHeadlessEvidenceV1(
+/**
+ * The continuation gate (ADR 0058) needs the reconstructed binding itself —
+ * the resolved profile ceiling and tool filter — in addition to the public
+ * evidence record. Both come from the same single recomputation.
+ */
+export interface HeadlessContinuationReconstructionV1 {
+  readonly evidence: HeadlessReconstructionV1;
+  readonly binding: HeadlessExecutionBindingV1;
+}
+
+function reconstructHeadlessCore(
   authority: HeadlessReconstructionAuthorityV1,
-): HeadlessReconstructionV1 {
+): HeadlessContinuationReconstructionV1 {
   const { run, project, events } = authority;
   invariant(
     typeof run === "object" && run !== null && !Array.isArray(run),
@@ -440,7 +461,27 @@ export function reconstructHeadlessEvidenceV1(
     effects: classifyCrashTail(events, lifecycle.startedEventSequence),
   } as const;
   return {
-    ...payload,
-    reconstructionDigestSha256: digestJson(json(payload)),
+    evidence: {
+      ...payload,
+      reconstructionDigestSha256: digestJson(json(payload)),
+    },
+    binding,
   };
+}
+
+export function reconstructHeadlessEvidenceV1(
+  authority: HeadlessReconstructionAuthorityV1,
+): HeadlessReconstructionV1 {
+  return reconstructHeadlessCore(authority).evidence;
+}
+
+/**
+ * ADR 0058 continuation support: the same evidence recomputation, plus the
+ * reconstructed H2a binding for the governed resume path. Still pure: no
+ * event, operation, lease, or provider effect is created here.
+ */
+export function reconstructHeadlessContinuationV1(
+  authority: HeadlessReconstructionAuthorityV1,
+): HeadlessContinuationReconstructionV1 {
+  return reconstructHeadlessCore(authority);
 }

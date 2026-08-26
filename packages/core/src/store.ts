@@ -40,9 +40,15 @@ import { IcarusError, invariant } from "./errors.js";
 import { assertGate1SchemasForStartup, createGate1Schemas } from "./gate1-schema.js";
 import type { HeadlessExecutionBindingV1 } from "./headless-binding.js";
 import {
+  HEADLESS_WORKER_CONTINUATION_SCHEMA,
+  HEADLESS_WORKER_INTERRUPTION_SCHEMA,
+  HEADLESS_WORKER_RESUME_SCHEMA,
+  headlessWorkerResumeRequestedPayload,
   headlessWorkerSettledPayload,
   headlessWorkerStartedPayload,
+  type ContinuedHeadlessWorkerSettlementV1,
   type DurableHeadlessWorkerSettlementV1,
+  type HeadlessWorkerResumeRequestV1,
 } from "./headless-worker.js";
 import {
   type CandidateSettlementInputV1,
@@ -4470,14 +4476,232 @@ export class IcarusStore {
         "HEADLESS_WORKER_IDENTITY_CHANGED",
         "Headless worker binding changed before settlement",
       );
+      const priorSettlements = this.#database
+        .prepare(
+          `SELECT payload_json FROM run_events
+           WHERE run_id = ? AND type = 'headless.worker.settled' ORDER BY sequence`,
+        )
+        .all(runId) as unknown[];
+      if (priorSettlements.length > 0) {
+        // ADR 0058: the only lawful second settlement closes a crashed
+        // continuation epoch — the first settlement is the interrupted crash
+        // settlement, exactly one resume intent was recorded against the same
+        // binding, and the new settlement is the final interruption.
+        invariant(
+          priorSettlements.length === 1 &&
+            settlement.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA,
+          "HEADLESS_WORKER_ALREADY_SETTLED",
+          "Headless worker already settled",
+        );
+        const priorPayload = parseJson<Record<string, JsonValue>>(
+          row(priorSettlements[0], "headless worker settlement").payload_json,
+          "headless worker settlement.payload_json",
+        );
+        invariant(
+          priorPayload.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA,
+          "HEADLESS_WORKER_ALREADY_SETTLED",
+          "Headless worker already settled",
+        );
+        const resumes = this.#database
+          .prepare(
+            `SELECT payload_json FROM run_events
+             WHERE run_id = ? AND type = 'headless.worker.resume_requested'`,
+          )
+          .all(runId) as unknown[];
+        invariant(
+          resumes.length === 1,
+          "HEADLESS_WORKER_ALREADY_SETTLED",
+          "Headless worker already settled",
+        );
+        const resumePayload = parseJson<Record<string, JsonValue>>(
+          row(resumes[0], "headless worker resume").payload_json,
+          "headless worker resume.payload_json",
+        );
+        invariant(
+          resumePayload.schema === HEADLESS_WORKER_RESUME_SCHEMA &&
+            resumePayload.bindingDigestSha256 === settlement.bindingDigestSha256,
+          "HEADLESS_WORKER_IDENTITY_CHANGED",
+          "Headless worker resume intent does not match this settlement",
+        );
+      }
+      this.#appendEvent(runId, "headless.worker.settled", headlessWorkerSettledPayload(settlement));
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
+  /**
+   * Records explicit H3b continuation intent (ADR 0058): exactly once, only
+   * over a reconciled crash tail, against the reconstructed binding and
+   * reconstruction digests the admission gate proved.
+   */
+  recordHeadlessWorkerResumeRequested(
+    runId: string,
+    request: HeadlessWorkerResumeRequestV1,
+  ): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const run = this.getRun(runId);
+      invariant(
+        request.runId === runId && request.schema === HEADLESS_WORKER_RESUME_SCHEMA,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker resume intent does not match this run",
+      );
+      invariant(
+        this.#database
+          .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
+          .get(runId) === undefined,
+        "HEADLESS_WORKER_NOT_QUIESCENT",
+        "Headless worker cannot resume across an active operation",
+      );
+      const started = this.#database
+        .prepare(
+          `SELECT sequence, payload_json FROM run_events
+           WHERE run_id = ? AND type = 'headless.worker.started'
+           ORDER BY sequence DESC LIMIT 1`,
+        )
+        .get(runId);
+      invariant(started !== undefined, "MISSING_HEADLESS_WORKER", "Headless worker never started");
+      const startedRow = row(started, "headless worker start");
+      const startedPayload = parseJson<Record<string, JsonValue>>(
+        startedRow.payload_json,
+        "headless worker start.payload_json",
+      );
+      invariant(
+        startedPayload.bindingDigestSha256 === request.bindingDigestSha256 &&
+          numberValue(startedRow.sequence, "headless worker start.sequence") ===
+            request.startedEventSequence,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker resume intent does not match the durable start",
+      );
+      const settlements = this.#database
+        .prepare(
+          `SELECT payload_json FROM run_events
+           WHERE run_id = ? AND type = 'headless.worker.settled' ORDER BY sequence`,
+        )
+        .all(runId) as unknown[];
+      invariant(
+        settlements.length === 1,
+        "HEADLESS_CONTINUATION_DENIED",
+        "Headless continuation requires exactly one interrupted settlement",
+      );
+      const settlementPayload = parseJson<Record<string, JsonValue>>(
+        row(settlements[0], "headless worker settlement").payload_json,
+        "headless worker settlement.payload_json",
+      );
+      invariant(
+        settlementPayload.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA,
+        "HEADLESS_CONTINUATION_DENIED",
+        "Headless continuation requires an interrupted crash settlement",
+      );
       invariant(
         this.#database
           .prepare(
-            "SELECT 1 FROM run_events WHERE run_id = ? AND type = 'headless.worker.settled' LIMIT 1",
+            "SELECT 1 FROM run_events WHERE run_id = ? AND type = 'headless.worker.resume_requested' LIMIT 1",
           )
           .get(runId) === undefined,
+        "HEADLESS_WORKER_CONTINUATION_EXHAUSTED",
+        "Headless worker continuation was already requested",
+      );
+      this.#appendEvent(
+        runId,
+        "headless.worker.resume_requested",
+        headlessWorkerResumeRequestedPayload(request),
+      );
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
+  /**
+   * Appends the terminal continuation settlement (ADR 0058): exactly one
+   * interrupted crash settlement and the matching resume intent must already
+   * be durable, and no operation may be active.
+   */
+  recordHeadlessWorkerContinuationSettled(
+    runId: string,
+    settlement: ContinuedHeadlessWorkerSettlementV1,
+  ): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const run = this.getRun(runId);
+      invariant(
+        settlement.runId === runId &&
+          settlement.schema === HEADLESS_WORKER_CONTINUATION_SCHEMA &&
+          settlement.finalState === run.state,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker continuation settlement does not match the current run",
+      );
+      invariant(
+        this.#database
+          .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
+          .get(runId) === undefined,
+        "HEADLESS_WORKER_NOT_QUIESCENT",
+        "Headless worker cannot settle across an active operation",
+      );
+      const started = this.#database
+        .prepare(
+          `SELECT payload_json FROM run_events
+           WHERE run_id = ? AND type = 'headless.worker.started'
+           ORDER BY sequence DESC LIMIT 1`,
+        )
+        .get(runId);
+      invariant(started !== undefined, "MISSING_HEADLESS_WORKER", "Headless worker never started");
+      const startedPayload = parseJson<Record<string, JsonValue>>(
+        row(started, "headless worker start").payload_json,
+        "headless worker start.payload_json",
+      );
+      invariant(
+        startedPayload.bindingDigestSha256 === settlement.bindingDigestSha256,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker binding changed before settlement",
+      );
+      const settlements = this.#database
+        .prepare(
+          `SELECT sequence, payload_json FROM run_events
+           WHERE run_id = ? AND type = 'headless.worker.settled' ORDER BY sequence`,
+        )
+        .all(runId) as unknown[];
+      invariant(
+        settlements.length === 1,
         "HEADLESS_WORKER_ALREADY_SETTLED",
-        "Headless worker already settled",
+        "Headless worker continuation requires exactly one prior settlement",
+      );
+      const settlementRow = row(settlements[0], "headless worker settlement");
+      const settlementPayload = parseJson<Record<string, JsonValue>>(
+        settlementRow.payload_json,
+        "headless worker settlement.payload_json",
+      );
+      invariant(
+        settlementPayload.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA &&
+          numberValue(settlementRow.sequence, "headless worker settlement.sequence") ===
+            settlement.continuation.interruptedSettlementSequence,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker continuation does not match the interrupted settlement",
+      );
+      const resumes = this.#database
+        .prepare(
+          `SELECT sequence, payload_json FROM run_events
+           WHERE run_id = ? AND type = 'headless.worker.resume_requested' ORDER BY sequence`,
+        )
+        .all(runId) as unknown[];
+      invariant(
+        resumes.length === 1,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker continuation lacks its resume intent",
+      );
+      const resumeRow = row(resumes[0], "headless worker resume");
+      const resumePayload = parseJson<Record<string, JsonValue>>(
+        resumeRow.payload_json,
+        "headless worker resume.payload_json",
+      );
+      invariant(
+        resumePayload.schema === HEADLESS_WORKER_RESUME_SCHEMA &&
+          resumePayload.bindingDigestSha256 === settlement.bindingDigestSha256 &&
+          resumePayload.reconstructionDigestSha256 ===
+            settlement.continuation.reconstructionDigestSha256 &&
+          numberValue(resumeRow.sequence, "headless worker resume.sequence") ===
+            settlement.continuation.resumeEventSequence,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker continuation does not match its resume intent",
       );
       this.#appendEvent(runId, "headless.worker.settled", headlessWorkerSettledPayload(settlement));
     });

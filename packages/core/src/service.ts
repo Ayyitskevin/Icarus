@@ -20,8 +20,10 @@ import { digestJson, sha256 } from "./digest.js";
 import { errorMessage, IcarusError, invariant } from "./errors.js";
 import type { GitController, RepositoryInspection, WorktreeFileWrite } from "./git.js";
 import { bindHeadlessExecutionV1, type HeadlessExecutionBindingV1 } from "./headless-binding.js";
+import { assertHeadlessContinuationReplaySafeV1 } from "./headless-continuation.js";
 import {
   type HeadlessReconstructionV1,
+  reconstructHeadlessContinuationV1,
   reconstructHeadlessEvidenceV1,
 } from "./headless-reconstruction.js";
 import {
@@ -31,8 +33,12 @@ import {
 import {
   type ActiveHeadlessExecutionV1,
   assertHeadlessWorkerBudgetAvailable,
+  createContinuedHeadlessWorkerSettlementV1,
   createInterruptedHeadlessWorkerSettlementV1,
   createHeadlessWorkerSettlementV1,
+  HEADLESS_WORKER_CONTINUATION_SCHEMA,
+  HEADLESS_WORKER_RESUME_SCHEMA,
+  HEADLESS_WORKER_SCHEMA,
   type HeadlessWorkerExecutionV1,
   type HeadlessWorkerReconciliationV1,
   inspectHeadlessWorkerLifecycleV1,
@@ -1310,6 +1316,127 @@ export class IcarusService {
       approvals: history.approvals,
       events: history.events,
       readableManifest: this.#store.readableManifest(runId),
+    });
+  }
+
+  /**
+   * H3b exactly-once continuation (ADR 0058). Under the existing per-run
+   * lease: prove the ADR 0057 reconstruction against current persisted
+   * authority, refuse any ambiguous or replay-unsafe crash tail, record
+   * exactly one digest-bound resume intent, re-drive only replay-safe stages
+   * through the ordinary execution path with the profile ceiling and tool
+   * filter re-established, and append exactly one continuation settlement.
+   * A run whose worker already settled returns its durable settlement
+   * unchanged.
+   */
+  async resumeHeadlessWorker(
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<HeadlessWorkerReconciliationV1> {
+    return this.#leases.withLease(runId, async () => {
+      const before = this.#store.listEvents(runId);
+      const lifecycle = inspectHeadlessWorkerLifecycleV1(runId, before);
+      invariant(
+        lifecycle.status !== "absent",
+        "MISSING_HEADLESS_WORKER",
+        "Headless worker never started",
+      );
+      if (lifecycle.status === "started") {
+        throw new IcarusError(
+          "HEADLESS_WORKER_RECONCILIATION_REQUIRED",
+          "Reconcile the interrupted headless worker before continuation",
+        );
+      }
+      if (
+        lifecycle.settlement.schema === HEADLESS_WORKER_SCHEMA ||
+        lifecycle.settlement.schema === HEADLESS_WORKER_CONTINUATION_SCHEMA
+      ) {
+        return { settlement: lifecycle.settlement, run: this.#store.getRun(runId) };
+      }
+      if (lifecycle.interruptedSettlement !== null) {
+        throw new IcarusError(
+          "HEADLESS_WORKER_CONTINUATION_EXHAUSTED",
+          "Headless worker continuation was already attempted and closed",
+        );
+      }
+
+      const history = this.#store.getRunHistory(runId);
+      const run = history.run;
+      const { evidence, binding } = reconstructHeadlessContinuationV1({
+        run,
+        project: this.#store.getProject(run.projectId),
+        approvals: history.approvals,
+        events: history.events,
+        readableManifest: this.#store.readableManifest(runId),
+      });
+      assertHeadlessContinuationReplaySafeV1(evidence, run);
+      const { iterationCeiling: _iterationCeiling, ...ceiling } =
+        binding.resolution.profile.budgets;
+      assertHeadlessWorkerBudgetAvailable(run, ceiling);
+      this.#store.recordHeadlessWorkerResumeRequested(runId, {
+        schema: HEADLESS_WORKER_RESUME_SCHEMA,
+        runId,
+        bindingDigestSha256: binding.bindingDigestSha256,
+        reconstructionDigestSha256: evidence.reconstructionDigestSha256,
+        startedEventSequence: evidence.startedEventSequence,
+      });
+      const intentEvents = this.#store.listEvents(runId);
+      const resumeEvent = intentEvents.find(
+        (event) => event.type === "headless.worker.resume_requested",
+      );
+      const interruptedEvent = intentEvents.find(
+        (event) => event.type === "headless.worker.settled",
+      );
+      invariant(
+        resumeEvent !== undefined && interruptedEvent !== undefined,
+        "DATABASE_ERROR",
+        "Headless worker resume intent was not persisted",
+      );
+
+      const active: ActiveHeadlessExecutionV1 = {
+        binding,
+        ceiling,
+        toolIds: new Set(binding.resolution.profile.toolIds),
+      };
+      this.#headlessExecutionContexts.set(runId, active);
+      try {
+        const current = this.#store.getRun(runId);
+        try {
+          if (current.state === "running") {
+            await this.#guarded(runId, "running", () => this.#execute(runId, signal), signal);
+          } else if (current.state === "verifying") {
+            await this.#guarded(
+              runId,
+              "verifying",
+              () =>
+                this.#store.sessionRepairReady(runId)
+                  ? this.#runRepairSession(runId, signal, true)
+                  : this.#verify(runId, signal),
+              signal,
+            );
+          }
+        } catch {
+          // #guarded has already persisted the failed run; settlement below is authoritative.
+        }
+        const settledRun = this.#store.getRun(runId);
+        const fallbackError =
+          settledRun.lastError === null
+            ? null
+            : { code: settledRun.lastError.code, message: settledRun.lastError.message };
+        const settlement = createContinuedHeadlessWorkerSettlementV1({
+          binding,
+          run: settledRun,
+          events: this.#store.listEvents(runId),
+          resumeEventSequence: resumeEvent.sequence,
+          interruptedSettlementSequence: interruptedEvent.sequence,
+          reconstructionDigestSha256: evidence.reconstructionDigestSha256,
+          error: fallbackError,
+        });
+        this.#store.recordHeadlessWorkerContinuationSettled(runId, settlement);
+        return { settlement, run: this.#store.getRun(runId) };
+      } finally {
+        this.#headlessExecutionContexts.delete(runId);
+      }
     });
   }
 

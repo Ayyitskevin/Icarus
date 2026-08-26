@@ -151,26 +151,34 @@ export {
 } from "./headless-profile.js";
 export type {
   ActiveHeadlessExecutionV1,
+  ContinuedHeadlessWorkerSettlementV1,
   DurableHeadlessWorkerSettlementV1,
   HeadlessWorkerExecutionV1,
   HeadlessWorkerExitCodeV1,
   HeadlessWorkerLifecycleV1,
   HeadlessWorkerOutcomeV1,
   HeadlessWorkerReconciliationV1,
+  HeadlessWorkerResumeRequestV1,
   HeadlessWorkerSettlementV1,
   InterruptedHeadlessWorkerSettlementV1,
 } from "./headless-worker.js";
 export {
   assertHeadlessWorkerBudgetAvailable,
+  createContinuedHeadlessWorkerSettlementV1,
   createInterruptedHeadlessWorkerSettlementV1,
   createHeadlessWorkerSettlementV1,
+  HEADLESS_WORKER_CONTINUATION_SCHEMA,
   HEADLESS_WORKER_INTERRUPTION_SCHEMA,
+  HEADLESS_WORKER_RESUME_SCHEMA,
   HEADLESS_WORKER_SCHEMA,
+  headlessWorkerResumeRequestedPayload,
   headlessWorkerSettledPayload,
   headlessWorkerStartedPayload,
   inspectHeadlessWorkerLifecycleV1,
 } from "./headless-worker.js";
+export { assertHeadlessContinuationReplaySafeV1 } from "./headless-continuation.js";
 export type {
+  HeadlessContinuationReconstructionV1,
   HeadlessCrashTailEffectV1,
   HeadlessEffectDispositionV1,
   HeadlessReconstructionAuthorityV1,
@@ -181,6 +189,7 @@ export type {
 export {
   HEADLESS_RECONSTRUCTION_EFFECT_LIMIT,
   HEADLESS_RECONSTRUCTION_SCHEMA,
+  reconstructHeadlessContinuationV1,
   reconstructHeadlessEvidenceV1,
 } from "./headless-reconstruction.js";
 export type {

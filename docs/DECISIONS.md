@@ -55,6 +55,8 @@ Decision records for the current milestone:
 | [0056](adr/0056-vulcan-kind-on-evidence-surfaces.md) | Change Room and Handoff Pack evidence projections recognize every persistable provider kind including `vulcan`, while the Gate 1 live-evidence profile/driver and the headless host catalog deliberately keep their reviewed kind sets | Proposed |
 | [0057](adr/0057-headless-evidence-reconstruction.md) | H3b evidence-only reconstruction recomputes the exact H2a binding from persisted inputs and classifies each crash-tail effect `no_effect`/`durably_settled`/`ambiguous` without recording resume intent or executing anything | Proposed — read-only projection only; no continuation, replay, fork, or deployment authority |
 
+| [0058](adr/0058-headless-exactly-once-continuation.md) | H3b continuation resumes a reconciled crashed worker exactly once under the run lease: reconstruction equality, closed classification, and replay-safe stage intent are proven before one digest-bound resume intent and one distinct continuation settlement | Proposed — no fork, session-turn continuation, or deployment authority |
+
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.
 

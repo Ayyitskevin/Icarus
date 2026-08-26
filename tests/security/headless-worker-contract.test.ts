@@ -87,7 +87,11 @@ describe("headless worker security contract", () => {
   });
 
   test("crash-tail reconciliation closes operations before settlement and never resumes work", () => {
-    const reconciliation = body(service, "async reconcileHeadlessWorker(", "async review(");
+    const reconciliation = body(
+      service,
+      "async reconcileHeadlessWorker(",
+      "reconstructHeadlessEvidence(runId: string)",
+    );
     expect(reconciliation).toContain("this.#leases.withLease(runId");
     const interrupt = reconciliation.indexOf("markStartedOperationsInterrupted(");
     const settlement = reconciliation.indexOf("createInterruptedHeadlessWorkerSettlementV1(");
