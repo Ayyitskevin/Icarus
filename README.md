@@ -505,7 +505,9 @@ patch-set digest, appends the `icarus.headless.worker-application.v1`
 settlement, and repeats byte-identically. A mismatched digest is refused
 before any effect. `run approve-headless` and `run apply-headless` also
 accept `--max-turns N` and `--max-budget-usd USD`, which only ever narrow the
-approved envelope; a third identical session tool call lands the run in
+approved envelope, and the ADR 0061 `--output-format history|stream-json`
+selector, which prints the receipt-bound NDJSON stream instead of the default
+H0 history; a third identical session tool call lands the run in
 `session.exhausted` (`doom_loop`) with exit `2`.
 It does not approve review, commit, push, deploy, schedule, create child runs,
 or configure an external research adapter.

@@ -131,7 +131,7 @@ describe("headless propose-only security contract", () => {
     );
     expect(command).toContain("/^[a-f0-9]{64}$/");
     expect(command).toContain("applyHeadlessProposal(");
-    expect(command).toContain("canonicalJsonLine(line)");
+    expect(command).toContain("emitRunTrajectory(runtime, result.run.id, outputFormat)");
     expect(command).toContain("process.exitCode = result.settlement.exitCode");
     expect(cli).toContain('"icarus run apply-headless RUN --patchset-sha SHA --actor ACTOR');
     expect(cli).toContain("--max-turns N] [--max-budget-usd USD]");

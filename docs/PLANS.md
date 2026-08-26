@@ -227,6 +227,9 @@ guard lands the third identical session tool call as `session.exhausted`.
       pipeline and refuse mismatched flags before any effect.
 - [x] Add `--max-turns` and `--max-budget-usd` narrowing clamps and the
       uniform doom-loop guard with exit-2 exhaustion semantics.
+- [x] Compose with the ADR 0061 stream surface: `apply-headless` takes
+      `--output-format history|stream-json` and the applied run emits the
+      receipt-bound NDJSON stream.
 - [x] Define and document exit codes: 0 complete, 2 envelope, 3 human,
       10 proposed, 1 failed, 130 cancelled; refusals exit 1 pre-effect.
 - [x] Prove with CLI fixtures: propose-only default, wrong-digest refusal

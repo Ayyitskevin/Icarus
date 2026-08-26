@@ -321,6 +321,32 @@ describe("headless propose-only default and digest-bound apply", () => {
     expect(withStore(fixture.stateRoot, (store) => store.listEvents(planned.id).length)).toBe(
       eventCountAfter,
     );
+
+    // ADR 0061 composition: the applied run streams as receipt-bound NDJSON.
+    const streamed = await runCli(fixture.stateRoot, [
+      "run",
+      "apply-headless",
+      planned.id,
+      "--patchset-sha",
+      patchSetSha as string,
+      "--actor",
+      "integration-test",
+      "--output-format",
+      "stream-json",
+    ]);
+    expect(streamed.exitCode).toBe(0);
+    const streamLines = historyLines(streamed.stdout);
+    expect(streamLines.every((line) => line.schema === "icarus.headless.stream.v1")).toBe(true);
+    expect(streamLines.filter((line) => line.kind === "receipt").at(-1)).toMatchObject({
+      kind: "receipt",
+      receiptKind: "worker",
+      settlementSchema: "icarus.headless.worker-application.v1",
+      outcome: "review_ready",
+      exitCode: 0,
+    });
+    expect(withStore(fixture.stateRoot, (store) => store.listEvents(planned.id).length)).toBe(
+      eventCountAfter,
+    );
     expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
   }, 180_000);
 });
