@@ -5846,7 +5846,15 @@ export class IcarusStore {
     const providerLocality = text(value.provider_locality, "run.provider.locality");
     const providerPrivacyClass = text(value.provider_privacy_class, "run.provider.privacy_class");
     invariant(
-      providerKind === "ollama" || providerKind === "openai",
+      // The room index projects whatever provider identity the authoritative
+      // run record carries, so this set must cover every ProviderKind the
+      // runtime can persist — a narrower set would fail the whole page closed
+      // as corruption on a legitimate run. An unknown kind is still database
+      // corruption, never a guessed identity.
+      providerKind === "ollama" ||
+        providerKind === "openai" ||
+        providerKind === "anthropic" ||
+        providerKind === "vulcan",
       "DATABASE_ERROR",
       "Run provider kind is invalid",
     );

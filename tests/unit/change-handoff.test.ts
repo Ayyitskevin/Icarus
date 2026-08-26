@@ -765,6 +765,47 @@ describe("Change Handoff projection", () => {
     });
   });
 
+  it("carries a vulcan run's bounded provider metadata end to end", () => {
+    // ADR 0042 item 6 charters the pack to carry provider kind, model,
+    // locality, and privacy class — bounded metadata, not authority. A vulcan
+    // run is a legitimate loopback, credential-free execution, so the reader,
+    // the payload builder, and the strict payload decoder all recognize the
+    // kind; a kind the runtime can never persist still fails closed. The run
+    // is created with the vulcan provider so the digest-bound plan approval
+    // binds it — swapping provider_json afterwards would rightly fail closed.
+    const vulcanProvider = createProviderConfig({
+      kind: "vulcan",
+      model: "code",
+      baseUrl: "http://127.0.0.1:8140/v1/",
+    });
+    const fixture = createChangeRoomFixture(UNIT_CEILING, vulcanProvider);
+    cleanupRoots.add(fixture.root);
+    openStores.add(fixture.store);
+    driveToCompleted(fixture.store);
+    closeFixture(fixture);
+
+    const source = readChangeHandoffSource(fixture.databasePath, fixture.runId);
+    expect(source.provider).toEqual({
+      kind: "vulcan",
+      model: "code",
+      locality: "loopback",
+      privacyClass: "local_process",
+    });
+    const preview = buildChangeHandoffPreview(source, { correlationId: "vulcan-run" });
+    expect(preview.payload.provider.kind).toBe("vulcan");
+    const decoded = decodeChangeHandoffPayloadBytes(preview.payloadBytes);
+    expect(decoded).toEqual(preview.payload);
+
+    const unknownKind = JSON.parse(preview.payloadBytes.toString("utf8")) as {
+      provider: { kind: string };
+    };
+    unknownKind.provider.kind = "bedrock";
+    expectCode(
+      () => decodeChangeHandoffPayloadBytes(canonicalJsonLine(unknownKind)),
+      "INVALID_HANDOFF",
+    );
+  });
+
   it("previews a valid early cancellation from preparing", () => {
     const fixture = trackedFixture();
     fixture.store.transition(fixture.runId, "cancelling", "cancellation.requested", {

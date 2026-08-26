@@ -260,7 +260,11 @@ const RUN_PHASES: Readonly<Record<RunStateView, RunPhase>> = {
 };
 
 const VERIFICATION_OUTCOMES = new Set(["passed", "failed", "unavailable", "not_run"]);
-const PROVIDER_KINDS = new Set(["ollama", "openai"]);
+// Every provider kind the runtime can persist in a run record. The room is a
+// read-only projection of authoritative state, so excluding a persisted kind
+// would mislabel a legitimate run as invalid evidence; a kind outside this
+// set is exactly that and is rejected.
+const PROVIDER_KINDS = new Set(["ollama", "openai", "anthropic", "vulcan"]);
 const PROVIDER_LOCALITIES = new Set(["loopback", "remote"]);
 const PRIVACY_CLASSES = new Set(["local_process", "remote_api"]);
 const PROVENANCE_CLASSES = new Set<ChangeRoomProvenanceClass>([

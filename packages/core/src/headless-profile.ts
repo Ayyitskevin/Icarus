@@ -337,6 +337,14 @@ function resolveProvider(
     denied(`provider profile ${providerProfileId} is not present in the host catalog`);
   }
   if (selected.kind !== "ollama" && selected.kind !== "openai" && selected.kind !== "anthropic") {
+    // `vulcan` stays refused here for now. This catalog feeds unattended
+    // headless workers, so admitting a provider kind is an execution-
+    // authority decision, not a vocabulary one: the check predates the vulcan
+    // gateway and no ADR has reviewed vulcan for unattended execution. The
+    // vulcan gateway itself is loopback-only and credential-free — the same
+    // safety class as the admitted ollama kind — so admission is a plausible
+    // follow-up, but it must be an explicit operator-reviewed decision with
+    // its own evidence, not a side effect of closing a vocabulary gap.
     invalidHost(`Host provider profile ${providerProfileId} has an invalid kind`);
   }
   try {

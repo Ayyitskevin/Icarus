@@ -260,6 +260,11 @@ function providerMatches(run: RunRecord, profile: LiveEvidenceProfileV1): boolea
     run.provider.baseUrl === profile.provider.baseUrl &&
     run.provider.inputUsdPerMillionTokens === profile.provider.inputUsdPerMillionTokens &&
     run.provider.outputUsdPerMillionTokens === profile.provider.outputUsdPerMillionTokens &&
+    // Vulcan can never match: the profile decoder refuses a vulcan pin, and
+    // this guard keeps that exclusion load-bearing even if the decoder is
+    // ever widened without pinning a vulcan adapter version below. Gate 1
+    // evidence comes only from the three adapters in
+    // LIVE_EVIDENCE_PROVIDER_ADAPTER_VERSIONS.
     profile.provider.kind !== "vulcan" &&
     profile.provider.adapterVersion ===
       LIVE_EVIDENCE_PROVIDER_ADAPTER_VERSIONS[profile.provider.kind]

@@ -174,4 +174,23 @@ describe("headless profile host resolution", () => {
       }),
     ).toThrowError(/duplicate ID/);
   });
+
+  it("refuses a vulcan host provider until unattended use is explicitly admitted", () => {
+    // The vulcan gateway is loopback-only and credential-free — the same
+    // safety class as the admitted ollama kind — but this catalog feeds
+    // unattended headless workers, so admitting a kind is an operator-reviewed
+    // authority decision, not a vocabulary update. See the resolveProvider
+    // comment.
+    const vulcanAuthority = authority();
+    const base = vulcanAuthority.providerProfiles[0];
+    if (base === undefined) throw new Error("Fixture provider is missing");
+    expect(() =>
+      resolveHeadlessProfileV1(profile(), {
+        ...vulcanAuthority,
+        providerProfiles: [
+          { ...base, kind: "vulcan" as const, baseUrl: "http://127.0.0.1:8140/v1/" },
+        ],
+      }),
+    ).toThrowError(/invalid kind/);
+  });
 });

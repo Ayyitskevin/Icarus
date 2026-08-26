@@ -657,7 +657,9 @@ describe("workspace change room page navigation", () => {
       {
         ...valid,
         rooms: [
-          { ...firstRoom, provider: { ...firstRoom.provider, kind: "anthropic" } },
+          // Every persisted ProviderKind is now valid evidence; the boundary
+          // sits at kinds the runtime can never write, like this one.
+          { ...firstRoom, provider: { ...firstRoom.provider, kind: "bedrock" } },
           ...valid.rooms.slice(1),
         ],
       },
@@ -694,6 +696,34 @@ describe("workspace change room page navigation", () => {
     const accepted = acceptChangeRoomPage(initial, request, valid);
     expect(() => acceptChangeRoomPage(accepted, request, valid)).toThrow("cursor is stale");
     expect(accepted.page).toBe(valid);
+  });
+
+  test("accepts summaries for every provider kind the runtime can persist", () => {
+    // A legitimate anthropic or vulcan run must render in the room index; the
+    // projection is read-only evidence, so recognition adds no authority.
+    const initial = createChangeRoomPageSession(page(101, 100, 12, true, 89));
+    const request = changeRoomPageRequest(initial, "older");
+    const valid = page(89, 100, 12, true, 77, 12);
+    const rooms = valid.rooms.map((room, index) => {
+      if (index === 0) {
+        return {
+          ...room,
+          provider: {
+            ...room.provider,
+            kind: "anthropic" as const,
+            locality: "remote" as const,
+            privacyClass: "remote_api" as const,
+          },
+        };
+      }
+      if (index === 1) {
+        return { ...room, provider: { ...room.provider, kind: "vulcan" as const } };
+      }
+      return room;
+    });
+    const accepted = acceptChangeRoomPage(initial, request, { ...valid, rooms });
+    expect(accepted.page.rooms[0]?.provider.kind).toBe("anthropic");
+    expect(accepted.page.rooms[1]?.provider.kind).toBe("vulcan");
   });
 
   test("rejects invalid newest and empty page metadata", () => {
@@ -884,6 +914,12 @@ describe("workspace change room detail contract", () => {
       }),
       withCard(1, { ...baseContext.body, egress: { state: "leaked", approval: null } }),
       withCard(2, { ...providerPlan.body, trustLabel: "trusted" }),
+      // A provider kind the runtime can never persist is invalid evidence,
+      // even inside an untrusted-proposal card.
+      withCard(2, {
+        ...providerPlan.body,
+        provider: { ...providerPlan.body.provider, kind: "bedrock" },
+      }),
       // The plan and its digest are recorded together; one without the other is a lie.
       withCard(2, { ...providerPlan.body, planSha256: null }),
       withCard(2, { ...providerPlan.body, plan: null }),

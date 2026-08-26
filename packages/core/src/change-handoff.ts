@@ -553,7 +553,12 @@ function assertSourceSnapshot(source: ChangeHandoffSourceSnapshot): void {
     source.activeOperations !== 0 ||
     (source.provider.kind !== "ollama" &&
       source.provider.kind !== "openai" &&
-      source.provider.kind !== "anthropic") ||
+      source.provider.kind !== "anthropic" &&
+      // Vulcan runs are loopback, credential-free executions whose bounded
+      // provider metadata (kind/model/locality/privacy class) the pack is
+      // explicitly chartered to carry; refusing them would make a legitimate
+      // run unrepresentable rather than unsafe.
+      source.provider.kind !== "vulcan") ||
     (source.provider.locality !== "loopback" && source.provider.locality !== "remote")
   ) {
     invalid("HANDOFF_SOURCE_INVALID");
@@ -967,7 +972,10 @@ function decodePayload(value: unknown): ChangeHandoffPayloadV1 {
   if (phase !== changeHandoffPhase(state)) invalid();
 
   const provider = exactRecord(object.provider, ["kind", "model", "locality", "privacyClass"]);
-  const kind = enumValue(provider.kind, ["ollama", "openai", "anthropic"]);
+  // Closed to the kinds the runtime can persist; the writer admits the same
+  // set, so a kind outside it in an exported artifact is corruption or
+  // forgery, not a provider this build has not heard of.
+  const kind = enumValue(provider.kind, ["ollama", "openai", "anthropic", "vulcan"]);
   const model = validateModel(stringValue(provider.model, 128));
   const locality = enumValue(provider.locality, ["loopback", "remote"]);
   const privacyClass = enumValue(provider.privacyClass, ["local_process", "remote_api"]);
