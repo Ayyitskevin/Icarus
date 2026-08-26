@@ -40,6 +40,13 @@ export interface HeadlessProfileWorkerPolicyV1 {
   readonly maxConcurrency: 1;
   readonly childRuns: "deny" | HeadlessChildRunsAllowV1;
   readonly scheduledRuns: "deny";
+  /**
+   * ADR 0060: `"propose"` stops after patch-set intent and requires the
+   * digest-bound apply act; `"apply"` is the explicit approve-and-run
+   * opt-in. Absent means `"propose"` — the default — and decodes to the
+   * identical pre-ADR-0060 object so existing profile digests are stable.
+   */
+  readonly mutation?: "propose" | "apply";
 }
 
 /**
@@ -257,9 +264,16 @@ function decodeChildRuns(value: unknown): "deny" | HeadlessChildRunsAllowV1 {
 }
 
 function decodeWorker(value: unknown): HeadlessProfileWorkerPolicyV1 {
+  const hasMutation =
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.hasOwn(value, "mutation");
   const decoded = record(
     value,
-    ["mode", "maxConcurrency", "childRuns", "scheduledRuns"],
+    hasMutation
+      ? ["mode", "maxConcurrency", "childRuns", "scheduledRuns", "mutation"]
+      : ["mode", "maxConcurrency", "childRuns", "scheduledRuns"],
     "profile.worker",
   );
   if (decoded.mode !== "one_task") invalid("profile.worker.mode must equal one_task");
@@ -269,11 +283,19 @@ function decodeWorker(value: unknown): HeadlessProfileWorkerPolicyV1 {
   if (decoded.scheduledRuns !== "deny") {
     invalid("profile.worker.scheduledRuns must equal deny");
   }
+  if (
+    decoded.mutation !== undefined &&
+    decoded.mutation !== "propose" &&
+    decoded.mutation !== "apply"
+  ) {
+    invalid("profile.worker.mutation must equal propose or apply");
+  }
   return {
     mode: "one_task",
     maxConcurrency: 1,
     childRuns: decodeChildRuns(decoded.childRuns),
     scheduledRuns: "deny",
+    ...(hasMutation ? { mutation: decoded.mutation as "propose" | "apply" } : {}),
   };
 }
 

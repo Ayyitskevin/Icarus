@@ -482,13 +482,31 @@ node packages/cli/dist/main.js run approve-headless <run-id> \
 
 The command holds the existing Linux run lease from approval through
 quiescence, reconstructs the persisted authority binding before the first
-effect, and writes the checksum-terminated headless history as JSONL. Exit `0`
-means passing evidence is ready for human review; `1` is failure, `2` is
-exhaustion, `3` requires human input, and `130` is settled signal cancellation.
-Failed or unavailable registered checks settle with the explicit
-`HEADLESS_VERIFICATION_FAILED` or `HEADLESS_VERIFICATION_UNAVAILABLE` error;
-an unexplained failed terminal state remains an incomplete settlement and
-fails closed.
+effect, and writes the checksum-terminated headless history as JSONL. Since
+ADR 0060 the default is propose-only: without `worker.mutation` in the
+profile the worker stops after durable patch-set intent and settles
+`icarus.headless.worker-proposal.v1` with exit `10`, materializing nothing.
+`"mutation": "apply"` in the profile's worker policy is the explicit
+approve-and-run opt-in. Exit codes: `0` complete and review-ready, `1`
+failure, `2` envelope exhaustion (turns, budget, or doom loop), `3` human
+input required, `10` proposed, `130` settled signal cancellation; refusals
+exit `1` with a named error before any effect.
+
+Applying a proposal takes the digest-bound act, which records an `apply`
+approval against the exact persisted patch set:
+
+```text
+node packages/cli/dist/main.js run apply-headless <run-id> \
+  --patchset-sha <proposal-digest> --actor kevin
+```
+
+The command re-proves the run, requires the flag to equal the durable
+patch-set digest, appends the `icarus.headless.worker-application.v1`
+settlement, and repeats byte-identically. A mismatched digest is refused
+before any effect. `run approve-headless` and `run apply-headless` also
+accept `--max-turns N` and `--max-budget-usd USD`, which only ever narrow the
+approved envelope; a third identical session tool call lands the run in
+`session.exhausted` (`doom_loop`) with exit `2`.
 It does not approve review, commit, push, deploy, schedule, create child runs,
 or configure an external research adapter.
 

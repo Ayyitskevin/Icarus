@@ -47,14 +47,20 @@ import {
   type HeadlessChildSettlementV1,
 } from "./headless-children.js";
 import {
+  HEADLESS_WORKER_APPLICATION_SCHEMA,
+  HEADLESS_WORKER_APPLY_SCHEMA,
   HEADLESS_WORKER_CONTINUATION_SCHEMA,
   HEADLESS_WORKER_INTERRUPTION_SCHEMA,
+  HEADLESS_WORKER_PROPOSAL_SCHEMA,
   HEADLESS_WORKER_RESUME_SCHEMA,
+  headlessWorkerApplyRequestedPayload,
   headlessWorkerResumeRequestedPayload,
   headlessWorkerSettledPayload,
   headlessWorkerStartedPayload,
+  type AppliedHeadlessWorkerSettlementV1,
   type ContinuedHeadlessWorkerSettlementV1,
   type DurableHeadlessWorkerSettlementV1,
+  type HeadlessWorkerApplyRequestV1,
   type HeadlessWorkerResumeRequestV1,
 } from "./headless-worker.js";
 import {
@@ -97,6 +103,7 @@ import {
   readableManifestDigest,
   treeCheckpointDigest,
 } from "./policy.js";
+import { sanitizeText } from "./redaction.js";
 import { assertTransition } from "./state-machine.js";
 import type {
   ApprovalRecord,
@@ -299,6 +306,7 @@ const APPROVAL_KINDS: ReadonlySet<ApprovalRecord["kind"]> = new Set([
   "review",
   "rollback",
   "restore",
+  "apply",
 ]);
 const APPROVAL_DECISIONS: ReadonlySet<ApprovalRecord["decision"]> = new Set(["approve", "reject"]);
 const RUN_PRESENTATION_ACTION_EVENT_TYPES = [
@@ -3573,11 +3581,57 @@ export class IcarusStore {
     transaction();
     return this.getRun(runId);
   }
+
+  /**
+   * Lands a doomed session — the identical tool call admitted a third time
+   * (ADR 0060) — in non-approvable review with the repeated call's digest as
+   * evidence. The settlement maps `session.exhausted` to exit 2.
+   */
+  recordSessionDoomLoop(
+    runId: string,
+    detail: { readonly tool: string; readonly callDigestSha256: string },
+  ): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const current = this.getRun(runId);
+      invariant(
+        current.state === "running" || current.state === "verifying",
+        "INVALID_STATE",
+        "Doom-loop landing requires an active run",
+      );
+      invariant(
+        /^[a-f0-9]{64}$/.test(detail.callDigestSha256),
+        "INVALID_HEADLESS_ENVELOPE",
+        "Doom-loop call digest is malformed",
+      );
+      assertTransition(current.state, "awaiting_review");
+      const now = this.#now();
+      const result = this.#database
+        .prepare(
+          `UPDATE runs SET state = 'awaiting_review', version = version + 1, updated_at = ?
+           WHERE id = ? AND state = ?`,
+        )
+        .run(now, runId, current.state);
+      invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
+      this.#appendEvent(runId, "session.exhausted", {
+        iterations: this.countSessionIterations(runId),
+        reason: "doom_loop",
+        tool: sanitizeText(detail.tool),
+        callDigestSha256: detail.callDigestSha256,
+      });
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
   /**
    * Lands a failed verification directly in non-approvable review when a
    * session cannot retain the ordinary reconciliation margin at entry.
    */
-  recordSessionAdmissionExhausted(runId: string, browserActionId: string | null = null): RunRecord {
+  recordSessionAdmissionExhausted(
+    runId: string,
+    browserActionId: string | null = null,
+    reason = "recovery_margin",
+  ): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
       invariant(current.state === "verifying", "INVALID_STATE", "Run is not verifying");
@@ -3602,7 +3656,7 @@ export class IcarusStore {
       invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
       this.#appendEvent(runId, "session.exhausted", {
         iterations: this.countSessionIterations(runId),
-        reason: "recovery_margin",
+        reason,
         ...(browserActionId === null
           ? {}
           : {
@@ -4795,6 +4849,201 @@ export class IcarusStore {
    * before the child's plan is admitted. The link is evidence; the parent
    * binding and spec digests bind it to the operator-approved authority.
    */
+  /**
+   * Records the digest-bound apply act (ADR 0060): exactly one `apply`
+   * approval in the ordinary approvals pipeline plus one apply-intent event,
+   * atomically. The run must hold a persisted patch set and no active
+   * operation, and the durable start must match the reconstructed binding.
+   */
+  recordHeadlessWorkerApplyRequested(
+    runId: string,
+    request: HeadlessWorkerApplyRequestV1,
+    actor: string,
+  ): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const run = this.getRun(runId);
+      invariant(
+        request.runId === runId && request.schema === HEADLESS_WORKER_APPLY_SCHEMA,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker apply intent does not match this run",
+      );
+      this.#assertApprovalInput({
+        kind: "apply",
+        digest: request.patchSetSha256,
+        actor,
+        decision: "approve",
+        expectedState: "running",
+        to: "running",
+        expectedDigest: () => null,
+        eventType: "headless.worker.apply_requested",
+      });
+      invariant(
+        run.state === "running" && run.patchSet !== null,
+        "HEADLESS_APPLY_DENIED",
+        "Headless application requires a running run with a persisted patch set",
+      );
+      invariant(
+        this.#database
+          .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
+          .get(runId) === undefined,
+        "HEADLESS_WORKER_NOT_QUIESCENT",
+        "Headless worker cannot apply across an active operation",
+      );
+      const started = this.#database
+        .prepare(
+          `SELECT sequence, payload_json FROM run_events
+           WHERE run_id = ? AND type = 'headless.worker.started'
+           ORDER BY sequence DESC LIMIT 1`,
+        )
+        .get(runId);
+      invariant(started !== undefined, "MISSING_HEADLESS_WORKER", "Headless worker never started");
+      const startedRow = row(started, "headless worker start");
+      const startedPayload = parseJson<Record<string, JsonValue>>(
+        startedRow.payload_json,
+        "headless worker start.payload_json",
+      );
+      invariant(
+        startedPayload.bindingDigestSha256 === request.bindingDigestSha256 &&
+          numberValue(startedRow.sequence, "headless worker start.sequence") ===
+            request.startedEventSequence,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker apply intent does not match the durable start",
+      );
+      invariant(
+        this.#database
+          .prepare(
+            "SELECT 1 FROM run_events WHERE run_id = ? AND type = 'headless.worker.apply_requested' LIMIT 1",
+          )
+          .get(runId) === undefined &&
+          this.#database
+            .prepare("SELECT 1 FROM approvals WHERE run_id = ? AND kind = 'apply' LIMIT 1")
+            .get(runId) === undefined,
+        "HEADLESS_APPLY_EXHAUSTED",
+        "Headless worker application was already requested",
+      );
+      const now = this.#now();
+      this.#database
+        .prepare(
+          `INSERT INTO approvals
+           (id, run_id, kind, digest, actor, decision, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(this.#id(), runId, "apply", request.patchSetSha256, actor, "approve", now);
+      this.#appendEvent(
+        runId,
+        "headless.worker.apply_requested",
+        headlessWorkerApplyRequestedPayload(request),
+      );
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
+  /**
+   * Appends the terminal application settlement (ADR 0060): the proposal
+   * settlement, the apply intent, and the apply approval must all be durable
+   * and digest-consistent, and no operation may be active.
+   */
+  recordHeadlessWorkerApplicationSettled(
+    runId: string,
+    settlement: AppliedHeadlessWorkerSettlementV1,
+  ): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const run = this.getRun(runId);
+      invariant(
+        settlement.runId === runId &&
+          settlement.schema === HEADLESS_WORKER_APPLICATION_SCHEMA &&
+          settlement.finalState === run.state,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker application settlement does not match the current run",
+      );
+      invariant(
+        this.#database
+          .prepare("SELECT 1 FROM operations WHERE run_id = ? AND status = 'started' LIMIT 1")
+          .get(runId) === undefined,
+        "HEADLESS_WORKER_NOT_QUIESCENT",
+        "Headless worker cannot settle across an active operation",
+      );
+      const started = this.#database
+        .prepare(
+          `SELECT payload_json FROM run_events
+           WHERE run_id = ? AND type = 'headless.worker.started'
+           ORDER BY sequence DESC LIMIT 1`,
+        )
+        .get(runId);
+      invariant(started !== undefined, "MISSING_HEADLESS_WORKER", "Headless worker never started");
+      const startedPayload = parseJson<Record<string, JsonValue>>(
+        row(started, "headless worker start").payload_json,
+        "headless worker start.payload_json",
+      );
+      invariant(
+        startedPayload.bindingDigestSha256 === settlement.bindingDigestSha256,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker binding changed before settlement",
+      );
+      const settlements = this.#database
+        .prepare(
+          `SELECT sequence, payload_json FROM run_events
+           WHERE run_id = ? AND type = 'headless.worker.settled' ORDER BY sequence`,
+        )
+        .all(runId) as unknown[];
+      invariant(
+        settlements.length === 1,
+        "HEADLESS_WORKER_ALREADY_SETTLED",
+        "Headless worker application requires exactly one prior settlement",
+      );
+      const settlementRow = row(settlements[0], "headless worker settlement");
+      const settlementPayload = parseJson<Record<string, JsonValue>>(
+        settlementRow.payload_json,
+        "headless worker settlement.payload_json",
+      );
+      invariant(
+        settlementPayload.schema === HEADLESS_WORKER_PROPOSAL_SCHEMA &&
+          numberValue(settlementRow.sequence, "headless worker settlement.sequence") ===
+            settlement.application.proposalSettlementSequence,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker application does not match the proposed settlement",
+      );
+      const applies = this.#database
+        .prepare(
+          `SELECT sequence, payload_json FROM run_events
+           WHERE run_id = ? AND type = 'headless.worker.apply_requested' ORDER BY sequence`,
+        )
+        .all(runId) as unknown[];
+      invariant(
+        applies.length === 1,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker application lacks its apply intent",
+      );
+      const applyRow = row(applies[0], "headless worker apply");
+      const applyPayload = parseJson<Record<string, JsonValue>>(
+        applyRow.payload_json,
+        "headless worker apply.payload_json",
+      );
+      invariant(
+        applyPayload.schema === HEADLESS_WORKER_APPLY_SCHEMA &&
+          applyPayload.bindingDigestSha256 === settlement.bindingDigestSha256 &&
+          applyPayload.patchSetSha256 === settlement.application.patchSetSha256 &&
+          numberValue(applyRow.sequence, "headless worker apply.sequence") ===
+            settlement.application.applyEventSequence,
+        "HEADLESS_WORKER_IDENTITY_CHANGED",
+        "Headless worker application does not match its apply intent",
+      );
+      invariant(
+        this.#database
+          .prepare(
+            "SELECT 1 FROM approvals WHERE run_id = ? AND kind = 'apply' AND digest = ? AND decision = 'approve' LIMIT 1",
+          )
+          .get(runId, settlement.application.patchSetSha256) !== undefined,
+        "HEADLESS_APPLY_DENIED",
+        "Headless worker application lacks its apply approval",
+      );
+      this.#appendEvent(runId, "headless.worker.settled", headlessWorkerSettledPayload(settlement));
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
   recordHeadlessChildLinked(runId: string, link: HeadlessChildLinkV1): RunRecord {
     const transaction = this.#database.transaction(() => {
       const run = this.getRun(runId);

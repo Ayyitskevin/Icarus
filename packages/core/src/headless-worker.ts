@@ -1,3 +1,4 @@
+import { sha256 } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
 import type { HeadlessExecutionBindingV1 } from "./headless-binding.js";
 import type { ToolName } from "./tools.js";
@@ -7,15 +8,19 @@ export const HEADLESS_WORKER_SCHEMA = "icarus.headless.worker.v1";
 export const HEADLESS_WORKER_INTERRUPTION_SCHEMA = "icarus.headless.worker-interruption.v1";
 export const HEADLESS_WORKER_CONTINUATION_SCHEMA = "icarus.headless.worker-continuation.v1";
 export const HEADLESS_WORKER_RESUME_SCHEMA = "icarus.headless.worker-resume.v1";
+export const HEADLESS_WORKER_PROPOSAL_SCHEMA = "icarus.headless.worker-proposal.v1";
+export const HEADLESS_WORKER_APPLICATION_SCHEMA = "icarus.headless.worker-application.v1";
+export const HEADLESS_WORKER_APPLY_SCHEMA = "icarus.headless.worker-apply.v1";
 
 export type HeadlessWorkerOutcomeV1 =
   | "review_ready"
   | "awaiting_human"
   | "exhausted"
   | "cancelled"
-  | "failed";
+  | "failed"
+  | "proposed";
 
-export type HeadlessWorkerExitCodeV1 = 0 | 1 | 2 | 3 | 130;
+export type HeadlessWorkerExitCodeV1 = 0 | 1 | 2 | 3 | 10 | 130;
 
 export interface HeadlessWorkerSettlementV1 {
   readonly schema: typeof HEADLESS_WORKER_SCHEMA;
@@ -79,10 +84,62 @@ export interface HeadlessWorkerResumeRequestV1 {
   readonly startedEventSequence: number;
 }
 
+/**
+ * Clean propose-only stop (ADR 0060): the worker proved quiescence after
+ * patch-set intent without materializing a byte. The proposal digest is the
+ * same checkpoint-file digest the materialization stage computes, so the
+ * digest-bound apply act grants exactly what was proposed.
+ */
+export interface ProposedHeadlessWorkerSettlementV1 {
+  readonly schema: typeof HEADLESS_WORKER_PROPOSAL_SCHEMA;
+  readonly runId: string;
+  readonly bindingDigestSha256: string;
+  readonly outcome: "proposed";
+  readonly exitCode: 10;
+  readonly finalState: RunRecord["state"];
+  readonly verificationOutcome: "passed" | "failed" | "unavailable" | null;
+  readonly usage: RunRecord["usage"];
+  readonly error: null;
+  readonly proposal: { readonly patchSetSha256: string };
+}
+
+/**
+ * Terminal settlement of a digest-bound application epoch (ADR 0060). The
+ * `application` member binds the exact apply-intent event, the proposal
+ * settlement it applies, and the patch-set digest the operator granted.
+ */
+export interface AppliedHeadlessWorkerSettlementV1 {
+  readonly schema: typeof HEADLESS_WORKER_APPLICATION_SCHEMA;
+  readonly runId: string;
+  readonly bindingDigestSha256: string;
+  readonly outcome: HeadlessWorkerOutcomeV1;
+  readonly exitCode: HeadlessWorkerExitCodeV1;
+  readonly finalState: RunRecord["state"];
+  readonly verificationOutcome: "passed" | "failed" | "unavailable" | null;
+  readonly usage: RunRecord["usage"];
+  readonly error: { readonly code: string; readonly message: string } | null;
+  readonly application: {
+    readonly applyEventSequence: number;
+    readonly proposalSettlementSequence: number;
+    readonly patchSetSha256: string;
+  };
+}
+
+/** Explicit apply intent recorded by the digest-bound application path. */
+export interface HeadlessWorkerApplyRequestV1 {
+  readonly schema: typeof HEADLESS_WORKER_APPLY_SCHEMA;
+  readonly runId: string;
+  readonly bindingDigestSha256: string;
+  readonly patchSetSha256: string;
+  readonly startedEventSequence: number;
+}
+
 export type DurableHeadlessWorkerSettlementV1 =
   | HeadlessWorkerSettlementV1
   | InterruptedHeadlessWorkerSettlementV1
-  | ContinuedHeadlessWorkerSettlementV1;
+  | ContinuedHeadlessWorkerSettlementV1
+  | ProposedHeadlessWorkerSettlementV1
+  | AppliedHeadlessWorkerSettlementV1;
 
 export type HeadlessWorkerLifecycleV1 =
   | { readonly status: "absent" }
@@ -94,6 +151,11 @@ export type HeadlessWorkerLifecycleV1 =
       readonly continuationRequest: {
         readonly resumeEventSequence: number;
         readonly reconstructionDigestSha256: string;
+      } | null;
+      /** Set when the open epoch is a crashed application (ADR 0060). */
+      readonly applyRequest: {
+        readonly applyEventSequence: number;
+        readonly patchSetSha256: string;
       } | null;
     }
   | {
@@ -108,7 +170,7 @@ export type HeadlessWorkerLifecycleV1 =
 
 export interface HeadlessWorkerExecutionV1 {
   readonly binding: HeadlessExecutionBindingV1;
-  readonly settlement: HeadlessWorkerSettlementV1;
+  readonly settlement: HeadlessWorkerSettlementV1 | ProposedHeadlessWorkerSettlementV1;
   readonly run: RunRecord;
 }
 
@@ -121,6 +183,14 @@ export interface ActiveHeadlessExecutionV1 {
   readonly binding: HeadlessExecutionBindingV1;
   readonly ceiling: SunCeiling;
   readonly toolIds: ReadonlySet<ToolName>;
+  /** Effective session iteration ceiling after ADR 0060 envelope clamps. */
+  readonly iterationCeiling: number;
+}
+
+/** ADR 0060 per-invocation runaway envelopes; every field only narrows. */
+export interface HeadlessRunEnvelopeV1 {
+  readonly maxTurns?: number;
+  readonly maxBudgetUsd?: number;
 }
 
 export function assertHeadlessWorkerBudgetAvailable(run: RunRecord, ceiling: SunCeiling): void {
@@ -237,9 +307,21 @@ const INTERRUPTED_SETTLEMENT_MEMBERS = [...ORDINARY_SETTLEMENT_MEMBERS, "reconci
 
 const CONTINUATION_SETTLEMENT_MEMBERS = [...ORDINARY_SETTLEMENT_MEMBERS, "continuation"] as const;
 
+const PROPOSAL_SETTLEMENT_MEMBERS = [...ORDINARY_SETTLEMENT_MEMBERS, "proposal"] as const;
+
+const APPLICATION_SETTLEMENT_MEMBERS = [...ORDINARY_SETTLEMENT_MEMBERS, "application"] as const;
+
 const RESUME_REQUEST_MEMBERS = [
   "bindingDigestSha256",
   "reconstructionDigestSha256",
+  "runId",
+  "schema",
+  "startedEventSequence",
+] as const;
+
+const APPLY_REQUEST_MEMBERS = [
+  "bindingDigestSha256",
+  "patchSetSha256",
   "runId",
   "schema",
   "startedEventSequence",
@@ -433,9 +515,9 @@ function decodeSettlement(
   expectedBindingDigest: string,
   expectedStartedEventSequence: number,
   events: readonly EventRecord[],
-  continuationEvidence: {
-    readonly resumeEvent: EventRecord;
-    readonly interruptedSettlement: EventRecord;
+  epochEvidence: {
+    readonly intentEvent: EventRecord;
+    readonly firstSettlement: EventRecord;
   } | null,
 ): DurableHeadlessWorkerSettlementV1 {
   const payload = eventPayload(event, "Headless worker settlement");
@@ -447,6 +529,7 @@ function decodeSettlement(
     interrupted: 1,
     exhausted: 2,
     awaiting_human: 3,
+    proposed: 10,
     cancelled: 130,
   } as const;
   invariant(
@@ -459,14 +542,18 @@ function decodeSettlement(
   invariant(
     schema === HEADLESS_WORKER_SCHEMA ||
       schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA ||
-      schema === HEADLESS_WORKER_CONTINUATION_SCHEMA,
+      schema === HEADLESS_WORKER_CONTINUATION_SCHEMA ||
+      schema === HEADLESS_WORKER_PROPOSAL_SCHEMA ||
+      schema === HEADLESS_WORKER_APPLICATION_SCHEMA,
     "INVALID_HEADLESS_WORKER_HISTORY",
     "Headless worker settlement schema is malformed",
   );
   const isInterrupted = schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA;
   const isContinuation = schema === HEADLESS_WORKER_CONTINUATION_SCHEMA;
+  const isProposal = schema === HEADLESS_WORKER_PROPOSAL_SCHEMA;
+  const isApplication = schema === HEADLESS_WORKER_APPLICATION_SCHEMA;
   invariant(
-    (outcome === "interrupted") === isInterrupted,
+    (outcome === "interrupted") === isInterrupted && (outcome === "proposed") === isProposal,
     "INVALID_HEADLESS_WORKER_HISTORY",
     "Headless worker settlement outcome is malformed",
   );
@@ -476,7 +563,11 @@ function decodeSettlement(
       ? INTERRUPTED_SETTLEMENT_MEMBERS
       : isContinuation
         ? CONTINUATION_SETTLEMENT_MEMBERS
-        : ORDINARY_SETTLEMENT_MEMBERS,
+        : isProposal
+          ? PROPOSAL_SETTLEMENT_MEMBERS
+          : isApplication
+            ? APPLICATION_SETTLEMENT_MEMBERS
+            : ORDINARY_SETTLEMENT_MEMBERS,
     "Headless worker settlement",
   );
   invariant(
@@ -577,6 +668,36 @@ function decodeSettlement(
       },
     };
   }
+  if (isProposal) {
+    const proposal = payload.proposal;
+    invariant(
+      typeof proposal === "object" &&
+        proposal !== null &&
+        !Array.isArray(proposal) &&
+        finalState === "running" &&
+        error === null,
+      "INVALID_HEADLESS_WORKER_HISTORY",
+      "Proposed headless worker settlement is malformed",
+    );
+    assertExactMembers(proposal, ["patchSetSha256"], "Proposed headless worker proposal");
+    invariant(
+      typeof proposal.patchSetSha256 === "string" && /^[a-f0-9]{64}$/.test(proposal.patchSetSha256),
+      "INVALID_HEADLESS_WORKER_HISTORY",
+      "Proposed headless worker patch-set digest is malformed",
+    );
+    return {
+      schema: HEADLESS_WORKER_PROPOSAL_SCHEMA,
+      runId,
+      bindingDigestSha256: digest,
+      outcome: "proposed",
+      exitCode: 10,
+      finalState,
+      verificationOutcome,
+      usage,
+      error: null,
+      proposal: { patchSetSha256: proposal.patchSetSha256 },
+    };
+  }
   const expectedOutcome = outcomeForEvidence(finalState, verificationOutcome, events);
   invariant(
     QUIESCENT_STATES.has(finalState) &&
@@ -587,13 +708,59 @@ function decodeSettlement(
     "INVALID_HEADLESS_WORKER_HISTORY",
     "Headless worker settlement outcome does not match its evidence",
   );
+  if (isApplication) {
+    const application = payload.application;
+    invariant(
+      typeof application === "object" &&
+        application !== null &&
+        !Array.isArray(application) &&
+        epochEvidence !== null,
+      "INVALID_HEADLESS_WORKER_HISTORY",
+      "Applied headless worker settlement lacks application evidence",
+    );
+    assertExactMembers(
+      application,
+      ["applyEventSequence", "patchSetSha256", "proposalSettlementSequence"],
+      "Applied headless worker application",
+    );
+    const { applyEventSequence, proposalSettlementSequence, patchSetSha256 } = application;
+    const applyPayload = eventPayload(epochEvidence.intentEvent, "Headless worker apply");
+    invariant(
+      Number.isSafeInteger(applyEventSequence) &&
+        applyEventSequence === epochEvidence.intentEvent.sequence &&
+        Number.isSafeInteger(proposalSettlementSequence) &&
+        proposalSettlementSequence === epochEvidence.firstSettlement.sequence &&
+        typeof patchSetSha256 === "string" &&
+        /^[a-f0-9]{64}$/.test(patchSetSha256) &&
+        applyPayload.schema === HEADLESS_WORKER_APPLY_SCHEMA &&
+        applyPayload.patchSetSha256 === patchSetSha256,
+      "INVALID_HEADLESS_WORKER_HISTORY",
+      "Applied headless worker settlement does not match its apply intent",
+    );
+    return {
+      schema: HEADLESS_WORKER_APPLICATION_SCHEMA,
+      runId,
+      bindingDigestSha256: digest,
+      outcome,
+      exitCode: expectedExitCodes[outcome],
+      finalState,
+      verificationOutcome,
+      usage,
+      error,
+      application: {
+        applyEventSequence: epochEvidence.intentEvent.sequence,
+        proposalSettlementSequence: epochEvidence.firstSettlement.sequence,
+        patchSetSha256,
+      },
+    };
+  }
   if (isContinuation) {
     const continuation = payload.continuation;
     invariant(
       typeof continuation === "object" &&
         continuation !== null &&
         !Array.isArray(continuation) &&
-        continuationEvidence !== null,
+        epochEvidence !== null,
       "INVALID_HEADLESS_WORKER_HISTORY",
       "Continued headless worker settlement lacks continuation evidence",
     );
@@ -604,12 +771,12 @@ function decodeSettlement(
     );
     const { resumeEventSequence, interruptedSettlementSequence, reconstructionDigestSha256 } =
       continuation;
-    const resumePayload = eventPayload(continuationEvidence.resumeEvent, "Headless worker resume");
+    const resumePayload = eventPayload(epochEvidence.intentEvent, "Headless worker resume");
     invariant(
       Number.isSafeInteger(resumeEventSequence) &&
-        resumeEventSequence === continuationEvidence.resumeEvent.sequence &&
+        resumeEventSequence === epochEvidence.intentEvent.sequence &&
         Number.isSafeInteger(interruptedSettlementSequence) &&
-        interruptedSettlementSequence === continuationEvidence.interruptedSettlement.sequence &&
+        interruptedSettlementSequence === epochEvidence.firstSettlement.sequence &&
         typeof reconstructionDigestSha256 === "string" &&
         /^[a-f0-9]{64}$/.test(reconstructionDigestSha256) &&
         resumePayload.schema === HEADLESS_WORKER_RESUME_SCHEMA &&
@@ -628,8 +795,8 @@ function decodeSettlement(
       usage,
       error,
       continuation: {
-        resumeEventSequence: continuationEvidence.resumeEvent.sequence,
-        interruptedSettlementSequence: continuationEvidence.interruptedSettlement.sequence,
+        resumeEventSequence: epochEvidence.intentEvent.sequence,
+        interruptedSettlementSequence: epochEvidence.firstSettlement.sequence,
         reconstructionDigestSha256,
       },
     };
@@ -683,6 +850,39 @@ function decodeResumeRequest(
   };
 }
 
+function decodeApplyRequest(
+  runId: string,
+  event: EventRecord,
+  expectedBindingDigest: string,
+  expectedStartedEventSequence: number,
+): { readonly applyEventSequence: number; readonly patchSetSha256: string } {
+  invariant(
+    event.runId === runId && event.sequence > expectedStartedEventSequence,
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker apply request identity is malformed",
+  );
+  const payload = eventPayload(event, "Headless worker apply");
+  assertExactMembers(payload, APPLY_REQUEST_MEMBERS, "Headless worker apply");
+  const { startedEventSequence, patchSetSha256 } = payload;
+  invariant(
+    payload.schema === HEADLESS_WORKER_APPLY_SCHEMA &&
+      payload.runId === runId &&
+      Number.isSafeInteger(startedEventSequence) &&
+      startedEventSequence === expectedStartedEventSequence &&
+      typeof patchSetSha256 === "string" &&
+      /^[a-f0-9]{64}$/.test(patchSetSha256),
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker apply request is malformed",
+  );
+  const digest = bindingDigest(payload, "Headless worker apply");
+  invariant(
+    digest === expectedBindingDigest,
+    "HEADLESS_WORKER_IDENTITY_CHANGED",
+    "Headless worker binding changed before apply",
+  );
+  return { applyEventSequence: event.sequence, patchSetSha256 };
+}
+
 export function inspectHeadlessWorkerLifecycleV1(
   runId: string,
   events: readonly EventRecord[],
@@ -690,9 +890,10 @@ export function inspectHeadlessWorkerLifecycleV1(
   const starts = events.filter((event) => event.type === "headless.worker.started");
   const settlements = events.filter((event) => event.type === "headless.worker.settled");
   const resumes = events.filter((event) => event.type === "headless.worker.resume_requested");
+  const applies = events.filter((event) => event.type === "headless.worker.apply_requested");
   if (starts.length === 0) {
     invariant(
-      settlements.length === 0 && resumes.length === 0,
+      settlements.length === 0 && resumes.length === 0 && applies.length === 0,
       "INVALID_HEADLESS_WORKER_HISTORY",
       "Headless worker evidence exists without a start",
     );
@@ -707,6 +908,16 @@ export function inspectHeadlessWorkerLifecycleV1(
     resumes.length <= 1,
     "INVALID_HEADLESS_WORKER_HISTORY",
     "Headless worker history contains more than one resume request",
+  );
+  invariant(
+    applies.length <= 1,
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker history contains more than one apply request",
+  );
+  invariant(
+    resumes.length + applies.length <= 1,
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker history contains more than one epoch intent",
   );
   invariant(
     settlements.length <= 2,
@@ -731,17 +942,20 @@ export function inspectHeadlessWorkerLifecycleV1(
     startedEventSequence: started.sequence,
   };
   const resume = resumes[0];
+  const apply = applies[0];
   const continuationRequest =
     resume === undefined ? null : decodeResumeRequest(runId, resume, digest, started.sequence);
+  const applyRequest =
+    apply === undefined ? null : decodeApplyRequest(runId, apply, digest, started.sequence);
   const first = settlements[0];
   const second = settlements[1];
   if (first === undefined) {
     invariant(
-      continuationRequest === null,
+      continuationRequest === null && applyRequest === null,
       "INVALID_HEADLESS_WORKER_HISTORY",
-      "Headless worker resume request exists without an interrupted settlement",
+      "Headless worker epoch intent exists without a first settlement",
     );
-    return { status: "started", ...base, continuationRequest: null };
+    return { status: "started", ...base, continuationRequest: null, applyRequest: null };
   }
   invariant(
     first.runId === runId && first.sequence > started.sequence,
@@ -758,11 +972,20 @@ export function inspectHeadlessWorkerLifecycleV1(
       "Headless worker resume request must follow an interrupted settlement",
     );
   }
+  if (applyRequest !== null) {
+    invariant(
+      firstSettlement.schema === HEADLESS_WORKER_PROPOSAL_SCHEMA &&
+        apply !== undefined &&
+        apply.sequence > first.sequence,
+      "INVALID_HEADLESS_WORKER_HISTORY",
+      "Headless worker apply request must follow a proposed settlement",
+    );
+  }
   if (second === undefined) {
-    if (continuationRequest !== null) {
-      // A crashed continuation epoch: operations may still be open; H3a
+    if (continuationRequest !== null || applyRequest !== null) {
+      // A crashed second epoch: operations may still be open; H3a
       // reconciliation closes this tail before anything else may act.
-      return { status: "started", ...base, continuationRequest };
+      return { status: "started", ...base, continuationRequest, applyRequest };
     }
     assertQuiescent(events);
     return {
@@ -773,30 +996,46 @@ export function inspectHeadlessWorkerLifecycleV1(
     };
   }
   invariant(
-    continuationRequest !== null && resume !== undefined,
+    (continuationRequest !== null && resume !== undefined) ||
+      (applyRequest !== null && apply !== undefined),
     "INVALID_HEADLESS_WORKER_HISTORY",
-    "Headless worker continuation settlement exists without resume intent",
+    "Headless worker second settlement exists without epoch intent",
   );
+  const intentEvent = (resume ?? apply) as EventRecord;
   invariant(
-    second.runId === runId && second.sequence > resume.sequence,
+    second.runId === runId && second.sequence > intentEvent.sequence,
     "INVALID_HEADLESS_WORKER_HISTORY",
-    "Headless worker continuation settlement precedes its resume intent",
+    "Headless worker second settlement precedes its epoch intent",
   );
   assertQuiescent(events);
   const secondSettlement = decodeSettlement(runId, second, digest, started.sequence, events, {
-    resumeEvent: resume,
-    interruptedSettlement: first,
+    intentEvent,
+    firstSettlement: first,
   });
-  invariant(
-    firstSettlement.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA,
-    "INVALID_HEADLESS_WORKER_HISTORY",
-    "Headless worker continuation must follow an interrupted settlement",
-  );
+  if (continuationRequest !== null) {
+    invariant(
+      firstSettlement.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA &&
+        (secondSettlement.schema === HEADLESS_WORKER_CONTINUATION_SCHEMA ||
+          secondSettlement.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA),
+      "INVALID_HEADLESS_WORKER_HISTORY",
+      "Headless worker continuation must follow an interrupted settlement",
+    );
+  } else {
+    invariant(
+      (firstSettlement.schema === HEADLESS_WORKER_PROPOSAL_SCHEMA ||
+        firstSettlement.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA) &&
+        (secondSettlement.schema === HEADLESS_WORKER_APPLICATION_SCHEMA ||
+          secondSettlement.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA),
+      "INVALID_HEADLESS_WORKER_HISTORY",
+      "Headless worker application must follow a proposed or interrupted settlement",
+    );
+  }
   return {
     status: "settled",
     ...base,
     settlement: secondSettlement,
-    interruptedSettlement: firstSettlement,
+    interruptedSettlement:
+      firstSettlement.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA ? firstSettlement : null,
   };
 }
 
@@ -949,6 +1188,147 @@ export function headlessWorkerResumeRequestedPayload(
   request: HeadlessWorkerResumeRequestV1,
 ): JsonValue {
   return request as unknown as JsonValue;
+}
+
+export function headlessWorkerApplyRequestedPayload(
+  request: HeadlessWorkerApplyRequestV1,
+): JsonValue {
+  return request as unknown as JsonValue;
+}
+
+/**
+ * The exact digest the materialization stage binds: one line per checkpoint
+ * file as `path:approvedBase64`. The proposal settlement and the apply act
+ * both recompute it from durable bytes (ADR 0060).
+ */
+export function headlessPatchSetDigestV1(
+  files: readonly { readonly path: string; readonly approvedBase64: string | null }[],
+): string {
+  return sha256(files.map((file) => `${file.path}:${file.approvedBase64 ?? ""}`).join("\n"));
+}
+
+/**
+ * Clean propose-only stop (ADR 0060): the worker proved quiescence with the
+ * patch set durable as intent and nothing materialized. The run stays
+ * `running`; the digest-bound apply act is the only way forward.
+ */
+export function createProposedHeadlessWorkerSettlementV1(input: {
+  readonly binding: HeadlessExecutionBindingV1;
+  readonly run: RunRecord;
+  readonly events: readonly EventRecord[];
+  readonly patchSetSha256: string;
+}): ProposedHeadlessWorkerSettlementV1 {
+  invariant(
+    input.run.id === input.binding.runId,
+    "HEADLESS_WORKER_IDENTITY_CHANGED",
+    "Headless worker run identity changed before settlement",
+  );
+  invariant(
+    input.run.state === "running" && input.run.patchSet !== null,
+    "INVALID_HEADLESS_PROPOSAL",
+    "Headless proposal requires a running run with a persisted patch set",
+  );
+  invariant(
+    /^[a-f0-9]{64}$/.test(input.patchSetSha256),
+    "INVALID_HEADLESS_PROPOSAL",
+    "Headless proposal patch-set digest is malformed",
+  );
+  assertQuiescent(input.events);
+  return {
+    schema: HEADLESS_WORKER_PROPOSAL_SCHEMA,
+    runId: input.run.id,
+    bindingDigestSha256: input.binding.bindingDigestSha256,
+    outcome: "proposed",
+    exitCode: 10,
+    finalState: input.run.state,
+    verificationOutcome: input.run.verification?.outcome ?? null,
+    usage: { ...input.run.usage },
+    error: null,
+    proposal: { patchSetSha256: input.patchSetSha256 },
+  };
+}
+
+/**
+ * Terminal settlement of the digest-bound application epoch (ADR 0060),
+ * mirroring the continuation constructor's outcome mapping and linkage
+ * validation against the durable apply intent.
+ */
+export function createAppliedHeadlessWorkerSettlementV1(input: {
+  readonly binding: HeadlessExecutionBindingV1;
+  readonly run: RunRecord;
+  readonly events: readonly EventRecord[];
+  readonly applyEventSequence: number;
+  readonly proposalSettlementSequence: number;
+  readonly patchSetSha256: string;
+  readonly error?: { readonly code: string; readonly message: string } | null;
+}): AppliedHeadlessWorkerSettlementV1 {
+  invariant(
+    input.run.id === input.binding.runId,
+    "HEADLESS_WORKER_IDENTITY_CHANGED",
+    "Headless worker run identity changed before settlement",
+  );
+  invariant(
+    QUIESCENT_STATES.has(input.run.state),
+    "HEADLESS_WORKER_NOT_QUIESCENT",
+    `Headless worker stopped in non-quiescent state ${input.run.state}`,
+  );
+  invariant(
+    Number.isSafeInteger(input.applyEventSequence) &&
+      input.applyEventSequence > 0 &&
+      Number.isSafeInteger(input.proposalSettlementSequence) &&
+      input.proposalSettlementSequence > 0 &&
+      input.proposalSettlementSequence < input.applyEventSequence &&
+      /^[a-f0-9]{64}$/.test(input.patchSetSha256),
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker application linkage is malformed",
+  );
+  const apply = input.events.find(
+    (event) =>
+      event.sequence === input.applyEventSequence &&
+      event.type === "headless.worker.apply_requested",
+  );
+  invariant(
+    apply !== undefined,
+    "INVALID_HEADLESS_WORKER_HISTORY",
+    "Headless worker application lacks its apply intent",
+  );
+  const applyPayload = eventPayload(apply, "Headless worker apply");
+  invariant(
+    applyPayload.schema === HEADLESS_WORKER_APPLY_SCHEMA &&
+      applyPayload.bindingDigestSha256 === input.binding.bindingDigestSha256 &&
+      applyPayload.patchSetSha256 === input.patchSetSha256,
+    "HEADLESS_WORKER_IDENTITY_CHANGED",
+    "Headless worker application does not match its apply intent",
+  );
+  assertQuiescent(input.events);
+  const { outcome, exitCode } = outcomeFor(input.run, input.events);
+  const error =
+    input.error ??
+    (outcome === "failed"
+      ? (verificationFailureFor(input.run) ?? childFailureFor(input.events))
+      : null);
+  if (outcome === "failed" && error === null) {
+    throw new IcarusError(
+      "INCOMPLETE_HEADLESS_WORKER_SETTLEMENT",
+      "Failed headless worker settlement requires an explicit error",
+    );
+  }
+  return {
+    schema: HEADLESS_WORKER_APPLICATION_SCHEMA,
+    runId: input.run.id,
+    bindingDigestSha256: input.binding.bindingDigestSha256,
+    outcome,
+    exitCode,
+    finalState: input.run.state,
+    verificationOutcome: input.run.verification?.outcome ?? null,
+    usage: { ...input.run.usage },
+    error,
+    application: {
+      applyEventSequence: input.applyEventSequence,
+      proposalSettlementSequence: input.proposalSettlementSequence,
+      patchSetSha256: input.patchSetSha256,
+    },
+  };
 }
 
 /**

@@ -261,7 +261,13 @@ function profile(
     toolIds,
     budgets: { ...CEILING, iterationCeiling },
     output: { format: "jsonl" },
-    worker: { mode: "one_task", maxConcurrency: 1, childRuns: "deny", scheduledRuns: "deny" },
+    worker: {
+      mode: "one_task",
+      maxConcurrency: 1,
+      childRuns: "deny",
+      scheduledRuns: "deny",
+      mutation: "apply",
+    },
   };
 }
 
@@ -392,6 +398,152 @@ describe("bounded headless worker", () => {
         expect.arrayContaining([
           expect.objectContaining({ type: "session.exhausted" }),
           expect.objectContaining({ type: "headless.worker.settled" }),
+        ]),
+      );
+    } finally {
+      current.close();
+    }
+  });
+
+  test("proposes only in propose mode and applies only with the exact digest", async () => {
+    const current = await fixture([plan(0), patchSet(FIXED)]);
+    try {
+      const planned = await plannedRun(current, 0);
+      const proposeProfile = profile(0);
+      // The ADR 0060 default: no mutation field means propose-only.
+      const { mutation: _mutation, ...workerWithoutMutation } = proposeProfile.worker;
+      const result = await current.service.approveHeadlessPlan(
+        planned.id,
+        planned.planSha256 ?? "",
+        "headless-operator",
+        { ...proposeProfile, worker: workerWithoutMutation },
+        PROVIDER_CATALOG,
+      );
+      expect(result.settlement).toMatchObject({
+        schema: "icarus.headless.worker-proposal.v1",
+        outcome: "proposed",
+        exitCode: 10,
+        finalState: "running",
+        error: null,
+      });
+      expect(result.run.state).toBe("running");
+      const patchSetSha256 = (
+        result.settlement as { readonly proposal?: { readonly patchSetSha256?: string } }
+      ).proposal?.patchSetSha256;
+      expect(patchSetSha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(
+        await current.service
+          .applyHeadlessProposal(planned.id, "0".repeat(64), "headless-operator")
+          .then(
+            () => {
+              throw new Error("apply with a wrong digest must refuse");
+            },
+            (error: unknown) => error,
+          ),
+      ).toMatchObject({ code: "HEADLESS_APPLY_DENIED" });
+      expect(
+        current.store.listApprovals(planned.id).filter((approval) => approval.kind === "apply"),
+      ).toHaveLength(0);
+
+      const applied = await current.service.applyHeadlessProposal(
+        planned.id,
+        patchSetSha256 as string,
+        "headless-operator",
+      );
+      expect(applied.settlement).toMatchObject({
+        schema: "icarus.headless.worker-application.v1",
+        outcome: "review_ready",
+        exitCode: 0,
+        application: { patchSetSha256 },
+      });
+      expect(applied.run.state).toBe("awaiting_review");
+      expect(applied.run.verification?.outcome).toBe("passed");
+      expect(current.store.listApprovals(planned.id).map((approval) => approval.kind)).toEqual([
+        "plan",
+        "apply",
+      ]);
+      const eventCount = current.store.listEvents(planned.id).length;
+      const repeated = await current.service.applyHeadlessProposal(
+        planned.id,
+        patchSetSha256 as string,
+        "headless-operator",
+      );
+      expect(repeated.settlement).toEqual(applied.settlement);
+      expect(current.store.listEvents(planned.id)).toHaveLength(eventCount);
+    } finally {
+      current.close();
+    }
+  });
+
+  test("clamps session turns through the envelope flag to exhaustion", async () => {
+    const current = await fixture([plan(1), patchSet(BROKEN)]);
+    try {
+      const planned = await plannedRun(current, 1);
+      const result = await current.service.approveHeadlessPlan(
+        planned.id,
+        planned.planSha256 ?? "",
+        "headless-operator",
+        profile(1, ["report_done"]),
+        PROVIDER_CATALOG,
+        undefined,
+        { maxTurns: 0 },
+      );
+      expect(result.settlement).toMatchObject({ outcome: "exhausted", exitCode: 2 });
+      expect(result.run.state).toBe("awaiting_review");
+      expect(
+        current.store.listEvents(planned.id).filter((event) => event.type === "provider.revise"),
+      ).toHaveLength(0);
+      expect(
+        current.store.listEvents(planned.id).some((event) => event.type === "session.exhausted"),
+      ).toBe(true);
+    } finally {
+      current.close();
+    }
+  });
+
+  test("doom-loop guard lands the third identical tool call as exhaustion", async () => {
+    const checkCall = { name: "run_checks", arguments: { checkIds: ["verify"] } };
+    const checkPlan = {
+      summary: "Replace the greeting.",
+      steps: ["Apply one exact replacement.", "Run verification."],
+      risks: ["The preimage may differ."],
+      target: TARGET,
+      targets: [TARGET],
+      iterationCeiling: 1,
+      checkIds: ["verify"],
+      grants: [{ kind: "exec.check", scope: ["verify"], maxCalls: 5 }],
+    };
+    const current = await fixture([
+      checkPlan,
+      patchSet(BROKEN),
+      { toolCalls: [checkCall, checkCall, checkCall] },
+    ]);
+    try {
+      const planned = await plannedRun(current, 1);
+      const result = await current.service.approveHeadlessPlan(
+        planned.id,
+        planned.planSha256 ?? "",
+        "headless-operator",
+        profile(1, ["run_checks"]),
+        PROVIDER_CATALOG,
+      );
+      expect(result.settlement).toMatchObject({ outcome: "exhausted", exitCode: 2 });
+      expect(result.run.state).toBe("awaiting_review");
+      expect(
+        current.store
+          .listEvents(planned.id)
+          .filter(
+            (event) =>
+              event.type === "operation.started" &&
+              (event.payload as { readonly kind?: unknown }).kind === "session.tool.exec.check",
+          ),
+      ).toHaveLength(2);
+      expect(current.store.listEvents(planned.id)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "session.exhausted",
+            payload: expect.objectContaining({ reason: "doom_loop", tool: "run_checks" }),
+          }),
         ]),
       );
     } finally {

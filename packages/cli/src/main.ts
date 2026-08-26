@@ -54,6 +54,7 @@ import {
   type Gate1MigrationToken,
   type GitHubLandingProfileV1,
   type HeadlessHostProviderProfileV1,
+  type HeadlessRunEnvelopeV1,
   IcarusError,
   type IcarusRuntime,
   inspectChangeHandoffDocuments,
@@ -195,6 +196,20 @@ function numberOption(options: ParsedOptions, name: string): number | undefined 
   return number;
 }
 
+/** ADR 0060 runaway envelopes; each flag only narrows approved ceilings. */
+function headlessEnvelope(options: ParsedOptions): HeadlessRunEnvelopeV1 | undefined {
+  const maxTurns = numberOption(options, "--max-turns");
+  if (maxTurns !== undefined && !Number.isSafeInteger(maxTurns)) {
+    fail("INVALID_ARGUMENT", "--max-turns must be a nonnegative integer");
+  }
+  const maxBudgetUsd = numberOption(options, "--max-budget-usd");
+  if (maxTurns === undefined && maxBudgetUsd === undefined) return undefined;
+  return {
+    ...(maxTurns === undefined ? {} : { maxTurns }),
+    ...(maxBudgetUsd === undefined ? {} : { maxBudgetUsd }),
+  };
+}
+
 function noPositionals(options: ParsedOptions): void {
   if (options.positionals.length !== 0) {
     fail("INVALID_ARGUMENT", `Unexpected positional arguments: ${options.positionals.join(" ")}`);
@@ -303,7 +318,10 @@ interface LandlockReexecDecision {
 
 function landlockReexecDecision(args: readonly string[]): LandlockReexecDecision | null {
   const [group, action, ...rest] = args;
-  if (group !== "run" || (action !== "approve-headless" && action !== "resume-headless")) {
+  if (
+    group !== "run" ||
+    (action !== "approve-headless" && action !== "resume-headless" && action !== "apply-headless")
+  ) {
     return null;
   }
   const options = parseOptions(
@@ -316,8 +334,19 @@ function landlockReexecDecision(args: readonly string[]): LandlockReexecDecision
           "--provider-catalog-json",
           "--output-format",
           "--sandbox-profile",
+          "--max-turns",
+          "--max-budget-usd",
         ]
-      : ["--output-format", "--sandbox-profile"],
+      : action === "apply-headless"
+        ? [
+            "--patchset-sha",
+            "--actor",
+            "--max-turns",
+            "--max-budget-usd",
+            "--output-format",
+            "--sandbox-profile",
+          ]
+        : ["--output-format", "--sandbox-profile"],
   );
   const flag = optional(options, "--sandbox-profile");
   const environment = process.env[LANDLOCK_PROFILE_ENV];
@@ -863,7 +892,8 @@ function usage(): never {
       "icarus run plan --project NAME --task TEXT --target PATH [--target PATH ...] --provider ollama|openai|anthropic|vulcan --model MODEL [provider options]",
       "icarus run approve-egress RUN --context-sha SHA --actor ACTOR",
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
-      "icarus run approve-headless RUN --plan-sha SHA --actor ACTOR --profile-json JSON --provider-catalog-json JSON [--output-format history|stream-json] [--sandbox-profile workspace|read-only|strict|off]",
+      "icarus run approve-headless RUN --plan-sha SHA --actor ACTOR --profile-json JSON --provider-catalog-json JSON [--max-turns N] [--max-budget-usd USD] [--output-format history|stream-json] [--sandbox-profile workspace|read-only|strict|off]",
+      "icarus run apply-headless RUN --patchset-sha SHA --actor ACTOR [--max-turns N] [--max-budget-usd USD] [--output-format history|stream-json] [--sandbox-profile workspace|read-only|strict|off]",
       "icarus run reconcile-headless RUN [--output-format history|stream-json]",
       "icarus run reconstruct-headless RUN",
       "icarus run resume-headless RUN [--output-format history|stream-json] [--sandbox-profile workspace|read-only|strict|off]",
@@ -1305,6 +1335,8 @@ async function dispatch(
       "--provider-catalog-json",
       "--output-format",
       "--sandbox-profile",
+      "--max-turns",
+      "--max-budget-usd",
     ]);
     const providerCatalog = boundedJsonOption(options, "--provider-catalog-json", 256 * 1024);
     if (!Array.isArray(providerCatalog)) {
@@ -1319,6 +1351,35 @@ async function dispatch(
       required(options, "--actor"),
       boundedJsonOption(options, "--profile-json", 256 * 1024),
       providerCatalog as readonly HeadlessHostProviderProfileV1[],
+      signal,
+      headlessEnvelope(options),
+    );
+    emitRunTrajectory(runtime, result.run.id, outputFormat);
+    process.exitCode = result.settlement.exitCode;
+    return;
+  }
+  if (action === "apply-headless") {
+    const options = parseOptions(rest, [
+      "--patchset-sha",
+      "--actor",
+      "--max-turns",
+      "--max-budget-usd",
+      "--output-format",
+      "--sandbox-profile",
+    ]);
+    const patchSetSha = required(options, "--patchset-sha");
+    if (!/^[a-f0-9]{64}$/.test(patchSetSha)) {
+      fail("INVALID_ARGUMENT", "--patchset-sha must be a 64-character hex digest");
+    }
+    const outputFormat = headlessOutputFormat(options);
+    // ADR 0060 digest-bound application: the service re-proves the run,
+    // requires the flag to equal the durable patch-set digest, records the
+    // apply approval, and settles exactly once.
+    const result = await runtime.service.applyHeadlessProposal(
+      oneRunId(options),
+      patchSetSha,
+      required(options, "--actor"),
+      headlessEnvelope(options),
       signal,
     );
     emitRunTrajectory(runtime, result.run.id, outputFormat);

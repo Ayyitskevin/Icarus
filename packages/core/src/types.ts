@@ -498,7 +498,8 @@ export interface RunVerificationAttemptsSnapshot {
 
 export interface ApprovalRecord {
   readonly runId: string;
-  readonly kind: "egress" | "plan" | "review" | "rollback" | "restore";
+  /** `apply` is the ADR 0060 digest-bound patch-set application grant. */
+  readonly kind: "egress" | "plan" | "review" | "rollback" | "restore" | "apply";
   readonly digest: string;
   readonly actor: string;
   readonly decision: "approve" | "reject";
