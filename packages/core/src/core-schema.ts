@@ -54,10 +54,13 @@ CREATE TABLE IF NOT EXISTS runs (
   version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
-);
+, headless_parent_run_id TEXT);
+-- ADR 0059: the single-active-run invariant binds root runs only; a run
+-- linked to a headless parent is sequenced by the parent's worker lease.
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_project
 ON runs(project_id)
-WHERE state NOT IN ('completed', 'failed', 'cancelled', 'rolled_back');
+WHERE state NOT IN ('completed', 'failed', 'cancelled', 'rolled_back')
+  AND headless_parent_run_id IS NULL;
 CREATE TABLE IF NOT EXISTS run_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id TEXT NOT NULL REFERENCES runs(id),
@@ -137,6 +140,20 @@ CREATE TABLE IF NOT EXISTS readable_manifests (
   entries_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+`;
+
+/**
+ * ADR 0059's headless child lineage column and lineage-aware active-run
+ * index. Existing databases apply this exactly once behind an explicit
+ * operator migration token; fresh databases get the shape from the core DDL.
+ */
+export const ICARUS_HEADLESS_CHILD_MIGRATION_SCHEMA = `
+ALTER TABLE runs ADD COLUMN headless_parent_run_id TEXT;
+DROP INDEX IF EXISTS one_active_run_per_project;
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_project
+ON runs(project_id)
+WHERE state NOT IN ('completed', 'failed', 'cancelled', 'rolled_back')
+  AND headless_parent_run_id IS NULL;
 `;
 
 /** ADR 0041's append-only operator review annotations. */

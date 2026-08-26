@@ -59,7 +59,8 @@ live-provider measurement, and deployment remain open.
       local candidate).
 - [ ] H3b: reconstruct the exact binding and effect receipt before
       exactly-once resume/fork after process death.
-- [ ] H4: isolated child runs with depth, write-set, tool, and budget limits.
+- [x] H4: isolated child runs with depth, write-set, tool, and budget limits
+      (ADR 0059 local candidate).
 - [ ] H5: separately governed external/research adapters. SearXNG and DeepAPI
       are not part of H2b.
 
@@ -162,6 +163,42 @@ single continuation allowance is then spent.
       closure with second-resume refusal.
 - [ ] Obtain one non-author round-table review of the continuation candidate.
 - [ ] H3b remainder: fork, and session-turn exactly-once continuation.
+
+## Headless H4 isolated child runs candidate
+
+Status: locally implemented under proposed ADR 0059. The full local gate ran
+green; one non-author review, risky-change research, and live-provider
+measurement remain open.
+
+Decision: H4 v1 admits operator-declared children only. A bounded `children`
+list on the source profile (riding the profile digest) admits strict specs
+whose tools, budgets, and targets can only narrow the parent's resolved
+authority, under a loopback provider. Each child is an ordinary run with a
+recorded lineage column and `headless.child.linked` event, planned and bound
+through the unchanged H1/H2a machinery under a derived, narrower profile, and
+executed sequentially in its own private worktree under the parent's lease
+before the parent settles. The parent settles only after every declared child
+has a durable `headless.child.settled` record and fails unless every spawned
+child reached review-ready evidence. Existing databases take a one-shot
+human-gated lineage migration.
+
+- [x] Add the closed `worker.childRuns` allow object and strict `children`
+      profile grammar; refuse unknown or widening values at resolution.
+- [x] Record lineage (column + digest-bound link event) and exempt only the
+      recorded parent-child pair from the single-active-run invariant.
+- [x] Execute children sequentially under the parent lease with cumulative
+      envelope accounting, spec-envelope plan admission, derived binding, and
+      isolated private worktrees.
+- [x] Gate the parent's settlement on durable child settlements; a failing or
+      envelope-exceeding child settles the parent failed.
+- [x] Keep H3a/H3b crash semantics: parent and child reconcile through the
+      existing paths; child-bearing continuation fails closed.
+- [x] Prove with integration fixtures: recorded lineage and isolated
+      workspaces, widening refusals before any effect, and parent+child crash
+      reconciliation.
+- [ ] Obtain one non-author round-table review of the child-run candidate.
+- [ ] H4 remainder: fork, concurrency above one, remote-provider children,
+      depth above one, model-initiated children, and child write-back.
 
 ## Accepted Gate 1 Slice 1 offline benchmark checkpoint
 

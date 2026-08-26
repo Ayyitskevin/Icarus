@@ -543,6 +543,25 @@ closed before any resume intent is recorded, and a crashed continuation is
 closed by `run reconcile-headless`, after which a second resume is refused.
 Ordinary `run resume` still refuses every headless lifecycle.
 
+A source profile may also declare bounded child runs (ADR 0059) by setting
+`worker.childRuns` to `{ "maxDepth": 1, "maxChildren": N }` and adding a
+`children` list. Each child specification names a canonical `childId`, a
+task, targets strictly inside the parent's approved plan targets, tools
+strictly inside the parent's tool set, and budgets strictly inside the
+parent's profile budgets; children require a loopback provider. When the
+parent's own task reaches review-ready evidence, the worker runs the declared
+children sequentially before settling: each child is an ordinary run with
+recorded lineage (`run list` shows it), its own plan admitted inside the
+spec envelope, its own private worktree, and its own settlement. The child
+must also fit the parent's remaining cumulative budget envelope at spawn.
+The parent settles only after every declared child settles, and fails with
+`HEADLESS_CHILD_FAILED` unless every child reached review-ready evidence.
+Children never write into the parent's workspace. Existing state roots take
+the one-shot lineage migration via
+`ICARUS_APPROVE_SCHEMA_MIGRATION=headless-children-v1` after a backup.
+Concurrency, remote-provider children, grandchildren, model-initiated
+children, and child write-back remain unavailable.
+
 Use `run list [--project <name>]` to rediscover persisted run IDs and `run
 history <run-id>` to inspect the append-only transition and approval record.
 

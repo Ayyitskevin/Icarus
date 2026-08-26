@@ -343,6 +343,26 @@ is closed by the unchanged H3a reconciliation, after which the spent
 continuation allowance refuses a second resume. Ordinary `run resume` still
 refuses every headless lifecycle.
 
+H4 (ADR 0059) admits operator-declared child runs. A source profile may carry
+a bounded `children` list when `worker.childRuns` allows it; every spec can
+only narrow the parent's resolved tools, budgets, and approved plan targets,
+and children require a loopback provider. When the parent's own task reaches
+review-ready evidence, the worker executes the declared children sequentially
+under the same lease before settling: each child is an ordinary run with a
+`headless_parent_run_id` lineage column and one digest-bound
+`headless.child.linked` event, its provider-generated plan is admitted only
+inside the spec envelope, and it is bound through the unchanged H2a machinery
+under a derived, narrower profile with `childRuns: "deny"` (depth one is the
+whole hierarchy). Children execute in isolated private worktrees; their
+metered budgets must fit the parent's remaining cumulative envelope at each
+spawn; and each child's durable outcome is recorded on the parent as a
+`headless.child.settled` event. The parent appends its settlement only after
+every declared child settles and fails unless every spawned child reached
+review-ready evidence. The single-active-run invariant now binds root runs
+only, with existing databases taking a one-shot human-gated lineage
+migration; parent and child crash tails reconcile through the unchanged H3a
+paths, and H3b continuation of a child-bearing worker fails closed.
+
 ## Guarded CLI golden-path sequence
 
 1. State-root initialization first rejects a location inside any Git checkout,

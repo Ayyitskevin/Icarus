@@ -134,6 +134,8 @@ export {
   reconstructHeadlessExecutionBindingV1,
 } from "./headless-binding.js";
 export type {
+  HeadlessChildRunsAllowV1,
+  HeadlessChildSpecV1,
   HeadlessHostProviderProfileV1,
   HeadlessProfileAuthorityV1,
   HeadlessProfileBudgetsV1,
@@ -142,8 +144,22 @@ export type {
   HeadlessProfileWorkerPolicyV1,
   ResolvedHeadlessProfileV1,
 } from "./headless-profile.js";
+export type {
+  HeadlessChildLinkV1,
+  HeadlessChildSettlementV1,
+} from "./headless-children.js";
+export {
+  assertHeadlessChildEnvelopeV1,
+  assertHeadlessChildPlanV1,
+  deriveHeadlessChildProfileV1,
+  HEADLESS_CHILD_LINK_SCHEMA,
+  HEADLESS_CHILD_MAX_DEPTH,
+  HEADLESS_CHILD_SETTLEMENT_SCHEMA,
+  headlessChildSpecDigestV1,
+} from "./headless-children.js";
 export {
   decodeHeadlessProfileV1,
+  HEADLESS_CHILD_LIMIT,
   HEADLESS_PROFILE_RESOLUTION_SCHEMA,
   HEADLESS_PROFILE_SCHEMA_VERSION,
   headlessProfileDigest,
@@ -171,6 +187,7 @@ export {
   HEADLESS_WORKER_INTERRUPTION_SCHEMA,
   HEADLESS_WORKER_RESUME_SCHEMA,
   HEADLESS_WORKER_SCHEMA,
+  headlessWorkerOutcomeForEvidenceV1,
   headlessWorkerResumeRequestedPayload,
   headlessWorkerSettledPayload,
   headlessWorkerStartedPayload,

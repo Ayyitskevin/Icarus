@@ -372,10 +372,59 @@ function outcomeForEvidence(
   if (disposition?.type === "session.exhausted") {
     return { outcome: "exhausted", exitCode: 2 };
   }
+  // H4: a declared child that failed or never reached review-ready evidence
+  // settles the parent failed, even when the parent's own task passes.
+  for (const event of events) {
+    if (event.type !== "headless.child.settled") continue;
+    const payload = event.payload as { readonly outcome?: unknown };
+    if (payload.outcome !== "review_ready") {
+      return { outcome: "failed", exitCode: 1 };
+    }
+  }
   if ((state === "awaiting_review" || state === "completed") && verificationOutcome === "passed") {
     return { outcome: "review_ready", exitCode: 0 };
   }
   return { outcome: "failed", exitCode: 1 };
+}
+
+/** The H4 spawn gate and CLI-facing evidence mapping, shared with settlement. */
+export function headlessWorkerOutcomeForEvidenceV1(
+  state: RunRecord["state"],
+  verificationOutcome: HeadlessWorkerSettlementV1["verificationOutcome"],
+  events: readonly EventRecord[],
+): { readonly outcome: HeadlessWorkerOutcomeV1; readonly exitCode: HeadlessWorkerExitCodeV1 } {
+  return outcomeForEvidence(state, verificationOutcome, events);
+}
+
+/** The first declared child that did not reach review-ready evidence. */
+function childFailureFor(
+  events: readonly EventRecord[],
+): { readonly code: string; readonly message: string } | null {
+  for (const event of events) {
+    if (event.type !== "headless.child.settled") continue;
+    const payload = event.payload as {
+      readonly childId?: unknown;
+      readonly outcome?: unknown;
+      readonly error?: unknown;
+    };
+    if (payload.outcome === "review_ready") continue;
+    const error = payload.error;
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      !Array.isArray(error) &&
+      typeof (error as { readonly code?: unknown }).code === "string" &&
+      /^[A-Z0-9_]{2,128}$/.test((error as { readonly code: string }).code) &&
+      typeof (error as { readonly message?: unknown }).message === "string"
+    ) {
+      return error as { readonly code: string; readonly message: string };
+    }
+    return {
+      code: "HEADLESS_CHILD_FAILED",
+      message: `Headless child ${typeof payload.childId === "string" ? payload.childId : "unknown"} did not reach review-ready evidence`,
+    };
+  }
+  return null;
 }
 
 function decodeSettlement(
@@ -849,7 +898,11 @@ export function createHeadlessWorkerSettlementV1(input: {
   );
   assertQuiescent(input.events);
   const { outcome, exitCode } = outcomeFor(input.run, input.events);
-  const error = input.error ?? (outcome === "failed" ? verificationFailureFor(input.run) : null);
+  const error =
+    input.error ??
+    (outcome === "failed"
+      ? (verificationFailureFor(input.run) ?? childFailureFor(input.events))
+      : null);
   if (outcome === "failed" && error === null) {
     throw new IcarusError(
       "INCOMPLETE_HEADLESS_WORKER_SETTLEMENT",
@@ -880,6 +933,9 @@ export function headlessWorkerStartedPayload(binding: HeadlessExecutionBindingV1
     toolIds: [...binding.resolution.profile.toolIds],
     budgets: binding.resolution.profile.budgets as unknown as JsonValue,
     worker: binding.resolution.profile.worker as unknown as JsonValue,
+    ...(binding.resolution.profile.children === undefined
+      ? {}
+      : { children: binding.resolution.profile.children as unknown as JsonValue }),
   };
 }
 
@@ -950,7 +1006,11 @@ export function createContinuedHeadlessWorkerSettlementV1(input: {
   );
   assertQuiescent(input.events);
   const { outcome, exitCode } = outcomeFor(input.run, input.events);
-  const error = input.error ?? (outcome === "failed" ? verificationFailureFor(input.run) : null);
+  const error =
+    input.error ??
+    (outcome === "failed"
+      ? (verificationFailureFor(input.run) ?? childFailureFor(input.events))
+      : null);
   if (outcome === "failed" && error === null) {
     throw new IcarusError(
       "INCOMPLETE_HEADLESS_WORKER_SETTLEMENT",

@@ -235,6 +235,7 @@ function schemaMigrationApproval(): {
   readonly patchSet: boolean;
   readonly readableManifest: boolean;
   readonly annotation: boolean;
+  readonly headlessChildren: boolean;
   readonly gate1: Gate1MigrationToken | null;
 } {
   const none = {
@@ -242,6 +243,7 @@ function schemaMigrationApproval(): {
     patchSet: false,
     readableManifest: false,
     annotation: false,
+    headlessChildren: false,
     gate1: null,
   };
   const approval = process.env.ICARUS_APPROVE_SCHEMA_MIGRATION;
@@ -252,6 +254,7 @@ function schemaMigrationApproval(): {
   if (approval === "patch-set-v2") return { ...none, patchSet: true };
   if (approval === "readable-manifest-v3") return { ...none, readableManifest: true };
   if (approval === "run-annotations-v1") return { ...none, annotation: true };
+  if (approval === "headless-children-v1") return { ...none, headlessChildren: true };
   if (approval === BROWSER_ACTION_LEDGER_MIGRATION) {
     return { ...none, gate1: BROWSER_ACTION_LEDGER_MIGRATION };
   }
@@ -1220,6 +1223,7 @@ export async function runCliMain(options: CliMainOptions = {}): Promise<void> {
       allowPatchSetMigration: migrationApproval.patchSet,
       allowReadableManifestMigration: migrationApproval.readableManifest,
       allowAnnotationMigration: migrationApproval.annotation,
+      allowHeadlessChildMigration: migrationApproval.headlessChildren,
       landingCredentialEnvironmentNames: landingCredentialEnvironmentAllowlist(),
     });
     if (await dispatchLiveEvidenceExecution(runtime, args, root, controller.signal)) return;

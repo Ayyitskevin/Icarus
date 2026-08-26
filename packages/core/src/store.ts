@@ -32,6 +32,7 @@ import {
   ICARUS_ANNOTATION_SCHEMA,
   ICARUS_APPROVAL_INDEX_SCHEMA,
   ICARUS_CORE_SCHEMA,
+  ICARUS_HEADLESS_CHILD_MIGRATION_SCHEMA,
   ICARUS_PATCH_SET_SCHEMA,
   ICARUS_READABLE_MANIFEST_SCHEMA,
 } from "./core-schema.js";
@@ -39,6 +40,12 @@ import { digestJson, sha256 } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
 import { assertGate1SchemasForStartup, createGate1Schemas } from "./gate1-schema.js";
 import type { HeadlessExecutionBindingV1 } from "./headless-binding.js";
+import {
+  headlessChildLinkPayload,
+  headlessChildSettlementPayload,
+  type HeadlessChildLinkV1,
+  type HeadlessChildSettlementV1,
+} from "./headless-children.js";
 import {
   HEADLESS_WORKER_CONTINUATION_SCHEMA,
   HEADLESS_WORKER_INTERRUPTION_SCHEMA,
@@ -683,6 +690,47 @@ function inspectApprovalIndex(databasePath: string): ApprovalIndexStatus {
 type PatchSetSchemaStatus = "not_applicable" | "missing" | "valid";
 
 type AnnotationSchemaStatus = "not_applicable" | "missing" | "valid";
+
+type HeadlessChildSchemaStatus = "not_applicable" | "missing" | "valid";
+
+/**
+ * Read-only shape inspection performed before the writable handle is opened, so
+ * a refusal cannot have mutated the database. A database that predates the
+ * `runs` table is not a migration candidate; a database that has `runs` but
+ * lacks the ADR 0059 lineage column requires explicit operator approval.
+ */
+function inspectHeadlessChildSchema(databasePath: string): HeadlessChildSchemaStatus {
+  if (!existsSync(databasePath)) return "not_applicable";
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const runsTableExists =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runs'")
+        .get() !== undefined;
+    if (!runsTableExists) return "not_applicable";
+
+    const columns = (database.prepare("PRAGMA table_info('runs')").all() as unknown[]).map(
+      (entry) => text(row(entry, "run column").name, "run column.name"),
+    );
+    if (!columns.includes("headless_parent_run_id")) return "missing";
+
+    const index = database
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'one_active_run_per_project'",
+      )
+      .get();
+    const indexSql = index === undefined ? null : row(index, "active run index").sql;
+    invariant(
+      typeof indexSql === "string" && indexSql.includes("headless_parent_run_id IS NULL"),
+      "DATABASE_ERROR",
+      "Active-run index predates headless child lineage",
+    );
+    return "valid";
+  } finally {
+    database.close();
+  }
+}
 
 /**
  * Read-only shape inspection performed before the writable handle is opened, so
@@ -1389,6 +1437,11 @@ export interface NewRunInput {
    */
   readonly targets: readonly string[];
   readonly provider: ProviderConfig;
+  /**
+   * H4 (ADR 0059): when set, the run is admitted as a child of this active
+   * run; its lineage event must be recorded before any further transition.
+   */
+  readonly headlessParentRunId?: string;
 }
 
 export interface CheckpointRecord {
@@ -1491,6 +1544,7 @@ export class IcarusStore {
       allowPatchSetMigration?: boolean;
       allowReadableManifestMigration?: boolean;
       allowAnnotationMigration?: boolean;
+      allowHeadlessChildMigration?: boolean;
     } = {},
   ) {
     const parent = path.dirname(databasePath);
@@ -1506,6 +1560,25 @@ export class IcarusStore {
       "INVALID_DATABASE_CONFIGURATION",
       "SQLite busy timeout is invalid",
     );
+    const headlessChildStatus = inspectHeadlessChildSchema(databasePath);
+    if (headlessChildStatus === "missing" && options.allowHeadlessChildMigration !== true) {
+      throw new IcarusError(
+        "DATABASE_MIGRATION_REQUIRED",
+        "Headless child lineage migration requires a state backup and explicit operator approval",
+      );
+    }
+    // ADR 0059's migration must land before the exact-schema startup check:
+    // it changes a base object, so a pre-lineage database can never satisfy
+    // the new shape until the column and index exist.
+    if (headlessChildStatus === "missing") {
+      const migration = new Database(databasePath);
+      try {
+        migration.pragma(`busy_timeout = ${busyTimeoutMs}`);
+        migration.exec(ICARUS_HEADLESS_CHILD_MIGRATION_SCHEMA);
+      } finally {
+        migration.close();
+      }
+    }
     const gate1Schemas = assertGate1SchemasForStartup(databasePath);
     const approvalIndexStatus = inspectApprovalIndex(databasePath);
     if (approvalIndexStatus === "missing" && options.allowApprovalIndexMigration !== true) {
@@ -2489,13 +2562,20 @@ export class IcarusStore {
       totalBytes: 0,
     };
     const transaction = this.#database.transaction(() => {
-      this.#assertNoOtherActiveRun(project.id, id);
+      if (input.headlessParentRunId !== undefined) {
+        invariant(
+          this.getRun(input.headlessParentRunId).projectId === project.id,
+          "INVALID_HEADLESS_CHILD",
+          "Headless child parent belongs to a different project",
+        );
+      }
+      this.#assertNoOtherActiveRun(project.id, id, input.headlessParentRunId);
       this.#database
         .prepare(
           `INSERT INTO runs
             (id, project_id, task, target, provider_json, state, base_commit, context_json,
-             context_artifact_path, context_sha256, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'preparing', ?, ?, ?, ?, ?, ?)`,
+             context_artifact_path, context_sha256, headless_parent_run_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'preparing', ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -2507,6 +2587,7 @@ export class IcarusStore {
           json(emptyContext),
           "",
           "",
+          input.headlessParentRunId ?? null,
           now,
           now,
         );
@@ -4704,6 +4785,66 @@ export class IcarusStore {
         "Headless worker continuation does not match its resume intent",
       );
       this.#appendEvent(runId, "headless.worker.settled", headlessWorkerSettledPayload(settlement));
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
+  /**
+   * Records a child run's lineage (ADR 0059) on the child run, exactly once,
+   * before the child's plan is admitted. The link is evidence; the parent
+   * binding and spec digests bind it to the operator-approved authority.
+   */
+  recordHeadlessChildLinked(runId: string, link: HeadlessChildLinkV1): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const run = this.getRun(runId);
+      invariant(
+        run.id === runId && link.runId === runId && link.parentRunId !== runId,
+        "INVALID_HEADLESS_CHILD",
+        "Headless child link does not match this run",
+      );
+      invariant(
+        this.getRun(link.parentRunId).id === link.parentRunId,
+        "INVALID_HEADLESS_CHILD",
+        "Headless child link parent is missing",
+      );
+      invariant(
+        this.#database
+          .prepare(
+            "SELECT 1 FROM run_events WHERE run_id = ? AND type = 'headless.child.linked' LIMIT 1",
+          )
+          .get(runId) === undefined,
+        "HEADLESS_CHILD_ALREADY_LINKED",
+        "Headless child lineage is already recorded",
+      );
+      this.#appendEvent(runId, "headless.child.linked", headlessChildLinkPayload(link));
+    });
+    transaction();
+    return this.getRun(runId);
+  }
+
+  /**
+   * Records one declared child's durable outcome on the parent run (ADR
+   * 0059). The parent worker appends exactly one record per declared child
+   * until the first non-review-ready outcome, which settles the parent
+   * failed through the worker outcome mapping.
+   */
+  recordHeadlessChildSettled(runId: string, record: HeadlessChildSettlementV1): RunRecord {
+    const transaction = this.#database.transaction(() => {
+      const run = this.getRun(runId);
+      invariant(
+        run.id === runId && record.runId === runId,
+        "INVALID_HEADLESS_CHILD",
+        "Headless child settlement does not match this run",
+      );
+      if (record.childRunId !== null) {
+        invariant(
+          this.getRun(record.childRunId).id === record.childRunId,
+          "INVALID_HEADLESS_CHILD",
+          "Headless child settlement child run is missing",
+        );
+      }
+      this.#appendEvent(runId, "headless.child.settled", headlessChildSettlementPayload(record));
     });
     transaction();
     return this.getRun(runId);
@@ -7539,7 +7680,7 @@ export class IcarusStore {
     });
   }
 
-  #assertNoOtherActiveRun(projectId: string, runId: string): void {
+  #assertNoOtherActiveRun(projectId: string, runId: string, headlessParentRunId?: string): void {
     const conflict = this.#database
       .prepare(
         `SELECT id FROM runs
@@ -7548,11 +7689,25 @@ export class IcarusStore {
          LIMIT 1`,
       )
       .get(projectId, runId) as { readonly id: string } | undefined;
+    if (conflict === undefined) return;
+    // H4 (ADR 0059): a run linked as a headless child may be active alongside
+    // its recorded parent — and only that parent — because children execute
+    // sequentially under the parent's lease in isolated workspaces.
+    const parentRunId = headlessParentRunId ?? this.#headlessChildParentRunId(runId);
     invariant(
-      conflict === undefined,
+      conflict.id === parentRunId,
       "PROJECT_RUN_CONFLICT",
       "Another run is active for this project",
-      conflict === undefined ? {} : { activeRunId: conflict.id },
+      { activeRunId: conflict.id },
     );
+  }
+
+  #headlessChildParentRunId(runId: string): string | null {
+    const record = this.#database
+      .prepare("SELECT headless_parent_run_id FROM runs WHERE id = ?")
+      .get(runId);
+    if (record === undefined) return null;
+    const value = row(record, "run").headless_parent_run_id;
+    return typeof value === "string" && value.length > 0 ? value : null;
   }
 }

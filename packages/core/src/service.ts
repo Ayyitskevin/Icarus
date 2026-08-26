@@ -20,6 +20,14 @@ import { digestJson, sha256 } from "./digest.js";
 import { errorMessage, IcarusError, invariant } from "./errors.js";
 import type { GitController, RepositoryInspection, WorktreeFileWrite } from "./git.js";
 import { bindHeadlessExecutionV1, type HeadlessExecutionBindingV1 } from "./headless-binding.js";
+import {
+  assertHeadlessChildEnvelopeV1,
+  assertHeadlessChildPlanV1,
+  deriveHeadlessChildProfileV1,
+  HEADLESS_CHILD_SETTLEMENT_SCHEMA,
+  type HeadlessChildSettlementV1,
+  headlessChildSpecDigestV1,
+} from "./headless-children.js";
 import { assertHeadlessContinuationReplaySafeV1 } from "./headless-continuation.js";
 import {
   type HeadlessReconstructionV1,
@@ -28,6 +36,7 @@ import {
 } from "./headless-reconstruction.js";
 import {
   type HeadlessHostProviderProfileV1,
+  type HeadlessChildSpecV1,
   resolveHeadlessProfileV1,
 } from "./headless-profile.js";
 import {
@@ -41,6 +50,7 @@ import {
   HEADLESS_WORKER_SCHEMA,
   type HeadlessWorkerExecutionV1,
   type HeadlessWorkerReconciliationV1,
+  headlessWorkerOutcomeForEvidenceV1,
   inspectHeadlessWorkerLifecycleV1,
 } from "./headless-worker.js";
 import {
@@ -650,6 +660,8 @@ export type PlanRunInput = (
   | { readonly projectName: string; readonly projectId?: never }
   | { readonly projectId: string; readonly projectName?: never }
 ) & {
+  /** H4 (ADR 0059): set only when the worker drafts a declared child run. */
+  readonly headlessParentRunId?: string;
   readonly task: string;
   /**
    * The operator's candidate selection (ADR 0023). The first entry anchors the
@@ -1219,6 +1231,9 @@ export class IcarusService {
       task,
       targets,
       provider,
+      ...(input.headlessParentRunId === undefined
+        ? {}
+        : { headlessParentRunId: input.headlessParentRunId }),
     });
   }
 
@@ -1387,6 +1402,11 @@ export class IcarusService {
         readableManifest: this.#store.readableManifest(runId),
       });
       assertHeadlessContinuationReplaySafeV1(evidence, run);
+      invariant(
+        (binding.resolution.profile.children ?? []).length === 0,
+        "HEADLESS_CONTINUATION_DENIED",
+        "Headless continuation of child-bearing workers is a later slice",
+      );
       const { iterationCeiling: _iterationCeiling, ...ceiling } =
         binding.resolution.profile.budgets;
       assertHeadlessWorkerBudgetAvailable(run, ceiling);
@@ -1627,6 +1647,22 @@ export class IcarusService {
       } catch {
         // #guarded has already persisted the failed run; settlement below is authoritative.
       }
+      const childSpecs = binding.resolution.profile.children ?? [];
+      if (childSpecs.length > 0) {
+        const candidate = this.#store.getRun(runId);
+        const parentReady =
+          headlessWorkerOutcomeForEvidenceV1(
+            candidate.state,
+            candidate.verification?.outcome ?? null,
+            this.#store.listEvents(runId),
+          ).outcome === "review_ready";
+        if (parentReady) {
+          // H4: declared children execute sequentially under this lease before
+          // the parent settles; any non-review-ready child is recorded on the
+          // parent and settles it failed through the outcome mapping.
+          await this.#runHeadlessChildren(runId, binding, childSpecs, signal);
+        }
+      }
       const run = this.#store.getRun(runId);
       const fallbackError =
         run.lastError === null
@@ -1643,6 +1679,187 @@ export class IcarusService {
     } finally {
       this.#headlessExecutionContexts.delete(runId);
     }
+  }
+
+  /**
+   * H4 (ADR 0059): executes the operator-declared children sequentially under
+   * the parent's lease. Each child is an ordinary run with recorded lineage,
+   * its own private workspace, and its own worker lifecycle; its durable
+   * outcome is appended to the parent, and the first non-review-ready child
+   * stops further spawns and settles the parent failed via the outcome
+   * mapping. Children never write into the parent's workspace.
+   */
+  async #runHeadlessChildren(
+    runId: string,
+    binding: HeadlessExecutionBindingV1,
+    specs: readonly HeadlessChildSpecV1[],
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    const parentProfile = binding.resolution.profile;
+    const settledChildrenUsage: RunRecord["usage"][] = [];
+    for (const spec of specs) {
+      const parentRun = this.#store.getRun(runId);
+      try {
+        assertHeadlessChildEnvelopeV1(
+          spec,
+          parentProfile.budgets,
+          parentRun.usage,
+          settledChildrenUsage,
+        );
+      } catch (error) {
+        this.#store.recordHeadlessChildSettled(runId, {
+          schema: HEADLESS_CHILD_SETTLEMENT_SCHEMA,
+          runId,
+          childId: spec.childId,
+          childRunId: null,
+          outcome: "failed",
+          exitCode: 1,
+          childBindingDigestSha256: null,
+          error: {
+            code: error instanceof IcarusError ? error.code : "HEADLESS_CHILD_DENIED",
+            message: errorMessage(error),
+          },
+        });
+        break;
+      }
+      let record: Omit<HeadlessChildSettlementV1, "schema" | "runId" | "childId">;
+      try {
+        record = await this.#runHostStage(
+          runId,
+          "headless.child",
+          parentProfile.budgets.maxActiveRuntimeMs,
+          signal,
+          (aggregateSignal) => this.#executeHeadlessChild(runId, binding, spec, aggregateSignal),
+        );
+      } catch (error) {
+        if (signal?.aborted) {
+          throw error;
+        }
+        const failure = asIcarusError(error, "HEADLESS_CHILD_FAILED");
+        record = {
+          childRunId: null,
+          outcome: "failed",
+          exitCode: 1,
+          childBindingDigestSha256: null,
+          error: { code: failure.code, message: failure.message },
+        };
+      }
+      this.#store.recordHeadlessChildSettled(runId, {
+        schema: HEADLESS_CHILD_SETTLEMENT_SCHEMA,
+        runId,
+        childId: spec.childId,
+        ...record,
+      });
+      if (record.outcome !== "review_ready") break;
+      if (record.childRunId !== null) {
+        settledChildrenUsage.push(this.#store.getRun(record.childRunId).usage);
+      }
+    }
+  }
+
+  /**
+   * Runs one declared child end to end: draft, bounded plan, plan admission
+   * inside the spec envelope, lineage link, derived binding, isolated
+   * execution, and quiescent settlement — the full H2 worker machinery under
+   * a derived, narrower profile.
+   */
+  async #executeHeadlessChild(
+    parentRunId: string,
+    parentBinding: HeadlessExecutionBindingV1,
+    spec: HeadlessChildSpecV1,
+    signal: AbortSignal | undefined,
+  ): Promise<Omit<HeadlessChildSettlementV1, "schema" | "runId" | "childId">> {
+    const parentRun = this.#store.getRun(parentRunId);
+    const project = this.#store.getProject(parentRun.projectId);
+    invariant(
+      parentRun.plan !== null,
+      "MISSING_PLAN",
+      "Headless child requires the parent's persisted plan",
+    );
+    const draft = this.createRunDraft({
+      projectId: project.id,
+      task: spec.task,
+      targets: spec.targets,
+      provider: parentRun.provider,
+      headlessParentRunId: parentRunId,
+    });
+    // The lineage link precedes planning so every later child transition can
+    // prove its single-active-run exemption against the recorded parent.
+    this.#store.recordHeadlessChildLinked(draft.id, {
+      schema: "icarus.headless.child-link.v1",
+      runId: draft.id,
+      parentRunId,
+      parentBindingDigestSha256: parentBinding.bindingDigestSha256,
+      depth: 1,
+      childId: spec.childId,
+      specDigestSha256: headlessChildSpecDigestV1(spec),
+    });
+    const planned = await this.planDraftRun(draft.id, signal);
+    const childPlanSha256 = planned.planSha256;
+    invariant(
+      planned.plan !== null && childPlanSha256 !== null,
+      "MISSING_PLAN",
+      "Headless child has no persisted plan",
+    );
+    assertHeadlessChildPlanV1(spec, planned.plan, parentRun.plan);
+    const childProfile = deriveHeadlessChildProfileV1(parentBinding.resolution.profile, spec);
+    return this.#leases.withLease(draft.id, async () => {
+      this.#store.approvePlan(draft.id, childPlanSha256, parentBinding.planApproval.actor);
+      const childRun = this.#store.getRun(draft.id);
+      const childBinding = bindHeadlessExecutionV1(childProfile, {
+        run: childRun,
+        project,
+        approvals: this.#store.listApprovals(draft.id),
+        readableManifest: this.#store.readableManifest(draft.id),
+        providerProfiles: [
+          {
+            id: childProfile.providerProfileId,
+            kind: childRun.provider.kind,
+            model: childRun.provider.model,
+            baseUrl: childRun.provider.baseUrl,
+            inputUsdPerMillionTokens: childRun.provider.inputUsdPerMillionTokens,
+            outputUsdPerMillionTokens: childRun.provider.outputUsdPerMillionTokens,
+          },
+        ],
+      });
+      const { iterationCeiling: _iterationCeiling, ...ceiling } = childProfile.budgets;
+      const active: ActiveHeadlessExecutionV1 = {
+        binding: childBinding,
+        ceiling,
+        toolIds: new Set(childProfile.toolIds),
+      };
+      assertHeadlessWorkerBudgetAvailable(childRun, ceiling);
+      this.#store.recordHeadlessWorkerStarted(draft.id, childBinding);
+      this.#headlessExecutionContexts.set(draft.id, active);
+      try {
+        try {
+          await this.#guarded(draft.id, "running", () => this.#execute(draft.id, signal), signal);
+        } catch {
+          // #guarded has already persisted the failed run; settlement below is authoritative.
+        }
+        const settled = this.#store.getRun(draft.id);
+        const fallbackError =
+          settled.lastError === null
+            ? null
+            : { code: settled.lastError.code, message: settled.lastError.message };
+        const childSettlement = createHeadlessWorkerSettlementV1({
+          binding: childBinding,
+          run: settled,
+          events: this.#store.listEvents(draft.id),
+          error: fallbackError,
+        });
+        this.#store.recordHeadlessWorkerSettled(draft.id, childSettlement);
+        return {
+          childRunId: draft.id,
+          outcome: childSettlement.outcome,
+          exitCode: childSettlement.exitCode,
+          childBindingDigestSha256: childBinding.bindingDigestSha256,
+          error: childSettlement.error,
+        };
+      } finally {
+        this.#headlessExecutionContexts.delete(draft.id);
+      }
+    });
   }
 
   async #reviewUnleased(
