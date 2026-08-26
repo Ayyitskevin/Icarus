@@ -949,6 +949,9 @@ not contact GitHub or a model provider and does not count toward Gate 1's live
 - `run history <run-id>` shows append-only events and approval records. Every
   completed verification event contains that attempt's bounded check evidence
   and diff; later restore/reverify attempts do not erase earlier evidence.
+  `--format jsonl` emits the checksum-terminated H0 trajectory;
+  `--format stream-json` emits the typed, receipt-bound NDJSON projection
+  (ADR 0061) — a read-only view of the same snapshot, never new evidence.
 - `run approve-egress <run-id> --context-sha <sha> --actor <actor>` binds exact
   remote context release.
 - `run approve <run-id> --plan-sha <sha> --actor <actor>` revalidates the source

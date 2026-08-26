@@ -116,10 +116,20 @@ describe("headless worker security contract", () => {
 
   test("the CLI emits checksum-terminated history and propagates worker exit status", () => {
     const command = body(cli, 'if (action === "approve-headless")', 'if (action === "status")');
-    expect(command).toContain("createHeadlessHistoryLines(");
-    expect(command).toContain("canonicalJsonLine(line)");
+    expect(command).toContain("emitRunTrajectory(runtime, result.run.id");
     expect(command).toContain("process.exitCode = result.settlement.exitCode");
     expect(command).not.toContain("process.exit(0)");
     expect(command).toContain('if (action === "reconcile-headless")');
+    // The shared emitter keeps the H0 history as the default and adds the
+    // ADR 0061 stream only as an opt-in format.
+    const emitter = body(cli, "function emitRunTrajectory(", "function handoffInputPair(");
+    expect(emitter).toContain("createHeadlessHistoryLines(");
+    expect(emitter).toContain("createHeadlessStreamLines(");
+    expect(emitter).toContain("canonicalJsonLine(line)");
+    // An invalid output format is validated before the worker executes.
+    expect(command.indexOf("headlessOutputFormat(options)")).toBeGreaterThanOrEqual(0);
+    expect(command.indexOf("headlessOutputFormat(options)")).toBeLessThan(
+      command.indexOf("approveHeadlessPlan("),
+    );
   });
 });

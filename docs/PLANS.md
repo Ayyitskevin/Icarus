@@ -200,6 +200,40 @@ human-gated lineage migration.
 - [ ] H4 remainder: fork, concurrency above one, remote-provider children,
       depth above one, model-initiated children, and child write-back.
 
+## Headless receipt event-stream candidate (ADR 0061)
+
+Status: locally implemented under proposed ADR 0061. The focused unit and
+integration suites pass; the full local gate and one non-author review
+remain open.
+
+Decision: emit a typed `icarus.headless.stream.v1` NDJSON event stream as a
+pure projection of the existing SQLite run history snapshot — the same
+snapshot the H0 export reads. The closed line kinds are `init`, `grant`,
+`plan`, `patchset`, `check`, `receipt`, and a checksum-terminated `result`,
+and every line cites the durable event sequence or approval digest it was
+derived from: plan lines bind the plan approval digest, patch-set lines bind
+the store-computed patch-set digest (supersessions resolved in order), check
+lines bind diff and checkpoint digests with metadata only (never check
+bytes), and receipt lines bind the worker/child settlement binding digest.
+The projection appends nothing and grants no authority; malformed history
+fails closed with `INVALID_HEADLESS_STREAM`.
+
+- [x] Add the pure `createHeadlessStreamLines` projection with fail-closed
+      history validation and byte-identical canonical output.
+- [x] Wire the opt-in surface: `run history --format stream-json` and
+      `--output-format history|stream-json` (default `history`,
+      byte-identical to before) on `approve-headless`,
+      `reconcile-headless`, and `resume-headless`; invalid formats are
+      argument errors validated before any execution effect.
+- [x] Prove with unit fixtures (digest binding, supersession order, child
+      receipts, malformed-history refusals) and CLI integration cases
+      (deterministic checksum-terminated stream, receipt-bound
+      approve-headless output, unchanged default H0 trajectory).
+- [x] Run the full local gate: 1,158 unit/provider, 186 integration, and 227
+      security tests passed; eval passed with three Gate 1 live-evidence
+      cases explicitly not run (`pnpm check` exit 0).
+- [ ] Obtain one non-author round-table review of the stream candidate.
+
 ## Accepted Gate 1 Slice 1 offline benchmark checkpoint
 
 Status: the versioned, deterministic, zero-external-effect offline benchmark
