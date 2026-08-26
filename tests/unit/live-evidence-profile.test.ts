@@ -625,6 +625,29 @@ describe("provider pin", () => {
       ),
     ).toThrowError(/provider.kind must be/);
   });
+
+  it("rejects a vulcan pin until Gate 1 evidence deliberately admits it", () => {
+    // Vulcan is a real provider kind elsewhere in the runtime, so its refusal
+    // here is a policy boundary, not a vocabulary miss: Gate 1 evidence is
+    // bound to the three production adapters with pinned versions and
+    // Icarus-accountable spend. Hosted vulcan aliases are metered by Vulcan's
+    // own ledger, which an Icarus spend ceiling cannot observe. Admission
+    // needs its own ADR; see the decodeProvider comment.
+    expect(() =>
+      decodeLiveEvidenceProfileV1(
+        approvedProfile({
+          provider: {
+            kind: "vulcan",
+            model: "code",
+            baseUrl: "http://127.0.0.1:8140/v1/",
+            adapterVersion: "vulcan-chat-completions-v1",
+            inputUsdPerMillionTokens: 0,
+            outputUsdPerMillionTokens: 0,
+          },
+        }),
+      ),
+    ).toThrowError(/provider.kind must be/);
+  });
 });
 
 describe("the approval digest signs every pinned field", () => {

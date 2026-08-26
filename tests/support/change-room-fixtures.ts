@@ -3,6 +3,7 @@ import { planApprovalDigest, treeCheckpointDigest } from "../../packages/core/sr
 import type { IcarusStore } from "../../packages/core/src/store.js";
 import type {
   CheckpointFile,
+  ProviderConfig,
   SunCeiling,
   VerificationEvidence,
 } from "../../packages/core/src/types.js";
@@ -26,7 +27,10 @@ export interface ChangeRoomFixture {
   readonly runId: string;
 }
 
-export function createChangeRoomFixture(ceiling: SunCeiling = UNIT_CEILING): ChangeRoomFixture {
+export function createChangeRoomFixture(
+  ceiling: SunCeiling = UNIT_CEILING,
+  provider: ProviderConfig = UNIT_PROVIDER,
+): ChangeRoomFixture {
   const fixture = createUnitStore();
   const { projectId } = seedUnitProject(fixture.store, ceiling);
   fixture.store.createRun({
@@ -34,7 +38,7 @@ export function createChangeRoomFixture(ceiling: SunCeiling = UNIT_CEILING): Cha
     projectId,
     task: "Update the greeting",
     targets: UNIT_PLAN.targets,
-    provider: UNIT_PROVIDER,
+    provider,
   });
   return { ...fixture, projectId, runId: UNIT_RUN_ID };
 }

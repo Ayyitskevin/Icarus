@@ -448,7 +448,11 @@ export interface RunPageView {
 
 export type ChangeRoomVerificationOutcome = "passed" | "failed" | "unavailable" | "not_run";
 
-export type ChangeRoomProviderKind = "ollama" | "openai";
+// Every ProviderKind the runtime can persist: the room is a read-only
+// projection of the authoritative run record, so a legitimate anthropic or
+// vulcan run must project rather than fail the page closed. Anything outside
+// this union is corruption or tampering and still fails closed.
+export type ChangeRoomProviderKind = "ollama" | "openai" | "anthropic" | "vulcan";
 
 export type ChangeRoomProviderLocality = "loopback" | "remote";
 

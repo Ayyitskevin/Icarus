@@ -281,6 +281,36 @@ describe("existing-runs live-evidence driver", () => {
     });
   });
 
+  it("never counts a vulcan-pinned run as Gate 1 evidence", async () => {
+    // The profile decoder refuses a vulcan pin, so this exercises the second
+    // wall: a hand-built authorization that skipped decoding. Run and profile
+    // agree on every provider field — only the deliberate kind exclusion
+    // blocks the match.
+    const { driver, context, service } = fixture(landingStatus("local_ready"));
+    const approved = context("start").profile;
+    const vulcanProfile = {
+      ...approved,
+      provider: {
+        ...approved.provider,
+        kind: "vulcan",
+        baseUrl: "http://127.0.0.1:8140/v1/",
+        adapterVersion: "vulcan-chat-completions-v1",
+      },
+    } as unknown as typeof approved;
+    const current = service.getRun();
+    service.getRun.mockReturnValue({
+      ...current,
+      provider: { ...current.provider, kind: "vulcan", baseUrl: "http://127.0.0.1:8140/v1/" },
+    });
+    await expect(
+      driver.observe({ ...context("start"), profile: vulcanProfile }),
+    ).resolves.toMatchObject({
+      outcome: "blocked",
+      durableStage: "case.preflight",
+      errorCode: "LIVE_EVIDENCE_CASE_MISMATCH",
+    });
+  });
+
   it("does not count an operation that has no durable GitHub POST admission", async () => {
     const status = {
       ...landingStatus("reconciliation_required"),

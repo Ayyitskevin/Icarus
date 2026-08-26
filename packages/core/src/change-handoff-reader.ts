@@ -369,7 +369,14 @@ function decodeProvider(value: unknown): ProviderConfig {
     "capabilities",
   ]);
   const kind = text(object.kind, 16);
-  if (kind !== "ollama" && kind !== "openai" && kind !== "anthropic") sourceInvalid();
+  // Every ProviderKind the store can persist. The rebuilt config below passes
+  // through `createProviderConfig`, which re-derives locality, privacy class,
+  // and pricing invariants for whichever kind is named — including vulcan's
+  // loopback-only gateway — so recognition here adds no authority, it only
+  // lets a legitimate vulcan run be read back instead of failing closed.
+  if (kind !== "ollama" && kind !== "openai" && kind !== "anthropic" && kind !== "vulcan") {
+    sourceInvalid();
+  }
   const model = nonemptyText(object.model, 256);
   const baseUrl = nonemptyText(object.baseUrl, 2_048);
   const inputRate =

@@ -252,6 +252,15 @@ function decodeProvider(value: unknown): LiveEvidenceProviderPinV1 {
     "profile.provider",
   );
   const kind = text(decoded.kind, "profile.provider.kind");
+  // `vulcan` is deliberately absent. Gate 1 live evidence is bound to the
+  // three production adapters whose versions are pinned in
+  // LIVE_EVIDENCE_PROVIDER_ADAPTER_VERSIONS and whose spend Icarus can account
+  // itself (ADR 0050's money binding). A vulcan pin could not honour that
+  // binding: hosted aliases are metered by Vulcan's own budget ledger, so an
+  // Icarus-computed spend ceiling would claim a bound it cannot observe, and
+  // the origin rules below have no vulcan arm to mirror. Admitting vulcan as
+  // Gate 1 evidence is a product decision that needs its own ADR, a pinned
+  // adapter version, and a metering story — not a one-line enum edit.
   if (kind !== "ollama" && kind !== "openai" && kind !== "anthropic") {
     invalid("profile.provider.kind must be ollama, openai, or anthropic");
   }

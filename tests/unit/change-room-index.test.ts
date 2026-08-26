@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { IcarusError } from "../../packages/core/src/errors.js";
+import { createProviderConfig } from "../../packages/core/src/provider.js";
 import {
   createChangeRoomFixture,
   driveToAwaitingReview,
@@ -88,6 +89,65 @@ describe("Change Room index page", () => {
     const page = bare.store.openChangeRoomPage();
     expect(page).toEqual({ before: 1, snapshot: 0, nextBefore: 1, hasMore: false, rooms: [] });
     bare.store.close();
+  });
+
+  it("projects anthropic and vulcan runs and fails closed on an unknown provider kind", () => {
+    // The index projects the provider identity the authoritative run record
+    // carries. Every ProviderKind the runtime can persist must project; a
+    // narrower accepted set would fail the page closed as corruption on a
+    // legitimate run, and a kind outside the set IS corruption.
+    const fixture = createChangeRoomFixture();
+    cleanupRoots.push(fixture.root);
+    const anthropic = createProviderConfig({
+      kind: "anthropic",
+      model: "claude-sonnet-4-5",
+      baseUrl: "https://api.anthropic.com/v1/",
+      inputUsdPerMillionTokens: 3,
+      outputUsdPerMillionTokens: 15,
+    });
+    const vulcan = createProviderConfig({
+      kind: "vulcan",
+      model: "code",
+      baseUrl: "http://127.0.0.1:8140/v1/",
+    });
+    const database = new Database(fixture.databasePath);
+    insertIndexRun(database, fixture.projectId, 1);
+    insertIndexRun(database, fixture.projectId, 2);
+    database
+      .prepare("UPDATE runs SET provider_json = ? WHERE id = ?")
+      .run(JSON.stringify(anthropic), indexRunId(1));
+    database
+      .prepare("UPDATE runs SET provider_json = ? WHERE id = ?")
+      .run(JSON.stringify(vulcan), indexRunId(2));
+    database.close();
+
+    const page = fixture.store.openChangeRoomPage();
+    const byId = new Map(page.rooms.map((room) => [room.roomId, room]));
+    expect(byId.get(indexRunId(1))?.provider).toEqual({
+      kind: "anthropic",
+      model: "claude-sonnet-4-5",
+      locality: "remote",
+      privacyClass: "remote_api",
+    });
+    expect(byId.get(indexRunId(2))?.provider).toEqual({
+      kind: "vulcan",
+      model: "code",
+      locality: "loopback",
+      privacyClass: "local_process",
+    });
+    fixture.store.close();
+
+    const unknown = createChangeRoomFixture();
+    cleanupRoots.push(unknown.root);
+    const tampered = new Database(unknown.databasePath);
+    tampered
+      .prepare(
+        "UPDATE runs SET provider_json = json_set(provider_json, '$.kind', 'bedrock') WHERE id = ?",
+      )
+      .run(UNIT_RUN_ID);
+    tampered.close();
+    expectCode(() => unknown.store.openChangeRoomPage(), "DATABASE_ERROR");
+    unknown.store.close();
   });
 
   it("projects provider, verification, state, and terminal metadata per room", () => {
