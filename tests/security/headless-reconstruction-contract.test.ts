@@ -54,7 +54,9 @@ describe("headless reconstruction security contract", () => {
     const reconstructionEntry = binding.slice(
       binding.indexOf("export function reconstructHeadlessExecutionBindingV1("),
     );
-    expect(reconstructionEntry).toContain("bindHeadlessExecutionCurrentV1(profile, authority, false)");
+    expect(reconstructionEntry).toContain(
+      "bindHeadlessExecutionCurrentV1(profile, authority, false)",
+    );
     expect(reconstructionEntry).not.toContain("assertPristineRunningRun");
   });
 
