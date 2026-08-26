@@ -1,5 +1,31 @@
 # Implementation plans
 
+## Disposition record: codex/packet4-fake-github-landing (HOLD, 2026-08-25)
+
+Status: formally held; no merge. The branch's 25 commits (2026-08-08 →
+2026-08-22) were evaluated against current `main` and are superseded by the
+merged ADR 0043/0055 lineage:
+
+- The in-core fake GitHub gateway and its ~4,700 lines of pre-S2a landing
+  persistence duplicate the reviewed `packages/github-gateway` authority table
+  and the S2b-ii/S2b-iii coordinator chain (PRs #25–42); deterministic testing
+  already uses the loopback HTTP seam in `tests/support/provider-http.ts`.
+- The `RunLeaseGuard` capability pattern was never adopted on main; adopting it
+  is a redesign against the extracted landing coordinator, not a port.
+- The Gate-2 retrieval benchmark corpus (`d5f3863`, `c0ac22a`) is NOT
+  superseded but carries open owner decisions; it is self-contained (17 new
+  files, zero edits to existing files) and cherry-picks cleanly when Gate 2
+  work begins.
+- The Change Room read-failure fix (`62d4e2b`) was extracted and landed
+  separately; the smoke coverage it added is preserved here.
+- The branch's `docs/OWNER_DECISION_PACKET_GATE1_PACKET4.md` decisions 1–4 were
+  since answered differently by ADRs 0043 and 0055; the packet is historical.
+  The remote branch remains as the archival record.
+
+Evidence: rebase attempt conflicts at the first commit (four files, including
+the pre-S2a `landing-ledger.ts` divergence of 7,582 lines); supersession
+mapping verified file-by-file against `main` at `b8c7927`.
+
 ## Headless H2b bounded worker candidate
 
 Status: locally implemented and settlement-hardened under proposed ADR 0048;
