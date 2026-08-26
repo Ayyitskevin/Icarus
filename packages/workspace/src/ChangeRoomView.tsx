@@ -24,10 +24,10 @@ import {
   acceptChangeContextPacket,
   acceptChangeRoom,
   acceptChangeRoomPage,
-  canNavigateToNewerRooms,
-  canNavigateToOlderRooms,
   CHANGE_ROOM_PAGE_MAX_PAGES,
   CHANGE_ROOM_PAGE_SIZE,
+  canNavigateToNewerRooms,
+  canNavigateToOlderRooms,
   changeRoomPageDepth,
   changeRoomPageRequest,
   createChangeRoomPageSession,
@@ -1018,7 +1018,7 @@ export function ChangeRoomView({ projects }: ChangeRoomViewProps) {
         if (controller.signal.aborted || roomGenerationRef.current !== generation) return;
         setRoom(acceptChangeRoom(roomId, value));
       } catch (error) {
-        if (!controller.signal.aborted && roomGenerationRef.current !== generation) {
+        if (!controller.signal.aborted && roomGenerationRef.current === generation) {
           setRoomError(errorMessage(error));
         }
       } finally {
@@ -1072,7 +1072,7 @@ export function ChangeRoomView({ projects }: ChangeRoomViewProps) {
         if (controller.signal.aborted || packetGenerationRef.current !== generation) return;
         setPacket(acceptChangeContextPacket(currentRoom, question, value));
       } catch (error) {
-        if (!controller.signal.aborted && packetGenerationRef.current !== generation) {
+        if (!controller.signal.aborted && packetGenerationRef.current === generation) {
           setPacketError(errorMessage(error));
         }
       } finally {

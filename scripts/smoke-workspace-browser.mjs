@@ -4886,6 +4886,76 @@ try {
 
   // Change Room evidence: bounded index, eleven-card projection, deterministic
   // explain packet with receipts, and GET-only read paths.
+  const installChangeRoomReadFailure = async (pathname, message, delayed) => {
+    const installed = await page.call(
+      (expectedPathname, errorMessage, delayResponse) => {
+        if (window.__icarusChangeRoomReadFailure !== undefined) return false;
+        const originalFetch = window.fetch;
+        const state = {
+          observed: false,
+          originalFetch,
+          release: null,
+        };
+        window.__icarusChangeRoomReadFailure = state;
+        const restore = () => {
+          window.fetch = originalFetch;
+          delete window.__icarusChangeRoomReadFailure;
+        };
+        const response = () =>
+          new Response(
+            JSON.stringify({
+              error: {
+                code: "BROWSER_SMOKE_CONTROLLED_FAILURE",
+                message: errorMessage,
+              },
+            }),
+            {
+              status: 503,
+              headers: { "content-type": "application/json; charset=utf-8" },
+            },
+          );
+        window.fetch = (input, init) => {
+          const raw =
+            typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+          const url = new URL(raw, window.location.origin);
+          if (
+            !state.observed &&
+            url.origin === window.location.origin &&
+            url.pathname === expectedPathname &&
+            (init?.method ?? "GET") === "GET"
+          ) {
+            state.observed = true;
+            if (!delayResponse) {
+              restore();
+              return Promise.resolve(response());
+            }
+            return new Promise((resolve) => {
+              state.release = () => {
+                restore();
+                resolve(response());
+              };
+            });
+          }
+          return originalFetch.call(window, input, init);
+        };
+        return true;
+      },
+      pathname,
+      message,
+      delayed,
+    );
+    assert.equal(installed, true, "Could not install the Change Room read failure fixture");
+  };
+  const releaseDelayedChangeRoomReadFailure = async () => {
+    const released = await page.call(() => {
+      const state = window.__icarusChangeRoomReadFailure;
+      if (state === undefined || state.release === null) return false;
+      state.release();
+      return true;
+    });
+    assert.equal(released, true, "Could not release the delayed Change Room read failure");
+  };
+
   await page.clickButton("Change Rooms");
   await page.clickButton("Load change rooms");
   await page.waitFor(
@@ -4903,7 +4973,28 @@ try {
     return true;
   });
   assert.equal(openedRoom, true, "Could not open the Change Room detail");
+  const selectedChangeRoomId = await page.call(() => {
+    const root = document.querySelector("#change-room-detail");
+    const term = Array.from(root?.querySelectorAll("dt") ?? []).find(
+      (candidate) => candidate.textContent?.trim() === "Room",
+    );
+    return term?.parentElement?.querySelector("dd")?.textContent?.trim() ?? null;
+  });
+  assert.match(selectedChangeRoomId, /^[a-f0-9-]{36}$/u);
+  const selectedChangeRoomPath = `/api/runs/${encodeURIComponent(selectedChangeRoomId)}/change-room`;
+  const selectedChangeContextPath = `/api/runs/${encodeURIComponent(selectedChangeRoomId)}/change-context`;
+  const activeRoomFailure = "Controlled active Change Room evidence failure.";
+  await installChangeRoomReadFailure(selectedChangeRoomPath, activeRoomFailure, false);
   await page.clickButton("Load change room evidence");
+  await page.waitFor(
+    (message) =>
+      document.querySelector("#change-room-detail [role=alert]")?.textContent?.includes(message) ===
+      true,
+    [activeRoomFailure],
+    "the active Change Room evidence error to remain visible",
+  );
+  assert.equal(await page.buttonDisabled("Retry change room evidence"), false);
+  await page.clickButton("Retry change room evidence");
   await page.waitFor(
     () => document.body.innerText.includes("Loaded at event revision"),
     [],
@@ -4928,6 +5019,17 @@ try {
   ]) {
     assert.equal(roomText.includes(expected), true, `Change Room detail is missing ${expected}`);
   }
+  const activeContextFailure = "Controlled active Change Room explanation failure.";
+  await installChangeRoomReadFailure(selectedChangeContextPath, activeContextFailure, false);
+  await page.clickButton("Why is it blocked?");
+  await page.waitFor(
+    (message) =>
+      document
+        .querySelector("#change-room-detail .change-room-explain [role=alert]")
+        ?.textContent?.includes(message) === true,
+    [activeContextFailure],
+    "the active Change Room explanation error to remain visible",
+  );
   await page.clickButton("Why is it blocked?");
   await page.waitFor(
     () => document.body.innerText.includes("receipt: card plan approval"),
@@ -4937,6 +5039,58 @@ try {
   const answerText = await page.bodyText();
   assert.equal(answerText.includes("plan approval"), true);
   assert.equal(answerText.includes("No model is involved"), true);
+
+  const lateContextFailure = "Late stale Change Room explanation failure.";
+  await installChangeRoomReadFailure(selectedChangeContextPath, lateContextFailure, true);
+  await page.clickButton("What changed?");
+  await page.waitFor(
+    () => window.__icarusChangeRoomReadFailure?.observed === true,
+    [],
+    "the delayed Change Room explanation request",
+  );
+  for (const pageNumber of [2, 3]) {
+    await page.clickButton("Older rooms");
+    await page.waitFor(
+      (expectedPage) =>
+        document
+          .querySelector("#change-rooms .run-page__status")
+          ?.textContent?.includes(`Page ${expectedPage}`) === true,
+      [pageNumber],
+      `Change Room page ${pageNumber}`,
+    );
+  }
+  const switchedRoomTask = await page.call((taskText) => {
+    const section = document.querySelector('section[aria-labelledby="change-rooms-heading"]');
+    const button = Array.from(section?.querySelectorAll("button") ?? []).find(
+      (candidate) =>
+        (candidate.getAttribute("aria-label") ?? "").startsWith("Open change room for") &&
+        candidate.querySelector("strong")?.textContent?.trim() === taskText,
+    );
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return null;
+    const task = button.querySelector("strong")?.textContent?.trim() ?? null;
+    button.click();
+    return task;
+  }, ALTERNATE_ARCHIVED_RUN_TASK);
+  assert.equal(typeof switchedRoomTask, "string", "Could not switch away from the delayed room");
+  await page.waitFor(
+    (task) => document.querySelector("#change-room-detail-heading")?.textContent?.trim() === task,
+    [switchedRoomTask],
+    "the alternate Change Room selection",
+  );
+  await page.clickButton("Load change room evidence");
+  await page.waitFor(
+    () => document.body.innerText.includes("Loaded at event revision"),
+    [],
+    "the alternate Change Room evidence",
+  );
+  await releaseDelayedChangeRoomReadFailure();
+  await delay(50);
+  assert.equal(
+    await page.call((message) => document.body.innerText.includes(message), lateContextFailure),
+    false,
+    "a late stale Change Room error must not overwrite the newly selected room",
+  );
+
   const changeRoomRequests = networkRequests.filter((request) => request.url?.includes("/change-"));
   const changeRoomResponses = networkResponses.filter((response) =>
     response.url?.includes("/change-"),
@@ -4953,6 +5107,8 @@ try {
     cards: 11,
     pinnedRevisionVisible: true,
     explainReceipts: true,
+    activeErrorsVisible: true,
+    lateErrorsSuppressed: true,
     requests: changeRoomRequests.length,
   };
   // Restore the workspace view so the remaining run-detail flow finds its
