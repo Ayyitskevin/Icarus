@@ -93,7 +93,7 @@ and human shipping approval remain open.
 ## Headless H3b reconstruction plan
 
 Status: the evidence-only reconstruction and classification slice is
-implemented under proposed ADR 0056; the full local gate passed. One
+implemented under proposed ADR 0057; the full local gate passed. One
 non-author review and the later exactly-once continuation slice remain open.
 
 Decision: the first H3b slice is evidence-only reconstruction and

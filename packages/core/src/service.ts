@@ -1297,7 +1297,7 @@ export class IcarusService {
   }
 
   /**
-   * H3b evidence-only reconstruction (ADR 0056). Pure read path: no lease, no
+   * H3b evidence-only reconstruction (ADR 0057). Pure read path: no lease, no
    * appended event, no operation or state change, and no provider, sandbox,
    * Git, or model-tool invocation. The result is metadata only and grants no
    * continuation authority.

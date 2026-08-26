@@ -199,7 +199,7 @@ export function bindHeadlessExecutionV1(
 }
 
 /**
- * H3b evidence reconstruction (ADR 0056). Recomputes the identical H2a
+ * H3b evidence reconstruction (ADR 0057). Recomputes the identical H2a
  * identity over current persisted inputs without requiring the pristine
  * pre-worker snapshot: after process death the run legitimately carries
  * workspace, patch, verification, or error state. The result remains

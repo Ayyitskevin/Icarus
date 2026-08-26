@@ -1,4 +1,4 @@
-# ADR 0056: Headless evidence reconstruction and crash-tail classification
+# ADR 0057: Headless evidence reconstruction and crash-tail classification
 
 - Status: Proposed — the read-only reconstruction and classification contract
   is implemented; it grants no continuation, replay, fork, provider, sandbox,

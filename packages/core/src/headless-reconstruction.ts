@@ -19,7 +19,7 @@ import type {
   RunRecord,
 } from "./types.js";
 
-// H3b evidence reconstruction (ADR 0056). This module is a pure read-only
+// H3b evidence reconstruction (ADR 0057). This module is a pure read-only
 // projection over durable run authority. It never appends an event, creates
 // or settles an operation, records resume intent, invokes a provider,
 // sandbox, Git controller, or model tool, or changes SQLite state. Its

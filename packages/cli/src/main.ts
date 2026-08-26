@@ -1055,7 +1055,7 @@ async function dispatch(
     const options = parseOptions(rest, []);
     // H3b evidence reconstruction is a pure projection: it reads the durable
     // snapshot and prints one canonical metadata record without appending an
-    // event, settling an operation, or recording resume intent (ADR 0056).
+    // event, settling an operation, or recording resume intent (ADR 0057).
     const result = runtime.service.reconstructHeadlessEvidence(oneRunId(options));
     process.stdout.write(canonicalJsonLine(result as unknown as JsonValue));
     return;

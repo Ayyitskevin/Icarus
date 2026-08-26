@@ -315,7 +315,7 @@ without changing run state or re-entering execution. Repeated reconciliation
 returns the existing settlement. Ordinary resume refuses any headless lifecycle;
 binding reconstruction and exactly-once continuation remain H3b work.
 
-The first H3b slice (ADR 0056) is evidence-only. `run reconstruct-headless`
+The first H3b slice (ADR 0057) is evidence-only. `run reconstruct-headless`
 reads the persisted run, project, approvals, events, and readable manifest —
 holding no lease and writing nothing — rebuilds the source profile from the
 durable start payload, re-resolves it against the plan-digest-pinned provider
