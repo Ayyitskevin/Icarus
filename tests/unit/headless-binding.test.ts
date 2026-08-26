@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   bindHeadlessExecutionV1,
   HEADLESS_EXECUTION_BINDING_SCHEMA,
+  reconstructHeadlessExecutionBindingV1,
   type HeadlessExecutionBindingAuthorityV1,
 } from "../../packages/core/src/headless-binding.js";
+import { IcarusError } from "../../packages/core/src/errors.js";
 import { planApprovalDigest } from "../../packages/core/src/policy.js";
 import type { ApprovalRecord, ProjectRecord, RunRecord } from "../../packages/core/src/types.js";
 import {
@@ -172,6 +174,28 @@ describe("headless execution authority binding", () => {
     expect(second.profileDigestSha256).toBe(original.profileDigestSha256);
     expect(second.resolutionDigestSha256).toBe(original.resolutionDigestSha256);
     expect(second.bindingDigestSha256).toBe(original.bindingDigestSha256);
+  });
+
+  it("rejects malformed host run records with a typed fail-closed error on both entry points", () => {
+    // Review regression guard (PR #57): the pristine-snapshot assertion must run
+    // AFTER the host-shape validation inside the shared binding path, so a
+    // malformed host record can never escape as an untyped TypeError.
+    const current = fixture();
+    for (const entry of [bindHeadlessExecutionV1, reconstructHeadlessExecutionBindingV1]) {
+      for (const malformed of [null, undefined, []]) {
+        let caught: unknown;
+        try {
+          entry(current.profile, {
+            ...current.authority,
+            run: malformed as unknown as (typeof current.authority)["run"],
+          });
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeInstanceOf(IcarusError);
+        expect((caught as IcarusError).code).toBe("INVALID_HEADLESS_BINDING_HOST");
+      }
+    }
   });
 
   it("binds approval provenance without treating the binding digest as approval", () => {

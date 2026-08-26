@@ -38,7 +38,7 @@ readable manifest, and:
 
 1. inspects the durable worker lifecycle through the existing H2b/H3a grammar,
    refusing absent, duplicated, or out-of-order lifecycles and treating any
-   `resume.requested` event inside the lifecycle as malformed evidence;
+   `resume.requested` event after the worker start as malformed evidence;
 2. rebuilds the source profile from the durable `headless.worker.started`
    payload — which carries every operator-selectable profile field — and
    requires its H1 profile digest to equal the recorded digest exactly;

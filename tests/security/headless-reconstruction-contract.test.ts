@@ -36,13 +36,25 @@ describe("headless reconstruction security contract", () => {
 
   test("reconstruction and binding stay on the same digest path", () => {
     expect(binding).toContain("function bindHeadlessExecutionCurrentV1(");
+    // The pristine-snapshot assertion lives inside the shared path, gated by an
+    // explicit flag, AFTER host-shape validation — never before it (PR #57
+    // review: a malformed host record must fail closed, not throw TypeError).
+    const shared = body(
+      binding,
+      "function bindHeadlessExecutionCurrentV1(",
+      "export function bindHeadlessExecutionV1(",
+    );
+    expect(shared).toContain("requirePristineSnapshot: boolean");
+    const hostCheck = shared.indexOf('invalidHost("Host run record is invalid")');
+    const pristineCheck = shared.indexOf("assertPristineRunningRun(run)");
+    expect(hostCheck).toBeGreaterThanOrEqual(0);
+    expect(pristineCheck).toBeGreaterThan(hostCheck);
     const admission = body(binding, "export function bindHeadlessExecutionV1(", "/**\n * H3b");
-    expect(admission).toContain("assertPristineRunningRun(authority.run)");
-    expect(admission).toContain("bindHeadlessExecutionCurrentV1(profile, authority)");
+    expect(admission).toContain("bindHeadlessExecutionCurrentV1(profile, authority, true)");
     const reconstructionEntry = binding.slice(
       binding.indexOf("export function reconstructHeadlessExecutionBindingV1("),
     );
-    expect(reconstructionEntry).toContain("bindHeadlessExecutionCurrentV1(profile, authority)");
+    expect(reconstructionEntry).toContain("bindHeadlessExecutionCurrentV1(profile, authority, false)");
     expect(reconstructionEntry).not.toContain("assertPristineRunningRun");
   });
 

@@ -125,6 +125,7 @@ function providerDigest(provider: RunRecord["provider"]): string {
 function bindHeadlessExecutionCurrentV1(
   profile: unknown,
   authority: HeadlessExecutionBindingAuthorityV1,
+  requirePristineSnapshot: boolean,
 ): HeadlessExecutionBindingV1 {
   const { run, project } = authority;
   if (typeof run !== "object" || run === null || Array.isArray(run)) {
@@ -135,6 +136,9 @@ function bindHeadlessExecutionCurrentV1(
   }
   if (run.projectId !== project.id) {
     denied("run and project identities do not match");
+  }
+  if (requirePristineSnapshot) {
+    assertPristineRunningRun(run);
   }
   if (run.plan === null || run.planSha256 === null) {
     denied("headless execution binding requires a persisted plan and digest");
@@ -194,8 +198,7 @@ export function bindHeadlessExecutionV1(
   profile: unknown,
   authority: HeadlessExecutionBindingAuthorityV1,
 ): HeadlessExecutionBindingV1 {
-  assertPristineRunningRun(authority.run);
-  return bindHeadlessExecutionCurrentV1(profile, authority);
+  return bindHeadlessExecutionCurrentV1(profile, authority, true);
 }
 
 /**
@@ -210,5 +213,5 @@ export function reconstructHeadlessExecutionBindingV1(
   profile: unknown,
   authority: HeadlessExecutionBindingAuthorityV1,
 ): HeadlessExecutionBindingV1 {
-  return bindHeadlessExecutionCurrentV1(profile, authority);
+  return bindHeadlessExecutionCurrentV1(profile, authority, false);
 }
