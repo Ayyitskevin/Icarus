@@ -1,5 +1,26 @@
 # Implementation plans
 
+## Workspace explicit Vulcan provider selection candidate
+
+Status: locally implemented under proposed ADR 0064. The full local gate and
+real-Chromium acceptance pass; non-author review is pending.
+
+- [x] Add a closed Ollama/Vulcan provider-kind selector to draft creation.
+- [x] Require the Workspace client to send the selected kind explicitly while
+      retaining the API's omitted-kind Ollama default for older callers.
+- [x] Render persisted provider kind as evidence; missing legacy evidence reads
+      `Not reported`, never an invented Ollama value.
+- [x] Keep URL admission credential-free and loopback-only for both kinds.
+- [x] Prove through compiled Chromium that seven unsafe URL classes are
+      rejected, three loopback forms are accepted, the POST carries `vulcan`,
+      the run persists/renders `vulcan`, and no provider request occurs.
+- [x] Pass `pnpm check` at the final candidate snapshot.
+- [ ] Obtain one non-author exact-snapshot review.
+
+This slice creates only a persisted draft. It does not admit Vulcan to the
+headless provider catalog or Gate 1 live evidence, and it performs no live
+provider generation, repository mutation, landing, deployment, or migration.
+
 ## Disposition record: codex/packet4-fake-github-landing (HOLD, 2026-08-25)
 
 Status: formally held; no merge. The branch's 25 commits (2026-08-08 →

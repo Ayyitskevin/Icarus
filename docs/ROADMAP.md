@@ -42,8 +42,13 @@ The local remediation now fails closed on malformed receipt identity, schema,
 membership, outcome/exit pairing, ordering, and cardinality; its refreshed full
 local gate passes, and two independent exact-snapshot reviews returned PASS
 with no blocker, high, or medium finding. The same review also found that the
-workspace planning UI omits the API's supported Vulcan provider choice; that
-is a separate product slice and is not absorbed into this security remediation.
+workspace planning UI omitted the API's supported Vulcan provider choice. The
+separate ADR 0064 candidate now exposes an explicit closed Ollama/Vulcan
+selector, sends the selected kind in every UI draft request, and renders the
+persisted kind without inferring it from the URL. Real Chromium acceptance
+covers rejected remote/credential-bearing URLs, accepted loopback forms,
+persisted Vulcan evidence, and zero provider calls. The headless catalog, Gate
+1 live-evidence profile, and unattended execution boundaries remain unchanged.
 
 DeepSeek Harness is a reference implementation and optional benchmark worker, not a replacement or default dependency. The full comparison and exit gates are in [`DEEPSEEK_HARNESS_COMPARISON.md`](DEEPSEEK_HARNESS_COMPARISON.md). This shift does not absorb Gate 1 remote-mutation work or authorize a Mickey deployment.
 

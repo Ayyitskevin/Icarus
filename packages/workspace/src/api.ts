@@ -1090,6 +1090,7 @@ export interface CreateRunInput {
   readonly task: string;
   readonly targets: readonly string[];
   readonly provider: {
+    readonly kind: "ollama" | "vulcan";
     readonly model: string;
     readonly baseUrl: string;
   };

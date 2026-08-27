@@ -765,6 +765,7 @@ function ProjectDetail({
   const [previewing, setPreviewing] = useState(false);
   const [task, setTask] = useState("");
   const [target, setTarget] = useState("");
+  const [providerKind, setProviderKind] = useState<"ollama" | "vulcan">("ollama");
   const [model, setModel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [draftError, setDraftError] = useState<string | null>(null);
@@ -830,7 +831,11 @@ function ProjectDetail({
         projectId: project.id,
         task: task.trim(),
         targets: selectedTargets(target),
-        provider: { model: model.trim(), baseUrl: new URL(baseUrl).toString() },
+        provider: {
+          kind: providerKind,
+          model: model.trim(),
+          baseUrl: new URL(baseUrl).toString(),
+        },
       });
       await onRunCreated(run);
     } catch (error) {
@@ -988,12 +993,27 @@ function ProjectDetail({
             </small>
           </label>
           <label>
+            Provider kind
+            <select
+              value={providerKind}
+              onChange={(event) =>
+                setProviderKind(event.target.value === "vulcan" ? "vulcan" : "ollama")
+              }
+            >
+              <option value="ollama">Ollama</option>
+              <option value="vulcan">Vulcan</option>
+            </select>
+            <small>
+              The selected kind is persisted exactly; no provider is inferred from the URL.
+            </small>
+          </label>
+          <label>
             Model
             <input
               required
               value={model}
               onChange={(event) => setModel(event.target.value)}
-              placeholder="configured-local-model"
+              placeholder={providerKind === "vulcan" ? "code" : "configured-local-model"}
             />
           </label>
           <label className="form-grid__wide">
@@ -1003,7 +1023,9 @@ function ProjectDetail({
               inputMode="url"
               value={baseUrl}
               onChange={(event) => setBaseUrl(event.target.value)}
-              placeholder="http://127.0.0.1:11434/"
+              placeholder={
+                providerKind === "vulcan" ? "http://127.0.0.1:8140/v1/" : "http://127.0.0.1:11434/"
+              }
             />
           </label>
           {draftError === null ? null : (
@@ -1685,6 +1707,10 @@ function RunEvidence({
           <div>
             <dt>Target</dt>
             <dd>{run.target}</dd>
+          </div>
+          <div>
+            <dt>Provider kind</dt>
+            <dd>{run.provider.kind ?? "Not reported"}</dd>
           </div>
           <div>
             <dt>Provider model</dt>
