@@ -53,8 +53,8 @@ The stream's closed line kinds, in emission order:
    `run_created`), and, for headless runs, a second `init` (phase
    `worker_started`) from the durable `headless.worker.started` event
    carrying the H2a binding digest, profile identity, and tool set.
-2. `grant` — one line per durable approval record (egress, plan, review,
-   rollback, restore), bound to its approval digest, actor, and decision.
+2. `grant` — one line per durable approval record (egress, plan, apply,
+   review, rollback, restore), bound to its approval digest, actor, and decision.
    Grants precede the evidence chronology, mirroring the H0 envelope; each
    carries its timestamp so a consumer can restore exact time order.
 3. `plan` — from `plan.created`, bound to the plan approval digest identity
@@ -89,6 +89,7 @@ The stream is wired as an opt-in output mode, default unchanged:
 ```text
 icarus run history RUN --format json|jsonl|stream-json
 icarus run approve-headless RUN ... [--output-format history|stream-json]
+icarus run apply-headless RUN ... [--output-format history|stream-json]
 icarus run reconcile-headless RUN [--output-format history|stream-json]
 icarus run resume-headless RUN [--output-format history|stream-json]
 ```
@@ -110,6 +111,11 @@ execution effect, never after settlement. Exit-code semantics are unchanged:
   strict metadata subset of surfaces the operator already has.
 - The default headless output, the H0 schema, and every existing consumer
   are untouched; opting in is one flag per invocation.
+- The generic offline Change Handoff reader remains intentionally closed to
+  headless lifecycle events. Headless supervisors use H0 history or this
+  stream; the `apply` grant is represented here explicitly instead of
+  partially widening a consumer that cannot validate the surrounding worker
+  grammar.
 - Malformed or drifting history (foreign run identity, broken sequence,
   unbindable patch-set digests, malformed payloads) fails closed rather than
   projecting a stream that contradicts the durable record.

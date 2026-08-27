@@ -366,7 +366,8 @@ paths, and H3b continuation of a child-bearing worker fails closed.
 ADR 0060 makes propose-only the headless default. `worker.mutation` absent
 means the worker stops after durable patch-set intent, proves quiescence, and
 settles `icarus.headless.worker-proposal.v1` (exit 10) carrying the exact
-patch-set digest; `"apply"` is the explicit approve-and-run opt-in.
+versioned digest over each path, operation, baseline, and approved byte set;
+`"apply"` is the explicit approve-and-run opt-in.
 Application takes the digest-bound `run apply-headless` act: the service
 re-proves the run (with the full ADR 0058 admission on the crash path),
 requires the flag to equal the durable patch-set digest, records an `apply`
@@ -376,7 +377,8 @@ settles `icarus.headless.worker-application.v1`. A crashed application epoch
 closes through the unchanged H3a path and spends the allowance. The lifecycle
 grammar keeps one start, at most one epoch intent (resume or apply), and at
 most two settlements. `--max-turns` and `--max-budget-usd` narrow the active
-envelope per invocation, and a deterministic guard in the shared session tool
+envelope per invocation; an already-spent cost clamp refuses before validation
+or authority and exits 2. A deterministic guard in the shared session tool
 path lands the third identical tool call as `session.exhausted`
 (`doom_loop`, exit 2). Exit codes: 0 complete, 2 envelope, 3 human,
 10 proposed, 1 failed, 130 cancelled; refusals exit 1 before any effect.

@@ -42,6 +42,7 @@ import {
 import {
   type ActiveHeadlessExecutionV1,
   assertHeadlessWorkerBudgetAvailable,
+  assertHeadlessWorkerEnvelopeAvailable,
   createAppliedHeadlessWorkerSettlementV1,
   createContinuedHeadlessWorkerSettlementV1,
   createInterruptedHeadlessWorkerSettlementV1,
@@ -1419,7 +1420,8 @@ export class IcarusService {
           envelope?.maxBudgetUsd ?? baseCeiling.maxCostUsd,
         ),
       };
-      assertHeadlessWorkerBudgetAvailable(run, ceiling);
+      assertHeadlessWorkerBudgetAvailable(run, baseCeiling);
+      assertHeadlessWorkerEnvelopeAvailable(run, envelope);
       this.#store.recordHeadlessWorkerApplyRequested(
         runId,
         {
@@ -1794,11 +1796,10 @@ export class IcarusService {
     signal: AbortSignal | undefined,
     envelope?: HeadlessRunEnvelopeV1,
   ): Promise<HeadlessWorkerExecutionV1> {
-    const cancelled = await this.#validatePlanApproval(runId, planSha256, actor, signal);
-    if (cancelled !== null) {
-      throw new IcarusError("CANCELLED", "Operator cancelled headless approval validation");
-    }
-    const candidate = this.#store.getRun(runId);
+    // The invocation envelope is an admission boundary. Prove it against the
+    // durable preflight snapshot before approval validation records even its
+    // bounded host operation, then re-check the full profile after validation.
+    const candidate = this.#store.preflightPlanApproval(runId, planSha256, actor);
     invariant(candidate.plan !== null, "MISSING_PLAN", "Headless run has no persisted plan");
     const project = this.#store.getProject(candidate.projectId);
     const preflight = resolveHeadlessProfileV1(profile, {
@@ -1814,6 +1815,12 @@ export class IcarusService {
     const { iterationCeiling: _preflightIterations, ...preflightCeiling } =
       preflight.profile.budgets;
     assertHeadlessWorkerBudgetAvailable(candidate, preflightCeiling);
+    assertHeadlessWorkerEnvelopeAvailable(candidate, envelope);
+    const cancelled = await this.#validatePlanApproval(runId, planSha256, actor, signal);
+    if (cancelled !== null) {
+      throw new IcarusError("CANCELLED", "Operator cancelled headless approval validation");
+    }
+    assertHeadlessWorkerBudgetAvailable(this.#store.getRun(runId), preflightCeiling);
     this.#store.approvePlan(runId, planSha256, actor);
     let binding: HeadlessExecutionBindingV1;
     try {
@@ -1850,7 +1857,6 @@ export class IcarusService {
       toolIds: new Set(binding.resolution.profile.toolIds),
       iterationCeiling,
     };
-    assertHeadlessWorkerBudgetAvailable(this.#store.getRun(runId), ceiling);
     this.#store.recordHeadlessWorkerStarted(runId, binding);
     this.#headlessExecutionContexts.set(runId, active);
     const mutation = binding.resolution.profile.worker.mutation ?? "propose";

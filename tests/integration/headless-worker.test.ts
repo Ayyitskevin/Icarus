@@ -13,7 +13,14 @@ import type {
   RepositoryInspection,
   TreeEntry,
 } from "../../packages/core/src/git.js";
+import { bindHeadlessExecutionV1 } from "../../packages/core/src/headless-binding.js";
 import type { HeadlessProfileV1 } from "../../packages/core/src/headless-profile.js";
+import {
+  createAppliedHeadlessWorkerSettlementV1,
+  createInterruptedHeadlessWorkerSettlementV1,
+  HEADLESS_WORKER_APPLY_SCHEMA,
+  headlessPatchSetDigestV1,
+} from "../../packages/core/src/headless-worker.js";
 import { DEFAULT_CEILING, DEFAULT_SANDBOX_LIMITS } from "../../packages/core/src/policy.js";
 import {
   createProviderConfig,
@@ -25,7 +32,9 @@ import { IcarusService } from "../../packages/core/src/service.js";
 import { IcarusStore } from "../../packages/core/src/store.js";
 import type {
   CheckEvidence,
+  CheckpointFile,
   JsonValue,
+  PatchSet,
   ProviderConfig,
   SunCeiling,
 } from "../../packages/core/src/types.js";
@@ -189,6 +198,7 @@ function plan(iterations: number): JsonValue {
 function gatewayFactory(
   outputs: readonly JsonValue[],
   hook?: (request: StructuredGenerationRequest) => void,
+  estimatedCostUsd = 0,
 ): (config: ProviderConfig) => ModelGateway {
   const queue = [...outputs];
   return (config) => ({
@@ -199,7 +209,7 @@ function gatewayFactory(
       if (output === undefined) throw new Error("Synthetic provider queue exhausted");
       return Promise.resolve({
         text: JSON.stringify(output),
-        usage: { inputTokens: 1, outputTokens: 1, estimatedCostUsd: 0, latencyMs: 1 },
+        usage: { inputTokens: 1, outputTokens: 1, estimatedCostUsd, latencyMs: 1 },
       });
     },
   });
@@ -215,6 +225,7 @@ interface Fixture {
 async function fixture(
   outputs: readonly JsonValue[],
   hook?: (request: StructuredGenerationRequest) => void,
+  estimatedCostUsd = 0,
 ): Promise<Fixture> {
   const root = await mkdtemp(path.join(os.tmpdir(), "icarus-headless-worker-"));
   cleanupRoots.push(root);
@@ -230,7 +241,7 @@ async function fixture(
     artifacts: new ArtifactStore(stateRoot),
     git: new ControlledGit(repositoryPath) as unknown as GitController,
     checks: new ControlledChecks(),
-    gatewayFactory: gatewayFactory(outputs, hook),
+    gatewayFactory: gatewayFactory(outputs, hook, estimatedCostUsd),
   });
   await service.initialize();
   await service.registerRepository("fixture", repositoryPath);
@@ -246,6 +257,9 @@ async function fixture(
     kind: "ollama",
     model: "synthetic-model",
     baseUrl: "http://127.0.0.1:11434/",
+    ...(estimatedCostUsd === 0
+      ? {}
+      : { inputUsdPerMillionTokens: 100, outputUsdPerMillionTokens: 100 }),
   });
   return { service, store, provider, close: () => store.close() };
 }
@@ -377,6 +391,65 @@ describe("bounded headless worker", () => {
     }
   });
 
+  test("refuses an already-spent approval envelope before granting plan authority", async () => {
+    const current = await fixture([plan(0)], undefined, 0.25);
+    try {
+      const planned = await plannedRun(current, 0);
+      const eventCount = current.store.listEvents(planned.id).length;
+      const providerCatalog = [{ id: "local-provider", ...current.provider }];
+
+      await expect(
+        current.service.approveHeadlessPlan(
+          planned.id,
+          planned.planSha256 ?? "",
+          "headless-operator",
+          profile(0),
+          providerCatalog,
+          undefined,
+          { maxBudgetUsd: 0.1 },
+        ),
+      ).rejects.toMatchObject({ code: "HEADLESS_ENVELOPE_EXHAUSTED" });
+      expect(current.store.getRun(planned.id).state).toBe("awaiting_approval");
+      expect(current.store.listApprovals(planned.id)).toHaveLength(0);
+      expect(current.store.listEvents(planned.id)).toHaveLength(eventCount);
+    } finally {
+      current.close();
+    }
+  });
+
+  test("refuses an already-spent apply envelope before granting apply authority", async () => {
+    const current = await fixture([plan(0), patchSet(FIXED)], undefined, 0.25);
+    try {
+      const planned = await plannedRun(current, 0);
+      const providerCatalog = [{ id: "local-provider", ...current.provider }];
+      const proposeProfile = profile(0);
+      const { mutation: _mutation, ...workerWithoutMutation } = proposeProfile.worker;
+      const proposed = await current.service.approveHeadlessPlan(
+        planned.id,
+        planned.planSha256 ?? "",
+        "headless-operator",
+        { ...proposeProfile, worker: workerWithoutMutation },
+        providerCatalog,
+      );
+      const patchSetSha256 = (
+        proposed.settlement as { readonly proposal: { readonly patchSetSha256: string } }
+      ).proposal.patchSetSha256;
+      const eventCount = current.store.listEvents(planned.id).length;
+
+      await expect(
+        current.service.applyHeadlessProposal(planned.id, patchSetSha256, "headless-operator", {
+          maxBudgetUsd: 0.1,
+        }),
+      ).rejects.toMatchObject({ code: "HEADLESS_ENVELOPE_EXHAUSTED" });
+      expect(current.store.listApprovals(planned.id).map((approval) => approval.kind)).toEqual([
+        "plan",
+      ]);
+      expect(current.store.listEvents(planned.id)).toHaveLength(eventCount);
+    } finally {
+      current.close();
+    }
+  });
+
   test("meters and refuses a session tool disabled by the profile", async () => {
     const current = await fixture([
       plan(1),
@@ -475,6 +548,206 @@ describe("bounded headless worker", () => {
     }
   });
 
+  test("the store refuses a direct apply grant for a non-checkpoint digest", async () => {
+    const current = await fixture([plan(0), patchSet(FIXED)]);
+    try {
+      const planned = await plannedRun(current, 0);
+      const proposeProfile = profile(0);
+      const { mutation: _mutation, ...workerWithoutMutation } = proposeProfile.worker;
+      await current.service.approveHeadlessPlan(
+        planned.id,
+        planned.planSha256 ?? "",
+        "headless-operator",
+        { ...proposeProfile, worker: workerWithoutMutation },
+        PROVIDER_CATALOG,
+      );
+      const started = current.store
+        .listEvents(planned.id)
+        .find((event) => event.type === "headless.worker.started");
+      expect(started).toBeDefined();
+      if (started === undefined) throw new Error("Expected a durable worker start");
+      const bindingDigestSha256 = (started.payload as { readonly bindingDigestSha256?: unknown })
+        .bindingDigestSha256;
+
+      expect(() =>
+        current.store.recordHeadlessWorkerApplyRequested(
+          planned.id,
+          {
+            schema: HEADLESS_WORKER_APPLY_SCHEMA,
+            runId: planned.id,
+            bindingDigestSha256: bindingDigestSha256 as string,
+            patchSetSha256: "0".repeat(64),
+            startedEventSequence: started.sequence,
+          },
+          "headless-operator",
+        ),
+      ).toThrowError(/durable checkpoint/);
+      expect(current.store.listApprovals(planned.id).map((approval) => approval.kind)).toEqual([
+        "plan",
+      ]);
+    } finally {
+      current.close();
+    }
+  });
+
+  test("reconciliation closes a crashed application epoch and spends its allowance", async () => {
+    const current = await fixture([plan(0), patchSet(FIXED)]);
+    try {
+      const planned = await plannedRun(current, 0);
+      const proposeProfile = profile(0);
+      const { mutation: _mutation, ...workerWithoutMutation } = proposeProfile.worker;
+      const proposed = await current.service.approveHeadlessPlan(
+        planned.id,
+        planned.planSha256 ?? "",
+        "headless-operator",
+        { ...proposeProfile, worker: workerWithoutMutation },
+        PROVIDER_CATALOG,
+      );
+      const proposal = proposed.settlement as {
+        readonly proposal: { readonly patchSetSha256: string };
+      };
+      const started = current.store
+        .listEvents(planned.id)
+        .find((event) => event.type === "headless.worker.started");
+      expect(started).toBeDefined();
+      if (started === undefined) throw new Error("Expected a durable worker start");
+      const bindingDigestSha256 = (started.payload as { readonly bindingDigestSha256?: unknown })
+        .bindingDigestSha256;
+      expect(bindingDigestSha256).toMatch(/^[a-f0-9]{64}$/);
+
+      current.store.recordHeadlessWorkerApplyRequested(
+        planned.id,
+        {
+          schema: HEADLESS_WORKER_APPLY_SCHEMA,
+          runId: planned.id,
+          bindingDigestSha256: bindingDigestSha256 as string,
+          patchSetSha256: proposal.proposal.patchSetSha256,
+          startedEventSequence: started.sequence,
+        },
+        "headless-operator",
+      );
+      const interrupted = createInterruptedHeadlessWorkerSettlementV1({
+        run: current.store.getRun(planned.id),
+        events: current.store.listEvents(planned.id),
+      });
+
+      expect(() =>
+        current.store.recordHeadlessWorkerSettled(planned.id, interrupted),
+      ).not.toThrow();
+      expect(current.store.listEvents(planned.id).at(-1)).toMatchObject({
+        type: "headless.worker.settled",
+        payload: {
+          schema: "icarus.headless.worker-interruption.v1",
+          outcome: "interrupted",
+        },
+      });
+      await expect(
+        current.service.applyHeadlessProposal(
+          planned.id,
+          proposal.proposal.patchSetSha256,
+          "headless-operator",
+        ),
+      ).rejects.toMatchObject({ code: "HEADLESS_APPLY_EXHAUSTED" });
+    } finally {
+      current.close();
+    }
+  });
+
+  test("an interrupted proposal can persist its recovered application settlement", async () => {
+    const current = await fixture([plan(0)]);
+    try {
+      const planned = await plannedRun(current, 0);
+      current.store.approvePlan(planned.id, planned.planSha256 ?? "", "headless-operator");
+      const proposeProfile = profile(0);
+      const { mutation: _mutation, ...workerWithoutMutation } = proposeProfile.worker;
+      const binding = bindHeadlessExecutionV1(
+        { ...proposeProfile, worker: workerWithoutMutation },
+        {
+          run: current.store.getRun(planned.id),
+          project: current.store.getProject(planned.projectId),
+          approvals: current.store.listApprovals(planned.id),
+          readableManifest: current.store.readableManifest(planned.id),
+          providerProfiles: PROVIDER_CATALOG,
+        },
+      );
+      current.store.recordHeadlessWorkerStarted(planned.id, binding);
+      current.store.recordWorkspace(planned.id, "/tmp/cache", "/tmp/worktree", null);
+      const acceptedPatchSet: PatchSet = {
+        summary: "Apply the approved greeting.",
+        edits: [
+          {
+            op: "modify",
+            path: TARGET,
+            expectedPreimageSha256: sha256(BASELINE),
+            replacements: [{ findText: BASELINE, replaceText: FIXED }],
+            rationale: "Replace one operator-selected file.",
+          },
+        ],
+      };
+      const files: readonly CheckpointFile[] = [
+        {
+          path: TARGET,
+          op: "modify",
+          baselineBase64: Buffer.from(BASELINE, "utf8").toString("base64"),
+          approvedBase64: Buffer.from(FIXED, "utf8").toString("base64"),
+        },
+      ];
+      current.store.recordPatchSetIntent(planned.id, acceptedPatchSet, files);
+      const interrupted = createInterruptedHeadlessWorkerSettlementV1({
+        run: current.store.getRun(planned.id),
+        events: current.store.listEvents(planned.id),
+      });
+      current.store.recordHeadlessWorkerSettled(planned.id, interrupted);
+      const firstSettlement = current.store
+        .listEvents(planned.id)
+        .find((event) => event.type === "headless.worker.settled");
+      const started = current.store
+        .listEvents(planned.id)
+        .find((event) => event.type === "headless.worker.started");
+      expect(firstSettlement).toBeDefined();
+      expect(started).toBeDefined();
+      if (firstSettlement === undefined || started === undefined) {
+        throw new Error("Expected durable start and interrupted settlement evidence");
+      }
+      const patchSetSha256 = headlessPatchSetDigestV1(files);
+      current.store.recordHeadlessWorkerApplyRequested(
+        planned.id,
+        {
+          schema: HEADLESS_WORKER_APPLY_SCHEMA,
+          runId: planned.id,
+          bindingDigestSha256: binding.bindingDigestSha256,
+          patchSetSha256,
+          startedEventSequence: started.sequence,
+        },
+        "headless-operator",
+      );
+      current.store.recordSessionOutcome(planned.id, "exhausted", null, 0);
+      const applyEvent = current.store
+        .listEvents(planned.id)
+        .find((event) => event.type === "headless.worker.apply_requested");
+      expect(applyEvent).toBeDefined();
+      if (applyEvent === undefined) throw new Error("Expected durable apply intent evidence");
+      const settlement = createAppliedHeadlessWorkerSettlementV1({
+        binding,
+        run: current.store.getRun(planned.id),
+        events: current.store.listEvents(planned.id),
+        applyEventSequence: applyEvent.sequence,
+        proposalSettlementSequence: firstSettlement.sequence,
+        patchSetSha256,
+      });
+
+      expect(() =>
+        current.store.recordHeadlessWorkerApplicationSettled(planned.id, settlement),
+      ).not.toThrow();
+      expect(current.store.listEvents(planned.id).at(-1)).toMatchObject({
+        type: "headless.worker.settled",
+        payload: { schema: "icarus.headless.worker-application.v1", outcome: "exhausted" },
+      });
+    } finally {
+      current.close();
+    }
+  });
+
   test("clamps session turns through the envelope flag to exhaustion", async () => {
     const current = await fixture([plan(1), patchSet(BROKEN)]);
     try {
@@ -494,8 +767,8 @@ describe("bounded headless worker", () => {
         current.store.listEvents(planned.id).filter((event) => event.type === "provider.revise"),
       ).toHaveLength(0);
       expect(
-        current.store.listEvents(planned.id).some((event) => event.type === "session.exhausted"),
-      ).toBe(true);
+        current.store.listEvents(planned.id).find((event) => event.type === "session.exhausted"),
+      ).toMatchObject({ payload: { iterations: 0, reason: "iteration_ceiling" } });
     } finally {
       current.close();
     }

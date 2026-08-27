@@ -45,10 +45,11 @@ In propose mode the worker runs planning, binding, workspace creation, and
 the provider edit exactly as before, records patch-set intent, proves
 quiescence, and settles with the distinct
 `icarus.headless.worker-proposal.v1` schema: the ordinary settlement members
-plus `proposal: { patchSetSha256 }`, where the digest is the same
-checkpoint-file digest the materialization stage already computes. The
-outcome is `proposed` with exit code 10. The run remains at `running`; no
-byte of the patch set is materialized.
+plus `proposal: { patchSetSha256 }`. The versioned canonical digest binds
+each sorted path, operation, baseline byte digest, and approved byte digest;
+absent bytes remain JSON `null`, so deletion cannot collide with writing an
+empty file. The outcome is `proposed` with exit code 10. The run remains at
+`running`; no byte of the patch set is materialized.
 
 ### Digest-bound application
 
@@ -88,8 +89,8 @@ further apply is refused with `HEADLESS_APPLY_EXHAUSTED`. `run
 resume-headless` refuses propose-mode lifecycles and points at
 apply-headless; apply-mode runs continue to use ADR 0058 unchanged. The
 lifecycle grammar stays: exactly one start, at most one intent event
-(resume request after an interruption, or apply request after a proposal),
-at most two settlements.
+(resume request after an interruption, or apply request after a proposal or
+fully re-proven interrupted proposal), at most two settlements.
 
 ### Runaway envelopes
 
@@ -97,7 +98,10 @@ at most two settlements.
 minimum of the approved plan, the profile, and the flag; admission beyond it
 lands `session.exhausted` (reason `iteration_ceiling`) and exit 2.
 `--max-budget-usd USD` clamps the active cost ceiling the same way; both are
-available on `approve-headless` and `apply-headless` and only ever narrow.
+available on `approve-headless` and `apply-headless` and only ever narrow. If
+durable usage has already spent a supplied cost clamp, admission refuses with
+`HEADLESS_ENVELOPE_EXHAUSTED`, exit 2, before recording validation work,
+approval, or epoch intent.
 
 A uniform doom-loop guard lives in the session tool path (interactive and
 headless alike, because the guard belongs to the tool loop, not the
@@ -134,6 +138,10 @@ stderr and persist nothing.
 - The proposal digest is durable evidence: an operator can review the exact
   patch set (`run history`) before granting application, and a drifted or
   forged flag fails closed.
+- Proposals created with the earlier ambiguous path/content digest do not
+  acquire authority under the canonical digest. They fail closed and must be
+  proposed again; there is no migration that silently rewrites an approval
+  identity.
 - Envelope clamps are per-invocation narrowings of already-approved
   ceilings; they never widen and are validated before any effect.
 - H4 composition: children of propose-mode parents spawn only in the

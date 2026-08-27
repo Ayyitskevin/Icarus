@@ -53,6 +53,7 @@ import {
   HEADLESS_WORKER_INTERRUPTION_SCHEMA,
   HEADLESS_WORKER_PROPOSAL_SCHEMA,
   HEADLESS_WORKER_RESUME_SCHEMA,
+  headlessPatchSetDigestV1,
   headlessWorkerApplyRequestedPayload,
   headlessWorkerResumeRequestedPayload,
   headlessWorkerSettledPayload,
@@ -3627,11 +3628,7 @@ export class IcarusStore {
    * Lands a failed verification directly in non-approvable review when a
    * session cannot retain the ordinary reconciliation margin at entry.
    */
-  recordSessionAdmissionExhausted(
-    runId: string,
-    browserActionId: string | null = null,
-    reason = "recovery_margin",
-  ): RunRecord {
+  recordSessionAdmissionExhausted(runId: string, browserActionId: string | null = null): RunRecord {
     const transaction = this.#database.transaction(() => {
       const current = this.getRun(runId);
       invariant(current.state === "verifying", "INVALID_STATE", "Run is not verifying");
@@ -3656,7 +3653,7 @@ export class IcarusStore {
       invariant(result.changes === 1, "CONCURRENT_RUN_UPDATE", "Run state changed concurrently");
       this.#appendEvent(runId, "session.exhausted", {
         iterations: this.countSessionIterations(runId),
-        reason,
+        reason: "recovery_margin",
         ...(browserActionId === null
           ? {}
           : {
@@ -3778,7 +3775,7 @@ export class IcarusStore {
         ? { summary: textValue as string }
         : kind === "awaiting_human"
           ? { question: textValue as string }
-          : {}),
+          : { reason: "iteration_ceiling" }),
     });
   }
 
@@ -4618,10 +4615,9 @@ export class IcarusStore {
         )
         .all(runId) as unknown[];
       if (priorSettlements.length > 0) {
-        // ADR 0058: the only lawful second settlement closes a crashed
-        // continuation epoch — the first settlement is the interrupted crash
-        // settlement, exactly one resume intent was recorded against the same
-        // binding, and the new settlement is the final interruption.
+        // ADRs 0058/0060: a second interruption may close exactly one crashed
+        // continuation or application epoch. Its single durable intent must
+        // match the first settlement shape and the original worker binding.
         invariant(
           priorSettlements.length === 1 &&
             settlement.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA,
@@ -4632,32 +4628,49 @@ export class IcarusStore {
           row(priorSettlements[0], "headless worker settlement").payload_json,
           "headless worker settlement.payload_json",
         );
-        invariant(
-          priorPayload.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA,
-          "HEADLESS_WORKER_ALREADY_SETTLED",
-          "Headless worker already settled",
-        );
         const resumes = this.#database
           .prepare(
             `SELECT payload_json FROM run_events
              WHERE run_id = ? AND type = 'headless.worker.resume_requested'`,
           )
           .all(runId) as unknown[];
+        const applies = this.#database
+          .prepare(
+            `SELECT payload_json FROM run_events
+             WHERE run_id = ? AND type = 'headless.worker.apply_requested'`,
+          )
+          .all(runId) as unknown[];
         invariant(
-          resumes.length === 1,
+          resumes.length + applies.length === 1,
           "HEADLESS_WORKER_ALREADY_SETTLED",
           "Headless worker already settled",
         );
-        const resumePayload = parseJson<Record<string, JsonValue>>(
-          row(resumes[0], "headless worker resume").payload_json,
-          "headless worker resume.payload_json",
-        );
-        invariant(
-          resumePayload.schema === HEADLESS_WORKER_RESUME_SCHEMA &&
-            resumePayload.bindingDigestSha256 === settlement.bindingDigestSha256,
-          "HEADLESS_WORKER_IDENTITY_CHANGED",
-          "Headless worker resume intent does not match this settlement",
-        );
+        if (resumes.length === 1) {
+          const resumePayload = parseJson<Record<string, JsonValue>>(
+            row(resumes[0], "headless worker resume").payload_json,
+            "headless worker resume.payload_json",
+          );
+          invariant(
+            priorPayload.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA &&
+              resumePayload.schema === HEADLESS_WORKER_RESUME_SCHEMA &&
+              resumePayload.bindingDigestSha256 === settlement.bindingDigestSha256,
+            "HEADLESS_WORKER_IDENTITY_CHANGED",
+            "Headless worker resume intent does not match this settlement",
+          );
+        } else {
+          const applyPayload = parseJson<Record<string, JsonValue>>(
+            row(applies[0], "headless worker apply").payload_json,
+            "headless worker apply.payload_json",
+          );
+          invariant(
+            (priorPayload.schema === HEADLESS_WORKER_PROPOSAL_SCHEMA ||
+              priorPayload.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA) &&
+              applyPayload.schema === HEADLESS_WORKER_APPLY_SCHEMA &&
+              applyPayload.bindingDigestSha256 === settlement.bindingDigestSha256,
+            "HEADLESS_WORKER_IDENTITY_CHANGED",
+            "Headless worker apply intent does not match this settlement",
+          );
+        }
       }
       this.#appendEvent(runId, "headless.worker.settled", headlessWorkerSettledPayload(settlement));
     });
@@ -4909,6 +4922,43 @@ export class IcarusStore {
         "HEADLESS_WORKER_IDENTITY_CHANGED",
         "Headless worker apply intent does not match the durable start",
       );
+      const settlements = this.#database
+        .prepare(
+          `SELECT payload_json FROM run_events
+           WHERE run_id = ? AND type = 'headless.worker.settled' ORDER BY sequence`,
+        )
+        .all(runId) as unknown[];
+      invariant(
+        settlements.length === 1,
+        "HEADLESS_APPLY_DENIED",
+        "Headless application requires exactly one proposal or interruption settlement",
+      );
+      const settlementPayload = parseJson<Record<string, JsonValue>>(
+        row(settlements[0], "headless worker settlement").payload_json,
+        "headless worker settlement.payload_json",
+      );
+      invariant(
+        settlementPayload.schema === HEADLESS_WORKER_PROPOSAL_SCHEMA ||
+          settlementPayload.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA,
+        "HEADLESS_APPLY_DENIED",
+        "Headless application requires a proposed or interrupted settlement",
+      );
+      invariant(
+        headlessPatchSetDigestV1(this.listCheckpointFiles(runId)) === request.patchSetSha256,
+        "HEADLESS_APPLY_DENIED",
+        "Headless application digest does not match the durable checkpoint",
+      );
+      if (settlementPayload.schema === HEADLESS_WORKER_PROPOSAL_SCHEMA) {
+        const proposal = settlementPayload.proposal;
+        invariant(
+          typeof proposal === "object" &&
+            proposal !== null &&
+            !Array.isArray(proposal) &&
+            (proposal as Record<string, JsonValue>).patchSetSha256 === request.patchSetSha256,
+          "HEADLESS_APPLY_DENIED",
+          "Headless application digest does not match the proposed settlement",
+        );
+      }
       invariant(
         this.#database
           .prepare(
@@ -4998,11 +5048,12 @@ export class IcarusStore {
         "headless worker settlement.payload_json",
       );
       invariant(
-        settlementPayload.schema === HEADLESS_WORKER_PROPOSAL_SCHEMA &&
+        (settlementPayload.schema === HEADLESS_WORKER_PROPOSAL_SCHEMA ||
+          settlementPayload.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA) &&
           numberValue(settlementRow.sequence, "headless worker settlement.sequence") ===
             settlement.application.proposalSettlementSequence,
         "HEADLESS_WORKER_IDENTITY_CHANGED",
-        "Headless worker application does not match the proposed settlement",
+        "Headless worker application does not match the proposed or interrupted settlement",
       );
       const applies = this.#database
         .prepare(

@@ -1524,6 +1524,12 @@ async function dispatch(
   usage();
 }
 
+export function cliExitCodeForError(code: string): 1 | 2 {
+  return code === "USAGE" || code.startsWith("INVALID") || code === "HEADLESS_ENVELOPE_EXHAUSTED"
+    ? 2
+    : 1;
+}
+
 export async function runCliMain(options: CliMainOptions = {}): Promise<void> {
   const controller = new AbortController();
   const abort = (): void => controller.abort(new Error("Operator interrupted Icarus"));
@@ -1578,7 +1584,7 @@ export async function runCliMain(options: CliMainOptions = {}): Promise<void> {
     process.stderr.write(
       `${JSON.stringify({ error: { code, message, ...(safeRunId === undefined ? {} : { runId: safeRunId }) } }, null, 2)}\n`,
     );
-    process.exitCode = code === "USAGE" || code.startsWith("INVALID") ? 2 : 1;
+    process.exitCode = cliExitCodeForError(code);
   } finally {
     runtime?.close();
     process.removeListener("SIGINT", abort);

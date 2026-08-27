@@ -1,8 +1,8 @@
-import { sha256 } from "./digest.js";
+import { digestJson, sha256 } from "./digest.js";
 import { IcarusError, invariant } from "./errors.js";
 import type { HeadlessExecutionBindingV1 } from "./headless-binding.js";
 import type { ToolName } from "./tools.js";
-import type { EventRecord, JsonValue, RunRecord, SunCeiling } from "./types.js";
+import type { CheckpointFile, EventRecord, JsonValue, RunRecord, SunCeiling } from "./types.js";
 
 export const HEADLESS_WORKER_SCHEMA = "icarus.headless.worker.v1";
 export const HEADLESS_WORKER_INTERRUPTION_SCHEMA = "icarus.headless.worker-interruption.v1";
@@ -203,6 +203,23 @@ export function assertHeadlessWorkerBudgetAvailable(run: RunRecord, ceiling: Sun
     !exhausted,
     "HEADLESS_PROFILE_ALREADY_EXHAUSTED",
     "Run usage already exceeds the selected headless profile ceiling",
+  );
+}
+
+/**
+ * Refuses a per-invocation cost clamp that prior durable usage has already
+ * spent. This is an admission refusal, not a worker failure: callers run it
+ * before recording an approval or epoch intent (ADR 0060).
+ */
+export function assertHeadlessWorkerEnvelopeAvailable(
+  run: RunRecord,
+  envelope: HeadlessRunEnvelopeV1 | undefined,
+): void {
+  if (envelope?.maxBudgetUsd === undefined) return;
+  invariant(
+    run.usage.estimatedCostUsd + run.usage.reservedCostUsd <= envelope.maxBudgetUsd,
+    "HEADLESS_ENVELOPE_EXHAUSTED",
+    "Run usage already exceeds the per-invocation headless budget envelope",
   );
 }
 
@@ -974,11 +991,12 @@ export function inspectHeadlessWorkerLifecycleV1(
   }
   if (applyRequest !== null) {
     invariant(
-      firstSettlement.schema === HEADLESS_WORKER_PROPOSAL_SCHEMA &&
+      (firstSettlement.schema === HEADLESS_WORKER_PROPOSAL_SCHEMA ||
+        firstSettlement.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA) &&
         apply !== undefined &&
         apply.sequence > first.sequence,
       "INVALID_HEADLESS_WORKER_HISTORY",
-      "Headless worker apply request must follow a proposed settlement",
+      "Headless worker apply request must follow a proposed or interrupted settlement",
     );
   }
   if (second === undefined) {
@@ -1197,14 +1215,26 @@ export function headlessWorkerApplyRequestedPayload(
 }
 
 /**
- * The exact digest the materialization stage binds: one line per checkpoint
- * file as `path:approvedBase64`. The proposal settlement and the apply act
- * both recompute it from durable bytes (ADR 0060).
+ * The exact operation digest the materialization stage binds. Every path,
+ * operation, and baseline/approved byte digest is canonicalized; a missing
+ * side remains null so delete/create can never collapse into an empty file.
+ * The proposal settlement and apply act both recompute it from durable bytes
+ * (ADR 0060).
  */
-export function headlessPatchSetDigestV1(
-  files: readonly { readonly path: string; readonly approvedBase64: string | null }[],
-): string {
-  return sha256(files.map((file) => `${file.path}:${file.approvedBase64 ?? ""}`).join("\n"));
+export function headlessPatchSetDigestV1(files: readonly CheckpointFile[]): string {
+  return digestJson({
+    schema: "icarus.headless.patch-set-digest.v1",
+    files: [...files]
+      .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
+      .map((file) => ({
+        path: file.path,
+        op: file.op,
+        baselineSha256:
+          file.baselineBase64 === null ? null : sha256(Buffer.from(file.baselineBase64, "base64")),
+        approvedSha256:
+          file.approvedBase64 === null ? null : sha256(Buffer.from(file.approvedBase64, "base64")),
+      })),
+  });
 }
 
 /**

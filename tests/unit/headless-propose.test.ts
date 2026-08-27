@@ -10,6 +10,7 @@ import {
   createProposedHeadlessWorkerSettlementV1,
   HEADLESS_WORKER_APPLICATION_SCHEMA,
   HEADLESS_WORKER_APPLY_SCHEMA,
+  HEADLESS_WORKER_INTERRUPTION_SCHEMA,
   HEADLESS_WORKER_PROPOSAL_SCHEMA,
   HEADLESS_WORKER_SCHEMA,
   type HeadlessWorkerApplyRequestV1,
@@ -17,7 +18,7 @@ import {
   inspectHeadlessWorkerLifecycleV1,
 } from "../../packages/core/src/headless-worker.js";
 import { createProviderConfig } from "../../packages/core/src/provider.js";
-import type { EventRecord, RunRecord } from "../../packages/core/src/types.js";
+import type { CheckpointFile, EventRecord, RunRecord } from "../../packages/core/src/types.js";
 import { UNIT_CEILING } from "../support/unit-fixtures.js";
 
 const NOW = "2026-08-26T05:30:00.000Z";
@@ -124,6 +125,25 @@ function proposedSettlementEvent(sequence: number): EventRecord {
   return event(sequence, "headless.worker.settled", {
     ...settlement,
   } as unknown as EventRecord["payload"]);
+}
+
+function interruptedSettlementEvent(sequence: number): EventRecord {
+  return event(sequence, "headless.worker.settled", {
+    schema: HEADLESS_WORKER_INTERRUPTION_SCHEMA,
+    runId: RUN_ID,
+    bindingDigestSha256: BINDING_DIGEST,
+    outcome: "interrupted",
+    exitCode: 1,
+    finalState: "running",
+    verificationOutcome: null,
+    usage: { ...run("running").usage },
+    error: { code: "HEADLESS_WORKER_INTERRUPTED", message: "Worker process disappeared" },
+    reconciliation: {
+      startedEventSequence: 1,
+      interruptedOperationIds: [],
+      continuation: "requires_binding_reconstruction",
+    },
+  });
 }
 
 function appliedSettlementEvent(sequence: number, events: readonly EventRecord[]): EventRecord {
@@ -273,8 +293,45 @@ describe("proposed worker settlement", () => {
       headlessPatchSetDigestV1([...checkpointFiles]),
     );
     expect(headlessPatchSetDigestV1(checkpointFiles)).not.toBe(
-      headlessPatchSetDigestV1([{ path: "src/greeting.txt", approvedBase64: "Yw==" }]),
+      headlessPatchSetDigestV1([
+        {
+          path: "src/greeting.txt",
+          op: "modify",
+          baselineBase64: "YQ==",
+          approvedBase64: "Yw==",
+        },
+      ]),
     );
+  });
+
+  test("the patch-set digest distinguishes operation, baseline, and absent bytes", () => {
+    const deleted: readonly CheckpointFile[] = [
+      {
+        path: "src/greeting.txt",
+        op: "delete",
+        baselineBase64: "YQ==",
+        approvedBase64: null,
+      },
+    ];
+    const emptied: readonly CheckpointFile[] = [
+      {
+        path: "src/greeting.txt",
+        op: "modify",
+        baselineBase64: "YQ==",
+        approvedBase64: "",
+      },
+    ];
+    const differentBaseline: readonly CheckpointFile[] = [
+      {
+        path: "src/greeting.txt",
+        op: "modify",
+        baselineBase64: "Yg==",
+        approvedBase64: "",
+      },
+    ];
+
+    expect(headlessPatchSetDigestV1(deleted)).not.toBe(headlessPatchSetDigestV1(emptied));
+    expect(headlessPatchSetDigestV1(emptied)).not.toBe(headlessPatchSetDigestV1(differentBaseline));
   });
 });
 
@@ -318,7 +375,7 @@ describe("application lifecycle grammar", () => {
         event(2, "headless.worker.settled", ordinary),
         applyRequestEvent(3),
       ]),
-    ).toThrow(/must follow a proposed settlement/);
+    ).toThrow(/must follow a proposed or interrupted settlement/);
     expect(() =>
       inspectHeadlessWorkerLifecycleV1(RUN_ID, [
         startedEvent(1),
@@ -327,6 +384,20 @@ describe("application lifecycle grammar", () => {
         applyRequestEvent(4),
       ]),
     ).toThrow(/more than one apply request/);
+  });
+
+  test("an admitted interrupted proposal may enter the application epoch", () => {
+    expect(
+      inspectHeadlessWorkerLifecycleV1(RUN_ID, [
+        startedEvent(1),
+        interruptedSettlementEvent(2),
+        applyRequestEvent(3),
+      ]),
+    ).toMatchObject({
+      status: "started",
+      applyRequest: { applyEventSequence: 3, patchSetSha256: PATCHSET_DIGEST },
+      continuationRequest: null,
+    });
   });
 
   test("a crashed application epoch stays open, then closes terminally", () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { runCliMain } from "../../packages/cli/src/main.js";
+import { cliExitCodeForError, runCliMain } from "../../packages/cli/src/main.js";
 import type { HeadlessExecutionBindingV1 } from "../../packages/core/src/headless-binding.js";
 import {
   createHeadlessWorkerSettlementV1,
@@ -464,5 +464,10 @@ describe("headless worker settlement", () => {
       if (previousHome === undefined) delete process.env.ICARUS_HOME;
       else process.env.ICARUS_HOME = previousHome;
     }
+  });
+
+  test("CLI maps a spent headless invocation envelope to exit 2", () => {
+    expect(cliExitCodeForError("HEADLESS_ENVELOPE_EXHAUSTED")).toBe(2);
+    expect(cliExitCodeForError("HEADLESS_PROFILE_ALREADY_EXHAUSTED")).toBe(1);
   });
 });
