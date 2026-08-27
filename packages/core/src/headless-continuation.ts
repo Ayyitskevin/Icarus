@@ -1,5 +1,5 @@
 import { invariant } from "./errors.js";
-import type { HeadlessReconstructionV1 } from "./headless-reconstruction.js";
+import type { HeadlessReconstruction } from "./headless-reconstruction.js";
 import type { RunRecord } from "./types.js";
 
 // H3b exactly-once continuation admission (ADR 0058). This module is a pure
@@ -10,9 +10,9 @@ import type { RunRecord } from "./types.js";
 
 /**
  * Crash-tail operation kinds the v1 continuation can re-enter replay-safely:
- * exactly the single-shot worker stage vocabulary. Session turns, recovery,
- * review, and foreign kinds are refused because their exactly-once resume
- * grammar is a later slice.
+ * exactly the single-shot worker stage vocabulary. The separately checked
+ * read-only session subset is not part of this set; recovery, review, and
+ * foreign kinds remain refused.
  */
 const CONTINUABLE_OPERATION_KINDS: ReadonlySet<string> = new Set([
   "execution.prepare",
@@ -23,6 +23,18 @@ const CONTINUABLE_OPERATION_KINDS: ReadonlySet<string> = new Set([
   "verification.preflight",
   "sandbox.verify",
   "verification.postflight",
+]);
+
+/**
+ * The first session-continuation slice admits only a complete prior batch of
+ * provider work plus read-only tools. Effectful/control calls retain process-
+ * local replay state and therefore remain closed until their request identity
+ * is durably bound by a later contract.
+ */
+const CONTINUABLE_SESSION_OPERATION_KINDS: ReadonlySet<string> = new Set([
+  "provider.revise",
+  "session.tool.read.manifest",
+  "session.tool.read.checks",
 ]);
 
 const RE_DRIVABLE_STATES: ReadonlySet<RunRecord["state"]> = new Set(["running", "verifying"]);
@@ -45,7 +57,7 @@ function denied(message: string): never {
  * successor intent that makes re-entry replay-safe.
  */
 export function assertHeadlessContinuationReplaySafeV1(
-  evidence: HeadlessReconstructionV1,
+  evidence: HeadlessReconstruction,
   run: RunRecord,
 ): void {
   invariant(
@@ -56,7 +68,48 @@ export function assertHeadlessContinuationReplaySafeV1(
   if (evidence.effects.some((effect) => effect.disposition === "ambiguous")) {
     denied("Headless crash tail contains an effect with an unknown durable outcome");
   }
+  const sessionEffects = evidence.effects.filter(
+    (effect) => effect.kind === "provider.revise" || effect.kind?.startsWith("session.") === true,
+  );
+  const sessionIterationBoundary =
+    "sessionIterationBoundary" in evidence ? evidence.sessionIterationBoundary : undefined;
+  if (sessionEffects.length > 0) {
+    const boundary = sessionIterationBoundary;
+    if (boundary === undefined) {
+      denied("Headless session continuation lacks a durable completed-iteration boundary");
+    }
+    if (run.state !== "running") {
+      denied(`Headless session continuation cannot re-enter run state ${run.state}`);
+    }
+    for (const effect of sessionEffects) {
+      if (
+        effect.kind === null ||
+        !CONTINUABLE_SESSION_OPERATION_KINDS.has(effect.kind) ||
+        effect.disposition !== "durably_settled" ||
+        effect.settlement !== "finished" ||
+        effect.settlementSequence === null ||
+        effect.settlementSequence >= boundary.eventSequence
+      ) {
+        denied(
+          `Headless session crash-tail operation kind ${effect.kind ?? "unknown"} is not continuable`,
+        );
+      }
+    }
+    const providerTurns = sessionEffects.filter((effect) => effect.kind === "provider.revise");
+    const readTools = sessionEffects.filter((effect) =>
+      effect.kind?.startsWith("session.tool.read."),
+    );
+    if (providerTurns.length !== boundary.iterations) {
+      denied("Headless session boundary does not cover every durable provider turn");
+    }
+    if (readTools.length < boundary.iterations) {
+      denied("Headless session boundary does not cover a durable read-only tool batch");
+    }
+  } else if (sessionIterationBoundary !== undefined) {
+    denied("Headless continuation has a session boundary without session operations");
+  }
   for (const effect of evidence.effects) {
+    if (sessionEffects.includes(effect)) continue;
     if (effect.kind === null || !CONTINUABLE_OPERATION_KINDS.has(effect.kind)) {
       denied(`Headless crash tail operation kind ${effect.kind ?? "unknown"} is not continuable`);
     }

@@ -153,7 +153,7 @@ export interface SessionLoopDeps {
     action: (signal: AbortSignal) => Promise<ToolResult>,
   ) => Promise<ToolResult>;
   /** Persists a restart-safe boundary after the emitted batch is complete. */
-  readonly completeIteration: (iteration: number) => void;
+  readonly completeIteration: (iteration: number) => void | Promise<void>;
 }
 
 function parseToolCalls(value: unknown): readonly ToolCall[] {
@@ -330,11 +330,11 @@ export async function runSessionLoop(
         evidence.push(renderToolResult(result));
 
         if (result.control === "done") {
-          deps.completeIteration(iterations);
+          await deps.completeIteration(iterations);
           return { kind: "done", summary: result.content, iterations };
         }
         if (result.control === "await_human") {
-          deps.completeIteration(iterations);
+          await deps.completeIteration(iterations);
           return { kind: "awaiting_human", question: result.content, iterations };
         }
       } catch (error) {
@@ -344,7 +344,7 @@ export async function runSessionLoop(
       }
     }
 
-    deps.completeIteration(iterations);
+    await deps.completeIteration(iterations);
   }
 
   return { kind: "exhausted", iterations: deps.spentIterations() };

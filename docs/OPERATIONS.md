@@ -1042,6 +1042,18 @@ limited to `read_file`, `list_tree`, `search`, `get_check_catalog`,
 written by this session, including a created file. `list_tree` and `search`
 enumerate only the approved base manifest.
 
+For headless crash continuation, an iteration is resumable only after its
+`session.iteration_completed` event is durable. `run reconstruct-headless`
+then emits `icarus.headless.reconstruction.v2` with the latest boundary bound
+into its digest; histories without a boundary retain byte-identical v1 output.
+`run resume-headless` may advance to the next turn only when every prior
+session operation is a settled `provider.revise`,
+`session.tool.read.manifest`, or `session.tool.read.checks` receipt before that
+boundary. Any missing boundary, in-flight operation, count mismatch,
+mutation/check/control/recovery tool, or non-running state is refused before a
+resume event or provider call. Run `reconcile-headless` first after a process
+death; never edit the event store to manufacture a boundary.
+
 `propose_patch` only previews and validates the bounded PatchSet supplied to
 that call. It persists no authority or patch/checkpoint effects on any terminal
 outcome, and a later apply never depends on an in-memory proposal.

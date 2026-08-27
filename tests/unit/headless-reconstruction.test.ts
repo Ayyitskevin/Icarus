@@ -226,6 +226,48 @@ function crashFixture(): {
 }
 
 describe("headless evidence reconstruction", () => {
+  it("binds the latest monotonic session-iteration boundary into reconstruction", () => {
+    const { profile, project, pristineRun, approvals, bindingAuthority } = baseFixture();
+    const binding = bindHeadlessExecutionV1(profile, bindingAuthority);
+    const run = crashedRun(pristineRun);
+    const tail: EventRecord[] = [
+      event(1, "headless.worker.started", headlessWorkerStartedPayload(binding)),
+      operationStarted(2, "op-revise", "provider.revise"),
+      operationFinished(3, "op-revise", "provider.revise"),
+      operationStarted(4, "op-read", "session.tool.read.manifest"),
+      operationFinished(5, "op-read", "session.tool.read.manifest"),
+      event(6, "session.iteration_completed", { iterations: 1 }),
+    ];
+    const settlement = createInterruptedHeadlessWorkerSettlementV1({ run, events: tail });
+    const events = [
+      ...tail,
+      event(7, "headless.worker.settled", headlessWorkerSettledPayload(settlement)),
+    ];
+    const authority = { run, project, approvals, events, readableManifest: null };
+    const result = reconstructHeadlessEvidenceV1(authority);
+
+    expect(result).toMatchObject({
+      schema: "icarus.headless.reconstruction.v2",
+      sessionIterationBoundary: { eventSequence: 6, iterations: 1 },
+    });
+    const withoutBoundary = reconstructHeadlessEvidenceV1({
+      ...authority,
+      events: events.filter((candidate) => candidate.type !== "session.iteration_completed"),
+    });
+    expect(withoutBoundary).not.toHaveProperty("sessionIterationBoundary");
+    expect(withoutBoundary.reconstructionDigestSha256).not.toBe(result.reconstructionDigestSha256);
+    expect(() =>
+      reconstructHeadlessEvidenceV1({
+        ...authority,
+        events: [
+          ...tail,
+          event(7, "session.iteration_completed", { iterations: 3 }),
+          event(8, "headless.worker.settled", headlessWorkerSettledPayload(settlement)),
+        ],
+      }),
+    ).toThrowError(/malformed or nonmonotonic/);
+  });
+
   it("reconstructs the exact binding and classifies a reconciled crash tail", () => {
     const { authority, bindingDigestSha256 } = crashFixture();
     const result = reconstructHeadlessEvidenceV1(authority);

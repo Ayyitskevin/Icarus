@@ -30,7 +30,7 @@ import {
 } from "./headless-children.js";
 import { assertHeadlessContinuationReplaySafeV1 } from "./headless-continuation.js";
 import {
-  type HeadlessReconstructionV1,
+  type HeadlessReconstruction,
   reconstructHeadlessContinuationV1,
   reconstructHeadlessEvidenceV1,
 } from "./headless-reconstruction.js";
@@ -617,6 +617,8 @@ export interface IcarusInstrumentation {
    * crash fixture hold the worker at the boundary instead of racing it.
    */
   readonly afterPatchSetIntent?: (runId: string) => Promise<void>;
+  /** Test seam after a complete session batch is durably committed. */
+  readonly afterSessionIterationBoundary?: (runId: string, iterations: number) => Promise<void>;
 }
 
 export interface IcarusServiceOptions {
@@ -1534,7 +1536,7 @@ export class IcarusService {
    * Git, or model-tool invocation. The result is metadata only and grants no
    * continuation authority.
    */
-  reconstructHeadlessEvidence(runId: string): HeadlessReconstructionV1 {
+  reconstructHeadlessEvidence(runId: string): HeadlessReconstruction {
     const history = this.#store.getRunHistory(runId);
     return reconstructHeadlessEvidenceV1({
       run: history.run,
@@ -3744,8 +3746,9 @@ export class IcarusService {
               pendingSettlement = null;
             }
           },
-          completeIteration: (iterations) => {
+          completeIteration: async (iterations) => {
             this.#store.recordSessionIterationBoundary(runId, iterations);
+            await this.#instrumentation.afterSessionIterationBoundary?.(runId, iterations);
           },
         },
         (evidence) => this.#renderSessionPrompt(runId, originalContext, evidence),

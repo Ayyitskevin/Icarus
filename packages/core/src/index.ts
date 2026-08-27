@@ -234,13 +234,17 @@ export type {
   HeadlessCrashTailEffectV1,
   HeadlessEffectDispositionV1,
   HeadlessReconstructionAuthorityV1,
+  HeadlessReconstruction,
   HeadlessReconstructionProviderV1,
   HeadlessReconstructionV1,
+  HeadlessReconstructionV2,
   HeadlessReconstructionWorkspaceV1,
+  HeadlessSessionIterationBoundaryV1,
 } from "./headless-reconstruction.js";
 export {
   HEADLESS_RECONSTRUCTION_EFFECT_LIMIT,
   HEADLESS_RECONSTRUCTION_SCHEMA,
+  HEADLESS_SESSION_RECONSTRUCTION_SCHEMA,
   reconstructHeadlessContinuationV1,
   reconstructHeadlessEvidenceV1,
 } from "./headless-reconstruction.js";
