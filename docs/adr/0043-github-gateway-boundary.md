@@ -23,8 +23,19 @@ including two security corrections — existed only as code and a package README
 This ADR records them, and records what the package deliberately does *not*
 decide.
 
-The package is currently imported by no runtime module. Nothing here grants a
-landing path; the coordinator that will call this surface is Packet 4b.
+At this ADR's 2026-08-09 checkpoint, the package was imported by no runtime
+module. Nothing in this record alone granted a landing path; the coordinator
+that would call this surface was Packet 4b.
+
+Follow-up (2026-08-27): Packet 4b later wired this unchanged operation table
+through the bounded coordinator and immutable receipt projection, and Packet 4c
+completed the separately approved credential-gated live 3/3 record on
+2026-08-23. ADR 0027 is the current authority and lifecycle record. Its
+coordinator keeps the head-filter and bounded-page questions fail-closed; the
+three dedicated live cases succeeded, but that observation is not a universal
+claim about every GitHub repository or future page size. No merge, deletion,
+deployment, active-repository canary, live-state migration, or unattended
+authority followed.
 
 ## Decision
 
@@ -213,9 +224,11 @@ base-reference read unblocks Packet 4b. The two open questions are named as
 contract work rather than being silently patched in a package that is not
 entitled to decide them.
 
-`packages/github-gateway` remains wired to nothing. This ADR grants no landing,
-push, merge, deployment, migration, or live-credential authority; those remain
-with ADR 0027, Packet 4b, and the operator-run live-evidence profile.
+At this ADR's original checkpoint, `packages/github-gateway` remained wired to
+nothing. The dated follow-up above records the later Packet 4b/4c outcome; this
+ADR still grants no independent landing, push, merge, deployment, migration,
+or live-credential authority. Those remain governed by ADR 0027 and the exact
+operator-approved live-evidence profile.
 
 ### Retroactive review record for PRs #25–27
 

@@ -1,8 +1,7 @@
 # ADR 0049: Fail-closed headless crash-tail reconciliation
 
-- Status: Proposed — local H3a candidate implemented and full local gate passed;
-  independent review plus risky-change research and live measurement remain
-  required before shipping
+- Status: Proposed — H3a implementation merged through PR #54 and received
+  independent review; risky-change research and live measurement remain open
 - Date: 2026-08-21
 - Related: [ADR 0044](0044-headless-workspace-harness-direction.md),
   [ADR 0047](0047-headless-authority-binding.md), and

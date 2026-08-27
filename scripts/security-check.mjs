@@ -7,6 +7,7 @@ import {
   validateWorkflowAttributes,
 } from "./ci-workflow-policy.mjs";
 import { validateGate1BenchmarkManifest } from "./gate1-benchmark-contract.mjs";
+import { validateGate2RetrievalManifest } from "./gate2-retrieval-contract.mjs";
 
 async function collectSources(directory, include) {
   const sources = [];
@@ -133,16 +134,30 @@ const gate1BenchmarkManifestSource = await readFile(
   "fixtures/evals/gate1/manifest.v1.json",
   "utf8",
 );
+const gate2RetrievalCoreSource = await readFile("packages/core/src/context-retrieval.ts", "utf8");
+const gate2RetrievalRunnerSource = await readFile("scripts/gate2-retrieval.mjs", "utf8");
+const gate2RetrievalManifestSource = await readFile(
+  "fixtures/evals/gate2/retrieval-manifest.v1.json",
+  "utf8",
+);
 const inheritedWorkflowSource = await readFile(".github/workflows/opencode.yml", "utf8");
 const packageSource = await readFile("package.json", "utf8");
 const packageJson = JSON.parse(packageSource);
 const gate1BenchmarkManifest = parseStrictJson(gate1BenchmarkManifestSource);
+const gate2RetrievalManifest = parseStrictJson(gate2RetrievalManifestSource);
 let gate1BenchmarkManifestValid = false;
+let gate2RetrievalManifestValid = false;
 try {
   validateGate1BenchmarkManifest(gate1BenchmarkManifest);
   gate1BenchmarkManifestValid = true;
 } catch {
   // The named assertion below reports benchmark authority drift.
+}
+try {
+  validateGate2RetrievalManifest(gate2RetrievalManifest);
+  gate2RetrievalManifestValid = true;
+} catch {
+  // The named assertion below reports retrieval-contract drift.
 }
 const ciWorkflowSource = await readFile(".github/workflows/ci.yml", "utf8");
 const gitAttributesSource = await readFile(".gitattributes", "utf8");
@@ -2099,7 +2114,41 @@ const assertions = {
     packageJson.scripts["benchmark:gate1"] ===
       "pnpm build:node && node scripts/gate1-benchmark.mjs" &&
     packageJson.scripts.eval ===
-      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs",
+      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs",
+  gate2RetrievalCommandIntegrated:
+    packageJson.scripts["benchmark:gate2:retrieval"] ===
+      "pnpm build:node && node scripts/gate2-retrieval.mjs" &&
+    packageJson.scripts.eval.endsWith("&& node scripts/gate2-retrieval.mjs"),
+  gate2RetrievalManifestClosedAndNonAuthoritative:
+    gate2RetrievalManifestValid &&
+    gate2RetrievalManifest.executionBoundary?.mode === "deterministic_read_only" &&
+    gate2RetrievalManifest.executionBoundary?.providerCalls === 0 &&
+    gate2RetrievalManifest.executionBoundary?.networkRequests === 0 &&
+    gate2RetrievalManifest.executionBoundary?.repositoryMutations === 0 &&
+    gate2RetrievalManifest.executionBoundary?.registeredCommands === 0 &&
+    gate2RetrievalManifest.executionBoundary?.measuresExplanationCompletion === false &&
+    gate2RetrievalManifest.case?.claimBoundary === "retrieval_measured_explanation_unsupported",
+  gate2RetrievalCoreIsBoundedAndSecretFiltered:
+    gate2RetrievalCoreSource.includes("MAX_RETRIEVAL_QUERY_TERMS = 128") &&
+    gate2RetrievalCoreSource.includes("MAX_RETRIEVAL_TREE_ENTRIES = 2_000") &&
+    gate2RetrievalCoreSource.includes("MAX_RETRIEVAL_SCAN_BYTES = 64 * 1024 * 1024") &&
+    gate2RetrievalCoreSource.includes("isWorkspaceContextPathExcluded(entry.path)") &&
+    gate2RetrievalCoreSource.includes("containsSecretShapedContent(bytes)") &&
+    gate2RetrievalCoreSource.includes("CONTEXT_RETRIEVAL_SCAN_BUDGET_EXCEEDED") &&
+    !/(?:node:child_process|node:http|node:https|ModelGateway|executeToolCall)/.test(
+      gate2RetrievalCoreSource,
+    ),
+  gate2RetrievalRunnerUsesPinnedLocalReadOnlyEvidence:
+    gate2RetrievalRunnerSource.includes('spawnSync(\n    "/usr/bin/git"') &&
+    gate2RetrievalRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2RetrievalRunnerSource.includes("sourceCheckoutUnchanged") &&
+    gate2RetrievalRunnerSource.includes("workspaceUnchanged") &&
+    gate2RetrievalRunnerSource.includes("providerCalls: 0") &&
+    gate2RetrievalRunnerSource.includes("networkRequests: 0") &&
+    gate2RetrievalRunnerSource.includes("repositoryMutations: 0") &&
+    !/(?:node:http|node:https|fetch\(|api\.github\.com|process\.env\.(?:GH|GITHUB))/.test(
+      gate2RetrievalRunnerSource,
+    ),
   gate1BenchmarkManifestClosedAndNonAuthoritative:
     gate1BenchmarkManifestValid &&
     gate1BenchmarkManifest.executionBoundary?.credentialReads === 0 &&

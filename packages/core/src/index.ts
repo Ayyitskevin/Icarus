@@ -99,6 +99,20 @@ export {
   createContextPreview,
   type ProjectContextPreview,
 } from "./context-preview.js";
+export {
+  type ContextRetrievalBudgetV1,
+  type ContextRetrievalEntryV1,
+  type ContextRetrievalMatchV1,
+  type ContextRetrievalResultV1,
+  GATE2_RETRIEVAL_SCHEMA,
+  MAX_RETRIEVAL_BYTES,
+  MAX_RETRIEVAL_FILES,
+  MAX_RETRIEVAL_QUERY_BYTES,
+  MAX_RETRIEVAL_QUERY_TERMS,
+  MAX_RETRIEVAL_SCAN_BYTES,
+  MAX_RETRIEVAL_TREE_ENTRIES,
+  retrieveReadOnlyContextV1,
+} from "./context-retrieval.js";
 export { IcarusError, invariant } from "./errors.js";
 export {
   BROWSER_ACTION_LEDGER_MIGRATION,

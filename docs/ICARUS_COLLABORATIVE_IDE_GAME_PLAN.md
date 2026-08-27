@@ -691,6 +691,14 @@ profile) are not started, and the gateway's interface gaps recorded in
 [`OPUS_CONTINUATION_PLAN_2026-08-09.md`](OPUS_CONTINUATION_PLAN_2026-08-09.md)
 §3 must close before the coordinator is written against this surface.
 
+Later outcome (2026-08-27): Packet 4b's bounded coordinator, remote states,
+immutable receipt, and read-only receipt presentation subsequently merged, and
+Packet 4c's separately approved credential-gated live 3/3 evidence completed on
+2026-08-23. The paragraph above remains the explicitly dated Packet 4a
+checkpoint; current authority and holds are recorded in ADR 0027 and the Gate 1
+live-evidence record. No merge, deployment, active-repository canary,
+live-state migration, or unattended authority followed.
+
 ### Packet 5 — context, IDE, then Council
 
 Only after Gate 1:

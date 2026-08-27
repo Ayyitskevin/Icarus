@@ -12,6 +12,31 @@ effectful/control session continuation, and wider Vulcan authority remain
 closed. Older sections below retain the status that was true at their named
 checkpoint and must not be read as the current release state.
 
+## Gate 2 deterministic retrieval baseline
+
+Status: one-case read-only baseline implemented; full explanation capability
+and the Gate 2 exit gate remain open.
+
+- [x] Add a reusable deterministic core retriever over one exact committed tree.
+- [x] Exclude linked, hidden, binary, invalid-UTF-8, and secret-shaped content
+      before selection.
+- [x] Enforce explicit query, tree-entry, scan-byte, selected-file, and
+      selected-byte ceilings without truncating selected file content.
+- [x] Bind the query, eligible repository inventory, selected content digests,
+      scores, and line-match provenance into a deterministic retrieval receipt.
+- [x] Add a strict one-case Gate 2 manifest/result contract and integrate the
+      focused evaluator under `pnpm eval`.
+- [x] Measure the pinned unfamiliar-codebase fixture at recall `1.0`, precision
+      `1.0`, unchanged source and temporary worktree, and zero provider,
+      network, repository-mutation, or registered-command effects.
+- [ ] Add a real read-only explanation run and validate its file-and-line
+      citations before changing `explain_codebase` from `unsupported`.
+- [ ] Publish and run Gate 2's required versioned 30-task benchmark, measure
+      first-pass plan acceptance, and compare fixed-model routing cost.
+
+This slice establishes retrieval evidence only. It grants no provider, canary,
+mutation, landing, migration, merge, deployment, or unattended authority.
+
 ## Headless Vulcan proposal admission
 
 Status: merged through PR #70 under proposed ADR 0065. Focused resolver,

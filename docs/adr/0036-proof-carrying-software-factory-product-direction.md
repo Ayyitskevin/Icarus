@@ -349,6 +349,14 @@ zero incorrect edits. Compare the same model versions, captured price table,
 and tasks against a fixed single-provider baseline; routing must lower median
 cost per success by at least 30% without lowering the success count.
 
+Progress checkpoint (2026-08-27): the first closed, deterministic retrieval
+baseline measures one pinned unfamiliar-codebase fixture at recall `1.0` and
+precision `1.0`, with digest/line provenance, unchanged source and temporary
+worktree, and zero provider, network, repository-mutation, or registered-command
+effects. This is a one-case implementation foothold, not the required 30-task
+benchmark or Gate 2 exit evidence. It produces no explanation, so
+`explain_codebase` remains honestly unsupported.
+
 ### Gate 3 — VS Code workbench
 
 Ship a thin extension over the headless API: selection/task submission,

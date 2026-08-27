@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "icarus.gate2.retrieval.v1",
+  "benchmarkRevision": 1,
+  "resultSchemaVersion": 1,
+  "executionBoundary": {
+    "mode": "deterministic_read_only",
+    "providerCalls": 0,
+    "networkRequests": 0,
+    "repositoryMutations": 0,
+    "registeredCommands": 0,
+    "measuresExplanationCompletion": false
+  },
+  "case": {
+    "id": "explain-codebase-retrieval",
+    "class": "explain_codebase",
+    "repository": {
+      "fixturePath": "fixtures/evals/repos/unfamiliar",
+      "treeSha1": "65f958d96cda8563886c14c09f971c0f17c40dff",
+      "commitSha1": "e37b35736aa65faab2d599794e41ef70c13041c7",
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+        },
+        {
+          "path": "config/app.json",
+          "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+        },
+        {
+          "path": "src/greeting.py",
+          "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+        },
+        {
+          "path": "src/main.py",
+          "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+        }
+      ]
+    },
+    "task": {
+      "path": "fixtures/evals/tasks/explain-codebase.md",
+      "sha256": "f97b4ce340849decaf66b2d4bd26a39c067885c6fd8ca5352b1f0a78ca7102fc"
+    },
+    "expectedPaths": ["README.md", "config/app.json", "src/greeting.py", "src/main.py"],
+    "retrievalBudget": {
+      "maxFiles": 4,
+      "maxTotalBytes": 4096,
+      "maxScanBytes": 4096
+    },
+    "thresholds": {
+      "minimumRecall": 0.9,
+      "minimumPrecision": 0.6
+    },
+    "requiredEvidence": [
+      "fixture_contract_valid",
+      "pinned_committed_tree",
+      "deterministic_retrieval_digest",
+      "file_line_provenance",
+      "recall_precision_measured",
+      "source_checkout_unchanged",
+      "zero_external_or_repository_effects"
+    ],
+    "claimBoundary": "retrieval_measured_explanation_unsupported"
+  }
+}

@@ -17,7 +17,7 @@ The current sequence is:
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
 | 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
-| 2 | Context and agent quality | measured explanation/security/refactor evals, retrieval recall ≥0.90 and precision ≥0.60, first-pass plan acceptance ≥80% |
+| 2 | Context and agent quality — **one-case retrieval baseline measured** | initial pinned unfamiliar-codebase retrieval is recall `1.0` / precision `1.0`; exit still requires measured explanation/security/refactor evals, a versioned 30-task benchmark with retrieval recall ≥0.90 and precision ≥0.60, and first-pass plan acceptance ≥80% |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
 | C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
@@ -26,8 +26,13 @@ The current sequence is:
 | 5 | Supabase change packs | isolated migrations/RLS/Auth/Storage/Realtime/functions, rollback/restore and smoke evidence, separate production approval |
 | 6 | Delivery and scale | five concurrent branch-pinned tasks, idempotent worker recovery, signed evidence, explicit public-effect approvals |
 
-Current product-quality work is Gate 2, starting with the read-only codebase
-explanation evaluator. The supervised active-repository canary is a separate
+Current product-quality work is Gate 2. Its first deterministic read-only
+retrieval baseline now measures the pinned unfamiliar-codebase fixture at
+recall `1.0` and precision `1.0` with digest and line-match provenance,
+unchanged source, and zero external effects. The full explanation class remains
+honestly unsupported until an actual explanation run produces validated
+citations, and the one-case baseline is not the required 30-task exit
+benchmark. The supervised active-repository canary is a separate
 security rollout lane and remains **HOLD** after the 2026-08-27 full-tree
 secret-scanner survey. It does not block offline/read-only Gate 2 measurement,
 and Gate 2 evidence does not authorize canary execution, live-state migration,

@@ -192,6 +192,32 @@ refactor, read-only security findings, and read-only codebase explanation. ADR
 Unsupported contracts validate their fixtures and capability classification
 but are never converted into passes.
 
+## Gate 2 deterministic retrieval baseline
+
+`pnpm benchmark:gate2:retrieval` is the first bounded Gate 2 measurement. Its
+closed one-case manifest is
+`fixtures/evals/gate2/retrieval-manifest.v1.json`; `pnpm eval` runs it after the
+Milestone 1 and Gate 1 evaluators. The evaluator copies the pinned unfamiliar-
+codebase fixture into a private temporary Git repository, proves the exact tree
+and commit identities, and calls the production core's deterministic lexical
+retriever over that committed tree. The retriever filters linked, excluded,
+binary, invalid-UTF-8, and secret-shaped files; enforces query, tree, scan,
+selected-file, and selected-byte ceilings; and emits content digests plus
+bounded line-match provenance.
+
+The current closed fixture selects all four expected files with recall `1.0`
+and precision `1.0`, preserving both the source fixture and temporary committed
+worktree byte-for-byte. The ignored report is
+`.local/gate2-retrieval-report.json`. Its validator derives pass/fail from the
+fixed `0.90` recall and `0.60` precision thresholds and refuses nonzero
+provider, network, repository-mutation, or registered-command effects.
+
+This is a retrieval foothold, not Gate 2 completion. It is one deterministic
+fixture rather than the required versioned 30-task benchmark; it does not call
+a model, produce an explanation, validate source citations, measure first-pass
+plan acceptance, or compare routing cost. The `explain_codebase` class in the
+schema-v2 catalog therefore remains honestly `unsupported`.
+
 ## Measures
 
 Every result contains:

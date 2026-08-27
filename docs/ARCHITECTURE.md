@@ -981,8 +981,14 @@ substitute a fake production adapter.
 Repository files are data, not authority over the host. Context entries retain
 path, reason, size, and digest. Root and nested rules can inform the plan, but
 cannot expand permissions, commands, network access, budgets, or writable paths.
-Semantic retrieval is deferred until deterministic selection has evaluation
-evidence.
+The first Gate 2 evaluation baseline adds a pure lexical retriever over one exact
+committed tree. It sorts inputs and results deterministically, excludes linked,
+hidden, binary, invalid-UTF-8, and secret-shaped content, applies fixed query,
+tree, scan, file, and result-byte ceilings, and binds selected whole-file digests
+plus file-and-line match provenance into a receipt. The baseline performs no
+provider call or repository effect and does not yet implement codebase
+explanation. Semantic retrieval remains deferred until a versioned benchmark can
+compare it against this deterministic evidence without widening authority.
 Path classification answers three separate questions: whether a file can be
 edited, whether its bytes can be shown to a model, and whether its pathname is
 intrinsically secret. For example, a safe `.npmrc` is protected and omitted
