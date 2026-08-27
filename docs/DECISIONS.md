@@ -63,7 +63,7 @@ Decision records for the current milestone:
 
 | [0061](adr/0061-headless-receipt-event-stream.md) | A typed `icarus.headless.stream.v1` NDJSON stream (init/grant/plan/patchset/check/receipt/result) is projected from the same durable run history snapshot the H0 export reads, every line bound to its plan-approval, patch-set, binding, or settlement identity, wired as an opt-in `--format stream-json` / `--output-format stream-json` mode with the H0 default byte-identical | Proposed — read-only projection only; no execution, approval, resume, fork, or deployment authority |
 
-| [0063](adr/0063-headless-read-only-session-continuation.md) | H3b may continue from the next turn only after a digest-bound, committed session batch containing settled provider work and read-only tools; reconstruction v2 carries the boundary while v1 remains byte-identical | Proposed — effectful/control session batches, live-provider evidence, deployment, and live execution authority remain closed |
+| [0063](adr/0063-headless-read-only-session-continuation.md) | H3b may continue from the next turn only after a digest-bound, committed session batch containing settled provider work and read-only tools; reconstruction v2 carries the boundary while v1 remains byte-identical | Accepted — reviewed head `956eecc` merged unchanged through PR #65 as `a5fa58c`; effectful/control session batches, live-provider evidence, deployment, and live execution authority remain closed |
 Major choices must be added as new ADRs. Do not rewrite an accepted ADR to hide
 a changed decision; supersede it and link both records.
 
