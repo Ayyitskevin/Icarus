@@ -562,10 +562,14 @@ nothing already settled is re-executed. It records one digest-bound
 `headless.worker.resume_requested` event, re-drives only replay-safe stages,
 and appends one `icarus.headless.worker-continuation.v1` settlement with the
 H2b exit semantics. Repeating it returns byte-identical history. An ambiguous
-tail, session-turn tail, drifted identity, or missing successor intent fails
-closed before any resume intent is recorded, and a crashed continuation is
-closed by `run reconcile-headless`, after which a second resume is refused.
-Ordinary `run resume` still refuses every headless lifecycle.
+tail, drifted identity, missing successor intent, or incomplete/effectful
+session turn fails closed before any resume intent is recorded. ADR 0063 adds
+one closed session case: after a fully settled provider-plus-read-only batch,
+the digest-bound `icarus.headless.reconstruction.v2` boundary permits only the
+next unspent turn; prior provider and read operations are not replayed. A
+crashed continuation is closed by `run reconcile-headless`, after which a
+second resume is refused. Ordinary `run resume` still refuses every headless
+lifecycle.
 
 A source profile may also declare bounded child runs (ADR 0059) by setting
 `worker.childRuns` to `{ "maxDepth": 1, "maxChildren": N }` and adding a

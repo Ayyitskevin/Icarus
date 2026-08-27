@@ -31,6 +31,7 @@ import type {
 // resume, replay, or fork.
 
 export const HEADLESS_RECONSTRUCTION_SCHEMA = "icarus.headless.reconstruction.v1";
+export const HEADLESS_SESSION_RECONSTRUCTION_SCHEMA = "icarus.headless.reconstruction.v2";
 /** Hard cap on classified crash-tail effects so the result stays bounded. */
 export const HEADLESS_RECONSTRUCTION_EFFECT_LIMIT = 1024;
 
@@ -66,8 +67,12 @@ export interface HeadlessReconstructionWorkspaceV1 {
   readonly worktreeMaterialized: boolean;
 }
 
-export interface HeadlessReconstructionV1 {
-  readonly schema: typeof HEADLESS_RECONSTRUCTION_SCHEMA;
+export interface HeadlessSessionIterationBoundaryV1 {
+  readonly eventSequence: number;
+  readonly iterations: number;
+}
+
+interface HeadlessReconstructionBase {
   readonly runId: string;
   readonly projectId: string;
   readonly lifecycle: "started" | "settled";
@@ -81,6 +86,21 @@ export interface HeadlessReconstructionV1 {
   readonly effects: readonly HeadlessCrashTailEffectV1[];
   readonly reconstructionDigestSha256: string;
 }
+
+export interface HeadlessReconstructionV1 extends HeadlessReconstructionBase {
+  readonly schema: typeof HEADLESS_RECONSTRUCTION_SCHEMA;
+}
+
+/**
+ * A distinct version keeps the closed v1 evidence shape byte-stable while
+ * binding the completed session batch needed by the ADR 0063 continuation.
+ */
+export interface HeadlessReconstructionV2 extends HeadlessReconstructionBase {
+  readonly schema: typeof HEADLESS_SESSION_RECONSTRUCTION_SCHEMA;
+  readonly sessionIterationBoundary: HeadlessSessionIterationBoundaryV1;
+}
+
+export type HeadlessReconstruction = HeadlessReconstructionV1 | HeadlessReconstructionV2;
 
 /**
  * Operation kinds whose durable start cannot have produced any provider,
@@ -318,6 +338,31 @@ function classifyCrashTail(
   );
 }
 
+function latestSessionIterationBoundary(
+  events: readonly EventRecord[],
+  startedEventSequence: number,
+): HeadlessSessionIterationBoundaryV1 | null {
+  const boundaries = events.filter(
+    (event) =>
+      event.sequence > startedEventSequence && event.type === "session.iteration_completed",
+  );
+  let previous = 0;
+  for (const boundary of boundaries) {
+    const payload = payloadObject(boundary, "Session iteration boundary");
+    assertExactMembers(payload, ["iterations"], "Session iteration boundary");
+    const iterations = payload.iterations;
+    invariant(
+      Number.isSafeInteger(iterations) && iterations === previous + 1,
+      "INVALID_HEADLESS_RECONSTRUCTION_HISTORY",
+      "Session iteration boundaries are malformed or nonmonotonic",
+    );
+    previous = iterations as number;
+  }
+  const latest = boundaries.at(-1);
+  if (latest === undefined) return null;
+  return { eventSequence: latest.sequence, iterations: previous };
+}
+
 function durableStartedProfile(
   events: readonly EventRecord[],
   startedEventSequence: number,
@@ -373,7 +418,7 @@ function durableStartedProfile(
  * evidence record. Both come from the same single recomputation.
  */
 export interface HeadlessContinuationReconstructionV1 {
-  readonly evidence: HeadlessReconstructionV1;
+  readonly evidence: HeadlessReconstruction;
   readonly binding: HeadlessExecutionBindingV1;
 }
 
@@ -449,8 +494,12 @@ function reconstructHeadlessCore(
     "Reconstructed binding digest does not match the durable headless lifecycle",
   );
 
-  const payload = {
-    schema: HEADLESS_RECONSTRUCTION_SCHEMA,
+  const effects = classifyCrashTail(events, lifecycle.startedEventSequence);
+  const sessionIterationBoundary = latestSessionIterationBoundary(
+    events,
+    lifecycle.startedEventSequence,
+  );
+  const commonPayload = {
     runId: run.id,
     projectId: project.id,
     lifecycle: lifecycle.status,
@@ -470,7 +519,22 @@ function reconstructHeadlessCore(
       contextSha256: run.contextSha256,
       worktreeMaterialized: run.worktreePath !== null,
     },
-    effects: classifyCrashTail(events, lifecycle.startedEventSequence),
+    effects,
+  } as const;
+  if (sessionIterationBoundary === null) {
+    const payload = { schema: HEADLESS_RECONSTRUCTION_SCHEMA, ...commonPayload } as const;
+    return {
+      evidence: {
+        ...payload,
+        reconstructionDigestSha256: digestJson(json(payload)),
+      },
+      binding,
+    };
+  }
+  const payload = {
+    schema: HEADLESS_SESSION_RECONSTRUCTION_SCHEMA,
+    ...commonPayload,
+    sessionIterationBoundary,
   } as const;
   return {
     evidence: {
@@ -483,7 +547,7 @@ function reconstructHeadlessCore(
 
 export function reconstructHeadlessEvidenceV1(
   authority: HeadlessReconstructionAuthorityV1,
-): HeadlessReconstructionV1 {
+): HeadlessReconstruction {
   return reconstructHeadlessCore(authority).evidence;
 }
 

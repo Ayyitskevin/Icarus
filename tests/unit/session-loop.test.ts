@@ -226,6 +226,42 @@ describe("the session loop is bounded by the approved ceiling", () => {
     expect(fixture.prompts).toHaveLength(1);
     expect(fixture.completed).toEqual([3]);
   });
+
+  it("awaits the durable iteration boundary before advancing or returning", async () => {
+    const fixture = harness({
+      iterationCeiling: 1,
+      responses: [callsOf("read_file")],
+    });
+    let enteredBoundary: (() => void) | undefined;
+    let releaseBoundary: (() => void) | undefined;
+    const entered = new Promise<void>((resolve) => {
+      enteredBoundary = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      releaseBoundary = resolve;
+    });
+    let returned = false;
+    const pending = runSessionLoop(
+      {
+        ...fixture.deps,
+        completeIteration: async (iteration) => {
+          fixture.deps.completeIteration(iteration);
+          enteredBoundary?.();
+          await barrier;
+        },
+      },
+      render,
+    ).then((outcome) => {
+      returned = true;
+      return outcome;
+    });
+
+    await entered;
+    expect(returned).toBe(false);
+    releaseBoundary?.();
+    await expect(pending).resolves.toEqual({ kind: "exhausted", iterations: 1 });
+    expect(fixture.completed).toEqual([1]);
+  });
 });
 
 describe("control signals are host-gated", () => {

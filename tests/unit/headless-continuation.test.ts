@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { assertHeadlessContinuationReplaySafeV1 } from "../../packages/core/src/headless-continuation.js";
 import type {
   HeadlessCrashTailEffectV1,
-  HeadlessReconstructionV1,
+  HeadlessReconstruction,
 } from "../../packages/core/src/headless-reconstruction.js";
 import type { HeadlessExecutionBindingV1 } from "../../packages/core/src/headless-binding.js";
 import {
@@ -390,9 +390,11 @@ function effect(overrides: Partial<HeadlessCrashTailEffectV1>): HeadlessCrashTai
   };
 }
 
-function evidence(effects: readonly HeadlessCrashTailEffectV1[]): HeadlessReconstructionV1 {
-  return {
-    schema: "icarus.headless.reconstruction.v1",
+function evidence(
+  effects: readonly HeadlessCrashTailEffectV1[],
+  sessionIterationBoundary?: { readonly eventSequence: number; readonly iterations: number },
+): HeadlessReconstruction {
+  const common = {
     runId: RUN_ID,
     projectId: "project-unit",
     lifecycle: "settled",
@@ -414,6 +416,14 @@ function evidence(effects: readonly HeadlessCrashTailEffectV1[]): HeadlessRecons
     },
     effects,
     reconstructionDigestSha256: RECONSTRUCTION_DIGEST,
+  } as const;
+  if (sessionIterationBoundary === undefined) {
+    return { schema: "icarus.headless.reconstruction.v1", ...common };
+  }
+  return {
+    schema: "icarus.headless.reconstruction.v2",
+    ...common,
+    sessionIterationBoundary,
   };
 }
 
@@ -474,7 +484,7 @@ describe("headless continuation replay-safety gate", () => {
     ).toThrowError(/verification evidence/);
   });
 
-  test("refuses session-turn and foreign crash-tail kinds", () => {
+  test("admits only a fully settled read-only session batch at its durable boundary", () => {
     const admitted: RunRecord = {
       ...run("running", null),
       worktreePath: "/private/worktree",
@@ -482,13 +492,78 @@ describe("headless continuation replay-safety gate", () => {
     };
     expect(() =>
       assertHeadlessContinuationReplaySafeV1(
-        evidence([effect({ kind: "session.tool.read.manifest", disposition: "no_effect" })]),
+        evidence(
+          [
+            effect({ operationId: "revise", kind: "provider.revise" }),
+            effect({
+              operationId: "read",
+              kind: "session.tool.read.manifest",
+              startedSequence: 4,
+              settlementSequence: 5,
+            }),
+          ],
+          { eventSequence: 6, iterations: 1 },
+        ),
+        admitted,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertHeadlessContinuationReplaySafeV1(
+        evidence([effect({ kind: "provider.revise" })]),
+        admitted,
+      ),
+    ).toThrowError(/completed-iteration boundary/);
+    expect(() =>
+      assertHeadlessContinuationReplaySafeV1(
+        evidence([effect({ kind: "provider.revise" })], { eventSequence: 4, iterations: 1 }),
+        admitted,
+      ),
+    ).toThrowError(/read-only tool batch/);
+    expect(() =>
+      assertHeadlessContinuationReplaySafeV1(
+        evidence(
+          [
+            effect({ operationId: "revise", kind: "provider.revise" }),
+            effect({
+              operationId: "check",
+              kind: "session.tool.exec.check",
+              startedSequence: 4,
+              settlementSequence: 5,
+            }),
+          ],
+          { eventSequence: 6, iterations: 1 },
+        ),
         admitted,
       ),
     ).toThrowError(/not continuable/);
     expect(() =>
       assertHeadlessContinuationReplaySafeV1(
-        evidence([effect({ kind: "provider.revise" })]),
+        evidence(
+          [
+            effect({ operationId: "revise", kind: "provider.revise" }),
+            effect({
+              operationId: "read",
+              kind: "session.tool.read.checks",
+              startedSequence: 6,
+              settlementSequence: 7,
+            }),
+          ],
+          { eventSequence: 5, iterations: 1 },
+        ),
+        admitted,
+      ),
+    ).toThrowError(/not continuable/);
+  });
+
+  test("continues to refuse foreign crash-tail kinds", () => {
+    const admitted: RunRecord = {
+      ...run("running", null),
+      worktreePath: "/private/worktree",
+      patchSet: { summary: "s", edits: [] } as unknown as RunRecord["patchSet"],
+    };
+    expect(() =>
+      assertHeadlessContinuationReplaySafeV1(
+        evidence([effect({ kind: "foreign.effect" })]),
         admitted,
       ),
     ).toThrowError(/not continuable/);

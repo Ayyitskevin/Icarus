@@ -333,8 +333,8 @@ The second H3b slice (ADR 0058) adds the governed continuation command
 `run resume-headless`. Under the same run lease it requires the ADR 0057
 reconstruction to hold against current persisted inputs, refuses any ambiguous
 or replay-unsafe crash tail (settled workspace/provider/sandbox effects must
-retain their durable successor intent; session-turn and foreign kinds are
-refused), records exactly one digest-bound `headless.worker.resume_requested`
+retain their durable successor intent; foreign kinds are refused), records
+exactly one digest-bound `headless.worker.resume_requested`
 event, re-establishes the profile ceiling and tool filter, and re-drives only
 replay-safe stages. It proves quiescence and appends exactly one
 `icarus.headless.worker-continuation.v1` settlement. A worker that already
@@ -342,6 +342,18 @@ settled returns its durable settlement unchanged; a crash during continuation
 is closed by the unchanged H3a reconciliation, after which the spent
 continuation allowance refuses a second resume. Ordinary `run resume` still
 refuses every headless lifecycle.
+
+ADR 0063 adds a versioned read-only session subset. A complete batch commits a
+strictly monotonic `session.iteration_completed` boundary only after its
+`provider.revise` and tool operations settle. Reconstruction without that
+evidence remains byte-identical `icarus.headless.reconstruction.v1`; evidence
+with it becomes `icarus.headless.reconstruction.v2`, whose digest binds the
+latest boundary. Continuation then admits only a `running` tail made entirely
+of settled `provider.revise`, `session.tool.read.manifest`, and
+`session.tool.read.checks` operations before the boundary, with exact provider
+turn accounting. The session loop resumes at the durable count and invokes
+only the next turn. Mutation, check execution, control, recovery, and foreign
+session kinds remain denied before resume intent.
 
 H4 (ADR 0059) admits operator-declared child runs. A source profile may carry
 a bounded `children` list when `worker.childRuns` allows it; every spec can

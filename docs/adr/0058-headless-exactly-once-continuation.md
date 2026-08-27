@@ -1,13 +1,17 @@
 # ADR 0058: Exactly-once headless crash continuation
 
-- Status: Proposed — the governed continuation path is implemented; it adds no
-  fork, child-run, schedule, deployment, or Mickey service authority
+- Status: Proposed — the governed continuation path is implemented; its
+  blanket session-tail refusal is partially superseded by ADR 0063's closed
+  read-only-batch path; it adds no fork, child-run, schedule, deployment, or
+  Mickey service authority
 - Date: 2026-08-26
 - Related: [ADR 0044](0044-headless-workspace-harness-direction.md) (headless
   workstream), [ADR 0047](0047-headless-authority-binding.md) (H2a binding),
   [ADR 0048](0048-bounded-headless-worker.md) (H2b worker),
   [ADR 0049](0049-headless-crash-tail-reconciliation.md) (H3a crash tail), and
-  [ADR 0057](0057-headless-evidence-reconstruction.md) (H3b evidence boundary)
+  [ADR 0057](0057-headless-evidence-reconstruction.md) (H3b evidence boundary),
+  and [ADR 0063](0063-headless-read-only-session-continuation.md) (later closed
+  read-only session subset)
 
 ## Context
 
@@ -94,11 +98,10 @@ behavior this gate exercises yet.
   appends nothing.
 - Crash-during-continuation recovers through the existing H3a command and
   then refuses further continuation; no third settlement is expressible.
-- Session-turn exactly-once continuation, fork, child runs, schedules,
-  daemons, and deployment remain later work. A run whose crash tail contains
-  any session operation is refused by this slice even when every operation is
-  settled, because the session's turn-consumption boundary is not yet part of
-  the gate.
+- At this decision point, every session operation was refused because the
+  turn-consumption boundary was not part of the gate. ADR 0063 later admits
+  only a committed provider-plus-read-only batch; effectful/control session
+  continuation, fork, schedules, daemons, and deployment remain later work.
 
 ## Alternatives rejected
 

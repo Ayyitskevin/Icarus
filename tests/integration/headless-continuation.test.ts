@@ -226,13 +226,20 @@ async function spawnHeadlessWorker(
   planned: RunRecord,
   providerBaseUrl: string,
   extraEnv: NodeJS.ProcessEnv = {},
+  profileOptions: {
+    readonly iterationCeiling?: number;
+    readonly toolIds?: readonly string[];
+  } = {},
 ) {
   const profile = {
     schemaVersion: 1,
     profileId: "local-headless",
     providerProfileId: "local-provider",
-    toolIds: [],
-    budgets: { ...DEFAULT_CEILING, iterationCeiling: 0 },
+    toolIds: [...(profileOptions.toolIds ?? [])],
+    budgets: {
+      ...DEFAULT_CEILING,
+      iterationCeiling: profileOptions.iterationCeiling ?? 0,
+    },
     output: { format: "jsonl" },
     worker: {
       mode: "one_task",
@@ -293,6 +300,195 @@ function historyLines(stdout: string): readonly Record<string, unknown>[] {
 }
 
 describe("headless exactly-once continuation", () => {
+  test("continues after one fully settled read-only session turn without replaying it", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const preimageSha = sha256("Hello, world!\n");
+    const provider = await startOllamaQueue([
+      {
+        content: {
+          summary: "Replace the greeting.",
+          steps: ["Apply one exact replacement.", "Repair after verification if needed."],
+          risks: ["The first candidate intentionally fails its check."],
+          target: "src/greeting.txt",
+          targets: ["src/greeting.txt"],
+          iterationCeiling: 2,
+          checkIds: ["verify"],
+          grants: [
+            { kind: "mutation.patchset", scope: ["src/greeting.txt"], maxCalls: 2 },
+            { kind: "read.manifest", scope: ["src/greeting.txt"], maxCalls: 2 },
+          ],
+        },
+      },
+      {
+        content: {
+          summary: "Write a deliberately failing first candidate.",
+          edits: [
+            {
+              op: "modify",
+              path: "src/greeting.txt",
+              expectedPreimageSha256: preimageSha,
+              replacements: [{ findText: "Hello, world!\n", replaceText: "Hello, broken!\n" }],
+              content: null,
+              rationale: "Exercise the approved repair session.",
+            },
+          ],
+        },
+      },
+      {
+        content: {
+          toolCalls: [{ name: "read_file", arguments: { path: "src/greeting.txt" } }],
+        },
+      },
+      {
+        content: {
+          toolCalls: [
+            {
+              name: "request_human_input",
+              arguments: { question: "Please review the retained failing candidate." },
+            },
+          ],
+        },
+      },
+    ]);
+    cleanups.push(provider.close);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
+    const planned = await setupRun(provider, fixture);
+
+    const poll = openPollStore(fixture.stateRoot);
+    const worker = await spawnHeadlessWorker(
+      fixture.stateRoot,
+      planned,
+      provider.baseUrl,
+      { ICARUS_TEST_PAUSE_AFTER_SESSION_ITERATION_FILE: path.join(fixture.stateRoot, "resume") },
+      { iterationCeiling: 2, toolIds: ["read_file", "request_human_input"] },
+    );
+    try {
+      await killAfter(poll, planned.id, worker, (events) =>
+        events.some(
+          (event) =>
+            event.type === "session.iteration_completed" &&
+            (event.payload as { readonly iterations?: unknown }).iterations === 1,
+        ),
+      );
+    } finally {
+      poll.close();
+    }
+    expect(await worker.exit).toEqual({ code: null, signal: "SIGKILL" });
+    expect(provider.requests).toHaveLength(3);
+
+    expect(
+      (await runCli(fixture.stateRoot, ["run", "reconcile-headless", planned.id])).exitCode,
+    ).toBe(1);
+    const resumed = await runCli(fixture.stateRoot, ["run", "resume-headless", planned.id]);
+    expect(resumed.exitCode).toBe(3);
+    expect(provider.requests).toHaveLength(4);
+    const events = historyLines(resumed.stdout).filter((line) => line.kind === "event");
+    expect(
+      events.filter(
+        (event) =>
+          event.type === "operation.started" &&
+          (event.payload as { readonly kind?: unknown }).kind === "provider.revise",
+      ),
+    ).toHaveLength(2);
+    expect(events.filter((event) => event.type === "session.iteration_completed")).toHaveLength(2);
+    expect(events.at(-1)).toMatchObject({
+      type: "headless.worker.settled",
+      payload: {
+        schema: "icarus.headless.worker-continuation.v1",
+        outcome: "awaiting_human",
+        exitCode: 3,
+      },
+    });
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+  }, 180_000);
+
+  test("refuses a completed session turn that used an effectful tool", async () => {
+    const fixture = await createFixtureRepository();
+    cleanups.push(fixture.cleanup);
+    const preimageSha = sha256("Hello, world!\n");
+    const provider = await startOllamaQueue([
+      {
+        content: {
+          summary: "Replace the greeting.",
+          steps: ["Apply one exact replacement.", "Repair after verification if needed."],
+          risks: ["The first candidate intentionally fails its check."],
+          target: "src/greeting.txt",
+          targets: ["src/greeting.txt"],
+          iterationCeiling: 2,
+          checkIds: ["verify"],
+          grants: [
+            { kind: "mutation.patchset", scope: ["src/greeting.txt"], maxCalls: 2 },
+            { kind: "exec.check", scope: ["verify"], maxCalls: 2 },
+          ],
+        },
+      },
+      {
+        content: {
+          summary: "Write a deliberately failing first candidate.",
+          edits: [
+            {
+              op: "modify",
+              path: "src/greeting.txt",
+              expectedPreimageSha256: preimageSha,
+              replacements: [{ findText: "Hello, world!\n", replaceText: "Hello, broken!\n" }],
+              content: null,
+              rationale: "Exercise the approved repair session.",
+            },
+          ],
+        },
+      },
+      {
+        content: {
+          toolCalls: [{ name: "run_checks", arguments: { checkIds: ["verify"] } }],
+        },
+      },
+    ]);
+    cleanups.push(provider.close);
+    const sourceBefore = await repositoryFingerprint(fixture.repository);
+    const planned = await setupRun(provider, fixture);
+
+    const poll = openPollStore(fixture.stateRoot);
+    const worker = await spawnHeadlessWorker(
+      fixture.stateRoot,
+      planned,
+      provider.baseUrl,
+      {
+        ICARUS_TEST_PAUSE_AFTER_SESSION_ITERATION_FILE: path.join(
+          fixture.stateRoot,
+          "effectful-resume",
+        ),
+      },
+      { iterationCeiling: 2, toolIds: ["run_checks"] },
+    );
+    try {
+      await killAfter(poll, planned.id, worker, (events) =>
+        events.some(
+          (event) =>
+            event.type === "session.iteration_completed" &&
+            (event.payload as { readonly iterations?: unknown }).iterations === 1,
+        ),
+      );
+    } finally {
+      poll.close();
+    }
+    expect(await worker.exit).toEqual({ code: null, signal: "SIGKILL" });
+    expect(provider.requests).toHaveLength(3);
+
+    expect(
+      (await runCli(fixture.stateRoot, ["run", "reconcile-headless", planned.id])).exitCode,
+    ).toBe(1);
+    const eventCount = withStore(fixture.stateRoot, (store) => store.listEvents(planned.id).length);
+    const resumed = await runCli(fixture.stateRoot, ["run", "resume-headless", planned.id]);
+    expect(resumed.exitCode).toBe(1);
+    expect(resumed.stderr).toContain("HEADLESS_CONTINUATION_DENIED");
+    expect(withStore(fixture.stateRoot, (store) => store.listEvents(planned.id).length)).toBe(
+      eventCount,
+    );
+    expect(provider.requests).toHaveLength(3);
+    expect(await repositoryFingerprint(fixture.repository)).toEqual(sourceBefore);
+  }, 180_000);
+
   test("resumes a reconciled crash exactly once, then returns byte-identical evidence", async () => {
     const fixture = await createFixtureRepository();
     cleanups.push(fixture.cleanup);

@@ -26,6 +26,7 @@ const STATE_MARKER = '{"application":"icarus","format":1}\n';
  * a leaked pause fail-closed rather than hung.
  */
 const TEST_PAUSE_ENV = "ICARUS_TEST_PAUSE_AFTER_PATCH_SET_INTENT_FILE";
+const TEST_SESSION_BOUNDARY_PAUSE_ENV = "ICARUS_TEST_PAUSE_AFTER_SESSION_ITERATION_FILE";
 const TEST_PAUSE_CEILING_MS = 10 * 60_000;
 
 async function pauseUntilFileExists(filePath: string): Promise<void> {
@@ -288,6 +289,7 @@ export async function createIcarusRuntime(
   const landingGit = new LandingGitController(controllerHome, runsRoot);
   const checks = new DockerSandboxRunner(root, git, options.dockerBinary ?? "docker");
   const testPauseFile = process.env[TEST_PAUSE_ENV];
+  const testSessionBoundaryPauseFile = process.env[TEST_SESSION_BOUNDARY_PAUSE_ENV];
   const service = new IcarusService({
     stateRoot: root,
     store,
@@ -297,11 +299,19 @@ export async function createIcarusRuntime(
     landingCredentialEnvironmentNames: options.landingCredentialEnvironmentNames ?? [],
     checks,
     ...(options.gatewayFactory === undefined ? {} : { gatewayFactory: options.gatewayFactory }),
-    ...(testPauseFile === undefined
+    ...(testPauseFile === undefined && testSessionBoundaryPauseFile === undefined
       ? {}
       : {
           instrumentation: {
-            afterPatchSetIntent: () => pauseUntilFileExists(testPauseFile),
+            ...(testPauseFile === undefined
+              ? {}
+              : { afterPatchSetIntent: () => pauseUntilFileExists(testPauseFile) }),
+            ...(testSessionBoundaryPauseFile === undefined
+              ? {}
+              : {
+                  afterSessionIterationBoundary: () =>
+                    pauseUntilFileExists(testSessionBoundaryPauseFile),
+                }),
           },
         }),
   });
