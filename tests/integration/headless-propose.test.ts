@@ -80,6 +80,20 @@ function withStore<T>(stateRoot: string, read: (store: IcarusStore) => T): T {
   }
 }
 
+/** ADR 0062: hosts without Landlock emit one canonical no-op notice on stderr. */
+function stderrWithoutLandlockNotices(stderr: string): string {
+  return stderr
+    .split("\n")
+    .filter((line) => {
+      try {
+        return (JSON.parse(line) as { schema?: unknown }).schema !== "icarus.landlock-notice.v1";
+      } catch {
+        return true;
+      }
+    })
+    .join("\n");
+}
+
 function historyLines(stdout: string): readonly Record<string, unknown>[] {
   return stdout
     .trimEnd()
@@ -171,7 +185,7 @@ describe("headless propose-only default and digest-bound apply", () => {
     // The default is propose-only: clean stop, exit 10, nothing materialized.
     const proposed = await runCli(fixture.stateRoot, [...approveArgs]);
     expect(proposed.exitCode).toBe(10);
-    expect(proposed.stderr).toBe("");
+    expect(stderrWithoutLandlockNotices(proposed.stderr)).toBe("");
     const proposalLines = historyLines(proposed.stdout);
     expect(proposalLines.every((line) => line.schema === HEADLESS_HISTORY_SCHEMA)).toBe(true);
     const proposalSettlement = proposalLines.find(
@@ -253,7 +267,7 @@ describe("headless propose-only default and digest-bound apply", () => {
       "integration-test",
     ]);
     expect(applied.exitCode).toBe(0);
-    expect(applied.stderr).toBe("");
+    expect(stderrWithoutLandlockNotices(applied.stderr)).toBe("");
     const appliedLines = historyLines(applied.stdout);
     const appliedEvents = appliedLines.filter((line) => line.kind === "event");
     expect(appliedEvents.filter((line) => line.type === "headless.worker.apply_requested")).toEqual(
