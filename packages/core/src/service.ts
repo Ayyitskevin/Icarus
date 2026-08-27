@@ -1386,6 +1386,11 @@ export class IcarusService {
         "HEADLESS_APPLY_DENIED",
         "Apply-mode workers do not take the digest-bound apply act",
       );
+      invariant(
+        binding.resolution.provider.kind !== "vulcan",
+        "HEADLESS_APPLY_DENIED",
+        "Vulcan headless proposals are evidence-only and cannot take the apply act",
+      );
       if (first.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA) {
         // The crash path takes the full ADR 0058 admission before any apply.
         assertHeadlessContinuationReplaySafeV1(evidence, run);

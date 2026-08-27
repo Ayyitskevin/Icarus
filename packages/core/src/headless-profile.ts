@@ -2,6 +2,7 @@ import { digestJson } from "./digest.js";
 import { errorMessage, IcarusError } from "./errors.js";
 import { assertSunCeiling, MAX_SESSION_ITERATIONS } from "./policy.js";
 import { createProviderConfig } from "./provider.js";
+import { VULCAN_PROVIDER_SEAT } from "./providers.js";
 import { TOOL_REGISTRY, type ToolDefinition, type ToolName } from "./tools.js";
 import type {
   CapabilityKind,
@@ -19,6 +20,7 @@ import type {
 
 export const HEADLESS_PROFILE_SCHEMA_VERSION = 1;
 export const HEADLESS_PROFILE_RESOLUTION_SCHEMA = "icarus.headless.profile-resolution.v1";
+export const HEADLESS_VULCAN_ADMISSION_SCHEMA = "icarus.headless.vulcan-admission.v1";
 
 export interface HeadlessProfileBudgetsV1 extends SunCeiling {
   readonly iterationCeiling: number;
@@ -95,6 +97,13 @@ export interface HeadlessProfileAuthorityV1 {
   readonly approvedPlan: PlanProposal;
 }
 
+export interface HeadlessVulcanAdmissionV1 {
+  readonly schema: typeof HEADLESS_VULCAN_ADMISSION_SCHEMA;
+  readonly seat: typeof VULCAN_PROVIDER_SEAT;
+  readonly mutation: "propose";
+  readonly childRuns: "deny";
+}
+
 export interface ResolvedHeadlessProfileV1 {
   readonly schema: typeof HEADLESS_PROFILE_RESOLUTION_SCHEMA;
   readonly profile: HeadlessProfileV1;
@@ -103,6 +112,8 @@ export interface ResolvedHeadlessProfileV1 {
   readonly resolutionDigestSha256: string;
   readonly provider: ProviderConfig;
   readonly tools: readonly ToolDefinition[];
+  /** Present only when the resolution deliberately admits the Vulcan adapter. */
+  readonly vulcanAdmission?: HeadlessVulcanAdmissionV1;
 }
 
 const PROFILE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -517,26 +528,42 @@ function resolveProvider(
   if (selected === undefined) {
     denied(`provider profile ${providerProfileId} is not present in the host catalog`);
   }
-  if (selected.kind !== "ollama" && selected.kind !== "openai" && selected.kind !== "anthropic") {
-    // `vulcan` stays refused here for now. This catalog feeds unattended
-    // headless workers, so admitting a provider kind is an execution-
-    // authority decision, not a vocabulary one: the check predates the vulcan
-    // gateway and no ADR has reviewed vulcan for unattended execution. The
-    // vulcan gateway itself is loopback-only and credential-free — the same
-    // safety class as the admitted ollama kind — so admission is a plausible
-    // follow-up, but it must be an explicit operator-reviewed decision with
-    // its own evidence, not a side effect of closing a vocabulary gap.
+  if (
+    selected.kind !== "ollama" &&
+    selected.kind !== "openai" &&
+    selected.kind !== "anthropic" &&
+    selected.kind !== "vulcan"
+  ) {
     invalidHost(`Host provider profile ${providerProfileId} has an invalid kind`);
   }
   try {
-    return createProviderConfig({
+    const provider = createProviderConfig({
       kind: selected.kind,
       model: selected.model,
       baseUrl: selected.baseUrl,
       inputUsdPerMillionTokens: selected.inputUsdPerMillionTokens,
       outputUsdPerMillionTokens: selected.outputUsdPerMillionTokens,
     });
+    if (provider.kind === "vulcan") {
+      if (provider.capabilities.locality !== "loopback") {
+        invalidHost(`Host provider profile ${providerProfileId} must use loopback Vulcan`);
+      }
+      if (
+        provider.inputUsdPerMillionTokens === null ||
+        provider.inputUsdPerMillionTokens <= 0 ||
+        provider.outputUsdPerMillionTokens === null ||
+        provider.outputUsdPerMillionTokens <= 0
+      ) {
+        invalidHost(
+          `Host provider profile ${providerProfileId} must declare positive input and output token rates for Vulcan`,
+        );
+      }
+    }
+    return provider;
   } catch (error) {
+    if (error instanceof IcarusError && error.code === "INVALID_HEADLESS_PROFILE_HOST") {
+      throw error;
+    }
     throw new IcarusError(
       "INVALID_HEADLESS_PROFILE_HOST",
       `Host provider profile ${providerProfileId} is invalid: ${errorMessage(error)}`,
@@ -573,6 +600,23 @@ export function resolveHeadlessProfileV1(
   assertApprovedPlanAuthority(authority.approvedPlan);
   assertBudgetWithinAuthority(profile.budgets, authority.projectCeiling, authority.approvedPlan);
   const provider = resolveProvider(profile.providerProfileId, authority.providerProfiles);
+  const vulcanAdmission =
+    provider.kind === "vulcan"
+      ? (() => {
+          if ((profile.worker.mutation ?? "propose") !== "propose") {
+            denied("vulcan headless admission is proposal-only");
+          }
+          if (profile.worker.childRuns !== "deny" || (profile.children?.length ?? 0) !== 0) {
+            denied("vulcan headless admission does not permit child runs");
+          }
+          return {
+            schema: HEADLESS_VULCAN_ADMISSION_SCHEMA,
+            seat: VULCAN_PROVIDER_SEAT,
+            mutation: "propose",
+            childRuns: "deny",
+          } as const;
+        })()
+      : undefined;
   const tools = resolveTools(profile.toolIds, authority.approvedPlan);
   assertChildrenWithinAuthority(profile, provider, authority.approvedPlan);
   const profileDigestSha256 = digestJson(profileJson(profile));
@@ -582,6 +626,7 @@ export function resolveHeadlessProfileV1(
     providerProfileId: profile.providerProfileId,
     provider,
     tools,
+    ...(vulcanAdmission === undefined ? {} : { vulcanAdmission }),
   } as unknown as JsonValue;
   return {
     schema: HEADLESS_PROFILE_RESOLUTION_SCHEMA,
@@ -590,5 +635,6 @@ export function resolveHeadlessProfileV1(
     resolutionDigestSha256: digestJson(resolution),
     provider,
     tools,
+    ...(vulcanAdmission === undefined ? {} : { vulcanAdmission }),
   };
 }

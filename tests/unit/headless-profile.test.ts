@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   decodeHeadlessProfileV1,
   headlessProfileDigest,
+  type HeadlessHostProviderProfileV1,
   resolveHeadlessProfileV1,
 } from "../../packages/core/src/headless-profile.js";
 import { DEFAULT_CEILING } from "../../packages/core/src/policy.js";
@@ -175,22 +176,99 @@ describe("headless profile host resolution", () => {
     ).toThrowError(/duplicate ID/);
   });
 
-  it("refuses a vulcan host provider until unattended use is explicitly admitted", () => {
-    // The vulcan gateway is loopback-only and credential-free — the same
-    // safety class as the admitted ollama kind — but this catalog feeds
-    // unattended headless workers, so admitting a kind is an operator-reviewed
-    // authority decision, not a vocabulary update. See the resolveProvider
-    // comment.
+  it("admits a priced loopback vulcan provider only for a child-free proposal worker", () => {
     const vulcanAuthority = authority();
     const base = vulcanAuthority.providerProfiles[0];
     if (base === undefined) throw new Error("Fixture provider is missing");
-    expect(() =>
-      resolveHeadlessProfileV1(profile(), {
+    const resolved = resolveHeadlessProfileV1(
+      profile({
+        worker: {
+          mode: "one_task",
+          maxConcurrency: 1,
+          childRuns: "deny",
+          scheduledRuns: "deny",
+          mutation: "propose",
+        },
+      }),
+      {
         ...vulcanAuthority,
         providerProfiles: [
-          { ...base, kind: "vulcan" as const, baseUrl: "http://127.0.0.1:8140/v1/" },
+          {
+            ...base,
+            kind: "vulcan" as const,
+            model: "code",
+            baseUrl: "http://127.0.0.1:8140/v1/",
+            inputUsdPerMillionTokens: 3,
+            outputUsdPerMillionTokens: 15,
+          },
         ],
-      }),
-    ).toThrowError(/invalid kind/);
+      },
+    );
+
+    expect(resolved.provider).toMatchObject({
+      kind: "vulcan",
+      model: "code",
+      baseUrl: "http://127.0.0.1:8140/v1/",
+      inputUsdPerMillionTokens: 3,
+      outputUsdPerMillionTokens: 15,
+    });
+    expect(resolved.vulcanAdmission).toEqual({
+      schema: "icarus.headless.vulcan-admission.v1",
+      seat: "icarus",
+      mutation: "propose",
+      childRuns: "deny",
+    });
+    expect(resolved.resolutionDigestSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("fails closed on unpriced, remote, apply-capable, or child-capable vulcan authority", () => {
+    const vulcanAuthority = authority();
+    const base = vulcanAuthority.providerProfiles[0];
+    if (base === undefined) throw new Error("Fixture provider is missing");
+    const proposalWorker = {
+      mode: "one_task",
+      maxConcurrency: 1,
+      childRuns: "deny",
+      scheduledRuns: "deny",
+      mutation: "propose",
+    };
+    const proposal = profile({ worker: proposalWorker });
+    const pricedVulcan: HeadlessHostProviderProfileV1 = {
+      ...base,
+      kind: "vulcan" as const,
+      model: "code",
+      baseUrl: "http://127.0.0.1:8140/v1/",
+      inputUsdPerMillionTokens: 3,
+      outputUsdPerMillionTokens: 15,
+    };
+    const resolve = (selectedProfile: unknown, provider: HeadlessHostProviderProfileV1) =>
+      resolveHeadlessProfileV1(selectedProfile, {
+        ...vulcanAuthority,
+        providerProfiles: [provider],
+      });
+
+    expect(() => resolve(proposal, { ...pricedVulcan, inputUsdPerMillionTokens: 0 })).toThrowError(
+      /positive input and output token rates/,
+    );
+    expect(() => resolve(proposal, { ...pricedVulcan, outputUsdPerMillionTokens: 0 })).toThrowError(
+      /positive input and output token rates/,
+    );
+    expect(() =>
+      resolve(proposal, { ...pricedVulcan, inputUsdPerMillionTokens: null }),
+    ).toThrowError(/positive input and output token rates/);
+    expect(() =>
+      resolve(proposal, { ...pricedVulcan, baseUrl: "https://vulcan.example.com/v1/" }),
+    ).toThrowError(/loopback/);
+    expect(() =>
+      resolve(profile({ worker: { ...proposalWorker, mutation: "apply" } }), pricedVulcan),
+    ).toThrowError(/proposal-only/);
+    expect(() =>
+      resolve(
+        profile({
+          worker: { ...proposalWorker, childRuns: { maxDepth: 1, maxChildren: 1 } },
+        }),
+        pricedVulcan,
+      ),
+    ).toThrowError(/child runs/);
   });
 });

@@ -114,6 +114,14 @@ describe("headless worker security contract", () => {
     expect(resume).toContain("HEADLESS_BINDING_RECONSTRUCTION_REQUIRED");
   });
 
+  test("vulcan proposals are refused before the digest-bound apply act is recorded", () => {
+    const apply = body(service, "async applyHeadlessProposal(", "async reconcileHeadlessWorker(");
+    const refusal = apply.indexOf('binding.resolution.provider.kind !== "vulcan"');
+    const record = apply.indexOf("recordHeadlessWorkerApplyRequested(");
+    expect(refusal).toBeGreaterThanOrEqual(0);
+    expect(record).toBeGreaterThan(refusal);
+  });
+
   test("the CLI emits checksum-terminated history and propagates worker exit status", () => {
     const command = body(cli, 'if (action === "approve-headless")', 'if (action === "status")');
     expect(command).toContain("emitRunTrajectory(runtime, result.run.id");

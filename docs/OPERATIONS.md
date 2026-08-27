@@ -987,6 +987,26 @@ That campaign uses simulated drivers and an empty-runtime CLI refusal. It does
 not contact GitHub or a model provider and does not count toward Gate 1's live
 3/3 evidence.
 
+## Headless Vulcan proposal boundary
+
+A headless host catalog may select `kind: "vulcan"` only with a loopback base
+URL and explicit positive input/output token rates. The source profile must
+remain proposal-only (an absent mutation field or `"mutation": "propose"`),
+must set `childRuns` to `"deny"`, and must declare no children. Resolution binds
+the normalized alias, endpoint, rates, fixed seat `icarus`, and narrowed policy.
+
+Use captured rates at least as high as the selected alias's possible upstream
+price. Icarus uses them for its ordinary worst-case reservation and run ceiling;
+Vulcan's daily seat budget remains an independent gateway backstop. Never set
+the rates to zero merely because the gateway is loopback: Vulcan aliases may
+route to hosted providers.
+
+The resulting proposal is evidence-only. `run apply-headless` reconstructs its
+binding and returns `HEADLESS_APPLY_DENIED` before recording an apply approval
+or apply-requested event. Do not route around this with a different provider
+kind. Vulcan children, Gate 1 admission, live deployment, and active-repository
+effects remain separate gates.
+
 ## Runbook
 
 - `run list [--project <name>]` rediscovers persisted runs without exposing
