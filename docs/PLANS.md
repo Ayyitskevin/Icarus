@@ -200,6 +200,43 @@ human-gated lineage migration.
 - [ ] H4 remainder: fork, concurrency above one, remote-provider children,
       depth above one, model-initiated children, and child write-back.
 
+
+## Headless propose-only default and runaway envelopes candidate
+
+Status: locally implemented under proposed ADR 0060. The full local gate ran
+green; one non-author review remains open.
+
+Decision: `run approve-headless` proposes by default (`worker.mutation`
+absent means `"propose"`; `"apply"` is the explicit approve-and-run opt-in).
+The worker stops after durable patch-set intent, proves quiescence, and
+settles `icarus.headless.worker-proposal.v1` with exit 10 and the exact
+patch-set digest. `run apply-headless RUN --patchset-sha SHA --actor ACTOR`
+is the only application path: it re-proves the run, requires the flag to
+equal the durable patch-set digest, records an `apply` approval in the
+ordinary approvals pipeline plus one apply-intent event, and settles
+`icarus.headless.worker-application.v1`. `--max-turns` and `--max-budget-usd`
+narrow the active envelope per invocation, and a deterministic doom-loop
+guard lands the third identical session tool call as `session.exhausted`.
+
+- [x] Add the optional `worker.mutation` profile field with digest-stable
+      absent semantics and the propose-only stop before materialization.
+- [x] Add the proposal settlement schema, apply intent, application
+      settlement, and the one-intent/two-settlement lifecycle grammar for the
+      apply epoch, with crashed-apply closure through the unchanged H3a path.
+- [x] Record the digest-bound `apply` approval in the existing approvals
+      pipeline and refuse mismatched flags before any effect.
+- [x] Add `--max-turns` and `--max-budget-usd` narrowing clamps and the
+      uniform doom-loop guard with exit-2 exhaustion semantics.
+- [x] Compose with the ADR 0061 stream surface: `apply-headless` takes
+      `--output-format history|stream-json` and the applied run emits the
+      receipt-bound NDJSON stream.
+- [x] Define and document exit codes: 0 complete, 2 envelope, 3 human,
+      10 proposed, 1 failed, 130 cancelled; refusals exit 1 pre-effect.
+- [x] Prove with CLI fixtures: propose-only default, wrong-digest refusal
+      with zero approvals, exact-digest apply, byte-identical double apply,
+      resume-headless refusal in propose mode, turns clamp, and doom loop.
+- [ ] Obtain one non-author round-table review of the candidate.
+
 ## Headless receipt event-stream candidate (ADR 0061)
 
 Status: locally implemented under proposed ADR 0061. The focused unit and

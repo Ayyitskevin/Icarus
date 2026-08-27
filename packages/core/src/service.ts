@@ -42,14 +42,21 @@ import {
 import {
   type ActiveHeadlessExecutionV1,
   assertHeadlessWorkerBudgetAvailable,
+  createAppliedHeadlessWorkerSettlementV1,
   createContinuedHeadlessWorkerSettlementV1,
   createInterruptedHeadlessWorkerSettlementV1,
   createHeadlessWorkerSettlementV1,
+  createProposedHeadlessWorkerSettlementV1,
+  HEADLESS_WORKER_APPLICATION_SCHEMA,
   HEADLESS_WORKER_CONTINUATION_SCHEMA,
+  HEADLESS_WORKER_INTERRUPTION_SCHEMA,
+  HEADLESS_WORKER_PROPOSAL_SCHEMA,
   HEADLESS_WORKER_RESUME_SCHEMA,
   HEADLESS_WORKER_SCHEMA,
+  type HeadlessRunEnvelopeV1,
   type HeadlessWorkerExecutionV1,
   type HeadlessWorkerReconciliationV1,
+  headlessPatchSetDigestV1,
   headlessWorkerOutcomeForEvidenceV1,
   inspectHeadlessWorkerLifecycleV1,
 } from "./headless-worker.js";
@@ -123,7 +130,12 @@ import { asIcarusError, boundedSignal } from "./service-support.js";
 import { resolveReadableManifest } from "./read-manifest.js";
 import { sanitizeText } from "./redaction.js";
 import type { CheckRunner } from "./sandbox.js";
-import { renderToolFailure, runSessionLoop, TOOL_CALL_SCHEMA } from "./session-loop.js";
+import {
+  renderToolFailure,
+  runSessionLoop,
+  type SessionOutcome,
+  TOOL_CALL_SCHEMA,
+} from "./session-loop.js";
 import type { BrowserActionAuthoritySnapshot, IcarusStore } from "./store.js";
 import { SESSION_ITERATION_OPERATION_KIND } from "./store.js";
 import {
@@ -1296,6 +1308,7 @@ export class IcarusService {
     profile: unknown,
     providerProfiles: readonly HeadlessHostProviderProfileV1[],
     signal?: AbortSignal,
+    envelope?: HeadlessRunEnvelopeV1,
   ): Promise<HeadlessWorkerExecutionV1> {
     return this.#leases.withLease(runId, () =>
       this.#approveHeadlessPlanUnleased(
@@ -1305,8 +1318,187 @@ export class IcarusService {
         profile,
         providerProfiles,
         signal,
+        envelope,
       ),
     );
+  }
+
+  /**
+   * ADR 0060 digest-bound application: admits only a proposed (or
+   * crash-interrupted, fully re-proven) headless run, requires the flag to
+   * equal the durable patch-set digest, records the apply approval and
+   * intent, re-drives from the boundary, and settles the application epoch.
+   */
+  async applyHeadlessProposal(
+    runId: string,
+    patchSetSha256: string,
+    actor: string,
+    envelope?: HeadlessRunEnvelopeV1,
+    signal?: AbortSignal,
+  ): Promise<HeadlessWorkerReconciliationV1> {
+    return this.#leases.withLease(runId, async () => {
+      const lifecycle = inspectHeadlessWorkerLifecycleV1(runId, this.#store.listEvents(runId));
+      invariant(
+        lifecycle.status !== "absent",
+        "MISSING_HEADLESS_WORKER",
+        "Headless worker never started",
+      );
+      if (lifecycle.status === "started") {
+        throw new IcarusError(
+          "HEADLESS_WORKER_RECONCILIATION_REQUIRED",
+          "Reconcile the interrupted headless worker before application",
+        );
+      }
+      const first = lifecycle.settlement;
+      if (
+        first.schema === HEADLESS_WORKER_SCHEMA ||
+        first.schema === HEADLESS_WORKER_CONTINUATION_SCHEMA ||
+        first.schema === HEADLESS_WORKER_APPLICATION_SCHEMA
+      ) {
+        return { settlement: first, run: this.#store.getRun(runId) };
+      }
+      if (
+        lifecycle.interruptedSettlement !== null ||
+        this.#store
+          .listEvents(runId)
+          .some((event) => event.type === "headless.worker.apply_requested")
+      ) {
+        throw new IcarusError(
+          "HEADLESS_APPLY_EXHAUSTED",
+          "Headless worker application was already attempted and closed",
+        );
+      }
+      const history = this.#store.getRunHistory(runId);
+      const run = history.run;
+      const { evidence, binding } = reconstructHeadlessContinuationV1({
+        run,
+        project: this.#store.getProject(run.projectId),
+        approvals: history.approvals,
+        events: history.events,
+        readableManifest: this.#store.readableManifest(runId),
+      });
+      const mode = binding.resolution.profile.worker.mutation ?? "propose";
+      invariant(
+        mode === "propose",
+        "HEADLESS_APPLY_DENIED",
+        "Apply-mode workers do not take the digest-bound apply act",
+      );
+      if (first.schema === HEADLESS_WORKER_INTERRUPTION_SCHEMA) {
+        // The crash path takes the full ADR 0058 admission before any apply.
+        assertHeadlessContinuationReplaySafeV1(evidence, run);
+        invariant(
+          (binding.resolution.profile.children ?? []).length === 0,
+          "HEADLESS_CONTINUATION_DENIED",
+          "Headless application of child-bearing workers after a crash is a later slice",
+        );
+      }
+      const recomputed = headlessPatchSetDigestV1(this.#store.listCheckpointFiles(runId));
+      invariant(
+        recomputed === patchSetSha256,
+        "HEADLESS_APPLY_DENIED",
+        "Patch-set flag does not match the persisted proposal",
+      );
+      if (first.schema === HEADLESS_WORKER_PROPOSAL_SCHEMA) {
+        invariant(
+          first.proposal.patchSetSha256 === recomputed,
+          "HEADLESS_WORKER_IDENTITY_CHANGED",
+          "Persisted proposal digest no longer matches the durable patch set",
+        );
+      }
+
+      const { iterationCeiling: _iterationCeiling, ...baseCeiling } =
+        binding.resolution.profile.budgets;
+      const iterationCeiling = Math.min(
+        binding.resolution.profile.budgets.iterationCeiling,
+        envelope?.maxTurns ?? binding.resolution.profile.budgets.iterationCeiling,
+      );
+      const ceiling = {
+        ...baseCeiling,
+        maxCostUsd: Math.min(
+          baseCeiling.maxCostUsd,
+          envelope?.maxBudgetUsd ?? baseCeiling.maxCostUsd,
+        ),
+      };
+      assertHeadlessWorkerBudgetAvailable(run, ceiling);
+      this.#store.recordHeadlessWorkerApplyRequested(
+        runId,
+        {
+          schema: "icarus.headless.worker-apply.v1",
+          runId,
+          bindingDigestSha256: binding.bindingDigestSha256,
+          patchSetSha256: recomputed,
+          startedEventSequence: evidence.startedEventSequence,
+        },
+        actor,
+      );
+      const intentEvents = this.#store.listEvents(runId);
+      const applyEvent = intentEvents.find(
+        (event) => event.type === "headless.worker.apply_requested",
+      );
+      const proposalEvent = intentEvents.find((event) => event.type === "headless.worker.settled");
+      invariant(
+        applyEvent !== undefined && proposalEvent !== undefined,
+        "DATABASE_ERROR",
+        "Headless worker apply intent was not persisted",
+      );
+
+      const active: ActiveHeadlessExecutionV1 = {
+        binding,
+        ceiling,
+        toolIds: new Set(binding.resolution.profile.toolIds),
+        iterationCeiling,
+      };
+      this.#headlessExecutionContexts.set(runId, active);
+      try {
+        const current = this.#store.getRun(runId);
+        invariant(
+          current.state === "running",
+          "HEADLESS_APPLY_DENIED",
+          "Headless application requires a running run",
+        );
+        try {
+          await this.#guarded(
+            runId,
+            "running",
+            () => this.#execute(runId, signal, "apply"),
+            signal,
+          );
+        } catch {
+          // #guarded has already persisted the failed run; settlement below is authoritative.
+        }
+        const childSpecs = binding.resolution.profile.children ?? [];
+        if (childSpecs.length > 0) {
+          const candidate = this.#store.getRun(runId);
+          const parentReady =
+            headlessWorkerOutcomeForEvidenceV1(
+              candidate.state,
+              candidate.verification?.outcome ?? null,
+              this.#store.listEvents(runId),
+            ).outcome === "review_ready";
+          if (parentReady) {
+            await this.#runHeadlessChildren(runId, binding, childSpecs, signal);
+          }
+        }
+        const settledRun = this.#store.getRun(runId);
+        const fallbackError =
+          settledRun.lastError === null
+            ? null
+            : { code: settledRun.lastError.code, message: settledRun.lastError.message };
+        const settlement = createAppliedHeadlessWorkerSettlementV1({
+          binding,
+          run: settledRun,
+          events: this.#store.listEvents(runId),
+          applyEventSequence: applyEvent.sequence,
+          proposalSettlementSequence: proposalEvent.sequence,
+          patchSetSha256: recomputed,
+          error: fallbackError,
+        });
+        this.#store.recordHeadlessWorkerApplicationSettled(runId, settlement);
+        return { settlement, run: this.#store.getRun(runId) };
+      } finally {
+        this.#headlessExecutionContexts.delete(runId);
+      }
+    });
   }
 
   async reconcileHeadlessWorker(runId: string): Promise<HeadlessWorkerReconciliationV1> {
@@ -1407,7 +1599,12 @@ export class IcarusService {
         "HEADLESS_CONTINUATION_DENIED",
         "Headless continuation of child-bearing workers is a later slice",
       );
-      const { iterationCeiling: _iterationCeiling, ...ceiling } =
+      invariant(
+        (binding.resolution.profile.worker.mutation ?? "propose") === "apply",
+        "HEADLESS_CONTINUATION_DENIED",
+        "Proposed workers apply through run apply-headless, not resume-headless",
+      );
+      const { iterationCeiling: profileIterationCeiling, ...ceiling } =
         binding.resolution.profile.budgets;
       assertHeadlessWorkerBudgetAvailable(run, ceiling);
       this.#store.recordHeadlessWorkerResumeRequested(runId, {
@@ -1434,6 +1631,7 @@ export class IcarusService {
         binding,
         ceiling,
         toolIds: new Set(binding.resolution.profile.toolIds),
+        iterationCeiling: profileIterationCeiling,
       };
       this.#headlessExecutionContexts.set(runId, active);
       try {
@@ -1594,6 +1792,7 @@ export class IcarusService {
     profile: unknown,
     providerProfiles: readonly HeadlessHostProviderProfileV1[],
     signal: AbortSignal | undefined,
+    envelope?: HeadlessRunEnvelopeV1,
   ): Promise<HeadlessWorkerExecutionV1> {
     const cancelled = await this.#validatePlanApproval(runId, planSha256, actor, signal);
     if (cancelled !== null) {
@@ -1632,20 +1831,49 @@ export class IcarusService {
       throw failure;
     }
 
-    const { iterationCeiling: _iterationCeiling, ...ceiling } = binding.resolution.profile.budgets;
+    const { iterationCeiling: profileIterationCeiling, ...baseCeiling } =
+      binding.resolution.profile.budgets;
+    const iterationCeiling = Math.min(
+      profileIterationCeiling,
+      envelope?.maxTurns ?? profileIterationCeiling,
+    );
+    const ceiling = {
+      ...baseCeiling,
+      maxCostUsd: Math.min(
+        baseCeiling.maxCostUsd,
+        envelope?.maxBudgetUsd ?? baseCeiling.maxCostUsd,
+      ),
+    };
     const active: ActiveHeadlessExecutionV1 = {
       binding,
       ceiling,
       toolIds: new Set(binding.resolution.profile.toolIds),
+      iterationCeiling,
     };
     assertHeadlessWorkerBudgetAvailable(this.#store.getRun(runId), ceiling);
     this.#store.recordHeadlessWorkerStarted(runId, binding);
     this.#headlessExecutionContexts.set(runId, active);
+    const mutation = binding.resolution.profile.worker.mutation ?? "propose";
     try {
       try {
-        await this.#guarded(runId, "running", () => this.#execute(runId, signal), signal);
+        await this.#guarded(runId, "running", () => this.#execute(runId, signal, mutation), signal);
       } catch {
         // #guarded has already persisted the failed run; settlement below is authoritative.
+      }
+      if (mutation === "propose") {
+        const proposed = this.#store.getRun(runId);
+        if (proposed.state === "running" && proposed.patchSet !== null) {
+          const settlement = createProposedHeadlessWorkerSettlementV1({
+            binding,
+            run: proposed,
+            events: this.#store.listEvents(runId),
+            patchSetSha256: headlessPatchSetDigestV1(this.#store.listCheckpointFiles(runId)),
+          });
+          this.#store.recordHeadlessWorkerSettled(runId, settlement);
+          return { binding, settlement, run: this.#store.getRun(runId) };
+        }
+        // A failed or cancelled first epoch never reached the proposal
+        // boundary; it settles with the ordinary non-success outcome below.
       }
       const childSpecs = binding.resolution.profile.children ?? [];
       if (childSpecs.length > 0) {
@@ -1822,11 +2050,12 @@ export class IcarusService {
           },
         ],
       });
-      const { iterationCeiling: _iterationCeiling, ...ceiling } = childProfile.budgets;
+      const { iterationCeiling: childIterationCeiling, ...ceiling } = childProfile.budgets;
       const active: ActiveHeadlessExecutionV1 = {
         binding: childBinding,
         ceiling,
         toolIds: new Set(childProfile.toolIds),
+        iterationCeiling: childIterationCeiling,
       };
       assertHeadlessWorkerBudgetAvailable(childRun, ceiling);
       this.#store.recordHeadlessWorkerStarted(draft.id, childBinding);
@@ -2626,7 +2855,11 @@ export class IcarusService {
     );
   }
 
-  async #execute(runId: string, signal?: AbortSignal): Promise<RunRecord> {
+  async #execute(
+    runId: string,
+    signal?: AbortSignal,
+    mutation: "propose" | "apply" = "apply",
+  ): Promise<RunRecord> {
     let run = this.#store.getRun(runId);
     invariant(run.state === "running", "INVALID_STATE", "Run is not executing");
     invariant(
@@ -2798,6 +3031,11 @@ export class IcarusService {
       run = this.#store.recordPatchSetIntent(runId, patchSet, files);
       if (this.#instrumentation.afterPatchSetIntent !== undefined) {
         await this.#instrumentation.afterPatchSetIntent(runId);
+      }
+      if (mutation === "propose") {
+        // ADR 0060: the propose-only stop. Patch-set intent is durable and
+        // quiescent; nothing materializes until the digest-bound apply act.
+        return this.#store.getRun(runId);
       }
     }
 
@@ -3437,57 +3675,90 @@ export class IcarusService {
       },
     };
     const activeHeadless = this.#activeHeadlessExecution(runId);
+    // ADR 0060 doom-loop guard: deterministic, over the canonical call digest.
+    const admittedCallDigests = new Map<string, number>();
 
-    const outcome = await runSessionLoop(
-      {
-        initialEvidence: this.#durableSessionEvidence(runId),
-        iterationCeiling: Math.min(
-          plan.iterationCeiling,
-          activeHeadless?.binding.resolution.profile.budgets.iterationCeiling ??
+    let outcome: SessionOutcome;
+    try {
+      outcome = await runSessionLoop(
+        {
+          initialEvidence: this.#durableSessionEvidence(runId),
+          iterationCeiling: Math.min(
+            plan.iterationCeiling,
+            activeHeadless?.iterationCeiling ?? MAX_SESSION_ITERATIONS,
             MAX_SESSION_ITERATIONS,
-          MAX_SESSION_ITERATIONS,
-        ),
-        spentIterations: () => this.#store.countSessionIterations(runId),
-        callProvider: async (prompt) => {
-          assertNoProviderSecretFields([prompt]);
-          const text = await this.#providerCall(
-            runId,
-            SESSION_ITERATION_OPERATION_KIND,
-            {
-              schemaName: "icarus_session_tools",
-              schema: TOOL_CALL_SCHEMA,
-              instructions: SESSION_INSTRUCTIONS,
-              input: prompt,
-              maxOutputTokens: project.ceiling.maxOutputTokensPerCall,
-              timeoutMs: project.ceiling.providerTimeoutMs,
-            },
-            signal,
-            true,
-          );
-          return parseProviderJson(text, project.ceiling.maxContextBytes);
-        },
-        toolContext,
-        ...(activeHeadless === null ? {} : { enabledTools: activeHeadless.toolIds }),
-        callsSoFar: (kind) =>
-          this.#store.countOperationsByKind(runId, sessionCapabilityOperationKind(kind)),
-        invokeTool: async (call, action) => {
-          try {
-            return await this.#runSessionToolOperation(runId, call, signal, action, () => {
-              const settlement = pendingSettlement;
+          ),
+          spentIterations: () => this.#store.countSessionIterations(runId),
+          callProvider: async (prompt) => {
+            assertNoProviderSecretFields([prompt]);
+            const text = await this.#providerCall(
+              runId,
+              SESSION_ITERATION_OPERATION_KIND,
+              {
+                schemaName: "icarus_session_tools",
+                schema: TOOL_CALL_SCHEMA,
+                instructions: SESSION_INSTRUCTIONS,
+                input: prompt,
+                maxOutputTokens: project.ceiling.maxOutputTokensPerCall,
+                timeoutMs: project.ceiling.providerTimeoutMs,
+              },
+              signal,
+              true,
+            );
+            return parseProviderJson(text, project.ceiling.maxContextBytes);
+          },
+          toolContext,
+          ...(activeHeadless === null ? {} : { enabledTools: activeHeadless.toolIds }),
+          callsSoFar: (kind) =>
+            this.#store.countOperationsByKind(runId, sessionCapabilityOperationKind(kind)),
+          invokeTool: async (call, action) => {
+            // ADR 0060 doom-loop guard, scoped to effectful and control calls:
+            // read-only manifest/check tools are no_effect by construction
+            // (ADR 0057), so repeating them is bounded waste the grants cap.
+            const capability = toolDefinition(call.name).capability;
+            if (capability !== "read.manifest" && capability !== "read.checks") {
+              const callDigest = digestJson(asJsonValue(call));
+              const admitted = (admittedCallDigests.get(callDigest) ?? 0) + 1;
+              admittedCallDigests.set(callDigest, admitted);
+              if (admitted >= 3) {
+                throw new IcarusError(
+                  "HEADLESS_DOOM_LOOP",
+                  `Identical tool call ${call.name} admitted a third time`,
+                  { tool: call.name, callDigestSha256: callDigest },
+                );
+              }
+            }
+            try {
+              return await this.#runSessionToolOperation(runId, call, signal, action, () => {
+                const settlement = pendingSettlement;
+                pendingSettlement = null;
+                return settlement;
+              });
+            } finally {
               pendingSettlement = null;
-              return settlement;
-            });
-          } finally {
-            pendingSettlement = null;
-          }
+            }
+          },
+          completeIteration: (iterations) => {
+            this.#store.recordSessionIterationBoundary(runId, iterations);
+          },
         },
-        completeIteration: (iterations) => {
-          this.#store.recordSessionIterationBoundary(runId, iterations);
-        },
-      },
-      (evidence) => this.#renderSessionPrompt(runId, originalContext, evidence),
-      signal,
-    );
+        (evidence) => this.#renderSessionPrompt(runId, originalContext, evidence),
+        signal,
+      );
+    } catch (error) {
+      if (
+        error instanceof IcarusError &&
+        error.code === "HEADLESS_DOOM_LOOP" &&
+        typeof error.details.tool === "string" &&
+        typeof error.details.callDigestSha256 === "string"
+      ) {
+        return this.#store.recordSessionDoomLoop(runId, {
+          tool: error.details.tool,
+          callDigestSha256: error.details.callDigestSha256,
+        });
+      }
+      throw error;
+    }
 
     let current = this.#store.getRun(runId);
     if (current.state === "running" && current.patchSet !== null && current.verification === null) {

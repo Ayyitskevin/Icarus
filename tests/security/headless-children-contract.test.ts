@@ -91,7 +91,7 @@ describe("headless child security contract", () => {
       "async #approveHeadlessPlanUnleased(",
       "async #runHeadlessChildren(",
     );
-    const execute = approval.indexOf("this.#execute(runId, signal)");
+    const execute = approval.indexOf("this.#execute(runId, signal, mutation)");
     const childrenCall = approval.indexOf("this.#runHeadlessChildren(");
     const settlement = approval.indexOf("createHeadlessWorkerSettlementV1(");
     expect(execute).toBeGreaterThanOrEqual(0);

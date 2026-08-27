@@ -61,9 +61,7 @@ describe("headless continuation security contract", () => {
     expect(inspector).toContain(
       "Headless worker resume request must follow an interrupted settlement",
     );
-    expect(inspector).toContain(
-      "Headless worker continuation settlement exists without resume intent",
-    );
+    expect(inspector).toContain("Headless worker second settlement exists without epoch intent");
   });
 
   test("the store records resume intent only over a reconciled crash tail, exactly once", () => {

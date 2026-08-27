@@ -118,6 +118,7 @@ function childProfile(children: readonly Record<string, unknown>[]): Record<stri
       maxConcurrency: 1,
       childRuns: { maxDepth: 1, maxChildren: 2 },
       scheduledRuns: "deny",
+      mutation: "apply",
     },
     children,
   };
@@ -363,6 +364,7 @@ describe("headless isolated child runs", () => {
         maxConcurrency: 1,
         childRuns: "deny",
         scheduledRuns: "deny",
+        mutation: "apply",
       },
     };
     for (const profile of [widenedTarget, widenedTool, widenedBudget, deniedChildren]) {

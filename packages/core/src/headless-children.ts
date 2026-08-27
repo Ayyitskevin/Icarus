@@ -5,7 +5,7 @@ import type {
   HeadlessProfileBudgetsV1,
   HeadlessProfileV1,
 } from "./headless-profile.js";
-import type { HeadlessWorkerOutcomeV1 } from "./headless-worker.js";
+import type { HeadlessWorkerExitCodeV1, HeadlessWorkerOutcomeV1 } from "./headless-worker.js";
 import type { JsonValue, PlanProposal, RunRecord } from "./types.js";
 
 // H4 isolated child runs (ADR 0059). This module owns the pure child
@@ -40,7 +40,7 @@ export interface HeadlessChildSettlementV1 {
   readonly childId: string;
   readonly childRunId: string | null;
   readonly outcome: HeadlessWorkerOutcomeV1;
-  readonly exitCode: 0 | 1 | 2 | 3 | 130;
+  readonly exitCode: HeadlessWorkerExitCodeV1;
   readonly childBindingDigestSha256: string | null;
   readonly error: { readonly code: string; readonly message: string } | null;
 }
@@ -87,6 +87,10 @@ export function deriveHeadlessChildProfileV1(
       maxConcurrency: 1,
       childRuns: "deny",
       scheduledRuns: "deny",
+      // ADR 0060: a child's isolated write-set is already spec-bound, and the
+      // parent's proposal gate is the operator control point, so children
+      // always execute their admitted envelope.
+      mutation: "apply",
     },
   };
 }

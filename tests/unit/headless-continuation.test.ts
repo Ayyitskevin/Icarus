@@ -221,6 +221,7 @@ describe("headless continuation lifecycle grammar", () => {
         resumeEventSequence: 5,
         reconstructionDigestSha256: RECONSTRUCTION_DIGEST,
       },
+      applyRequest: null,
     });
   });
 
@@ -259,7 +260,7 @@ describe("headless continuation lifecycle grammar", () => {
   test("rejects resume intent without an interrupted settlement", () => {
     expect(() =>
       inspectHeadlessWorkerLifecycleV1(RUN_ID, [startedEvent(1), resumeRequest(2)]),
-    ).toThrowError(/without an interrupted settlement/);
+    ).toThrowError(/without a first settlement/);
     const ordinary = {
       schema: HEADLESS_WORKER_SCHEMA,
       runId: RUN_ID,
@@ -286,7 +287,7 @@ describe("headless continuation lifecycle grammar", () => {
       (candidate) => candidate.type !== "headless.worker.resume_requested",
     );
     expect(() => inspectHeadlessWorkerLifecycleV1(RUN_ID, withoutResume)).toThrowError(
-      /without resume intent/,
+      /without epoch intent/,
     );
     expect(() =>
       inspectHeadlessWorkerLifecycleV1(RUN_ID, [...events, events.at(-1) as EventRecord]),

@@ -234,7 +234,13 @@ async function spawnHeadlessWorker(
     toolIds: [],
     budgets: { ...DEFAULT_CEILING, iterationCeiling: 0 },
     output: { format: "jsonl" },
-    worker: { mode: "one_task", maxConcurrency: 1, childRuns: "deny", scheduledRuns: "deny" },
+    worker: {
+      mode: "one_task",
+      maxConcurrency: 1,
+      childRuns: "deny",
+      scheduledRuns: "deny",
+      mutation: "apply",
+    },
   };
   const catalog = [
     {
