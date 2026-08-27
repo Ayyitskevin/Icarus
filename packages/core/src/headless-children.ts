@@ -39,13 +39,34 @@ export interface HeadlessChildSettlementV1 {
   readonly runId: string;
   readonly childId: string;
   readonly childRunId: string | null;
-  readonly outcome: HeadlessWorkerOutcomeV1;
+  readonly outcome: Exclude<HeadlessWorkerOutcomeV1, "proposed">;
   readonly exitCode: HeadlessWorkerExitCodeV1;
   readonly childBindingDigestSha256: string | null;
   readonly error: { readonly code: string; readonly message: string } | null;
 }
 
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
+const RUN_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+const CHILD_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const CHILD_SETTLEMENT_MEMBERS = [
+  "childBindingDigestSha256",
+  "childId",
+  "childRunId",
+  "error",
+  "exitCode",
+  "outcome",
+  "runId",
+  "schema",
+] as const;
+const CHILD_EXIT_CODES = {
+  review_ready: 0,
+  failed: 1,
+  exhausted: 2,
+  awaiting_human: 3,
+  cancelled: 130,
+} as const satisfies Readonly<
+  Record<HeadlessChildSettlementV1["outcome"], HeadlessWorkerExitCodeV1>
+>;
 
 function denied(message: string): never {
   invariant(false, "HEADLESS_CHILD_DENIED", message);
@@ -191,12 +212,75 @@ export function headlessChildLinkPayload(link: HeadlessChildLinkV1): JsonValue {
 }
 
 export function headlessChildSettlementPayload(record: HeadlessChildSettlementV1): JsonValue {
+  return json(decodeHeadlessChildSettlementV1(json(record), record.runId));
+}
+
+/** Strict reader for a child settlement projected from durable event history. */
+export function decodeHeadlessChildSettlementV1(
+  value: JsonValue,
+  expectedRunId: string,
+): HeadlessChildSettlementV1 {
   invariant(
-    record.schema === HEADLESS_CHILD_SETTLEMENT_SCHEMA &&
-      (record.childBindingDigestSha256 === null ||
-        DIGEST_PATTERN.test(record.childBindingDigestSha256)),
+    typeof value === "object" && value !== null && !Array.isArray(value),
     "INVALID_HEADLESS_CHILD",
     "Headless child settlement is malformed",
   );
-  return json(record);
+  const actualMembers = Object.keys(value).sort();
+  const expectedMembers = [...CHILD_SETTLEMENT_MEMBERS].sort();
+  invariant(
+    actualMembers.length === expectedMembers.length &&
+      actualMembers.every((member, index) => member === expectedMembers[index]),
+    "INVALID_HEADLESS_CHILD",
+    "Headless child settlement members are malformed",
+  );
+  const { schema, runId, childId, childRunId, outcome, exitCode, childBindingDigestSha256, error } =
+    value;
+  const childOutcome = outcome as HeadlessChildSettlementV1["outcome"];
+  invariant(
+    schema === HEADLESS_CHILD_SETTLEMENT_SCHEMA &&
+      runId === expectedRunId &&
+      typeof childId === "string" &&
+      CHILD_ID_PATTERN.test(childId) &&
+      (childRunId === null ||
+        (typeof childRunId === "string" && RUN_ID_PATTERN.test(childRunId))) &&
+      typeof outcome === "string" &&
+      Object.hasOwn(CHILD_EXIT_CODES, outcome) &&
+      exitCode === CHILD_EXIT_CODES[childOutcome] &&
+      (childBindingDigestSha256 === null ||
+        (typeof childBindingDigestSha256 === "string" &&
+          DIGEST_PATTERN.test(childBindingDigestSha256))),
+    "INVALID_HEADLESS_CHILD",
+    "Headless child settlement is malformed",
+  );
+  invariant(
+    error === null ||
+      (typeof error === "object" &&
+        !Array.isArray(error) &&
+        Object.keys(error).length === 2 &&
+        typeof error.code === "string" &&
+        /^[A-Z0-9_]{2,128}$/.test(error.code) &&
+        typeof error.message === "string" &&
+        error.message.length > 0),
+    "INVALID_HEADLESS_CHILD",
+    "Headless child settlement error is malformed",
+  );
+  const childWasSpawned = childRunId !== null;
+  invariant(
+    childWasSpawned === (childBindingDigestSha256 !== null) &&
+      (outcome !== "review_ready" || (childWasSpawned && error === null)) &&
+      (outcome !== "failed" || error !== null) &&
+      (childWasSpawned || (outcome === "failed" && error !== null)),
+    "INVALID_HEADLESS_CHILD",
+    "Headless child settlement evidence is contradictory",
+  );
+  return {
+    schema: HEADLESS_CHILD_SETTLEMENT_SCHEMA,
+    runId: expectedRunId,
+    childId,
+    childRunId,
+    outcome: childOutcome,
+    exitCode: exitCode as HeadlessWorkerExitCodeV1,
+    childBindingDigestSha256,
+    error: error as HeadlessChildSettlementV1["error"],
+  };
 }

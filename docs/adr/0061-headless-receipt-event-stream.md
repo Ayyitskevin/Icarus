@@ -84,6 +84,24 @@ projected event resolves back to the exact authoritative record it was
 derived from. Event types outside the curated set remain available through
 the unchanged H0 export; the stream is a projection, not a replay.
 
+Receipt projection replays the lifecycle grammar before it emits any line.
+Worker evidence must pass `inspectHeadlessWorkerLifecycleV1`, including start
+schema/run/binding identity, exact settlement membership, closed schema/
+outcome/exit-code combinations, epoch cardinality, ordering, and quiescence;
+the projection separately requires the start fields it emits. Child settlements
+pass their own strict decoder, including exact members, parent and child
+identities (including canonical UUID child-run identity), closed outcome/
+exit-code combinations, digest and error shape, spawned-evidence consistency,
+parent-worker ordering, unique child/run identity, and the operator-declared
+child order from the worker-start record. The settled children may be only a
+prefix while a run remains in progress, and no settlement may follow a failed
+child. Parent-worker ordering is epoch-aware: apply-mode children precede the
+first settlement, while proposal-mode children follow the durable apply intent
+and precede the application settlement; child-bearing resume evidence is
+refused because that continuation remains explicitly unsupported. A malformed
+receipt is therefore refused as `INVALID_HEADLESS_STREAM`; the presentation
+layer never treats arbitrary event payload strings as a valid settlement.
+
 The stream is wired as an opt-in output mode, default unchanged:
 
 ```text
@@ -117,8 +135,9 @@ execution effect, never after settlement. Exit-code semantics are unchanged:
   partially widening a consumer that cannot validate the surrounding worker
   grammar.
 - Malformed or drifting history (foreign run identity, broken sequence,
-  unbindable patch-set digests, malformed payloads) fails closed rather than
-  projecting a stream that contradicts the durable record.
+  unbindable patch-set digests, invalid worker lifecycle, malformed child
+  settlement, or malformed payloads) fails closed rather than projecting a
+  stream that contradicts the durable record.
 
 ## Alternatives rejected
 
