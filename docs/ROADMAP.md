@@ -36,6 +36,15 @@ unchanged through [PR #65](https://github.com/Ayyitskevin/Icarus/pull/65) as
 digest so future field or canonicalization drift cannot hide behind relative
 repeatability. This does not widen any continuation or deployment boundary.
 
+A 2026-08-27 cold review of ADR 0061 found that the stream projection copied
+settlement fields without first replaying the worker/child lifecycle grammar.
+The local remediation now fails closed on malformed receipt identity, schema,
+membership, outcome/exit pairing, ordering, and cardinality; its refreshed full
+local gate passes, and two independent exact-snapshot reviews returned PASS
+with no blocker, high, or medium finding. The same review also found that the
+workspace planning UI omits the API's supported Vulcan provider choice; that
+is a separate product slice and is not absorbed into this security remediation.
+
 DeepSeek Harness is a reference implementation and optional benchmark worker, not a replacement or default dependency. The full comparison and exit gates are in [`DEEPSEEK_HARNESS_COMPARISON.md`](DEEPSEEK_HARNESS_COMPARISON.md). This shift does not absorb Gate 1 remote-mutation work or authorize a Mickey deployment.
 
 Gate C2 begins only after Gates 1–3 and the read-only Council evidence. It pulls

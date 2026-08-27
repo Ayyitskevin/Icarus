@@ -2085,6 +2085,11 @@ export class IcarusService {
           events: this.#store.listEvents(draft.id),
           error: fallbackError,
         });
+        invariant(
+          childSettlement.outcome !== "proposed",
+          "INVALID_HEADLESS_CHILD",
+          "An apply-mode child cannot settle as proposed",
+        );
         this.#store.recordHeadlessWorkerSettled(draft.id, childSettlement);
         return {
           childRunId: draft.id,

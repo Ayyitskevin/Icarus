@@ -55,11 +55,12 @@ repository and prospective state path untouched.
 
 ## Landlock sandbox profiles (ADR 0062)
 
-Headless worker execution (`run approve-headless`, `run resume-headless`)
-runs beneath a kernel-enforced Landlock ruleset as a second layer below the
-grant pipeline: grants remain the policy layer that refuses violations, and
-the profile makes whole classes of violation impossible. The CLI re-executes
-itself under a small helper compiled fresh on every run
+Headless worker execution (`run approve-headless`, `run apply-headless`, and
+`run resume-headless`) runs beneath a kernel-enforced Landlock ruleset as a
+second layer below the grant pipeline: grants remain the policy layer that
+refuses violations, and the profile makes whole classes of violation
+impossible. The CLI re-executes itself under a small helper compiled fresh on
+every run
 (`packages/core/native/landlock-sandbox.c`, host C compiler, no other
 dependencies) before the runtime exists; the domain is one-way and inherited
 across exec and fork, so everything the run spawns stays confined.

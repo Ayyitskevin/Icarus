@@ -46,10 +46,10 @@ Three constraints shape the design:
 Three named profiles map to Landlock filesystem rulesets, applied by
 re-executing the CLI under a small compiled helper before the runtime
 exists. `run approve-headless` and `run resume-headless` accept
-`--sandbox-profile workspace|read-only|strict|off`, defaulting to
-`workspace` (overridable via `ICARUS_SANDBOX_PROFILE`). Reconciliation
-and reconstruction commands execute no tool actions and stay
-unsandboxed.
+`--sandbox-profile workspace|read-only|strict|off`; `run apply-headless`
+accepts the same option for the application epoch. All three default to
+`workspace` (overridable via `ICARUS_SANDBOX_PROFILE`). Reconciliation and
+reconstruction commands execute no tool actions and stay unsandboxed.
 
 - `workspace` (default): read-write beneath the Icarus state root;
   read-only beneath `/`. A run can never write outside Icarus state —

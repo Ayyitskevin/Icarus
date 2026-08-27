@@ -239,9 +239,12 @@ guard lands the third identical session tool call as `session.exhausted`.
 
 ## Headless receipt event-stream candidate (ADR 0061)
 
-Status: locally implemented under proposed ADR 0061. The focused unit and
-integration suites pass; the full local gate and one non-author review
-remain open.
+Status: locally implemented under proposed ADR 0061. A 2026-08-27 cold review
+found that receipt projection trusted settlement fields without replaying the
+worker/child lifecycle grammar. The remediation now validates both grammars
+before projection and passes its focused adversarial corpus and refreshed full
+local gate; two independent exact-snapshot reviews returned PASS with no
+remaining blocker, high, or medium finding.
 
 Decision: emit a typed `icarus.headless.stream.v1` NDJSON event stream as a
 pure projection of the existing SQLite run history snapshot — the same
@@ -266,10 +269,22 @@ fails closed with `INVALID_HEADLESS_STREAM`.
       receipts, malformed-history refusals) and CLI integration cases
       (deterministic checksum-terminated stream, receipt-bound
       approve-headless output, unchanged default H0 trajectory).
+- [x] Replay the strict worker lifecycle and child settlement grammars before
+      receipt projection; refuse unknown schemas/outcomes, mismatched exits,
+      foreign/noncanonical identities, undeclared children, malformed members/
+      digests/errors, invalid worker or child ordering/cardinality, and
+      contradictory spawned evidence as `INVALID_HEADLESS_STREAM` (2026-08-27 local
+      remediation; [evaluation](evals/2026-08-27-headless-stream-lifecycle-validation.md)).
 - [x] Run the full local gate: 1,158 unit/provider, 186 integration, and 227
       security tests passed; eval passed with three Gate 1 live-evidence
       cases explicitly not run (`pnpm check` exit 0).
-- [ ] Obtain one non-author round-table review of the stream candidate.
+- [x] Refresh the full local gate at the lifecycle-validation candidate head:
+      1,224 unit/provider, 202 integration, and 235 security tests passed; 7
+      supported evaluations passed with 3 live-evidence cases explicitly not
+      run; production builds completed (`pnpm check`, 2026-08-27).
+- [x] Obtain non-author round-table review of the stream candidate; independent
+      specification and standards reviews returned PASS after their findings
+      were reproduced and closed with permanent regression cases (2026-08-27).
 
 ## Landlock sandbox profiles candidate
 
@@ -289,8 +304,9 @@ hosts degrade to a documented no-op with one canonical stderr notice.
       (`packages/core/native/landlock-sandbox.c`), exactly once, with
       `ICARUS_LANDLOCK_APPLIED` and a confined `TMPDIR`.
 - [x] Wire `--sandbox-profile workspace|read-only|strict|off` on
-      `run approve-headless` and `run resume-headless` with the conservative
-      `workspace` default; grant pipeline semantics unchanged.
+      `run approve-headless`, `run apply-headless`, and `run resume-headless`
+      with the conservative `workspace` default; grant pipeline semantics
+      unchanged.
 - [x] Prove kernel enforcement (write confinement, read allowlist, meta
       lifecycle, SQLite WAL survival) and a full headless run settling
       review-ready under `strict`; skip guarded off supported hosts.

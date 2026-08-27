@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 
 import { canonicalJsonLine } from "./canonical-json.js";
 import { digestJson } from "./digest.js";
-import { invariant } from "./errors.js";
+import { IcarusError, invariant } from "./errors.js";
+import {
+  decodeHeadlessChildSettlementV1,
+  type HeadlessChildSettlementV1,
+} from "./headless-children.js";
+import { inspectHeadlessWorkerLifecycleV1 } from "./headless-worker.js";
 import type {
   ApprovalRecord,
   CapabilityGrant,
@@ -251,6 +256,7 @@ function checkEntries(payload: Readonly<Record<string, JsonValue>>): {
 function receiptFields(
   payload: Readonly<Record<string, JsonValue>>,
   child: boolean,
+  runId: string,
 ): {
   readonly settlementSchema: string;
   readonly outcome: string;
@@ -269,21 +275,13 @@ function receiptFields(
     `${label} is malformed`,
   );
   if (child) {
-    const { childBindingDigestSha256, childRunId } = payload;
-    invariant(
-      (childBindingDigestSha256 === null ||
-        (typeof childBindingDigestSha256 === "string" &&
-          DIGEST_PATTERN.test(childBindingDigestSha256))) &&
-        (childRunId === null || typeof childRunId === "string"),
-      "INVALID_HEADLESS_STREAM",
-      "Child settlement is malformed",
-    );
+    const settlement = childSettlementForStream(payload, runId);
     return {
-      settlementSchema: schema,
-      outcome,
-      exitCode,
-      bindingDigestSha256: childBindingDigestSha256,
-      childRunId,
+      settlementSchema: settlement.schema,
+      outcome: settlement.outcome,
+      exitCode: settlement.exitCode,
+      bindingDigestSha256: settlement.childBindingDigestSha256,
+      childRunId: settlement.childRunId,
     };
   }
   return {
@@ -293,6 +291,131 @@ function receiptFields(
     bindingDigestSha256: payloadDigest(payload, "bindingDigestSha256", label),
     childRunId: null,
   };
+}
+
+function childSettlementForStream(
+  payload: Readonly<Record<string, JsonValue>>,
+  runId: string,
+): HeadlessChildSettlementV1 {
+  try {
+    return decodeHeadlessChildSettlementV1(payload, runId);
+  } catch (error) {
+    if (error instanceof IcarusError) {
+      throw new IcarusError(
+        "INVALID_HEADLESS_STREAM",
+        `Child settlement is malformed: ${error.message}`,
+      );
+    }
+    throw error;
+  }
+}
+
+function assertValidWorkerLifecycle(runId: string, events: readonly EventRecord[]): void {
+  try {
+    inspectHeadlessWorkerLifecycleV1(runId, events);
+  } catch (error) {
+    if (error instanceof IcarusError) {
+      throw new IcarusError(
+        "INVALID_HEADLESS_STREAM",
+        `Headless worker lifecycle is malformed: ${error.message}`,
+      );
+    }
+    throw error;
+  }
+}
+
+function assertValidChildLifecycle(runId: string, events: readonly EventRecord[]): void {
+  const childEvents = events.filter((event) => event.type === "headless.child.settled");
+
+  const started = events.find((event) => event.type === "headless.worker.started");
+  const startedPayload =
+    started === undefined ? null : eventPayload(started, "Headless worker start");
+  const declaredChildren = startedPayload?.children;
+  if (childEvents.length === 0 && declaredChildren === undefined) return;
+  invariant(
+    Array.isArray(declaredChildren),
+    "INVALID_HEADLESS_STREAM",
+    "Headless child settlement lacks its worker-start declaration",
+  );
+  const declaredChildIds = declaredChildren.map((entry) => {
+    invariant(
+      typeof entry === "object" &&
+        entry !== null &&
+        !Array.isArray(entry) &&
+        typeof entry.childId === "string",
+      "INVALID_HEADLESS_STREAM",
+      "Headless worker child declaration is malformed",
+    );
+    return entry.childId;
+  });
+  invariant(
+    new Set(declaredChildIds).size === declaredChildIds.length,
+    "INVALID_HEADLESS_STREAM",
+    "Headless worker child declaration identity is duplicated",
+  );
+  if (declaredChildIds.length === 0 && childEvents.length === 0) return;
+  const workerSettlements = events.filter((event) => event.type === "headless.worker.settled");
+  const firstWorkerSettlement = workerSettlements[0];
+  const secondWorkerSettlement = workerSettlements[1];
+  const applyRequest = events.find((event) => event.type === "headless.worker.apply_requested");
+  const resumeRequest = events.find((event) => event.type === "headless.worker.resume_requested");
+  const firstSettlementSchema =
+    firstWorkerSettlement === undefined
+      ? null
+      : eventPayload(firstWorkerSettlement, "Worker settlement").schema;
+  const applicationEpoch = applyRequest !== undefined;
+  const epochStart = applicationEpoch ? applyRequest : started;
+  const epochEnd = applicationEpoch ? secondWorkerSettlement : firstWorkerSettlement;
+  invariant(
+    epochStart !== undefined &&
+      resumeRequest === undefined &&
+      (!applicationEpoch || firstSettlementSchema === "icarus.headless.worker-proposal.v1") &&
+      (applicationEpoch ||
+        firstSettlementSchema !== "icarus.headless.worker-proposal.v1" ||
+        childEvents.length === 0) &&
+      childEvents.every(
+        (event) =>
+          event.sequence > epochStart.sequence &&
+          (epochEnd === undefined || event.sequence < epochEnd.sequence),
+      ),
+    "INVALID_HEADLESS_STREAM",
+    "Headless child settlement is outside the parent worker lifecycle",
+  );
+
+  const childIds = new Set<string>();
+  const childRunIds = new Set<string>();
+  let previousOutcome: HeadlessChildSettlementV1["outcome"] | null = null;
+  for (const [index, event] of childEvents.entries()) {
+    const settlement = childSettlementForStream(eventPayload(event, "Child settlement"), runId);
+    invariant(
+      declaredChildIds[index] === settlement.childId &&
+        (previousOutcome === null || previousOutcome === "review_ready"),
+      "INVALID_HEADLESS_STREAM",
+      "Headless child settlement does not match its declared sequence",
+    );
+    invariant(
+      !childIds.has(settlement.childId),
+      "INVALID_HEADLESS_STREAM",
+      "Headless child settlement identity is duplicated",
+    );
+    childIds.add(settlement.childId);
+    previousOutcome = settlement.outcome;
+    if (settlement.childRunId !== null) {
+      invariant(
+        !childRunIds.has(settlement.childRunId),
+        "INVALID_HEADLESS_STREAM",
+        "Headless child run identity is duplicated",
+      );
+      childRunIds.add(settlement.childRunId);
+    }
+  }
+  const epochEndOutcome =
+    epochEnd === undefined ? null : eventPayload(epochEnd, "Worker settlement").outcome;
+  invariant(
+    epochEndOutcome !== "review_ready" || childEvents.length === declaredChildIds.length,
+    "INVALID_HEADLESS_STREAM",
+    "Successful parent settlement is missing declared child evidence",
+  );
 }
 
 /**
@@ -327,6 +450,8 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
     );
     previousSequence = event.sequence;
   }
+  assertValidWorkerLifecycle(runId, events);
+  assertValidChildLifecycle(runId, events);
 
   const runCreated = events.filter((event) => event.type === "run.created");
   invariant(
@@ -531,7 +656,7 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
     }
     if (event.type === "headless.worker.settled" || event.type === "headless.child.settled") {
       const child = event.type === "headless.child.settled";
-      const receipt = receiptFields(eventPayload(event, "Settlement"), child);
+      const receipt = receiptFields(eventPayload(event, "Settlement"), child, runId);
       const line = push<HeadlessStreamReceiptLineV1>({
         runId,
         kind: "receipt",
