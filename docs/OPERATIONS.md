@@ -168,8 +168,11 @@ The browser golden path is:
    committed-tree metadata only and deterministically filters all `.env*`,
    dependency/generated paths, binary or invalid UTF-8 files, model-hidden paths,
    and secret-shaped content.
-3. Enter a task plus explicit loopback Ollama model/base URL. Draft creation
-   first persists a real `preparing` run without contacting the provider.
+3. Enter a task, select Ollama or Vulcan explicitly, and enter its loopback
+   model/base URL (for example, Ollama at `http://127.0.0.1:11434/` or Vulcan
+   at `http://127.0.0.1:8140/v1/`). Draft creation first persists a real
+   `preparing` run without contacting the provider. The run evidence must show
+   the selected kind; absent historical kind evidence reads `Not reported`.
    Stopping and restarting the foreground server before planning must rediscover
    the same draft.
 4. Select Plan as a separate action. SQLite admits the bounded planning
@@ -657,9 +660,13 @@ preserve the state and require explicit operator recovery.
   exact approved context egress digest again. The approved readable-manifest
   digest is the only additional context authority; a prior provider response
   cannot widen it.
-- The workspace accepts only an explicit loopback Ollama model/base URL. It
-  rejects remote, LAN, Tailscale, public, OpenAI, and other cloud endpoints
-  before persisting the draft; the broader CLI provider contract is unchanged.
+- The workspace draft form has a closed provider-kind selector: `ollama` or
+  `vulcan`. It sends that selection explicitly and never infers a kind from the
+  URL. Both kinds require a credential-free loopback HTTP(S) URL; remote, LAN,
+  Tailscale, public, OpenAI, and other cloud endpoints are rejected before the
+  draft is persisted. The API retains Ollama as the compatibility default only
+  for older callers that omit `provider.kind`; the broader CLI provider
+  contract is unchanged.
 
 ## Model probes
 

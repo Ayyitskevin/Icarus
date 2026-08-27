@@ -26,6 +26,7 @@ const TARGET_CONTENT = "browser acceptance source remains untouched\n";
 const DIRTY_MARKER_NAME = ".browser-status-private-marker.txt";
 const DIRTY_MARKER_CONTENT = "private dirty marker content must never render\n";
 const TASK = "Inspect one bounded browser workspace request.";
+const VULCAN_TASK = "Persist one explicit Vulcan browser workspace request.";
 const PLAN_SUMMARY = "Review one exact local target before any guarded execution.";
 const START_TIMEOUT_MS = 15_000;
 const UI_TIMEOUT_MS = 10_000;
@@ -838,8 +839,14 @@ class BrowserPage {
             .join(" ");
           return normalize(ownText) === label;
         });
-        const control = fieldLabel?.querySelector("input, textarea");
-        if (!(control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement)) {
+        const control = fieldLabel?.querySelector("input, textarea, select");
+        if (
+          !(
+            control instanceof HTMLInputElement ||
+            control instanceof HTMLTextAreaElement ||
+            control instanceof HTMLSelectElement
+          )
+        ) {
           return false;
         }
         const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(control), "value");
@@ -1355,6 +1362,7 @@ async function createBrowserPage(chromium, workspaceUrl, launchUrl) {
   const blockedExternalRequests = [];
   const browserErrors = [];
   const localRequestSecurity = [];
+  const runDraftProviderKinds = [];
   const tokenLeaks = {
     requestUrls: false,
     requestBodies: false,
@@ -1487,6 +1495,16 @@ async function createBrowserPage(chromium, workspaceUrl, launchUrl) {
           action,
           contentType,
         });
+        if (event.request?.method === "POST" && parsed.pathname === "/api/runs") {
+          let providerKind = null;
+          try {
+            const body = JSON.parse(requestBody);
+            providerKind = typeof body?.provider?.kind === "string" ? body.provider.kind : null;
+          } catch {
+            // The API remains responsible for rejecting malformed request bodies.
+          }
+          runDraftProviderKinds.push(providerKind);
+        }
       }
       localEventPoll =
         parsed.origin === workspaceUrl &&
@@ -1670,6 +1688,7 @@ async function createBrowserPage(chromium, workspaceUrl, launchUrl) {
     blockedExternalRequests,
     browserErrors,
     localRequestSecurity,
+    runDraftProviderKinds,
     responseBodyEvidence,
     tokenLeaks,
     failNextEventPoll: () => {
@@ -5667,6 +5686,125 @@ try {
     "review browser requests must retain the exact stable numeric-loopback origin",
   );
 
+  const vulcanBrowserPage = await createBrowserPage(chromium, workspace.url, workspace.launchUrl);
+  const vulcanPage = vulcanBrowserPage.page;
+  const vulcanProjectName = projectPageFixtureName(PROJECT_PAGE_FIXTURE_COUNT);
+  await vulcanPage.waitFor(
+    (projectName) =>
+      Array.from(
+        document.querySelectorAll('section[aria-labelledby="projects-heading"] button strong'),
+      ).some((label) => label.textContent?.trim() === projectName),
+    [vulcanProjectName],
+    "the Vulcan draft project catalog",
+  );
+  await vulcanPage.clickProject(vulcanProjectName);
+  await vulcanPage.waitFor(
+    (projectName) => document.querySelector("#project-detail-heading")?.textContent === projectName,
+    [vulcanProjectName],
+    "the project selected for the explicit Vulcan draft",
+  );
+  await vulcanPage.setField("Task", VULCAN_TASK);
+  await vulcanPage.setField("Candidate targets (one path per line)", TARGET);
+  assert.equal(
+    await vulcanPage.call(() => {
+      const label = Array.from(document.querySelectorAll("label")).find((candidate) =>
+        Array.from(candidate.childNodes)
+          .filter((node) => node.nodeType === Node.TEXT_NODE)
+          .some((node) => node.textContent?.trim() === "Provider kind"),
+      );
+      const select = label?.querySelector("select");
+      return select instanceof HTMLSelectElement ? select.value : null;
+    }),
+    "ollama",
+  );
+  assert.deepEqual(
+    await vulcanPage.call(() => {
+      const label = Array.from(document.querySelectorAll("label")).find((candidate) =>
+        Array.from(candidate.childNodes)
+          .filter((node) => node.nodeType === Node.TEXT_NODE)
+          .some((node) => node.textContent?.trim() === "Provider kind"),
+      );
+      const select = label?.querySelector("select");
+      return select instanceof HTMLSelectElement
+        ? Array.from(select.options).map((option) => option.value)
+        : [];
+    }),
+    ["ollama", "vulcan"],
+  );
+  await vulcanPage.setField("Provider kind", "vulcan");
+  await vulcanPage.setField("Model", "code");
+  const vulcanDraftPostBaseline = vulcanBrowserPage.networkRequests.filter(
+    (request) => request.method === "POST" && request.url === `${workspace.url}/api/runs`,
+  ).length;
+  for (const invalidUrl of [
+    "not-a-url",
+    "https://example.com/v1/",
+    "http://192.168.1.10:8140/v1/",
+    "http://user@127.0.0.1:8140/v1/",
+    "http://127.0.0.1:8140/v1/?probe=1",
+    "http://127.0.0.1:8140/v1/#probe",
+    "ftp://127.0.0.1:8140/v1/",
+  ]) {
+    await vulcanPage.setField("Loopback provider URL", invalidUrl);
+    await vulcanPage.waitFor(
+      (buttonText) =>
+        Array.from(document.querySelectorAll("button")).some(
+          (button) => button.textContent?.trim() === buttonText && button.disabled,
+        ),
+      ["Create persisted draft"],
+      `the rejected Vulcan provider URL ${invalidUrl}`,
+    );
+  }
+  for (const validUrl of [
+    "http://localhost:8140/v1/",
+    "http://127.0.0.1:8140/v1/",
+    "http://[::1]:8140/v1/",
+  ]) {
+    await vulcanPage.setField("Loopback provider URL", validUrl);
+    await vulcanPage.waitFor(
+      (buttonText) =>
+        Array.from(document.querySelectorAll("button")).some(
+          (button) => button.textContent?.trim() === buttonText && !button.disabled,
+        ),
+      ["Create persisted draft"],
+      `the accepted Vulcan loopback provider URL ${validUrl}`,
+    );
+  }
+  assert.equal(
+    vulcanBrowserPage.networkRequests.filter(
+      (request) => request.method === "POST" && request.url === `${workspace.url}/api/runs`,
+    ).length,
+    vulcanDraftPostBaseline,
+    "client-side provider validation must not submit rejected Vulcan drafts",
+  );
+  await vulcanPage.setField("Loopback provider URL", "http://127.0.0.1:8140/v1/");
+  assert.equal(await vulcanPage.buttonDisabled("Create persisted draft"), false);
+  const providerRequestsBeforeVulcanDraft = provider.requests.length;
+  await vulcanPage.clickButton("Create persisted draft");
+  const vulcanDraftOutcome = await vulcanPage.waitFor(
+    (task) => {
+      if (document.querySelector("#run-evidence-heading")?.textContent === task) {
+        return { status: "created", message: null };
+      }
+      const alert = document.querySelector('[role="alert"]');
+      return alert === null
+        ? null
+        : { status: "error", message: alert.textContent?.replaceAll(/\s+/g, " ").trim() ?? "" };
+    },
+    [VULCAN_TASK],
+    "the explicit Vulcan draft outcome",
+  );
+  assert.deepEqual(vulcanDraftOutcome, { status: "created", message: null });
+  const vulcanBrowserRunId = await vulcanPage.runFact("Run ID");
+  assert.equal(await vulcanPage.runFact("Provider kind"), "vulcan");
+  assert.equal(await vulcanPage.runFact("Provider model"), "code");
+  assert.equal(await vulcanPage.runFact("Provider endpoint"), "http://127.0.0.1:8140/v1/");
+  assert.equal(provider.requests.length, providerRequestsBeforeVulcanDraft);
+  assert.equal(vulcanBrowserPage.runDraftProviderKinds.at(-1), "vulcan");
+  assert.equal(runtime.service.getRun(vulcanBrowserRunId).provider.kind, "vulcan");
+  assert.deepEqual(vulcanBrowserPage.blockedExternalRequests, []);
+  assert.deepEqual(vulcanBrowserPage.browserErrors, []);
+
   const projects = runtime.service.listProjects();
   const browserProject = projects.find((project) => project.name === "browser-project");
   const run = runtime.service.getRun(browserRunId);
@@ -5694,6 +5832,7 @@ try {
         projectId: browserProject?.id,
         contextDigest: firstDigest,
         runId: run.id,
+        vulcanRunId: vulcanBrowserRunId,
         draftSurvivedReload: true,
         state: run.state,
         verification: "not_run",
