@@ -226,6 +226,7 @@ async function fixture(
   outputs: readonly JsonValue[],
   hook?: (request: StructuredGenerationRequest) => void,
   estimatedCostUsd = 0,
+  providerOverride?: ProviderConfig,
 ): Promise<Fixture> {
   const root = await mkdtemp(path.join(os.tmpdir(), "icarus-headless-worker-"));
   cleanupRoots.push(root);
@@ -253,14 +254,16 @@ async function fixture(
     sandbox: { image: IMAGE, ...DEFAULT_SANDBOX_LIMITS },
     ceiling: CEILING,
   });
-  const provider = createProviderConfig({
-    kind: "ollama",
-    model: "synthetic-model",
-    baseUrl: "http://127.0.0.1:11434/",
-    ...(estimatedCostUsd === 0
-      ? {}
-      : { inputUsdPerMillionTokens: 100, outputUsdPerMillionTokens: 100 }),
-  });
+  const provider =
+    providerOverride ??
+    createProviderConfig({
+      kind: "ollama",
+      model: "synthetic-model",
+      baseUrl: "http://127.0.0.1:11434/",
+      ...(estimatedCostUsd === 0
+        ? {}
+        : { inputUsdPerMillionTokens: 100, outputUsdPerMillionTokens: 100 }),
+    });
   return { service, store, provider, close: () => store.close() };
 }
 
@@ -543,6 +546,57 @@ describe("bounded headless worker", () => {
       );
       expect(repeated.settlement).toEqual(applied.settlement);
       expect(current.store.listEvents(planned.id)).toHaveLength(eventCount);
+    } finally {
+      current.close();
+    }
+  });
+
+  test("keeps a priced loopback vulcan proposal closed to the later apply act", async () => {
+    let providerCalls = 0;
+    const vulcan = createProviderConfig({
+      kind: "vulcan",
+      model: "code",
+      baseUrl: "http://127.0.0.1:8140/v1/",
+      inputUsdPerMillionTokens: 3,
+      outputUsdPerMillionTokens: 15,
+    });
+    const current = await fixture(
+      [plan(0), patchSet(FIXED)],
+      () => {
+        providerCalls += 1;
+      },
+      0,
+      vulcan,
+    );
+    try {
+      const planned = await plannedRun(current, 0);
+      const selected = profile(0);
+      const proposed = await current.service.approveHeadlessPlan(
+        planned.id,
+        planned.planSha256 ?? "",
+        "headless-operator",
+        { ...selected, worker: { ...selected.worker, mutation: "propose" } },
+        [{ id: "local-provider", ...vulcan }],
+      );
+      expect(proposed.settlement).toMatchObject({
+        schema: "icarus.headless.worker-proposal.v1",
+        outcome: "proposed",
+        exitCode: 10,
+      });
+      expect(proposed.run.provider.kind).toBe("vulcan");
+      expect(providerCalls).toBe(2);
+      const patchSetSha256 = (
+        proposed.settlement as { readonly proposal: { readonly patchSetSha256: string } }
+      ).proposal.patchSetSha256;
+
+      await expect(
+        current.service.applyHeadlessProposal(planned.id, patchSetSha256, "headless-operator"),
+      ).rejects.toMatchObject({ code: "HEADLESS_APPLY_DENIED" });
+      expect(providerCalls).toBe(2);
+      expect(current.store.listApprovals(planned.id).map((approval) => approval.kind)).toEqual([
+        "plan",
+      ]);
+      expect(current.store.getRun(planned.id).state).toBe("running");
     } finally {
       current.close();
     }

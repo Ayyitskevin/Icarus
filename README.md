@@ -493,6 +493,15 @@ input required, `10` proposed, `130` settled signal cancellation; refusals
 exit `1` with a named error before any effect, except an already-spent
 invocation envelope, which exits `2` before recording validation or approval.
 
+A Vulcan host-catalog entry is deliberately narrower under ADR 0065. Its URL
+must normalize to loopback, both token rates must be explicit and positive,
+the worker must be child-free and proposal-only, and the resolution digest
+binds seat `icarus` with those limits. The later `apply-headless` act refuses a
+Vulcan proposal before recording an apply approval or effect. This conservative
+pricing lets Icarus enforce its own per-run dollar ceiling while Vulcan
+independently enforces its daily per-seat hosted budget; it does not admit
+Vulcan to Gate 1 or authorize a live deployment.
+
 Applying a proposal takes the digest-bound act, which records an `apply`
 approval against the exact persisted patch set:
 

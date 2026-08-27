@@ -1,6 +1,7 @@
-# ADR 0056: Evidence surfaces recognize the vulcan provider kind; execution authority surfaces still do not
+# ADR 0056: Evidence surfaces recognize the vulcan provider kind
 
-- Status: Proposed
+- Status: Proposed — ADR 0065 later supersedes only the headless-catalog
+  exclusion; Gate 1 remains excluded
 - Date: 2026-08-26
 - Related: [ADR 0041](0041-change-rooms-evidence-projections.md) (change room
   projections), [ADR 0042](0042-change-handoff-packs.md) (handoff packs),
@@ -71,13 +72,11 @@ spend ceiling would claim a bound it cannot observe — and ADR 0053's origin
 rules have no vulcan arm to mirror. The driver's guard stays so the exclusion
 remains load-bearing even if the profile decoder is ever widened first.
 
-The headless host provider catalog also still refuses `vulcan`. That check
-predates the gateway by one day, so it was never a decision about vulcan — but
-the catalog feeds unattended workers, which makes admission an
-execution-authority decision rather than a vocabulary one. The vulcan gateway
-is loopback-only and credential-free, the same safety class as the admitted
-`ollama` kind, so admission is a plausible follow-up; it needs its own review,
-not a side effect of this record.
+At the time of this record, the headless host provider catalog also refused
+`vulcan`. ADR 0065 later supersedes that exclusion only for explicitly priced,
+loopback, child-free proposals and binds the fixed seat and narrowed policy into
+the resolution digest. It retains the later apply refusal. This is a separate
+execution-authority decision, not a side effect of the evidence enum change.
 
 ## Consequences
 
@@ -87,12 +86,12 @@ not a side effect of this record.
 - The unknown-kind boundary is now tested at its real location: kinds the
   runtime can never persist (`bedrock` in the fixtures) still fail closed on
   every surface that gained a kind.
-- The two deliberate exclusions are written down where they execute, with
-  tests asserting them, so a future reader cannot mistake them for the same
-  gap this record closed.
-- Admitting vulcan to Gate 1 live evidence (pinned adapter version, origin
-  rule, truthful metering) or to the headless host catalog (unattended-use
-  review) remains open follow-up work, each needing its own ADR.
+- Gate 1's deliberate exclusion remains written down where it executes, with
+  tests asserting it, so a future reader cannot mistake it for the evidence gap
+  this record closed.
+- Admitting Vulcan to Gate 1 live evidence (pinned adapter version, origin
+  rule, truthful metering), `apply-headless`, or children remains open follow-up
+  work requiring its own decision.
 
 ## Verification
 
@@ -107,4 +106,5 @@ not a side effect of this record.
 - `tests/unit/live-evidence-profile.test.ts` and
   `tests/unit/live-evidence-existing-runs-driver.test.ts` pin the Gate 1
   refusal of a vulcan pin at both walls.
-- `tests/unit/headless-profile.test.ts` pins the host-catalog refusal.
+- ADR 0065's resolver, service, and static security tests pin the separately
+  reviewed proposal-only headless boundary.

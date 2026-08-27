@@ -101,6 +101,39 @@ describe("VulcanChatCompletionsGateway HTTP contract", () => {
     });
   });
 
+  it("prices reported usage with explicit positive host-catalog rates", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, {
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: '{"summary":"priced","steps":[]}' },
+            finish_reason: "stop",
+          },
+        ],
+        usage: { prompt_tokens: 21, completion_tokens: 9, total_tokens: 30 },
+      });
+    });
+    const gateway = new VulcanChatCompletionsGateway(
+      createProviderConfig({
+        kind: "vulcan",
+        model: "code",
+        baseUrl: server.baseUrl,
+        inputUsdPerMillionTokens: 3,
+        outputUsdPerMillionTokens: 15,
+      }),
+    );
+
+    const result = await gateway.generateStructured(generationRequest);
+
+    expect(result.usage).toMatchObject({
+      inputTokens: 21,
+      outputTokens: 9,
+      estimatedCostUsd: 0.000198,
+    });
+    expect(server.requests).toHaveLength(1);
+  });
+
   it("refuses a non-loopback base URL before any transport", async () => {
     // The loopback-only rule is what makes a credential-free adapter safe:
     // planning prompts must not leave the host through this gateway.

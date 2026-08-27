@@ -1,5 +1,34 @@
 # Implementation plans
 
+## Headless Vulcan proposal admission candidate
+
+Status: locally implemented under proposed ADR 0065. Focused resolver,
+service-lifecycle, and static security coverage passes; compiled production
+measurement matches 20/20 declared outcomes, and the complete local release
+gate passes. Non-author exact-snapshot review remains open.
+
+- [x] Admit `vulcan` through the H1 host catalog only at a normalized loopback
+      endpoint with explicit positive input and output token rates.
+- [x] Bind the gateway's fixed `icarus` seat plus proposal-only/child-denied
+      policy into a Vulcan-only resolution record without changing existing
+      provider resolution bytes.
+- [x] Refuse apply-capable and child-capable Vulcan source profiles before
+      worker execution.
+- [x] Refuse the later digest-bound `apply-headless` act after durable binding
+      reconstruction and before any apply approval or effect.
+- [x] Measure the compiled resolver against 20 realistic host/profile cases and
+      inspect live Vulcan health, local/hosted route mix, and ledger status
+      without issuing a generation request.
+- [x] Pass the complete local release gate at the final candidate snapshot:
+      1,226 unit/provider, 203 integration, 7 supported offline evaluations,
+      236 security tests, static assertions, and production builds passed;
+      three future-milestone evaluations remained honestly unsupported.
+- [ ] Obtain one non-author exact-snapshot security review before merge.
+
+This slice permits evidence-producing proposals only. It does not authorize a
+live Vulcan call, proposal application, child run, Gate 1 profile, active
+repository, GitHub effect, deployment, or migration.
+
 ## Workspace explicit Vulcan provider selection candidate
 
 Status: locally implemented under proposed ADR 0064. The full local gate and
