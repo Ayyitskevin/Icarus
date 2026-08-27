@@ -3,7 +3,9 @@
 ## Workspace explicit Vulcan provider selection candidate
 
 Status: locally implemented under proposed ADR 0064. The full local gate and
-real-Chromium acceptance pass; non-author review is pending.
+real-Chromium acceptance pass. Grok independently reviewed exact candidate
+`c4a752a` from its own clone and returned PASS with no blocker, high, or medium
+finding.
 
 - [x] Add a closed Ollama/Vulcan provider-kind selector to draft creation.
 - [x] Require the Workspace client to send the selected kind explicitly while
@@ -15,7 +17,8 @@ real-Chromium acceptance pass; non-author review is pending.
       rejected, three loopback forms are accepted, the POST carries `vulcan`,
       the run persists/renders `vulcan`, and no provider request occurs.
 - [x] Pass `pnpm check` at the final candidate snapshot.
-- [ ] Obtain one non-author exact-snapshot review.
+- [x] Obtain one non-author exact-snapshot review; evidence is recorded in
+      `shared/handoffs/2026-08-27_grok_icarus-workspace-vulcan-provider-review.md`.
 
 This slice creates only a persisted draft. It does not admit Vulcan to the
 headless provider catalog or Gate 1 live evidence, and it performs no live
