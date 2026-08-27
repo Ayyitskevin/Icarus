@@ -2,10 +2,11 @@
 
 ## Headless Vulcan proposal admission candidate
 
-Status: locally implemented under proposed ADR 0065. Focused resolver,
+Status: implemented under proposed ADR 0065. Focused resolver,
 service-lifecycle, and static security coverage passes; compiled production
-measurement matches 20/20 declared outcomes, and the complete local release
-gate passes. Non-author exact-snapshot review remains open.
+measurement matches 20/20 declared outcomes, and the complete local and hosted
+release gates pass. Grok independently reviewed exact code snapshot `848fab3`
+from its own clone and returned PASS with no blocking finding.
 
 - [x] Admit `vulcan` through the H1 host catalog only at a normalized loopback
       endpoint with explicit positive input and output token rates.
@@ -23,7 +24,9 @@ gate passes. Non-author exact-snapshot review remains open.
       1,226 unit/provider, 203 integration, 7 supported offline evaluations,
       236 security tests, static assertions, and production builds passed;
       three future-milestone evaluations remained honestly unsupported.
-- [ ] Obtain one non-author exact-snapshot security review before merge.
+- [x] Obtain one non-author exact code-snapshot security review before merge:
+      Grok returned PASS on `848fab3`; the review handoff records the separate
+      clone and rerunnable file/line evidence.
 
 This slice permits evidence-producing proposals only. It does not authorize a
 live Vulcan call, proposal application, child run, Gate 1 profile, active
