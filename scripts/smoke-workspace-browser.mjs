@@ -2779,6 +2779,7 @@ try {
     "the persisted draft evidence",
   );
   assert.equal(provider.requests.length, 0);
+  assert.equal(browserPage.runDraftProviderKinds.at(-1), "ollama");
   assert.equal(await page.runFact("Product phase"), "draft");
   assert.equal(await page.runFact("Exact persisted state"), "preparing");
   const browserRunId = await page.runFact("Run ID");

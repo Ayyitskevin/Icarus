@@ -29,7 +29,7 @@ form controls and the actual local API transport:
 
 | # | Input or observation | Expected and observed result |
 | ---: | --- | --- |
-| 1 | Initial provider kind | `ollama` |
+| 1 | Initial provider kind and first draft POST | both `ollama` |
 | 2 | Provider option values | exactly `ollama`, `vulcan` |
 | 3 | Select `vulcan` | selected explicitly |
 | 4 | `not-a-url` | create disabled |
