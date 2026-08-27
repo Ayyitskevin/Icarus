@@ -14,8 +14,8 @@ The exact scalars `true`, `false`, `read`, and `write` do not contain credential
 bytes. A closed GitHub expression that names one value beneath `env`, `github`,
 `inputs`, `secrets`, or `vars` is a reference, not the referenced value. The
 configuration owner remains responsible for deciding whether a safe scalar is
-allowed; for example, the CI workflow policy must still reject checkout with
-persisted credentials.
+allowed; the CI and inherited OpenCode workflow policies therefore still reject
+checkout with persisted credentials.
 
 ## Measurement
 
@@ -56,8 +56,8 @@ separately approves a designed self-hosting boundary.
 
 The focused security tests read the real tracked workflows, exercise each new
 safe form, prove that a credential literal and an inline GitHub expression
-literal remain denied, and retain the independent CI-policy mutation that
-rejects `persist-credentials: true`:
+literal remain denied, and retain independent CI/OpenCode policy assertions
+that reject `persist-credentials: true`:
 
 ```text
 pnpm build:node

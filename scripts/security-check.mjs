@@ -1362,6 +1362,11 @@ const assertions = {
       /@[0-9a-f]{40}$/.test(reference),
     ) &&
     !inheritedWorkflowSource.includes("@latest") &&
+    // The scanner classifies booleans as data; this workflow's policy owns
+    // the separate rule that checkout must not retain its credential.
+    /^ {8}uses: actions\/checkout@[0-9a-f]{40}\n {8}with:\n {10}persist-credentials: false$/m.test(
+      inheritedWorkflowSource,
+    ) &&
     // Untrusted comment fields never reach a shell through interpolation.
     !/run:[^\n]*\$\{\{[^}]*github\.event\.comment/.test(inheritedWorkflowSource),
   anthropicCredentialsAreOriginPinned:
