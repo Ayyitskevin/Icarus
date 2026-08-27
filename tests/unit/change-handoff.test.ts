@@ -1554,6 +1554,41 @@ describe("Change Handoff authoritative reader", () => {
       verification: { outcome: "failed" },
       reviewDecision: null,
     });
+
+    const doomLoopExhausted = trackedFixture();
+    enterChargedRepairSession(doomLoopExhausted);
+    doomLoopExhausted.store.recordSessionDoomLoop(doomLoopExhausted.runId, {
+      tool: "apply_patchset",
+      callDigestSha256: "d".repeat(64),
+    });
+    closeFixture(doomLoopExhausted);
+    expect(
+      readChangeHandoffSource(doomLoopExhausted.databasePath, doomLoopExhausted.runId),
+    ).toMatchObject({
+      state: "awaiting_review",
+      verification: { outcome: "failed" },
+      reviewDecision: null,
+    });
+  });
+
+  it("rejects a session exhaustion reason outside the closed evidence enum", () => {
+    const fixture = trackedFixture();
+    prepareIterationPlan(fixture);
+    finishToAwaitingReview(fixture.store, "failed", "verifying");
+    fixture.store.beginSessionIteration(fixture.runId);
+    fixture.store.recordSessionOutcome(fixture.runId, "exhausted", null, 0);
+    mutateDatabase(fixture, (database) => {
+      database
+        .prepare(
+          "UPDATE run_events SET payload_json = json_set(payload_json, '$.reason', 'unbounded') WHERE run_id = ? AND type = 'session.exhausted'",
+        )
+        .run(fixture.runId);
+    });
+
+    expectCode(
+      () => readChangeHandoffSource(fixture.databasePath, fixture.runId),
+      "HANDOFF_SOURCE_INVALID",
+    );
   });
 
   it("preserves same-revision completion authority across rollback, restore, and fresh verification", () => {

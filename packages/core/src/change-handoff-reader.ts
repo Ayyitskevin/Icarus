@@ -2186,13 +2186,29 @@ function readEventSummary(
     ) {
       const unshaped = row(boundedJson(object.bounded_payload, 65_536));
       const operationIdPresent = Object.hasOwn(unshaped, "operationId");
-      const admissionExhausted = type === "session.exhausted" && Object.hasOwn(unshaped, "reason");
+      const reasonPresent = type === "session.exhausted" && Object.hasOwn(unshaped, "reason");
+      const reason = reasonPresent ? text(unshaped.reason, 32) : null;
+      const admissionExhausted = reason === "recovery_margin";
+      const doomLoopExhausted = reason === "doom_loop";
+      if (
+        reason !== null &&
+        reason !== "recovery_margin" &&
+        reason !== "iteration_ceiling" &&
+        reason !== "doom_loop"
+      ) {
+        sourceInvalid();
+      }
       const fromPresent = Object.hasOwn(unshaped, "from");
       const toPresent = Object.hasOwn(unshaped, "to");
       const actionIdPresent = Object.hasOwn(unshaped, "browserActionId");
       if (fromPresent !== toPresent || fromPresent !== actionIdPresent) sourceInvalid();
-      const expectedKeys = admissionExhausted
-        ? [...(fromPresent ? ["from", "to"] : []), "iterations", "reason"]
+      const expectedKeys = reasonPresent
+        ? [
+            ...(fromPresent ? ["from", "to"] : []),
+            "iterations",
+            "reason",
+            ...(doomLoopExhausted ? ["tool", "callDigestSha256"] : []),
+          ]
         : [
             ...(fromPresent ? ["from", "to"] : []),
             "iterations",
@@ -2218,7 +2234,6 @@ function readEventSummary(
       }
       if (admissionExhausted) {
         if (
-          payload.reason !== "recovery_margin" ||
           activeVerification === null ||
           activeVerification.to !== "verifying" ||
           activeVerification.outcome !== "failed" ||
@@ -2228,6 +2243,10 @@ function readEventSummary(
         ) {
           sourceInvalid();
         }
+      } else if (doomLoopExhausted) {
+        const tool = nonemptyText(payload.tool, 128);
+        const callDigestSha256 = text(payload.callDigestSha256, 64);
+        if (tool.trim().length === 0 || !SHA256_PATTERN.test(callDigestSha256)) sourceInvalid();
       } else if (type === "session.completed" || type === "session.awaiting_human") {
         const sessionText = nonemptyText(
           type === "session.completed" ? payload.summary : payload.question,

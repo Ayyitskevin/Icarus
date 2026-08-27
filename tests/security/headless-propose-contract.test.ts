@@ -57,7 +57,7 @@ describe("headless propose-only security contract", () => {
     expect(inspector).toContain("more than one epoch intent");
     expect(inspector).toContain("more than one apply request");
     expect(inspector).toContain("more than two settlements");
-    expect(inspector).toContain("apply request must follow a proposed settlement");
+    expect(inspector).toContain("apply request must follow a proposed or interrupted settlement");
   });
 
   test("the apply act requires the durable digest before any effect", () => {

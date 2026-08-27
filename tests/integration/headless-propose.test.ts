@@ -351,6 +351,17 @@ describe("headless propose-only default and digest-bound apply", () => {
     expect(streamed.exitCode).toBe(0);
     const streamLines = historyLines(streamed.stdout);
     expect(streamLines.every((line) => line.schema === "icarus.headless.stream.v1")).toBe(true);
+    expect(
+      streamLines.filter((line) => line.kind === "grant" && line.approvalKind === "apply"),
+    ).toEqual([
+      expect.objectContaining({
+        kind: "grant",
+        approvalKind: "apply",
+        digest: patchSetSha,
+        actor: "integration-test",
+        decision: "approve",
+      }),
+    ]);
     expect(streamLines.filter((line) => line.kind === "receipt").at(-1)).toMatchObject({
       kind: "receipt",
       receiptKind: "worker",

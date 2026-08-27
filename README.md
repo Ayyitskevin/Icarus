@@ -490,7 +490,8 @@ profile the worker stops after durable patch-set intent and settles
 approve-and-run opt-in. Exit codes: `0` complete and review-ready, `1`
 failure, `2` envelope exhaustion (turns, budget, or doom loop), `3` human
 input required, `10` proposed, `130` settled signal cancellation; refusals
-exit `1` with a named error before any effect.
+exit `1` with a named error before any effect, except an already-spent
+invocation envelope, which exits `2` before recording validation or approval.
 
 Applying a proposal takes the digest-bound act, which records an `apply`
 approval against the exact persisted patch set:
@@ -501,7 +502,8 @@ node packages/cli/dist/main.js run apply-headless <run-id> \
 ```
 
 The command re-proves the run, requires the flag to equal the durable
-patch-set digest, appends the `icarus.headless.worker-application.v1`
+versioned digest over every path, operation, baseline, and approved byte set,
+then appends the `icarus.headless.worker-application.v1`
 settlement, and repeats byte-identically. A mismatched digest is refused
 before any effect. `run approve-headless` and `run apply-headless` also
 accept `--max-turns N` and `--max-budget-usd USD`, which only ever narrow the
@@ -509,6 +511,8 @@ approved envelope, and the ADR 0061 `--output-format history|stream-json`
 selector, which prints the receipt-bound NDJSON stream instead of the default
 H0 history; a third identical session tool call lands the run in
 `session.exhausted` (`doom_loop`) with exit `2`.
+Headless evidence uses H0 history or the ADR 0061 stream; the generic Change
+Handoff export remains closed to the headless lifecycle grammar.
 It does not approve review, commit, push, deploy, schedule, create child runs,
 or configure an external research adapter.
 

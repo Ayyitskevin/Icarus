@@ -508,7 +508,7 @@ describe("browser action ledger", () => {
     fixture.store.close();
   });
 
-  test("preserves legacy session payloads while action-linked terminals retain exact correlation", () => {
+  test("adds the closed exhaustion reason while action-linked terminals retain exact correlation", () => {
     const legacy = createUnitStore();
     cleanupRoots.push(legacy.root);
     seedPreparingRun(legacy.store, legacy.databasePath);
@@ -519,7 +519,7 @@ describe("browser action ledger", () => {
     const legacyTerminal = legacy.store
       .listEvents(UNIT_RUN_ID)
       .find((event) => event.type === "session.exhausted");
-    expect(legacyTerminal?.payload).toEqual({ iterations: 0 });
+    expect(legacyTerminal?.payload).toEqual({ iterations: 0, reason: "iteration_ceiling" });
     legacy.store.close();
 
     const linked = createUnitStore();
@@ -544,6 +544,7 @@ describe("browser action ledger", () => {
       from: "running",
       to: "awaiting_review",
       iterations: 0,
+      reason: "iteration_ceiling",
       browserActionId: request.actionId,
     });
     expect(linked.store.getBrowserAction(request.actionId)).toMatchObject({
