@@ -1,22 +1,25 @@
 # Icarus collaborative IDE game plan
 
-- Status: Product and execution plan; Gate 0 released, Gate 1 active
-- Date: 2026-07-31; last updated 2026-08-09
+- Status: Product and execution plan; Gate 0 released, Gate 1 live 3/3 recorded,
+  Gate 2 next; supervised active-repository canary remains held
+- Date: 2026-07-31; last updated 2026-08-27
 - Planning horizon: 12–18 months, reviewed at every exit gate
 - Governing direction:
   [ADR 0036](adr/0036-proof-carrying-software-factory-product-direction.md)
 - Gate 0 release/evidence head:
   `802b91e6f6c9b392f56c9ee3660be818a0f74a62`; Gate 0 merged and released with
   successful exact-head Linux, macOS, and Windows evidence
-- Current Gate 1 portability state: ADR 0039 rejected after native run
+- Gate 1 portability and landing outcome: ADR 0039 rejected after native run
   `30613980911` passed Windows and failed macOS; accepted ADR 0040's
   Chromium-only mutation boundary and exact-head technical evidence passed at
   `eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI `30618041483` and
   native real-Chrome run `30618043377`; explicit human acceptance of the
   interim operator-controlled browser/resolver/proxy residual risk was recorded
-  on 2026-07-31; Packet 3 durable local landing is complete; Packet 4a's bounded
-  GitHub gateway package is merged but wired to no runtime path, while Packet 4's
-  remote landing/receipt/live-evidence work and Gate 1 completion remain open
+  on 2026-07-31; Packet 3 durable local landing and Packet 4's bounded
+  draft-PR landing, receipts, and credential-gated live-evidence path are
+  implemented; the separately approved live record completed 3/3 on 2026-08-23.
+  Live-state migration, merge, deployment, unattended use, and the supervised
+  active-repository canary remain outside the accepted authority
 
 This plan turns the product direction in ADR 0036 into a dependency-ordered
 build program. It incorporates the requested Buzz-style experience where
@@ -491,7 +494,7 @@ remains source-collaboration truth; Icarus preserves the proof and rationale.
 | Durable state | `packages/core/src/store.ts`, `state-machine.ts`, `gate1-schema.ts`, `landing-records.ts`, `landing-state.ts`, `landing-ledger.ts` | Packet 3 local landing persistence and coordination complete; later collaboration ledgers and append-only room events |
 | Orchestration | `packages/core/src/service.ts`, `session-loop.ts`, `landing-coordinator.ts` | Packet 3 local landing coordinator complete and extracted from `service.ts`; later room scheduler and child-run integration |
 | Git isolation | `packages/core/src/git.ts`, `landing-git.ts` | Packet 3 deterministic candidate and absent-only private-ref integration complete; retain the file-only boundary when adding Packet 4 |
-| Provider landing | `packages/github-gateway` (Packet 4a, merged, unwired) | coordinator wiring, receipt, idempotent reconciliation; interface reconciliation first |
+| Provider landing | `packages/github-gateway`, `packages/core/src/landing-coordinator.ts` | Packet 4 bounded draft-PR coordination, receipts, and idempotent reconciliation implemented; merge, deployment, and unattended authority remain absent |
 | Browser boundary | `packages/api/src/server.ts`, `contracts.ts`, `present.ts` | Packet 2 action routes and Packet 3 bounded landing projection complete; shared client remains later work |
 | Browser UI | `packages/workspace/src/api.ts`, `App.tsx`, `LandingPanel.tsx` | Packet 3 landing authority/evidence presentation complete; mission-room pane follows the shared client |
 | Shared client | new `packages/client` | versioned contracts for browser and VS Code |
@@ -529,11 +532,12 @@ native-fixture correction followed as exact `main`
 [run 30602942008](https://github.com/Ayyitskevin/Icarus/actions/runs/30602942008)
 and both macOS and Windows jobs in native
 [run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
-succeeded there. Gate 0 is merged and released without Gate 1 runtime code;
+succeeded there. Gate 0 merged and released without Gate 1 runtime code;
 at that point Packet 1 became the forward work. Its contracts and PR #20's
-repository-only foundations have since landed; the separately approved real 3/3
-benchmark evidence and remaining end-to-end Gate 1 runtime and coordination
-work remain open.
+repository-only foundations subsequently landed. Packet 4 later completed the
+bounded runtime coordination, and the separately approved live record completed
+3/3 on 2026-08-23 without granting canary, merge, deployment, or unattended
+authority.
 
 ### Packet 1 — authority contracts and benchmark
 
@@ -580,7 +584,8 @@ its manifest digest is `null` only when raw manifest bytes were unavailable.
 Packet 1's authority-and-benchmark contract deliverable is therefore present; no
 command-pass evidence is implied here.
 
-This does not complete Gate 1. Each completed-case report record marks draft-PR
+This offline Packet 1 report did not by itself complete Gate 1. Each
+completed-case report record marks draft-PR
 and receipt effects contract-only and not executed, and the manifest's
 derivative-effect declaration is `contract-only-unassessed`. For each completed
 case, the offline runner reopens the production runtime and replays a
@@ -588,16 +593,18 @@ harness-only candidate journal into a new local controller; it does not execute
 browser reload or foreground-server restart and does not prove durable landing
 coordination.
 
-Packet 3's separate acceptance matrix now supplies durable local landing
-coordination through `local_ready`. Packet 4a's gateway package is merged and
-unwired; Packet 4's remote receipt runtime and a separate versioned
-human-approved credential-gated live-evidence profile remain outstanding. That profile must bind the offline
+Packet 3's separate acceptance matrix supplies durable local landing
+coordination through `local_ready`. Packet 4 later wired the gateway through a
+bounded remote receipt runtime and exercised a separately versioned,
+human-approved credential-gated live-evidence profile. That profile binds the offline
 manifest digest and immutable case/task/check/source/expected-change/candidate
 pins; pin the real provider/model and adapter version, captured pricing and
 budgets, and an operator-produced repository-automation assessment/disposition/
-raw digest; authorize only named separately approved remote effects; and succeed
-3/3 against approved real repositories. Mock or synthetic model, GitHub,
-automation, or receipt evidence cannot close the gate.
+raw digest; authorizes only named separately approved remote effects; and
+completed 3/3 against approved real repositories on 2026-08-23. Mock or
+synthetic model, GitHub, automation, or receipt evidence could not close the
+gate. That record does not authorize the supervised active-repository canary,
+merge, deployment, migration, or unattended use.
 
 ### Packet 2 — browser authority without Git effects
 

@@ -1,8 +1,20 @@
 # Implementation plans
 
-## Headless Vulcan proposal admission candidate
+## Current execution status
 
-Status: implemented under proposed ADR 0065. Focused resolver,
+Gate 0 is released and Gate 1's credential-gated live 3/3 evidence completed
+2026-08-23. Current product-quality work is ADR 0036 Gate 2, beginning with the
+three honestly unsupported evaluation classes: read-only codebase explanation,
+read-only security findings, and behavior-preserving refactoring. The separate
+supervised active-repository canary remains **HOLD** after the 2026-08-27
+secret-scanner survey; live-state migration, merge, deployment, unattended use,
+effectful/control session continuation, and wider Vulcan authority remain
+closed. Older sections below retain the status that was true at their named
+checkpoint and must not be read as the current release state.
+
+## Headless Vulcan proposal admission
+
+Status: merged through PR #70 under proposed ADR 0065. Focused resolver,
 service-lifecycle, and static security coverage passes; compiled production
 measurement matches 20/20 declared outcomes, and the complete local and hosted
 release gates pass. Grok independently reviewed exact code snapshot `848fab3`
@@ -32,9 +44,9 @@ This slice permits evidence-producing proposals only. It does not authorize a
 live Vulcan call, proposal application, child run, Gate 1 profile, active
 repository, GitHub effect, deployment, or migration.
 
-## Workspace explicit Vulcan provider selection candidate
+## Workspace explicit Vulcan provider selection
 
-Status: locally implemented under proposed ADR 0064. The full local gate and
+Status: merged through PR #69 under proposed ADR 0064. The full local gate and
 real-Chromium acceptance pass. Grok independently reviewed exact candidate
 `c4a752a` from its own clone and returned PASS with no blocker, high, or medium
 finding.
@@ -82,9 +94,9 @@ Evidence: rebase attempt conflicts at the first commit (four files, including
 the pre-S2a `landing-ledger.ts` divergence of 7,582 lines); supersession
 mapping verified file-by-file against `main` at `b8c7927`.
 
-## Headless H2b bounded worker candidate
+## Headless H2b bounded worker implementation
 
-Status: locally implemented and settlement-hardened under proposed ADR 0048;
+Status: merged through PR #54 and settlement-hardened under proposed ADR 0048;
 the full local gate and non-author review passed. Risky-change research,
 live-provider measurement, and deployment remain open.
 
@@ -112,17 +124,17 @@ live-provider measurement, and deployment remain open.
       added.
 - [x] H3a: reconcile a killed worker's open operation and append a fail-closed
       interruption settlement without truncation or execution replay (ADR 0049
-      local candidate).
-- [ ] H3b: reconstruct the exact binding and effect receipt before
-      exactly-once resume/fork after process death.
+      implementation merged through PR #54).
+- [x] H3b: reconstruct the exact binding and effect receipt, then continue one
+      replay-safe stage exactly once after process death (ADRs 0057 and 0058).
 - [x] H4: isolated child runs with depth, write-set, tool, and budget limits
-      (ADR 0059 local candidate).
+      (ADR 0059 implementation merged through PR #60).
 - [ ] H5: separately governed external/research adapters. SearXNG and DeepAPI
       are not part of H2b.
 
-## Headless H3a crash-tail reconciliation candidate
+## Headless H3a crash-tail reconciliation implementation
 
-Status: locally implemented under proposed ADR 0049; full local gate and
+Status: merged through PR #54 under proposed ADR 0049; full local gate and
 non-author review passed. Risky-change research, live-provider measurement,
 and human shipping approval remain open.
 
@@ -147,11 +159,12 @@ and human shipping approval remain open.
 - [x] H3b: reconstruct and compare binding/provider/workspace/effect identity,
       then resume only a replay-safe or host-reconciled stage.
 
-## Headless H3b reconstruction plan
+## Headless H3b reconstruction implementation
 
 Status: the evidence-only reconstruction and classification slice is
-implemented under proposed ADR 0057; the full local gate and one non-author
-review passed. The exactly-once continuation slice below is its successor.
+merged through PR #57 under proposed ADR 0057; the full local gate and one
+non-author review passed. The exactly-once continuation slice below is its
+successor.
 
 Decision: the first H3b slice is evidence-only reconstruction and
 classification. It grants no continuation, replay, fork, provider, sandbox,
@@ -185,9 +198,9 @@ resume, fork, or any other execution authority.
 - [x] Keep exactly-once continuation in a later H3b slice after this evidence
       boundary passes the full local gate and one non-author review.
 
-## Headless H3b exactly-once continuation candidate
+## Headless H3b exactly-once continuation implementation
 
-Status: locally implemented under proposed ADR 0058. The full local gate ran
+Status: merged through PR #59 under proposed ADR 0058. The full local gate ran
 green; one non-author review, risky-change research, and live-provider
 measurement remain open.
 
@@ -218,11 +231,12 @@ single continuation allowance is then spent.
       ambiguous-tail refusal with no resume intent, and crashed-continuation
       closure with second-resume refusal.
 - [ ] Obtain one non-author round-table review of the continuation candidate.
-- [ ] H3b remainder: fork, and session-turn exactly-once continuation.
+- [ ] H3b remainder: fork and effectful/control session-turn continuation.
+      ADR 0063 separately accepts the closed read-only session-batch subset.
 
-## Headless H4 isolated child runs candidate
+## Headless H4 isolated child runs implementation
 
-Status: locally implemented under proposed ADR 0059. The full local gate ran
+Status: merged through PR #60 under proposed ADR 0059. The full local gate ran
 green; one non-author review, risky-change research, and live-provider
 measurement remain open.
 
@@ -257,9 +271,10 @@ human-gated lineage migration.
       depth above one, model-initiated children, and child write-back.
 
 
-## Headless propose-only default and runaway envelopes candidate
+## Headless propose-only default and runaway envelopes implementation
 
-Status: locally implemented under proposed ADR 0060. The full local gate ran
+Status: merged through PR #62 and hardened through PR #64 under proposed ADR
+0060. The full local gate ran
 green; one non-author review remains open.
 
 Decision: `run approve-headless` proposes by default (`worker.mutation`
@@ -293,9 +308,10 @@ guard lands the third identical session tool call as `session.exhausted`.
       resume-headless refusal in propose mode, turns clamp, and doom loop.
 - [ ] Obtain one non-author round-table review of the candidate.
 
-## Headless receipt event-stream candidate (ADR 0061)
+## Headless receipt event-stream implementation (ADR 0061)
 
-Status: locally implemented under proposed ADR 0061. A 2026-08-27 cold review
+Status: merged through PR #61 and lifecycle-hardened through PR #68 under
+proposed ADR 0061. A 2026-08-27 cold review
 found that receipt projection trusted settlement fields without replaying the
 worker/child lifecycle grammar. The remediation now validates both grammars
 before projection and passes its focused adversarial corpus and refreshed full
@@ -342,9 +358,9 @@ fails closed with `INVALID_HEADLESS_STREAM`.
       specification and standards reviews returned PASS after their findings
       were reproduced and closed with permanent regression cases (2026-08-27).
 
-## Landlock sandbox profiles candidate
+## Landlock sandbox profiles implementation
 
-Status: implemented under proposed ADR 0062. Kernel enforcement, CLI
+Status: merged through PR #63 under proposed ADR 0062. Kernel enforcement, CLI
 re-execution, and skip-guarded tests are in the tree; one non-author review
 remains open.
 
@@ -372,12 +388,13 @@ hosts degrade to a documented no-op with one canonical stderr notice.
 
 ## Accepted Gate 1 Slice 1 offline benchmark checkpoint
 
-Status: the versioned, deterministic, zero-external-effect offline benchmark
-contract is implementation-complete in the current tree. This closes Slice 1's
-offline contract deliverable only. Gate 1 remains open. This offline report
-itself claims no live provider/model run, GitHub object or ref effect, draft pull
-request, landing/GitHub receipt, or durable landing-coordinator evidence;
-Packet 2's separate browser-authority record appears below.
+Status: historical checkpoint. The versioned, deterministic,
+zero-external-effect offline benchmark contract completed Slice 1's offline
+deliverable while Gate 1 was still open; Gate 1 later completed its separate
+live 3/3 evidence on 2026-08-23. This offline report itself claims no live
+provider/model run, GitHub object or ref effect, draft pull request,
+landing/GitHub receipt, or durable landing-coordinator evidence; Packet 2's
+separate browser-authority record appears below.
 
 ### Completed offline contract
 
@@ -912,14 +929,14 @@ provider-usage rollups inside room cards (the existing full-run usage view
 and operation timeline events remain the usage surface); anything
 Nostr/relay/federation/forge/Git-hosting/chat-like; and any claim that a
 change landed outside the Icarus-private worktree.
-## Current product execution program
+## Historical Gate 1 product execution program
 
 The dependency-ordered plan for making Icarus a trustworthy Cursor rival with
 a Buzz-inspired multi-agent mission room is
 [`ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md`](ICARUS_COLLABORATIVE_IDE_GAME_PLAN.md).
-It records the closure of the historical ADR 0026 release hold, makes Gate 1
-browser authority plus isolated create-only Git landing with reconciliation the
-first forward product slice,
+It records the closure of the historical ADR 0026 release hold and the program
+that made Gate 1 browser authority plus isolated create-only Git landing with
+reconciliation the first forward product slice,
 places a thin VS Code workbench in the center, introduces a bounded read-only
 Council before write-capable collaboration, and requires isolated child runs
 plus deterministic integration for the later Crew.
@@ -933,7 +950,7 @@ and both native jobs in
 [run 30602949132](https://github.com/Ayyitskevin/Icarus/actions/runs/30602949132)
 succeeded at that exact head.
 
-The immediate forward sequence continues through Gate 1:
+The Gate 1 sequence at that checkpoint was:
 
 1. preserve Packet 2's published exact-head hosted and native macOS/Windows
    acceptance for ADR 0029's closed guarded lifecycle actions;
@@ -1021,15 +1038,19 @@ Packet 3 performs no credential lookup, network request, GitHub mutation,
 live-state migration, source-checkout mutation, merge, or deployment. Those
 boundaries remain with Packet 4 and the Gate 1 exit gate.
 
-### Packet 4a record — bounded GitHub gateway (merged, unwired)
+### Packet 4a historical record — bounded GitHub gateway package checkpoint
 
-Status: **PACKAGE MERGED; WIRED TO NOTHING**. `packages/github-gateway` merged
+Status at this checkpoint: **PACKAGE MERGED; WIRED TO NOTHING**. Later Packet
+4b slices wired the coordinator through bounded draft-PR landing and immutable
+receipt presentation, and Gate 1's live 3/3 evidence completed 2026-08-23.
+`packages/github-gateway` merged
 as [PR #25](https://github.com/Ayyitskevin/Icarus/pull/25) with two subsequent
 security corrections,
 [PR #26](https://github.com/Ayyitskevin/Icarus/pull/26) and
 [PR #27](https://github.com/Ayyitskevin/Icarus/pull/27). This closes Packet 4a's
-package deliverable only. It is not Packet 4, and it is not Gate 1 item 5:
-no runtime path reaches it.
+package deliverable only. At that checkpoint it was not Packet 4 or Gate 1
+item 5: no runtime path reached it. Packet 4b later superseded that wiring
+status without widening the package's operation table.
 
 The package supplies a dependency-free, injectable-transport gateway over a
 closed operation table: actor read, blob/tree/commit object upload, absent-only
@@ -1226,12 +1247,12 @@ prepare/status/decide/resume` routes print. The workspace validates the exact
 interactive element, no new browser authority. The receipt is absent (and
 presented as absent) until the landing lands.
 
-Packet 4b is thereby complete offline: preflight, object upload, absent-only
+Packet 4b completed offline: preflight, object upload, absent-only
 remote ref, one-POST-ever draft PR, immutable receipt, and its presentation.
-What remains for Gate 1 is S3 alone: the credential-gated live-evidence
-profile and the operator's credentialed 3/3 run against real repositories.
-Every claim in this packet remains offline evidence — Gate 1 closes only on
-that live run.
+At that checkpoint S3 remained: the credential-gated live-evidence profile and
+the operator's credentialed 3/3 run against real repositories. That run later
+completed on 2026-08-23; this packet's claims remain offline evidence and do not
+authorize canary, migration, merge, deployment, or unattended use.
 
 Evidence: the presentation suite pins the receipt's exact key order, the
 full-shape projection at both the service and API seams, credential-sentinel
@@ -1244,8 +1265,9 @@ reject an injected or dropped key) and the panel's inert render. Full
 
 Status: **MERGED AND RELEASED AT THE GATE 0 RELEASE HEAD**. The corrected ADR 0026
 implementation, exact-head Linux gate, and exact-head macOS/Windows native
-acceptance pass at `802b91e6f6c9b392f56c9ee3660be818a0f74a62`. Gate 1 is
-the current forward work.
+acceptance pass at `802b91e6f6c9b392f56c9ee3660be818a0f74a62`. Gate 1 was
+the next forward work at this checkpoint; Gate 2 is next after the recorded
+Gate 1 live 3/3 outcome.
 
 At authoring/candidate time, status was **LOCAL CORRECTIONS PASS; PUBLICATION
 HOLD**. Explicit human approval authorized the High remote-egress and Medium

@@ -22,6 +22,11 @@
   it. Coordinator wiring, remote receipts, credential-gated live evidence, and
   any existing/live database migration remain Packet 4 or operator-gated work;
   this checkpoint does not complete Gate 1.
+- Follow-up checkpoint (2026-08-23): Packet 4 wired the unchanged closed GitHub
+  operation table into the bounded coordinator, added immutable remote receipt
+  projection, and supported the separately approved credential-gated live 3/3
+  record. That outcome grants no active-repository canary, live-state migration,
+  merge, deployment, or unattended authority.
 
 - Supersedes: only the unaccepted landing-state proposal in
   [`FABLE_ICARUS_VISION.md`](../FABLE_ICARUS_VISION.md), specifically its

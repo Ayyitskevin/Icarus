@@ -154,7 +154,9 @@ Chromium-family browser covered by the acceptance record. ADR 0040's exact-head
 native technical gate passed at
 `eb01b6406c12126c60add7ac83800f8eba8ffdc9`, and human acceptance of its interim
 operator-controlled browser/resolver/proxy residual risk was recorded on
-2026-07-31. Remaining Gate 1 runtime slices still gate release. Planning creates
+2026-07-31. That browser checkpoint did not itself complete Gate 1. The later
+bounded landing path and live 3/3 record did; canary, migration, merge,
+deployment, and unattended authority remain withheld. Planning creates
 no private worktree and executes no project code. Before each bounded
 context/provider operation,
 SQLite atomically admits one `started` operation per run; a concurrent planner

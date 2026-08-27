@@ -16,8 +16,9 @@ and exact-head technical evidence are complete at
 `eb01b6406c12126c60add7ac83800f8eba8ffdc9` in Linux CI `30618041483` and
 native real-Chrome run `30618043377`; explicit human acceptance of the interim
 operator-controlled browser/resolver/proxy residual risk was recorded on
-2026-07-31. Remaining Gate 1 runtime slices still gate release, and this
-acceptance does not change that gate. No live migration, merge, deployment, or
+2026-07-31. That browser checkpoint did not itself complete Gate 1. The later
+bounded landing path and live 3/3 record do not widen this browser acceptance.
+No live migration, merge, deployment, or
 public release was authorized or performed as part of it. Planning creates no
 private worktree and executes no project code. SQLite atomically admits one
 started operation per run before bounded context/provider work and rejects a
@@ -1264,7 +1265,8 @@ the error message rather than the message. `manifestSha256` is the digest of the
 raw manifest bytes when available and is `null` only when those bytes could not
 be read. The failure report adds an explicit incomplete-effects limitation. Both
 variants reject missing or extra fields, are strict-parsed and validated before
-and after atomic persistence, and say Gate 1 remains incomplete. If report
+and after atomic persistence, and say the offline report cannot itself complete
+Gate 1. If report
 construction, validation, or persistence fails and the failure variant cannot
 itself be validated and persisted, the command raises a combined failure and no
 report should be trusted.

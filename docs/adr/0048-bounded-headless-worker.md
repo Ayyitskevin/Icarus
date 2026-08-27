@@ -1,6 +1,7 @@
 # ADR 0048: Lease-held bounded headless worker
 
-- Status: Proposed — local H2b candidate implemented, settlement-hardened, and
+- Status: Proposed — H2b implementation merged through PR #54,
+  settlement-hardened, and
   independently reviewed; risky-change research, live-provider measurement,
   and deployment evidence remain required
 - Date: 2026-08-21
