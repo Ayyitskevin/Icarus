@@ -81,6 +81,13 @@ and the CLI emits exactly one canonical JSON record. Repeated reconstruction
 over the same durable bytes returns byte-identical canonical output.
 Exactly-once continuation remains a later H3b slice.
 
+The accepted ordinary-v1 fixture also pins its reconstruction digest as the
+literal
+`5e3d38c1fa35428354e7a2ed8537efc1b3fc686abd98c2c89e8c4f6fa59101e0`.
+That regression turns any field-set, value, or canonicalization drift into a
+review-visible protocol decision instead of allowing relative repeatability
+alone to ratify a newly changed v1 shape.
+
 ## Consequences
 
 - A killed worker's binding is now re-derivable from current persisted inputs,

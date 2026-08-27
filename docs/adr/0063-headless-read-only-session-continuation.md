@@ -1,8 +1,10 @@
 # ADR 0063: Exactly-once continuation after a read-only session batch
 
-- Status: Proposed — the local candidate is implemented; effectful/control
-  session batches, live-provider evidence, deployment, and live execution
-  authority remain closed
+- Status: Accepted — independently reviewed head
+  `956eecc87c15798e849b0211ce0582dc47911bc6` merged unchanged through PR #65
+  as `a5fa58c2f49224fd27c8afd02da18cb6feace5bb`; effectful/control session
+  batches, live-provider evidence, deployment, and live execution authority
+  remain closed
 - Date: 2026-08-26
 - Related: [ADR 0026](0026-agent-session-loop-and-tool-registry.md) (session
   loop), [ADR 0057](0057-headless-evidence-reconstruction.md) (durable
@@ -73,7 +75,9 @@ iteration event and operation receipts already exist.
 - A process killed immediately after a committed read-only session batch can
   continue exactly once from the next provider turn.
 - Single-shot and pre-boundary reconstruction output remains byte-identical
-  v1; session-boundary evidence is explicitly versioned v2.
+  v1; session-boundary evidence is explicitly versioned v2. The accepted
+  ordinary-v1 fixture has a literal golden digest so future drift fails as a
+  protocol regression rather than passing a relative equality assertion.
 - The resume-intent digest binds the exact completed boundary, so removing or
   moving it changes reconstruction authority.
 - Effectful/control session continuation, fork/concurrency, schedules, remote

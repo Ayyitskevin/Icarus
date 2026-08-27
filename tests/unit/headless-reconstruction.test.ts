@@ -37,6 +37,10 @@ import {
 } from "../support/unit-fixtures.js";
 
 const NOW = "2026-08-26T05:30:00.000Z";
+// Accepted PR #65 ordinary-v1 fixture. Changing this digest is a protocol
+// decision, not routine snapshot churn: v2 carries the session boundary.
+const V1_RECONSTRUCTION_GOLDEN_SHA256 =
+  "5e3d38c1fa35428354e7a2ed8537efc1b3fc686abd98c2c89e8c4f6fa59101e0";
 
 function sourceProfile(): Record<string, unknown> {
   return {
@@ -327,6 +331,8 @@ describe("headless evidence reconstruction", () => {
     const { authority } = crashFixture();
     const first = reconstructHeadlessEvidenceV1(authority);
     const second = reconstructHeadlessEvidenceV1(authority);
+    expect(first.schema).toBe(HEADLESS_RECONSTRUCTION_SCHEMA);
+    expect(first.reconstructionDigestSha256).toBe(V1_RECONSTRUCTION_GOLDEN_SHA256);
     expect(canonicalJson(first as unknown as JsonValue)).toBe(
       canonicalJson(second as unknown as JsonValue),
     );
