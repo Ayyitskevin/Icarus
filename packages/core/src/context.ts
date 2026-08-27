@@ -203,6 +203,9 @@ function isPlaceholderOrReference(
     return true;
   }
   if (
+    /^\$\{\{\s*(?:env|github|inputs|secrets|vars)\.[A-Za-z_][A-Za-z0-9_.-]*\s*\}\}$/.test(
+      trimmed,
+    ) ||
     /^\$\{[^}\r\n]+\}$/.test(trimmed) ||
     /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed) ||
     /^\{\{[^}\r\n]+\}\}$/.test(trimmed) ||
@@ -225,6 +228,9 @@ function isPlaceholderOrReference(
   ) {
     return true;
   }
+  // Closed control scalars carry no secret bytes; their semantics remain the
+  // responsibility of the configuration policy that owns the field.
+  if (["false", "read", "true", "write"].includes(lower)) return true;
   if (["boolean", "number", "string", "unknown"].includes(lower)) return true;
   if (allowBareIdentifier && /^[A-Za-z_$][\w$]*$/.test(trimmed)) return true;
   return normalizeCredentialKey(trimmed) === normalizeCredentialKey(key);

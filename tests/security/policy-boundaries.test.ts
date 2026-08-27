@@ -204,6 +204,42 @@ describe("host-owned policy boundaries", () => {
     },
   );
 
+  test("treats non-secret credential controls and references as data", async () => {
+    for (const workflowPath of [
+      "../../.github/workflows/ci.yml",
+      "../../.github/workflows/native-acceptance.yml",
+      "../../.github/workflows/opencode.yml",
+    ]) {
+      const workflow = await readFile(new URL(workflowPath, import.meta.url));
+      expect(containsSecretShapedContent(workflow)).toBe(false);
+    }
+    for (const content of [
+      assignment("persist-credentials", "false", ": "),
+      assignment("credentials", "true", ": "),
+      assignment("token", "FALSE"),
+      assignment("id-token", "write", ": "),
+      assignment("OPENCODE_API_KEY", ["$", "{{ secrets.OPENCODE_API_KEY }}"].join(""), ": "),
+    ]) {
+      expect(containsSecretShapedContent(Buffer.from(content))).toBe(false);
+    }
+    expect(
+      containsSecretShapedContent(
+        Buffer.from(assignment("persist-credentials", credentialValue("checkout"), ": ")),
+      ),
+    ).toBe(true);
+    expect(
+      containsSecretShapedContent(
+        Buffer.from(
+          assignment(
+            "OPENCODE_API_KEY",
+            ["$", "{{ ", "'production-credential-999999999999999999999999'", " }}"].join(""),
+            ": ",
+          ),
+        ),
+      ),
+    ).toBe(true);
+  });
+
   test("scans a maximum-size unterminated credential line without throwing or recursion", () => {
     const prefix = Buffer.from(assignment("password", '"'));
     const suspicious = Buffer.concat([
