@@ -73,6 +73,28 @@ describe("Gate 2 retrieval benchmark contract", () => {
     expect(validateGate2RetrievalResult(measured, value, "f".repeat(64))).toBe(measured);
   });
 
+  it("keeps precision falsifiable with one eligible negative fixture path", async () => {
+    const value = await manifest();
+    const negative = value.case.repository.files.find(
+      (entry) => !value.case.expectedPaths.includes(entry.path),
+    );
+    if (negative === undefined) throw new Error("manifest has no negative example");
+    const measured = result(value);
+    measured.case.selectedPaths = [...value.case.expectedPaths.slice(0, 3), negative.path];
+    measured.case.provenance = measured.case.selectedPaths.map((entry) => ({
+      path: entry,
+      sha256: value.case.repository.files.find((candidate) => candidate.path === entry)?.sha256,
+      lineCount: 1,
+      matches: [{ term: "lantern", lines: [1] }],
+    }));
+    measured.case.recall = 0.75;
+    measured.case.precision = 0.75;
+    measured.case.passed = false;
+    measured.passed = false;
+
+    expect(validateGate2RetrievalResult(measured, value, "f".repeat(64))).toBe(measured);
+  });
+
   it("rejects unknown fields and widened execution or claim boundaries", async () => {
     const extra = await manifest();
     Object.assign(extra, { unreviewed: true });
@@ -128,8 +150,20 @@ describe("Gate 2 retrieval benchmark contract", () => {
     effect.case.effects.providerCalls = 1;
     const widenedClaim = result(value);
     widenedClaim.limitations = [];
+    const excessSelection = result(value);
+    const negative = value.case.repository.files.find(
+      (entry) => !value.case.expectedPaths.includes(entry.path),
+    );
+    if (negative === undefined) throw new Error("manifest has no negative example");
+    excessSelection.case.selectedPaths.push(negative.path);
+    excessSelection.case.provenance.push({
+      path: negative.path,
+      sha256: negative.sha256,
+      lineCount: 1,
+      matches: [{ term: "lantern", lines: [1] }],
+    });
 
-    for (const attack of [forgedRecall, missingProvenance, effect, widenedClaim]) {
+    for (const attack of [forgedRecall, missingProvenance, effect, widenedClaim, excessSelection]) {
       expect(() => validateGate2RetrievalResult(attack, value, "f".repeat(64))).toThrow();
     }
   });

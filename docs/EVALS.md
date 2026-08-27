@@ -205,9 +205,11 @@ binary, invalid-UTF-8, and secret-shaped files; enforces query, tree, scan,
 selected-file, and selected-byte ceilings; and emits content digests plus
 bounded line-match provenance.
 
-The current closed fixture selects all four expected files with recall `1.0`
-and precision `1.0`, preserving both the source fixture and temporary committed
-worktree byte-for-byte. The ignored report is
+The current closed fixture contains four expected program files plus one
+eligible historical distractor that matches the task's `lantern` term. The
+retriever selects the four expected files and rejects the distractor, producing
+recall `1.0` and falsifiable precision `1.0` while preserving both the source
+fixture and temporary committed worktree byte-for-byte. The ignored report is
 `.local/gate2-retrieval-report.json`. Its validator derives pass/fail from the
 fixed `0.90` recall and `0.60` precision thresholds and refuses nonzero
 provider, network, repository-mutation, or registered-command effects.

@@ -15,9 +15,9 @@
     "id": "explain-codebase-retrieval",
     "class": "explain_codebase",
     "repository": {
-      "fixturePath": "fixtures/evals/repos/unfamiliar",
-      "treeSha1": "65f958d96cda8563886c14c09f971c0f17c40dff",
-      "commitSha1": "e37b35736aa65faab2d599794e41ef70c13041c7",
+      "fixturePath": "fixtures/evals/gate2/repos/unfamiliar",
+      "treeSha1": "f9fd140563e632ec336ac18599ffbb940ac81426",
+      "commitSha1": "03f52b6f5be1c98ade5ef9afea4385ffdc8be681",
       "files": [
         {
           "path": "README.md",
@@ -26,6 +26,10 @@
         {
           "path": "config/app.json",
           "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+        },
+        {
+          "path": "docs/history.md",
+          "sha256": "dc2aa7628e39d3af4d186f67f30b92ec4bf6c2eacf9277fd60b03c6d7db3ebcd"
         },
         {
           "path": "src/greeting.py",

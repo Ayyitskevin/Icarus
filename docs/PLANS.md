@@ -26,9 +26,10 @@ and the Gate 2 exit gate remain open.
       scores, and line-match provenance into a deterministic retrieval receipt.
 - [x] Add a strict one-case Gate 2 manifest/result contract and integrate the
       focused evaluator under `pnpm eval`.
-- [x] Measure the pinned unfamiliar-codebase fixture at recall `1.0`, precision
-      `1.0`, unchanged source and temporary worktree, and zero provider,
-      network, repository-mutation, or registered-command effects.
+- [x] Measure the pinned unfamiliar-codebase fixture against one eligible
+      negative example at recall `1.0`, precision `1.0`, unchanged source and
+      temporary worktree, and zero provider, network, repository-mutation, or
+      registered-command effects.
 - [ ] Add a real read-only explanation run and validate its file-and-line
       citations before changing `explain_codebase` from `unsupported`.
 - [ ] Publish and run Gate 2's required versioned 30-task benchmark, measure

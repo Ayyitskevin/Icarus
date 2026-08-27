@@ -42,6 +42,7 @@ const EXPECTED_EVIDENCE = [
   "source_checkout_unchanged",
   "zero_external_or_repository_effects",
 ];
+const EXPECTED_PATHS = ["README.md", "config/app.json", "src/greeting.py", "src/main.py"];
 export const GATE2_RETRIEVAL_LIMITATIONS = Object.freeze([
   "This one-case deterministic fixture measures lexical retrieval only; it is not the Gate 2 30-task release benchmark.",
   "The explain_codebase capability remains unsupported until a read-only explanation run produces validated source citations.",
@@ -135,14 +136,14 @@ export function validateGate2RetrievalManifest(value) {
     fail("case identity or claim boundary changed");
   }
   const repository = exactKeys(scenario.repository, REPOSITORY_KEYS, "case.repository");
-  if (repository.fixturePath !== "fixtures/evals/repos/unfamiliar") {
+  if (repository.fixturePath !== "fixtures/evals/gate2/repos/unfamiliar") {
     fail("fixture path changed");
   }
   if (!HEX_40.test(repository.treeSha1) || !HEX_40.test(repository.commitSha1)) {
     fail("pinned Git identities must be lowercase SHA-1 values");
   }
-  if (!Array.isArray(repository.files) || repository.files.length !== 4) {
-    fail("repository inventory must contain exactly four files");
+  if (!Array.isArray(repository.files) || repository.files.length !== EXPECTED_PATHS.length + 1) {
+    fail("repository inventory must contain four expected files and one negative example");
   }
   const inventoryPaths = [];
   for (const [index, entryValue] of repository.files.entries()) {
@@ -166,14 +167,20 @@ export function validateGate2RetrievalManifest(value) {
   ) {
     fail("task contract is invalid");
   }
-  exactStringArray(scenario.expectedPaths, inventoryPaths, "case.expectedPaths");
+  exactStringArray(scenario.expectedPaths, EXPECTED_PATHS, "case.expectedPaths");
+  if (
+    EXPECTED_PATHS.some((entry) => !inventoryPaths.includes(entry)) ||
+    inventoryPaths.filter((entry) => !EXPECTED_PATHS.includes(entry)).length !== 1
+  ) {
+    fail("repository inventory must contain exactly one non-expected negative example");
+  }
 
   const budget = exactKeys(scenario.retrievalBudget, BUDGET_KEYS, "case.retrievalBudget");
   positiveInteger(budget.maxFiles, 64, "maxFiles");
   positiveInteger(budget.maxTotalBytes, 524288, "maxTotalBytes");
   positiveInteger(budget.maxScanBytes, 67108864, "maxScanBytes");
-  if (budget.maxFiles !== inventoryPaths.length || budget.maxTotalBytes > budget.maxScanBytes) {
-    fail("retrieval budget must cover only the closed fixture and fit within its scan budget");
+  if (budget.maxFiles !== EXPECTED_PATHS.length || budget.maxTotalBytes > budget.maxScanBytes) {
+    fail("retrieval budget must cover the expected set and fit within its scan budget");
   }
   const thresholds = exactKeys(scenario.thresholds, THRESHOLD_KEYS, "case.thresholds");
   if (thresholds.minimumRecall !== 0.9 || thresholds.minimumPrecision !== 0.6) {
@@ -257,6 +264,7 @@ export function validateGate2RetrievalResult(value, manifest, expectedManifestSh
   );
   if (
     new Set(selectedPaths).size !== selectedPaths.length ||
+    selectedPaths.length > expected.retrievalBudget.maxFiles ||
     selectedPaths.some((entry) => !inventory.has(entry)) ||
     scenario.provenance.length !== selectedPaths.length
   ) {
