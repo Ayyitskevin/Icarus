@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadGate2BenchmarkContract } from "../../scripts/gate2-benchmark-contract.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
-const manifestPath = path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v1.json");
+const manifestV1Path = path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v1.json");
+const manifestV2Path = path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v2.json");
 const temporaryRoots: string[] = [];
 
 async function fixtureCopy(): Promise<string> {
@@ -27,10 +28,28 @@ afterEach(async () => {
 
 describe("Gate 2 fixture boundary", () => {
   it("verifies every committed task and repository raw-byte pin", async () => {
-    const result = await loadGate2BenchmarkContract(manifestPath, repositoryRoot);
+    const result = await loadGate2BenchmarkContract(manifestV1Path, repositoryRoot);
 
     expect(result.manifest.cases).toHaveLength(30);
     expect(result.manifestSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.predecessorManifestSha256).toBeNull();
+  });
+
+  it("loads v2 only with its exact committed v1 predecessor", async () => {
+    const result = await loadGate2BenchmarkContract(manifestV2Path, repositoryRoot);
+
+    expect(result.manifest.schemaVersion).toBe(2);
+    expect(result.manifest.cases).toHaveLength(30);
+    expect(result.predecessorManifestSha256).toBe(
+      "43159d8a174312e7fd720fbb625173601e7c90f6e5983c62c206b69ce99c9558",
+    );
+
+    const root = await fixtureCopy();
+    const predecessor = path.join(root, "fixtures/evals/gate2/manifest.v1.json");
+    await writeFile(predecessor, `${await readFile(predecessor, "utf8")} `, "utf8");
+    await expect(
+      loadGate2BenchmarkContract(path.join(root, "fixtures/evals/gate2/manifest.v2.json"), root),
+    ).rejects.toThrow("predecessor manifest digest");
   });
 
   it("rejects a single-byte task mutation", async () => {

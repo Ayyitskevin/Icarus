@@ -343,6 +343,26 @@ reopens are observed. The protected task-priority migration scaffold remains
 excluded. The dated measurement is
 [`docs/evals/2026-08-28-gate2-scaffold-cohort-a.md`](evals/2026-08-28-gate2-scaffold-cohort-a.md).
 
+`fixtures/evals/gate2/manifest.v2.json` is the immutable, host-policy-compatible
+successor to manifest v1. It binds the exact v1 SHA-256
+`43159d8a174312e7fd720fbb625173601e7c90f6e5983c62c206b69ce99c9558`,
+preserves 28 cases byte-for-byte, and replaces only the two cases whose declared
+outputs required protected `migrations/` paths. The replacement tasks retain
+offline schema semantics but target only `schema/` snapshots and read-only
+`checks/` contracts. They do not create or apply a migration, connect to a live
+database, or widen ordinary PatchSet policy. Manifest v2 SHA-256 is
+`0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5`.
+
+`pnpm benchmark:gate2:schema-successor` executes exactly those two v2 cases
+through production retrieval, plan approval, private PatchSet mutation,
+digest-pinned no-network SQLite checks, local review, and durable runtime reopen.
+Both intended baselines fail and both final registered checks pass. Recall and
+digest provenance are `1.0`; precision is `0.75` for each case. Four loopback
+requests, four sandbox checks, four observed in-memory SQLite executions, two
+private mutations, two final checks, and two reopens are observed. The report
+retains 2 executed, 2 passed, and 28 unexecuted. The dated measurement is
+[`docs/evals/2026-08-28-gate2-schema-successor-cohort.md`](evals/2026-08-28-gate2-schema-successor-cohort.md).
+
 Across the explanation, security-review, refactor, repair-A, repair-B, and
 scaffold-A reports, 28 distinct manifest cases now have deterministic contract-
 integration evidence and 2 cases have not been executed by any partial cohort.
@@ -353,6 +373,12 @@ passed. Manifest v1's schema repair and scaffold cases request protected
 resolving that input contract requires an explicit benchmark-versioning
 decision, not a policy bypass. Live-model quality, autonomous target discovery,
 the full 30-task threshold, and fixed-model routing-cost comparison remain open.
+
+The 28-case manifest-v1 identity union and the two-case manifest-v2 successor
+report are evidence against different immutable revisions. They must not be
+added into a synthetic 30/30 result. A trusted v2 full-suite orchestrator must
+execute or explicitly adopt evidence for all 30 v2 identities under one closed
+result contract before any full-suite threshold claim.
 
 ## Measures
 
@@ -419,16 +445,21 @@ the ignored local report. Generated reports are never committed.
 
 ## Gate 2 benchmark contract
 
-The closed Gate 2 contract is `fixtures/evals/gate2/manifest.v1.json`. It pins
+The original closed Gate 2 contract is the byte-preserved
+`fixtures/evals/gate2/manifest.v1.json`. Its immutable successor is
+`fixtures/evals/gate2/manifest.v2.json`; the successor exact-binds v1's digest,
+replacement map, 28 unchanged cases, and two reviewed host-policy-compatible
+replacement cases. Both manifests pin
 30 task documents and seven existing fixture repositories by complete sorted
 file inventory, raw-byte SHA-256, and canonical inventory digest. The task mix
 is fixed at ten repairs, five refactors, five explanations, five security
 reviews, and five scaffolds. Unknown, missing, duplicate, reordered, reclassified,
 unpinned, or byte-drifted input fails validation.
 
-`pnpm benchmark:gate2:contract` strict-parses and validates those pins offline.
-`pnpm eval` includes the same command. A successful command reports 30 validated
-cases, zero executed cases, and `contract_validated_gate2_execution_not_run`.
+`pnpm benchmark:gate2:contract` strict-parses and validates both revisions and
+their lineage offline. `pnpm eval` includes the same command. A successful
+command reports the latest 30 validated cases, zero executed cases, and
+`contract_validated_gate2_execution_not_run`.
 It reads no credentials, invokes no provider or repository code, performs no
 network or Git operation, mutates no source checkout, and cannot complete Gate 2.
 
@@ -452,10 +483,11 @@ proof that the referenced evidence exists. Six separate partial cohorts
 implement five explanation, five security-review, five refactor, five repair-A,
 four repair-B, and four scaffold-A evaluator IDs. The four five-case reports
 each leave 25 cases unexecuted; repair-B and scaffold-A independently leave 26.
-No partial report fabricates the full result's remaining observations. Their
+No v1 partial report fabricates the full result's remaining observations. Their
 distinct-case union covers 28 cases and leaves 2 unexecuted, but is not a
 synthetic full result or threshold pass; the full-suite runner remains
-unavailable and incomplete.
+unavailable and incomplete. The separate two-case v2 successor report cannot be
+added to that v1 union because revision identity is part of the evidence.
 
 The strict result contract recomputes retrieval, provenance, plan, outcome,
 usage, cost, and aggregate values from 30 manifest-bound observations. It
@@ -479,7 +511,8 @@ Its strict JSON decoder is byte- and depth-bounded, and its result limitations
 state that structural self-consistency does not authenticate runner or evaluator
 evidence. The partial explanation, security-review, refactor, and repair-A
 runners retain five outcomes each, while repair-B and scaffold-A retain four
-each; a trusted full runner must retain the exact evidence bytes named by every
-one of its 30 observations.
+each; the schema-successor runner retains two v2 outcomes. A trusted v2 full
+runner must retain the exact evidence bytes named by every one of its 30
+observations.
 Gate 2 remains open until the scenario evaluators and deterministic retrieval
 runtime execute the fixed suite and satisfy the accepted ADR 0036 exit gate.

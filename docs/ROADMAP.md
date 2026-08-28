@@ -17,7 +17,7 @@ The current sequence is:
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
 | 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
-| 2 | Context and agent quality — **five explanation, five security-review, five refactor, five repair-A, four repair-B, and four scaffold-A cases measured; full 30-task benchmark open** | six deterministic cohorts cover 28 distinct manifest cases through production retrieval/adapters; refactor, repair, and scaffold cohorts additionally traverse plan approval, private PatchSet mutation, sandbox checks, review, and durable reopen with exact final bytes; explanation/refactor/repair-A macro precision is 0.80, security is 0.75, and repair-B/scaffold-A are 0.875; scaffold-A macro recall is 0.9375 and every other cohort has recall 1.0, while provenance is 1.0 throughout; each report keeps independent accounting while their distinct-case union leaves 2 migration-path cases untouched and does not establish a full-suite threshold pass; mutation-cohort first-pass host-contract acceptance is 100% but operator-selected targets do not measure autonomous discovery; manifest v1's two migration-path cases remain held by protected-path policy; exit still requires live-model quality, the full 30-task threshold, autonomous planning evidence, and fixed-model routing comparison |
+| 2 | Context and agent quality — **28 manifest-v1 cases plus both manifest-v2 replacements measured; full 30-task v2 benchmark open** | six deterministic v1 cohorts cover 28 distinct v1 cases; immutable v2 exact-binds v1, preserves those 28 cases, and replaces only the two protected migration-path tasks with policy-compatible offline schema work; a seventh cohort executes both replacements through production retrieval, plan approval, private PatchSet mutation, pinned no-network checks, review, and durable reopen; its recall/provenance are 1.0 and precision is 0.75; v1 and v2 partial evidence is not additive, so no 30/30 or full-suite threshold is claimed; operator-selected targets do not measure autonomous discovery; exit still requires one closed v2 full run, live-model quality, autonomous planning evidence, and fixed-model routing comparison |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
 | C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
@@ -60,10 +60,15 @@ reproduce, seven creates and one modification reach their exact final bytes,
 and all four completed runs reopen. Its retrieval provenance is `1.0`, macro
 precision is `0.875`, and macro recall is honestly `0.9375` because the greeting
 case omits one expected context path. Together the six cohorts cover 28
-distinct manifest cases and leave 2 unexecuted; that union is not a synthetic
-full-suite threshold result. Manifest v1's schema repair and scaffold cases
-name protected `migrations/` paths and correctly remain held pending an explicit
-benchmark-versioning decision. This is deterministic
+distinct manifest-v1 cases and leave 2 unexecuted; that union is not a
+synthetic full-suite threshold result. Immutable manifest v2 exact-binds v1's
+digest, preserves those 28 cases byte-for-byte, and replaces only the schema
+repair and scaffold cases whose declared outputs named protected `migrations/`
+paths. A seventh deterministic cohort executes both replacements through the
+same private lifecycle: both baselines fail, both final checks pass, recall and
+provenance are `1.0`, precision is `0.75`, and both completed runs reopen. The
+v1 union and v2 successor report cannot be added across revisions; one closed
+30-case v2 run remains required. This is deterministic
 contract-integration evidence, not live-model semantic/security judgment,
 whole-codebase coverage, autonomous planning quality, or general mutation
 quality. The separate
@@ -71,8 +76,8 @@ Gate 2 contract now pins seven fixture repositories, 30 task documents and
 scenario evaluators, an admitted model pool with per-model estimated rates, and
 the exit thresholds. Its contract-only validator still reports 30 contract-valid
 cases and 0 executed cases by design. It neither authenticates future evaluator
-evidence nor turns any frozen cohort into broad quality or Gate 2 exit
-evidence.
+evidence nor turns any frozen cohort or cross-revision union into broad quality
+or Gate 2 exit evidence.
 The supervised
 active-repository canary is a separate security rollout lane and remains
 **HOLD** after the 2026-08-27 full-tree

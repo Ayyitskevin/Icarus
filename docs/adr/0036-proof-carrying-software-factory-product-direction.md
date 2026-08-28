@@ -2,9 +2,9 @@
 
 - Status: Accepted product direction — Gate 0 released; Gate 1's bounded
   browser and landing paths plus credential-gated live 3/3 evidence are
-  complete; Gate 2 has measured five-case deterministic explanation,
-  security-review, refactor, repair-A, and repair-B cohorts plus a published 30-task
-  contract whose full runner remains open. Canary,
+  complete; Gate 2 has measured deterministic explanation, security-review,
+  refactor, repair, scaffold, and schema-successor cohorts plus immutable v1/v2
+  30-task contracts whose full v2 runner remains open. Canary,
   live-state migration, merge, deployment, and unattended authority remain
   closed
 - Date: 2026-07-30; progress status updated 2026-08-28
@@ -412,6 +412,18 @@ unexecuted. Their identity union remains neither a synthetic full-suite result
 nor a claim that the full-suite threshold passed. Live-model quality,
 autonomous target discovery, the full-suite threshold, and paired routing
 comparison remain open.
+
+Manifest v2 resolves that input mismatch without weakening production policy.
+It exact-binds manifest v1 SHA-256
+`43159d8a174312e7fd720fbb625173601e7c90f6e5983c62c206b69ce99c9558`,
+preserves 28 cases byte-for-byte, and replaces only the two protected-path tasks
+with offline `schema/` snapshot and `checks/` contract work. Its SHA-256 is
+`0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5`.
+The two-case successor cohort reproduces both failing baselines, passes both
+registered final checks, records recall/provenance `1.0` and precision `0.75`,
+and reopens both completed private runs. This report leaves 28 v2 cases
+unexecuted. The 28-case v1 union and two-case v2 report are not additive across
+revision identity; a closed 30-case v2 run remains required.
 
 ### Gate 3 — VS Code workbench
 

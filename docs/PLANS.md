@@ -5,9 +5,12 @@
 Gate 0 is released and Gate 1's credential-gated live 3/3 evidence completed
 2026-08-23. Current product-quality work is ADR 0036 Gate 2. Five frozen
 read-only explanation, five security-review, five refactor, five repair-A, four
-repair-B, and four scaffold-A cases now execute as separate deterministic
-fixture cohorts; live-model quality, autonomous target discovery, and two
-remaining migration-path cases remain open. The separate
+repair-B, and four scaffold-A manifest-v1 cases now execute as separate
+deterministic fixture cohorts. Immutable manifest v2 preserves 28 cases and
+replaces the two protected migration-path tasks; both replacements now execute
+as a separate deterministic successor cohort. Cross-revision evidence is not
+additive, so a full v2 run, live-model quality, and autonomous target discovery
+remain open. The separate
 supervised active-repository canary remains **HOLD** after the 2026-08-27
 secret-scanner survey; live-state migration, merge, deployment, unattended use,
 effectful/control session continuation, and wider Vulcan authority remain
@@ -17,9 +20,10 @@ checkpoint and must not be read as the current release state.
 ## Gate 2 deterministic retrieval, analysis, refactor, repair, and scaffold baseline
 
 Status: the one-case retrieval baseline plus manifest-bound explanation,
-security-review, refactor, repair-A, repair-B, and scaffold-A fixtures execute;
-live-model quality, the remaining 2 migration-path cases, autonomous target
-discovery, and the Gate 2 exit gate remain open.
+security-review, refactor, repair-A, repair-B, scaffold-A, and schema-successor
+fixtures execute. Manifest v2 resolves the two incompatible task definitions
+without weakening policy, but the full v2 suite, live-model quality, autonomous
+target discovery, and the Gate 2 exit gate remain open.
 
 - [x] Add a reusable deterministic core retriever over one exact committed tree.
 - [x] Exclude linked, hidden, binary, invalid-UTF-8, and secret-shaped content
@@ -76,10 +80,17 @@ discovery, and the Gate 2 exit gate remain open.
       recall, and leave the protected task-priority migration excluded. The six
       partial cohorts cover 28 distinct cases, with 2 not executed by any
       cohort.
+- [x] Publish immutable manifest v2 as an exact successor to v1: preserve 28
+      cases byte-for-byte, replace only the two protected migration-path tasks
+      with offline schema-snapshot/check-contract work, bind the exact v1
+      digest and replacement map, and keep production PatchSet policy unchanged.
+      Execute both v2 replacements through the production lifecycle with two
+      reproduced failing baselines, two passing final checks, observed private
+      mutation/check/reopen evidence, and 2/28 independent accounting.
 - [ ] Implement the manifest-bound scenario evaluators, execute all 30 tasks,
-      resolve or version the two protected migration-path cases, measure live-
-      model plan quality and autonomous target discovery, and compare the same
-      pinned model pool against its fixed single-model baseline.
+      under one manifest-v2 full-suite result, measure live-model plan quality
+      and autonomous target discovery, and compare the same pinned model pool
+      against its fixed single-model baseline.
 
 The explanation and security-review cohorts add bounded read-only provider
 analysis. The refactor, repair-A, repair-B, and scaffold-A cohorts grant
@@ -90,7 +101,9 @@ or unattended authority. Frozen responses prove contract integration, not
 live-model quality. Manifest v1's schema repair and scaffold cases name
 protected `migrations/` paths; the production guard correctly refuses them, and
 resolving that mismatch requires a versioned benchmark decision rather than a
-policy bypass or an in-place rewrite of immutable input.
+policy bypass or an in-place rewrite of immutable input. Manifest v2 makes that
+versioned decision, but v1's 28-case evidence and v2's two replacement outcomes
+cannot be added across revisions into a synthetic 30/30 run.
 
 ## Headless Vulcan proposal admission
 

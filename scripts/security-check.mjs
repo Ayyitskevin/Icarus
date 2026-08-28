@@ -9,7 +9,9 @@ import {
 import { validateGate1BenchmarkManifest } from "./gate1-benchmark-contract.mjs";
 import {
   parseStrictGate2Json,
+  sha256Raw,
   validateGate2BenchmarkManifest,
+  validateGate2BenchmarkSuccessor,
 } from "./gate2-benchmark-contract.mjs";
 import { validateGate2RetrievalManifest } from "./gate2-retrieval-contract.mjs";
 
@@ -178,6 +180,14 @@ const gate2ScaffoldACohortRunnerSource = await readFile(
   "scripts/gate2-scaffold-cohort-a.mjs",
   "utf8",
 );
+const gate2SchemaSuccessorCohortContractSource = await readFile(
+  "scripts/gate2-schema-successor-cohort-contract.mjs",
+  "utf8",
+);
+const gate2SchemaSuccessorCohortRunnerSource = await readFile(
+  "scripts/gate2-schema-successor-cohort.mjs",
+  "utf8",
+);
 const gate1BenchmarkManifestSource = await readFile(
   "fixtures/evals/gate1/manifest.v1.json",
   "utf8",
@@ -200,15 +210,21 @@ const gate2BenchmarkManifestSource = await readFile(
   "fixtures/evals/gate2/manifest.v1.json",
   "utf8",
 );
+const gate2BenchmarkSuccessorManifestSource = await readFile(
+  "fixtures/evals/gate2/manifest.v2.json",
+  "utf8",
+);
 const inheritedWorkflowSource = await readFile(".github/workflows/opencode.yml", "utf8");
 const packageSource = await readFile("package.json", "utf8");
 const packageJson = JSON.parse(packageSource);
 const gate1BenchmarkManifest = parseStrictJson(gate1BenchmarkManifestSource);
 const gate2RetrievalManifest = parseStrictJson(gate2RetrievalManifestSource);
 const gate2BenchmarkManifest = parseStrictGate2Json(gate2BenchmarkManifestSource);
+const gate2BenchmarkSuccessorManifest = parseStrictGate2Json(gate2BenchmarkSuccessorManifestSource);
 let gate1BenchmarkManifestValid = false;
 let gate2RetrievalManifestValid = false;
 let gate2BenchmarkManifestValid = false;
+let gate2BenchmarkSuccessorManifestValid = false;
 try {
   validateGate1BenchmarkManifest(gate1BenchmarkManifest);
   gate1BenchmarkManifestValid = true;
@@ -226,6 +242,16 @@ try {
   gate2BenchmarkManifestValid = true;
 } catch {
   // The named assertion below reports benchmark authority drift.
+}
+try {
+  validateGate2BenchmarkSuccessor(
+    gate2BenchmarkSuccessorManifest,
+    gate2BenchmarkManifest,
+    sha256Raw(gate2BenchmarkManifestSource),
+  );
+  gate2BenchmarkSuccessorManifestValid = true;
+} catch {
+  // The named assertion below reports successor-lineage or host-policy drift.
 }
 const ciWorkflowSource = await readFile(".github/workflows/ci.yml", "utf8");
 const gitAttributesSource = await readFile(".gitattributes", "utf8");
@@ -2182,7 +2208,7 @@ const assertions = {
     packageJson.scripts["benchmark:gate1"] ===
       "pnpm build:node && node scripts/gate1-benchmark.mjs" &&
     packageJson.scripts.eval ===
-      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-refactor-cohort.mjs && node scripts/gate2-repair-cohort-a.mjs && node scripts/gate2-repair-cohort-b.mjs && node scripts/gate2-scaffold-cohort-a.mjs && node scripts/gate2-benchmark-contract.mjs",
+      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-refactor-cohort.mjs && node scripts/gate2-repair-cohort-a.mjs && node scripts/gate2-repair-cohort-b.mjs && node scripts/gate2-scaffold-cohort-a.mjs && node scripts/gate2-schema-successor-cohort.mjs && node scripts/gate2-benchmark-contract.mjs",
   gate2RetrievalCommandIntegrated:
     packageJson.scripts["benchmark:gate2:retrieval"] ===
       "pnpm build:node && node scripts/gate2-retrieval.mjs" &&
@@ -2467,6 +2493,68 @@ const assertions = {
     !/(?:api\.github\.com|process\.env\.(?:GH|GITHUB|OPENAI|ANTHROPIC)|deploy|force-push)/.test(
       gate2ScaffoldACohortRunnerSource,
     ),
+  gate2SchemaSuccessorCohortIsBoundedAndIntegrated:
+    packageJson.scripts["benchmark:gate2:schema-successor"] ===
+      "pnpm build:node && node scripts/gate2-schema-successor-cohort.mjs" &&
+    packageJson.scripts.eval.includes("&& node scripts/gate2-schema-successor-cohort.mjs") &&
+    gate2BenchmarkSuccessorManifestValid &&
+    gate2BenchmarkSuccessorManifest.supersedes?.manifestSha256 ===
+      "43159d8a174312e7fd720fbb625173601e7c90f6e5983c62c206b69ce99c9558" &&
+    gate2BenchmarkSuccessorManifest.replacements?.length === 2 &&
+    gate2BenchmarkContractSource.includes("validateGate2BenchmarkSuccessor(") &&
+    gate2BenchmarkContractSource.includes(
+      'if (unchangedSuccessors.length !== 28) fail("successor must preserve exactly 28 unchanged cases")',
+    ) &&
+    gate2SchemaSuccessorCohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
+    gate2SchemaSuccessorCohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes("createIcarusRuntime(") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes(".service.planRun(") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes(".service.approvePlan(") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes(".service.review(") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes("new DockerSandboxRunner(") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes("sourceCheckoutUnchanged") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes("sourceGitDirectoryUnchanged") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes("durableRunRecovered") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes(
+      "const privateWorkspaceMutations = observations.filter(",
+    ) &&
+    gate2SchemaSuccessorCohortRunnerSource.includes(
+      "const sandboxCheckExecutions = observations.reduce(",
+    ) &&
+    gate2SchemaSuccessorCohortRunnerSource.includes(
+      "const icarusRegisteredCheckExecutions = observations.reduce(",
+    ) &&
+    gate2SchemaSuccessorCohortRunnerSource.includes(
+      "const runtimeReopens = observations.filter(",
+    ) &&
+    gate2SchemaSuccessorCohortRunnerSource.includes(
+      "const offlineInMemoryDatabaseChecks = countOfflineInMemoryDatabaseChecks(observations)",
+    ) &&
+    gate2SchemaSuccessorCohortRunnerSource.includes("externalNetworkRequests: 0") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes("remoteMutations: 0") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes("liveDatabaseConnections: 0") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes(
+      'externalNetworkRequests: "design-assertion"',
+    ) &&
+    gate2SchemaSuccessorCohortRunnerSource.includes('remoteMutations: "design-assertion"') &&
+    gate2SchemaSuccessorCohortRunnerSource.includes(
+      'liveDatabaseConnections: "design-assertion"',
+    ) &&
+    gate2SchemaSuccessorCohortRunnerSource.includes('offlineInMemoryDatabaseChecks: "observed"') &&
+    !gate2SchemaSuccessorCohortRunnerSource.includes("offlineInMemoryDatabaseChecks: 4") &&
+    ["repair-schema-status-snapshot", "scaffold-task-priority-contract"].every((caseId) =>
+      gate2SchemaSuccessorCohortContractSource.includes(`caseId: "${caseId}"`),
+    ) &&
+    gate2SchemaSuccessorCohortContractSource.includes(
+      '"manifest-v2-evidence-does-not-retroactively-execute-replaced-v1-cases"',
+    ) &&
+    gate2SchemaSuccessorCohortContractSource.includes(
+      '"offline-in-memory-sqlite-checks-do-not-authorize-live-database-application"',
+    ) &&
+    !gate2SchemaSuccessorCohortContractSource.includes('path: "migrations/') &&
+    !/(?:api\.github\.com|process\.env\.(?:GH|GITHUB|OPENAI|ANTHROPIC)|deploy|force-push)/.test(
+      gate2SchemaSuccessorCohortRunnerSource,
+    ),
   gate2RetrievalRunnerUsesPinnedLocalReadOnlyEvidence:
     gate2RetrievalRunnerSource.includes('spawnSync(\n    "/usr/bin/git"') &&
     gate2RetrievalRunnerSource.includes("retrieveReadOnlyContextV1(") &&
@@ -2483,6 +2571,7 @@ const assertions = {
       "node scripts/gate2-benchmark-contract.mjs" &&
     packageJson.scripts.eval.endsWith("&& node scripts/gate2-benchmark-contract.mjs") &&
     gate2BenchmarkManifestValid &&
+    gate2BenchmarkSuccessorManifestValid &&
     gate2BenchmarkManifest.executionBoundary?.contractValidation === "offline-read-only" &&
     gate2BenchmarkManifest.executionBoundary?.credentialReads === 0 &&
     gate2BenchmarkManifest.executionBoundary?.externalNetworkRequests === 0 &&

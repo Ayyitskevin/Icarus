@@ -3,17 +3,23 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 
+import { assertAllowedTarget } from "../../packages/core/src/policy.js";
+
 import {
   GATE2_CASE_IDS,
+  GATE2_CASE_IDS_BY_REVISION,
   MAX_GATE2_JSON_BYTES,
   parseStrictGate2Json,
+  sha256Raw,
   validateGate2BenchmarkManifest,
+  validateGate2BenchmarkSuccessor,
 } from "../../scripts/gate2-benchmark-contract.mjs";
 
-const manifestUrl = new URL("../../fixtures/evals/gate2/manifest.v1.json", import.meta.url);
+const manifestV1Url = new URL("../../fixtures/evals/gate2/manifest.v1.json", import.meta.url);
+const manifestV2Url = new URL("../../fixtures/evals/gate2/manifest.v2.json", import.meta.url);
 
-async function loadManifest(): Promise<Record<string, any>> {
-  return JSON.parse(await readFile(manifestUrl, "utf8")) as Record<string, any>;
+async function loadManifest(url = manifestV1Url): Promise<Record<string, any>> {
+  return JSON.parse(await readFile(url, "utf8")) as Record<string, any>;
 }
 
 function copy(value: Record<string, any>): Record<string, any> {
@@ -28,6 +34,63 @@ describe("Gate 2 benchmark manifest contract", () => {
     expect(manifest.cases.map((entry: Record<string, unknown>) => entry.id)).toEqual(
       GATE2_CASE_IDS,
     );
+  });
+
+  it("accepts the immutable v2 successor only against the exact v1 bytes", async () => {
+    const [predecessor, successor, predecessorBytes] = await Promise.all([
+      loadManifest(manifestV1Url),
+      loadManifest(manifestV2Url),
+      readFile(manifestV1Url),
+    ]);
+    const predecessorSha256 = sha256Raw(predecessorBytes);
+
+    expect(validateGate2BenchmarkManifest(successor)).toBe(successor);
+    expect(validateGate2BenchmarkSuccessor(successor, predecessor, predecessorSha256)).toBe(
+      successor,
+    );
+    expect(successor.cases.map((entry: Record<string, unknown>) => entry.id)).toEqual(
+      GATE2_CASE_IDS_BY_REVISION["gate2-thirty-task-v2-host-policy-compatible"],
+    );
+    expect(successor.supersedes.manifestSha256).toBe(predecessorSha256);
+    for (const benchmarkCase of successor.cases) {
+      for (const changedPath of benchmarkCase.expectedOutcome.expectedChangedPaths) {
+        expect(assertAllowedTarget(changedPath)).toBe(changedPath);
+      }
+    }
+  });
+
+  it("rejects successor lineage drift and protected replacement targets", async () => {
+    const [predecessor, source, predecessorBytes] = await Promise.all([
+      loadManifest(manifestV1Url),
+      loadManifest(manifestV2Url),
+      readFile(manifestV1Url),
+    ]);
+    const predecessorSha256 = sha256Raw(predecessorBytes);
+
+    const inheritedDrift = copy(source);
+    inheritedDrift.cases[0].expectedContextPaths = ["AGENTS.md", "src/greeting.txt"];
+    expect(() =>
+      validateGate2BenchmarkSuccessor(inheritedDrift, predecessor, predecessorSha256),
+    ).toThrow("28 unchanged cases");
+
+    const lineageDrift = copy(source);
+    lineageDrift.replacements[0].predecessorCaseId = "repair-basic-greeting";
+    expect(() => validateGate2BenchmarkManifest(lineageDrift)).toThrow("replacement lineage");
+
+    const protectedTarget = copy(source);
+    protectedTarget.cases[4].expectedOutcome.expectedChangedPaths = [
+      "migrations/001_add_status.sql",
+    ];
+    expect(() => validateGate2BenchmarkManifest(protectedTarget)).toThrow(
+      "ordinary PatchSet authority",
+    );
+
+    const replacementScopeDrift = copy(source);
+    replacementScopeDrift.cases[4].repositoryId = "basic";
+    replacementScopeDrift.cases[4].expectedContextPaths = ["AGENTS.md"];
+    expect(() =>
+      validateGate2BenchmarkSuccessor(replacementScopeDrift, predecessor, predecessorSha256),
+    ).toThrow("replacement case drifted");
   });
 
   it("rejects extra and missing members at every authority boundary", async () => {
@@ -135,7 +198,7 @@ describe("Gate 2 benchmark manifest contract", () => {
   });
 
   it("strict parsing rejects duplicate JSON members before JSON.parse can collapse them", async () => {
-    const source = await readFile(manifestUrl, "utf8");
+    const source = await readFile(manifestV1Url, "utf8");
     const duplicate = source.replace(
       '"schemaVersion": 1,',
       '"schemaVersion": 1, "schemaVersion": 1,',
