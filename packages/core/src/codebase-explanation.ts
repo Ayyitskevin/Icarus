@@ -284,6 +284,12 @@ function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV1): void {
  * Produce one provider-assisted, read-only explanation over an already bounded
  * retrieval receipt. The provider can cite only whole selected files and the
  * host validates every cited line range before returning a result.
+ *
+ * Receipt validation proves internal consistency and detects changes after
+ * retrieval; it does not authenticate the receipt's origin or its claimed Git
+ * commit. The caller is responsible for obtaining the receipt directly from a
+ * trusted retriever inside the same trust boundary. Citations establish source
+ * locations, not semantic entailment between a claim and the cited text.
  */
 export async function explainCodebaseV1(
   gateway: ModelGateway,

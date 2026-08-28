@@ -987,15 +987,20 @@ hidden, binary, invalid-UTF-8, and secret-shaped content, applies fixed query,
 tree, scan, file, and result-byte ceilings, and binds selected whole-file digests
 plus file-and-line match provenance into a receipt. The focused retrieval
 benchmark still performs no provider call or repository effect. A separate
-Gate 2 explanation function accepts only that validated receipt and its exact
-query, makes one bounded structured-generation call through an injected
-production gateway, and host-validates a closed set of non-secret claims whose
-inclusive line ranges must name selected, non-empty source text. Its digest
-binds the task, base commit, retrieval receipt, provider identity, summary, and
-claims; provider usage is validated but excluded from the semantic digest. The
-function has no filesystem, Git-mutation, command, sandbox, or network adapter
-of its own. Semantic retrieval remains deferred until a versioned benchmark can
-compare it against this deterministic evidence without widening authority.
+Gate 2 explanation function accepts a caller-supplied retrieval receipt and its
+exact query, verifies the receipt's internal byte/digest consistency, makes one
+bounded structured-generation call through an injected production gateway, and
+host-validates a closed set of non-secret claims whose inclusive line ranges
+must name selected, non-empty source text. The unkeyed receipt digest does not
+authenticate its origin or claimed Git commit; the caller must obtain it from
+the trusted retriever in the same trust boundary. Citations establish source
+locations, not semantic entailment. The result digest binds the task, base
+commit, retrieval receipt, provider identity, summary, and claims but does not
+prove semantic correctness; provider usage is validated and excluded from that
+digest. The function has no filesystem, Git-mutation, command, sandbox, or
+network adapter of its own. Semantic retrieval remains deferred until a
+versioned benchmark can compare it against this deterministic evidence without
+widening authority.
 Path classification answers three separate questions: whether a file can be
 edited, whether its bytes can be shown to a model, and whether its pathname is
 intrinsically secret. For example, a safe `.npmrc` is protected and omitted

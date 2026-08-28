@@ -224,6 +224,10 @@ base commit, retrieval digest, provider identity, and explanation into a digest,
 and proves source content and Git metadata unchanged. The frozen explanation
 passes with one provider request, four selected paths, three cited claims, zero
 incorrect edits, and zero repository-mutation or arbitrary-command effects.
+Citation validation proves that each claim points to selected source lines; it
+does not prove that the prose is entailed by those lines. The frozen oracle
+checks one exact canned response, while broader semantic quality remains for the
+versioned benchmark.
 
 This is one deterministic explanation measurement, not broad explanation
 quality or Gate 2 exit evidence. The required versioned 30-task benchmark,
