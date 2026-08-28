@@ -56,8 +56,9 @@ priced loopback Vulcan mapping for child-free proposals.
 Unknown fields, inherited prototypes, unknown or duplicate tools, malformed
 ceilings, alternate output modes, concurrency above one, unbounded child
 policies, and schedules are refused. Provider URLs, models, pricing,
-credentials, grants, targets,
-commands, approvals, and executable hooks have no field in the grammar.
+credentials, grants, commands, approvals, and executable hooks have no field in
+the grammar. ADR 0059 child specs may select only bounded subsets of the
+already-approved plan targets; they cannot declare or expand target authority.
 
 `headlessProfileDigest` hashes the strictly decoded canonical record. Tool IDs
 are sorted because they are a set; two orderings must not create two identities
