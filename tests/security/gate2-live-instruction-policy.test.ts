@@ -22,6 +22,20 @@ describe("Gate 2 live instruction policy", () => {
     expect(buildGate2LiveInstructions("scaffold", "mutation")).not.toContain(
       "tests/test_json_output.py",
     );
+    const combined = [
+      buildGate2LiveInstructions("scaffold", "mutation"),
+      buildGate2LiveInstructions("security_review", "read_only"),
+    ].join("\n");
+    for (const benchmarkShapedFragment of [
+      "../outside",
+      "src/",
+      "tests/",
+      "checks/",
+      ".py",
+      ".sql",
+    ]) {
+      expect(combined).not.toContain(benchmarkShapedFragment);
+    }
     expect(buildGate2LiveInstructions("scaffold", "mutation")).toContain(
       "Do not repair unrelated defects",
     );

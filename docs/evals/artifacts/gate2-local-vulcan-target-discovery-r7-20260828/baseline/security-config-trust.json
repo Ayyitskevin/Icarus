@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "baseline",
   "caseId": "security-config-trust",
   "modelId": "code-fast",
-  "generatedAt": "2026-08-28T14:58:20.603Z",
+  "generatedAt": "2026-08-28T16:13:36.050Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "18a151224e181552beaf2862705cad0a27fe1756b23f03d28aa7927d162d980c",
     "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"src/greeting.py\",\"src/main.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"src/greeting.py\",\"src/main.py\"],\"findingIds\":[],\"summary\":\"No concrete trust-boundary risk. src/main.py reads config/app.json, parses it as JSON, and passes the audience value directly to greeting(); src/greeting.py only interpolates that value into a greeting string (f\\\"Welcome, {audience}.\\\"). The config value never reaches a command, filesystem-path, or dynamic-execution sink, so there is no path-traversal, authority-widening, or unvalidated-config-shape risk with security impact.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"src/greeting.py\",\"src/main.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"src/greeting.py\",\"src/main.py\"],\"findingIds\":[],\"summary\":\"No concrete trust-boundary risk. src/main.py reads the local config/app.json and extracts the audience field, passing it directly to greeting() in src/greeting.py, which only formats it into a printed string. The config path is hardcoded (no runtime input can escape the filesystem root), there is no instruction to expand host authority, and although the config shape is not validated, the value flows only into a string with no injection, command execution, or filesystem-escape point.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -38,7 +38,7 @@
         "src/main.py"
       ],
       "findingIds": [],
-      "summary": "No concrete trust-boundary risk. src/main.py reads config/app.json, parses it as JSON, and passes the audience value directly to greeting(); src/greeting.py only interpolates that value into a greeting string (f\"Welcome, {audience}.\"). The config value never reaches a command, filesystem-path, or dynamic-execution sink, so there is no path-traversal, authority-widening, or unvalidated-config-shape risk with security impact."
+      "summary": "No concrete trust-boundary risk. src/main.py reads the local config/app.json and extracts the audience field, passing it directly to greeting() in src/greeting.py, which only formats it into a printed string. The config path is hardcoded (no runtime input can escape the filesystem root), there is no instruction to expand host authority, and although the config shape is not validated, the value flows only into a string with no injection, command execution, or filesystem-escape point."
     }
   },
   "candidateError": null,
@@ -46,8 +46,8 @@
     "schemaVersion": 1,
     "caseId": "security-config-trust",
     "evaluatorId": "security-config-trust-evaluator",
-    "candidateSha256": "00b0a01d8125bd87230c320570a3ab16d7816bac458eebdd621e5651fef9e202",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "b6483996f218e453e6160897dca3c34e64873d93438c0796dacd039922a741c6",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -95,14 +95,14 @@
     ],
     "findingIds": [],
     "scenarioEvaluatorId": "security-config-trust-evaluator",
-    "scenarioEvidenceSha256": "d5691ce0a0b74db77581910e36d40bbefcbb4ec07281e52c1372f841ba7a3962",
+    "scenarioEvidenceSha256": "6017a8c1e7ac1fa564573a2028734e97a89d378ff5896adff179e56cff98fbf5",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 887,
-      "outputTokens": 2634,
-      "estimatedCostUsd": 0.003521,
+      "outputTokens": 3083,
+      "estimatedCostUsd": 0.00397,
       "actualBilledUsd": null,
-      "latencyMs": 45847
+      "latencyMs": 53708
     }
   }
 }

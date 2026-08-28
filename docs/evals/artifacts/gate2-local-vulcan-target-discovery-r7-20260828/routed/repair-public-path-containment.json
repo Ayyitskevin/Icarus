@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "repair-public-path-containment",
   "modelId": "code",
-  "generatedAt": "2026-08-28T15:18:05.478Z",
+  "generatedAt": "2026-08-28T16:29:34.242Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "44a05e53bc87b1adb802836a6e44e257035b980b2d6684d51bcfdf0041ec75b2",
     "repositoryDigestSha256": "0091120cc1019d8c7e48935b1f0a41bf5925098210cdb4e7b3d2fd60af3c3849"
   },
-  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"README.md\",\n    \"checks/expected_finding.md\",\n    \"src/files.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/files.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"public-path-containment\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/files.py\",\n        \"content\": \"from pathlib import Path\\n\\n\\ndef read_public(root: Path, user_path: str) -> str:\\n    root_path = Path(root).resolve()\\n    target = (root_path / user_path).resolve()\\n    try:\\n        target.relative_to(root_path)\\n    except ValueError as exc:\\n        raise ValueError(\\\"path escapes public root\\\") from exc\\n    return target.read_text(encoding=\\\"utf8\\\")\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Resolve the requested path against the public root and reject any target that is not contained within that root.\"\n  }\n}",
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"README.md\",\n    \"checks/expected_finding.md\",\n    \"src/files.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/files.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"public-path-containment\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/files.py\",\n        \"content\": \"from pathlib import Path\\n\\n\\ndef read_public(root: Path, user_path: str) -> str:\\n    root_path = Path(root).resolve()\\n    target = (root_path / user_path).resolve()\\n    try:\\n        target.relative_to(root_path)\\n    except ValueError as exc:\\n        raise ValueError(\\\"path escapes public root\\\") from exc\\n    return target.read_text(encoding=\\\"utf8\\\")\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Resolve the requested path against the public root and raise ValueError if it escapes that root.\"\n  }\n}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -45,7 +45,7 @@
       ],
       "citations": [],
       "findingIds": [],
-      "summary": "Resolve the requested path against the public root and reject any target that is not contained within that root."
+      "summary": "Resolve the requested path against the public root and raise ValueError if it escapes that root."
     }
   },
   "candidateError": null,
@@ -53,8 +53,8 @@
     "schemaVersion": 1,
     "caseId": "repair-public-path-containment",
     "evaluatorId": "repair-public-path-containment-evaluator",
-    "candidateSha256": "707a46948020e592df3229b3175e5ea301328b1fcb4d2b5341d46d3151204803",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "66320fdece533530d80b5e273640d5dec60041c6fc6bfa2ef2677dbedefd45ae",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -111,14 +111,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "repair-public-path-containment-evaluator",
-    "scenarioEvidenceSha256": "b1920b8dbefc9059ba6ee49e96a5aa76d8914396529f2d3cbd700e18faaa7791",
+    "scenarioEvidenceSha256": "03f991c64bb8a9b1e643587d296feac805a9835be5712c9c90c582308fafb33f",
     "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 623,
-      "outputTokens": 1224,
-      "estimatedCostUsd": 0.0014489715,
+      "outputTokens": 1659,
+      "estimatedCostUsd": 0.001790229,
       "actualBilledUsd": null,
-      "latencyMs": 68786
+      "latencyMs": 103085
     }
   }
 }

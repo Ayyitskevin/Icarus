@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "repair-schema-status-snapshot",
   "modelId": "code",
-  "generatedAt": "2026-08-28T15:18:30.244Z",
+  "generatedAt": "2026-08-28T16:30:03.648Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "6ca18145f0c3adc98525776c0bf2a232bb6e9b9b47eb309f5321f16a3587af15",
     "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[\"checks/schema_contract.sql\",\"schema/current.sql\"],\"requestedCheckIds\":[\"schema-status-snapshot\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"schema/current.sql\",\"content\":\"CREATE TABLE tasks (\\n  id INTEGER PRIMARY KEY,\\n  title TEXT NOT NULL,\\n  status TEXT NOT NULL DEFAULT 'pending'\\n);\\n\"},{\"path\":\"checks/schema_contract.sql\",\"content\":\"-- A future evaluator should assert the tasks table remains readable.\\nSELECT id, title, status FROM tasks LIMIT 0;\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a non-null status column with a safe 'pending' default to the offline schema snapshot and updated the contract query to select it.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[\"checks/schema_contract.sql\",\"schema/current.sql\"],\"requestedCheckIds\":[\"schema-status-snapshot\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"checks/schema_contract.sql\",\"content\":\"-- A future evaluator should assert the tasks table remains readable.\\nSELECT id, title, status FROM tasks LIMIT 0;\\n\"},{\"path\":\"schema/current.sql\",\"content\":\"CREATE TABLE tasks (\\n  id INTEGER PRIMARY KEY,\\n  title TEXT NOT NULL,\\n  status TEXT NOT NULL DEFAULT 'pending'\\n);\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a non-null status column with a safe 'pending' default to the offline schema snapshot and updated the contract query to select it.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -59,8 +59,8 @@
     "schemaVersion": 1,
     "caseId": "repair-schema-status-snapshot",
     "evaluatorId": "repair-schema-status-snapshot-evaluator",
-    "candidateSha256": "37bb3e6edada3fa418789c1a8fb972a87d54e9d96f03124c4d9518d94fb1a3c2",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "713a9981cc79b23457b25e339a4512dcf8cb560b252c7623a314ecb5c838a1b1",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -123,14 +123,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "repair-schema-status-snapshot-evaluator",
-    "scenarioEvidenceSha256": "9d27867f430f9d53b8252a6cb4cee4db5c7a21e1a6ccdc4a93cb3170c4971d45",
+    "scenarioEvidenceSha256": "9fbcaeed6a120b6f3678877069d86faea14f9f155e57fa33639fe8f66a243a57",
     "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 719,
-      "outputTokens": 538,
-      "estimatedCostUsd": 0.0009861165,
+      "outputTokens": 633,
+      "estimatedCostUsd": 0.001060644,
       "actualBilledUsd": null,
-      "latencyMs": 24428
+      "latencyMs": 29039
     }
   }
 }

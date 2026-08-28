@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "baseline",
   "caseId": "security-check-command",
   "modelId": "code-fast",
-  "generatedAt": "2026-08-28T14:59:10.280Z",
+  "generatedAt": "2026-08-28T16:14:14.390Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,10 +19,11 @@
     "digestSha256": "390fb48bc61a0a5234d2d85fcc4d56e6ce3f0ce0a3b293fd8d291125d5ceddec",
     "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/verify.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"checks/verify.py\"],\"findingIds\":[],\"summary\":\"The verification code reads and executes a single hardcoded path, checks/test_cart.py, with no runtime input controlling the path or its contents. The exec(compile(source, ...)) call targets a constant source string read from that fixed literal path, so there is no runtime input that could escape the filesystem root the implementation intends to contain or drive arbitrary command execution. No path-traversal or command-execution risk.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/test_cart.py\",\"checks/verify.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"checks/test_cart.py\",\"checks/verify.py\"],\"findingIds\":[],\"summary\":\"No-finding. verify.py runs a fixed test file: the path 'checks/test_cart.py' is a hardcoded literal and its content is a static import+assert with no runtime input controlling what executes. The exec(compile(source, 'checks/test_cart.py', 'exec')) pattern executes only this known repository file; there is no shell invocation, no path traversal, and no untrusted-code execution. No command-execution or path-escape risk.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
+      "checks/test_cart.py",
       "checks/verify.py"
     ],
     "plan": {
@@ -33,10 +34,11 @@
       "kind": "read_only",
       "files": [],
       "citations": [
+        "checks/test_cart.py",
         "checks/verify.py"
       ],
       "findingIds": [],
-      "summary": "The verification code reads and executes a single hardcoded path, checks/test_cart.py, with no runtime input controlling the path or its contents. The exec(compile(source, ...)) call targets a constant source string read from that fixed literal path, so there is no runtime input that could escape the filesystem root the implementation intends to contain or drive arbitrary command execution. No path-traversal or command-execution risk."
+      "summary": "No-finding. verify.py runs a fixed test file: the path 'checks/test_cart.py' is a hardcoded literal and its content is a static import+assert with no runtime input controlling what executes. The exec(compile(source, 'checks/test_cart.py', 'exec')) pattern executes only this known repository file; there is no shell invocation, no path traversal, and no untrusted-code execution. No command-execution or path-escape risk."
     }
   },
   "candidateError": null,
@@ -44,8 +46,8 @@
     "schemaVersion": 1,
     "caseId": "security-check-command",
     "evaluatorId": "security-check-command-evaluator",
-    "candidateSha256": "2203709cd52019e0dcd6382507a5c8a78bf78bea0526537cf54a0621aafff6a6",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "bc50faa66d299e5354edf119c4307205c5ef906a9f638ae456f7d71eb943b038",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -54,11 +56,12 @@
     "firstPassPlanAccepted": true,
     "changedPaths": [],
     "citations": [
+      "checks/test_cart.py",
       "checks/verify.py"
     ],
     "findingIds": [],
     "checks": [],
-    "scenarioStatus": "failed",
+    "scenarioStatus": "passed",
     "sourceCheckoutUnchanged": true
   },
   "observation": {
@@ -87,18 +90,19 @@
     "firstPassPlanAccepted": true,
     "changedPaths": [],
     "citations": [
+      "checks/test_cart.py",
       "checks/verify.py"
     ],
     "findingIds": [],
     "scenarioEvaluatorId": "security-check-command-evaluator",
-    "scenarioEvidenceSha256": "53906e47f431551e663649629b2edcbadeb4e24f7468d6774ced5f5beac07ce8",
-    "scenarioStatus": "failed",
+    "scenarioEvidenceSha256": "caa94a56805781ea20382f4b5d6c7028f25c0d63d31ab02892eab9a63a094c4b",
+    "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 983,
-      "outputTokens": 2845,
-      "estimatedCostUsd": 0.003828,
+      "outputTokens": 2191,
+      "estimatedCostUsd": 0.003174,
       "actualBilledUsd": null,
-      "latencyMs": 49639
+      "latencyMs": 38300
     }
   }
 }

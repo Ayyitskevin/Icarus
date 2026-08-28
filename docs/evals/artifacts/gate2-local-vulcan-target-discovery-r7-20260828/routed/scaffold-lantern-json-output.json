@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "scaffold-lantern-json-output",
   "modelId": "code",
-  "generatedAt": "2026-08-28T14:34:12.568Z",
+  "generatedAt": "2026-08-28T16:51:33.076Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,11 +19,12 @@
     "digestSha256": "6be29a3381578a6469fb1d3675b434ac7367241dd2fe3d4e492a833bb5ca4927",
     "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"config/app.json\",\"src/greeting.py\",\"src/main.py\"],\"plan\":{\"mutationTargets\":[\"src/main.py\",\"tests/test_json_output.py\"],\"requestedCheckIds\":[\"lantern-json-output\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/main.py\",\"content\":\"import argparse\\nimport json\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\n\\ndef main() -> None:\\n    parser = argparse.ArgumentParser(prog=\\\"lantern\\\")\\n    parser.add_argument(\\\"--json\\\", action=\\\"store_true\\\", help=\\\"emit JSON instead of text\\\")\\n    args = parser.parse_args()\\n\\n    audience = json.loads(Path(\\\"config/app.json\\\").read_text())[\\\"audience\\\"]\\n\\n    if args.json:\\n        print(json.dumps({\\\"audience\\\": audience, \\\"message\\\": greeting(audience)}))\\n    else:\\n        print(greeting(audience))\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    main()\\n\"},{\"path\":\"tests/test_json_output.py\",\"content\":\"import json\\nimport subprocess\\nimport sys\\nfrom pathlib import Path\\n\\nROOT = Path(__file__).resolve().parents[1]\\n\\n\\ndef _run_main(*args: str) -> str:\\n    result = subprocess.run(\\n        [sys.executable, \\\"src/main.py\\\", *args],\\n        cwd=ROOT,\\n        capture_output=True,\\n        text=True,\\n        check=True,\\n    )\\n    return result.stdout\\n\\n\\ndef _audience() -> str:\\n    return json.loads((ROOT / \\\"config\\\" / \\\"app.json\\\").read_text())[\\\"audience\\\"]\\n\\n\\ndef test_default_text_mode_preserved():\\n    assert _run_main().strip() == f\\\"Welcome, {_audience()}.\\\"\\n\\n\\ndef test_json_output_mode():\\n    payload = json.loads(_run_main(\\\"--json\\\"))\\n    assert payload[\\\"audience\\\"] == _audience()\\n    assert payload[\\\"message\\\"] == f\\\"Welcome, {_audience()}.\\\"\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a dependency-free --json output mode to src/main.py while preserving the default text greeting, and added an offline check tests/test_json_output.py covering both modes.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"config/app.json\",\"src/greeting.py\",\"src/main.py\"],\"plan\":{\"mutationTargets\":[\"src/main.py\",\"tests/test_json_output.py\"],\"requestedCheckIds\":[\"lantern-json-output\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/main.py\",\"content\":\"import json\\nimport sys\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\n\\ndef main() -> None:\\n    audience = json.loads(Path(\\\"config/app.json\\\").read_text())[\\\"audience\\\"]\\n    msg = greeting(audience)\\n    if \\\"--json\\\" in sys.argv[1:]:\\n        print(json.dumps({\\\"greeting\\\": msg}))\\n    else:\\n        print(msg)\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    main()\\n\"},{\"path\":\"tests/test_json_output.py\",\"content\":\"import json\\nimport subprocess\\nimport sys\\nfrom pathlib import Path\\n\\nROOT = Path(__file__).resolve().parent.parent\\n\\n\\ndef test_json_output_mode():\\n    result = subprocess.run(\\n        [sys.executable, \\\"src/main.py\\\", \\\"--json\\\"],\\n        capture_output=True,\\n        text=True,\\n        cwd=ROOT,\\n    )\\n    assert result.returncode == 0\\n    payload = json.loads(result.stdout)\\n    assert payload[\\\"greeting\\\"] == \\\"Welcome, traveler.\\\"\\n\\n\\ndef test_default_text_mode_preserved():\\n    result = subprocess.run(\\n        [sys.executable, \\\"src/main.py\\\"],\\n        capture_output=True,\\n        text=True,\\n        cwd=ROOT,\\n    )\\n    assert result.returncode == 0\\n    assert result.stdout.strip() == \\\"Welcome, traveler.\\\"\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a --json flag to src/main.py that emits a JSON object ({\\\"greeting\\\": \\\"...\\\"}) while preserving the default plain-text output. Created tests/test_json_output.py as the offline check (registered as lantern-json-output) verifying both modes.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
       "config/app.json",
+      "README.md",
       "src/greeting.py",
       "src/main.py"
     ],
@@ -41,16 +42,16 @@
       "files": [
         {
           "path": "src/main.py",
-          "content": "import argparse\nimport json\nfrom pathlib import Path\n\nfrom src.greeting import greeting\n\n\ndef main() -> None:\n    parser = argparse.ArgumentParser(prog=\"lantern\")\n    parser.add_argument(\"--json\", action=\"store_true\", help=\"emit JSON instead of text\")\n    args = parser.parse_args()\n\n    audience = json.loads(Path(\"config/app.json\").read_text())[\"audience\"]\n\n    if args.json:\n        print(json.dumps({\"audience\": audience, \"message\": greeting(audience)}))\n    else:\n        print(greeting(audience))\n\n\nif __name__ == \"__main__\":\n    main()\n"
+          "content": "import json\nimport sys\nfrom pathlib import Path\n\nfrom src.greeting import greeting\n\n\ndef main() -> None:\n    audience = json.loads(Path(\"config/app.json\").read_text())[\"audience\"]\n    msg = greeting(audience)\n    if \"--json\" in sys.argv[1:]:\n        print(json.dumps({\"greeting\": msg}))\n    else:\n        print(msg)\n\n\nif __name__ == \"__main__\":\n    main()\n"
         },
         {
           "path": "tests/test_json_output.py",
-          "content": "import json\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nROOT = Path(__file__).resolve().parents[1]\n\n\ndef _run_main(*args: str) -> str:\n    result = subprocess.run(\n        [sys.executable, \"src/main.py\", *args],\n        cwd=ROOT,\n        capture_output=True,\n        text=True,\n        check=True,\n    )\n    return result.stdout\n\n\ndef _audience() -> str:\n    return json.loads((ROOT / \"config\" / \"app.json\").read_text())[\"audience\"]\n\n\ndef test_default_text_mode_preserved():\n    assert _run_main().strip() == f\"Welcome, {_audience()}.\"\n\n\ndef test_json_output_mode():\n    payload = json.loads(_run_main(\"--json\"))\n    assert payload[\"audience\"] == _audience()\n    assert payload[\"message\"] == f\"Welcome, {_audience()}.\"\n"
+          "content": "import json\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nROOT = Path(__file__).resolve().parent.parent\n\n\ndef test_json_output_mode():\n    result = subprocess.run(\n        [sys.executable, \"src/main.py\", \"--json\"],\n        capture_output=True,\n        text=True,\n        cwd=ROOT,\n    )\n    assert result.returncode == 0\n    payload = json.loads(result.stdout)\n    assert payload[\"greeting\"] == \"Welcome, traveler.\"\n\n\ndef test_default_text_mode_preserved():\n    result = subprocess.run(\n        [sys.executable, \"src/main.py\"],\n        capture_output=True,\n        text=True,\n        cwd=ROOT,\n    )\n    assert result.returncode == 0\n    assert result.stdout.strip() == \"Welcome, traveler.\"\n"
         }
       ],
       "citations": [],
       "findingIds": [],
-      "summary": "Added a dependency-free --json output mode to src/main.py while preserving the default text greeting, and added an offline check tests/test_json_output.py covering both modes."
+      "summary": "Added a --json flag to src/main.py that emits a JSON object ({\"greeting\": \"...\"}) while preserving the default plain-text output. Created tests/test_json_output.py as the offline check (registered as lantern-json-output) verifying both modes."
     }
   },
   "candidateError": null,
@@ -58,8 +59,8 @@
     "schemaVersion": 1,
     "caseId": "scaffold-lantern-json-output",
     "evaluatorId": "scaffold-lantern-json-output-evaluator",
-    "candidateSha256": "24131ce3ced152368047e14e525185f9da2e7b4dd0173bf8d4ac43772769d15b",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "f4afb8d1bfc641871acd2709827de6cc9e7c082c784b399a2480fd16b0327c59",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -122,14 +123,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "scaffold-lantern-json-output-evaluator",
-    "scenarioEvidenceSha256": "1c4c4f44c3006153bfe637914288cc09410cca71271e7fb2bb06543576e40bc8",
+    "scenarioEvidenceSha256": "65a88d4b90518eb2b07978b5fdc67e31c231e0a39f218a8e533d6305bb66985c",
     "scenarioStatus": "passed",
     "usage": {
-      "inputTokens": 958,
-      "outputTokens": 3421,
-      "estimatedCostUsd": 0.0034353255,
+      "inputTokens": 885,
+      "outputTokens": 2053,
+      "estimatedCostUsd": 0.002304861,
       "actualBilledUsd": null,
-      "latencyMs": 158561
+      "latencyMs": 96104
     }
   }
 }

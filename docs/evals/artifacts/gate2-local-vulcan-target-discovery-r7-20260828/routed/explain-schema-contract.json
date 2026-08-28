@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "explain-schema-contract",
   "modelId": "code",
-  "generatedAt": "2026-08-28T15:30:51.688Z",
+  "generatedAt": "2026-08-28T16:43:41.979Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "8ece9a7a15ebf6c9dff084f62841871793550a4231fe6dac5b4f1fab4a072d64",
     "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"checks/schema_contract.sql\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"The current schema (schema/current.sql) defines a single table `tasks` with two columns: `id INTEGER PRIMARY KEY` and `title TEXT NOT NULL`. The offline contract query (checks/schema_contract.sql) executes `SELECT id, title FROM tasks LIMIT 0;`, which is a zero-row shape assertion: it verifies that the `tasks` table exists and exposes the expected `id` and `title` columns without retrieving any data. The accompanying comment states its intent—'A future evaluator should assert the tasks table remains readable.' The repository README (README.md) clarifies that this fixture models an offline application schema and that evaluation must never apply a migration to live state, while migrations/README.md reserves the migrations/ directory for future numbered migrations only after explicit schema approval. Together these sources establish that the contract query is a read-only, offline guard ensuring the tasks table's column contract is preserved across any future schema evolution.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"checks/schema_contract.sql\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"The current task table (schema/current.sql) defines a single table `tasks` with two columns: `id INTEGER PRIMARY KEY` and `title TEXT NOT NULL`. The offline contract query (checks/schema_contract.sql) issues `SELECT id, title FROM tasks LIMIT 0;`, which selects exactly the columns declared in the schema but returns zero rows. Its stated purpose—per the inline comment—is to let a future evaluator assert that the tasks table remains readable and exposes the expected column set, without fetching or mutating any data. The repository README confirms this is an offline schema fixture and explicitly forbids applying migrations to live state, while the migrations README notes that any future schema change requires explicit approval. Together these sources establish that the contract query is a read-only, zero-row shape check used to verify schema stability in an offline evaluation context.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -41,7 +41,7 @@
         "schema/current.sql"
       ],
       "findingIds": [],
-      "summary": "The current schema (schema/current.sql) defines a single table `tasks` with two columns: `id INTEGER PRIMARY KEY` and `title TEXT NOT NULL`. The offline contract query (checks/schema_contract.sql) executes `SELECT id, title FROM tasks LIMIT 0;`, which is a zero-row shape assertion: it verifies that the `tasks` table exists and exposes the expected `id` and `title` columns without retrieving any data. The accompanying comment states its intent—'A future evaluator should assert the tasks table remains readable.' The repository README (README.md) clarifies that this fixture models an offline application schema and that evaluation must never apply a migration to live state, while migrations/README.md reserves the migrations/ directory for future numbered migrations only after explicit schema approval. Together these sources establish that the contract query is a read-only, offline guard ensuring the tasks table's column contract is preserved across any future schema evolution."
+      "summary": "The current task table (schema/current.sql) defines a single table `tasks` with two columns: `id INTEGER PRIMARY KEY` and `title TEXT NOT NULL`. The offline contract query (checks/schema_contract.sql) issues `SELECT id, title FROM tasks LIMIT 0;`, which selects exactly the columns declared in the schema but returns zero rows. Its stated purpose—per the inline comment—is to let a future evaluator assert that the tasks table remains readable and exposes the expected column set, without fetching or mutating any data. The repository README confirms this is an offline schema fixture and explicitly forbids applying migrations to live state, while the migrations README notes that any future schema change requires explicit approval. Together these sources establish that the contract query is a read-only, zero-row shape check used to verify schema stability in an offline evaluation context."
     }
   },
   "candidateError": null,
@@ -49,8 +49,8 @@
     "schemaVersion": 1,
     "caseId": "explain-schema-contract",
     "evaluatorId": "explain-schema-contract-evaluator",
-    "candidateSha256": "b062f27ffd2e972ea70d03401e375e008fc9de187639c5f323be8d0b41e04172",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "adc218725698cea0186a711ff18eaaa5ed6569e8bf2e213970e69e2384d8c319",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -100,14 +100,14 @@
     ],
     "findingIds": [],
     "scenarioEvaluatorId": "explain-schema-contract-evaluator",
-    "scenarioEvidenceSha256": "d1a54f1cf219f14ed82eb8e0568823e3d65c89be6f61aff09e6236428cfe67f2",
+    "scenarioEvidenceSha256": "325e04cfbdaf20c7f74a96ddd0e9210c77026480a59cbb71c6913bb53451e5bb",
     "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 742,
-      "outputTokens": 822,
-      "estimatedCostUsd": 0.001226958,
+      "outputTokens": 1027,
+      "estimatedCostUsd": 0.0013877805,
       "actualBilledUsd": null,
-      "latencyMs": 42930
+      "latencyMs": 54669
     }
   }
 }

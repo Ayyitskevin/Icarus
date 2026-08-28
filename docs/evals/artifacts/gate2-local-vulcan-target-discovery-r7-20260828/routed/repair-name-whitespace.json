@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "repair-name-whitespace",
   "modelId": "code",
-  "generatedAt": "2026-08-28T15:19:42.652Z",
+  "generatedAt": "2026-08-28T16:31:15.160Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "7028df214f34a192436e2fa21d9969a7abe3a61067a2f6279d8a4a8603fff21f",
     "repositoryDigestSha256": "ba8451fe227e973c5c9e255880235e00488f9c204bbe8cd5fbca73e3c8d2f47f"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"plan\":{\"mutationTargets\":[\"src/format_name.py\",\"src/name_utils.py\",\"src/profile.py\"],\"requestedCheckIds\":[\"profile-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/name_utils.py\",\"content\":\"def normalize_name(value: str) -> str:\\n    return \\\" \\\".join(value.strip().split()).title()\\n\"},{\"path\":\"src/format_name.py\",\"content\":\"from src.name_utils import normalize_name\\n\\n\\ndef format_name(value: str) -> str:\\n    return normalize_name(value)\\n\"},{\"path\":\"src/profile.py\",\"content\":\"from src.name_utils import normalize_name\\n\\n\\ndef display_name(value: str) -> str:\\n    return normalize_name(value)\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Extracted the duplicated name-normalization logic into a shared module (src/name_utils.py) and updated both public functions (format_name, display_name) to delegate to it, preserving identical whitespace-collapsing and title-casing behavior while guaranteeing they remain identical by construction.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"plan\":{\"mutationTargets\":[\"src/format_name.py\",\"src/name_utils.py\",\"src/profile.py\"],\"requestedCheckIds\":[\"profile-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/name_utils.py\",\"content\":\"def normalize_name(value: str) -> str:\\n    return \\\" \\\".join(value.strip().split()).title()\\n\"},{\"path\":\"src/format_name.py\",\"content\":\"from src.name_utils import normalize_name\\n\\n\\ndef format_name(value: str) -> str:\\n    return normalize_name(value)\\n\"},{\"path\":\"src/profile.py\",\"content\":\"from src.name_utils import normalize_name\\n\\n\\ndef display_name(value: str) -> str:\\n    return normalize_name(value)\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Extracted the duplicated name-normalization logic into a shared module (src/name_utils.py) and updated both public functions (format_name and display_name) to delegate to it, preserving identical behavior for repeated whitespace and guaranteeing they remain identical by construction.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -56,7 +56,7 @@
       ],
       "citations": [],
       "findingIds": [],
-      "summary": "Extracted the duplicated name-normalization logic into a shared module (src/name_utils.py) and updated both public functions (format_name, display_name) to delegate to it, preserving identical whitespace-collapsing and title-casing behavior while guaranteeing they remain identical by construction."
+      "summary": "Extracted the duplicated name-normalization logic into a shared module (src/name_utils.py) and updated both public functions (format_name and display_name) to delegate to it, preserving identical behavior for repeated whitespace and guaranteeing they remain identical by construction."
     }
   },
   "candidateError": null,
@@ -64,8 +64,8 @@
     "schemaVersion": 1,
     "caseId": "repair-name-whitespace",
     "evaluatorId": "repair-name-whitespace-evaluator",
-    "candidateSha256": "4947d4fa305ae9d789fa69753f58ef93366b8ed8d90590ee4379bc62842740cd",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "c291cdd25e13b9d1add5a89733705f264718d864b3723164e940f458fd3af433",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -107,14 +107,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "repair-name-whitespace-evaluator",
-    "scenarioEvidenceSha256": "610f1e71e08bbfcc1f79b310d52a3b9a38ba3041b4a0737b8202048478c450b4",
+    "scenarioEvidenceSha256": "e8e8831ebf138d904dcffeadf931713532748217fb2ac8cc020bf7c92132cae5",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 734,
-      "outputTokens": 1549,
-      "estimatedCostUsd": 0.0017910135,
+      "outputTokens": 1544,
+      "estimatedCostUsd": 0.001787091,
       "actualBilledUsd": null,
-      "latencyMs": 72377
+      "latencyMs": 71479
     }
   }
 }

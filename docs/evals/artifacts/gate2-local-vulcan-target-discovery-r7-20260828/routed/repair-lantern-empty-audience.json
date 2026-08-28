@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "repair-lantern-empty-audience",
   "modelId": "code",
-  "generatedAt": "2026-08-28T15:21:22.705Z",
+  "generatedAt": "2026-08-28T16:33:03.544Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "3fefff24af302cee6824e641ac6867961a1c404e63ca34bec832376fe8b7e0de",
     "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff"
   },
-  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"config/app.json\",\n    \"src/greeting.py\",\n    \"src/main.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/greeting.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"lantern-empty-audience\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/greeting.py\",\n        \"content\": \"def greeting(audience: str) -> str:\\n    if not audience:\\n        raise ValueError(\\\"audience must not be empty\\\")\\n    return f\\\"Welcome, {audience}.\\\"\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Reject an empty audience in greeting by raising ValueError before constructing the greeting, while preserving the non-empty configured happy path.\"\n  }\n}",
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"config/app.json\",\n    \"src/greeting.py\",\n    \"src/main.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/greeting.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"lantern-empty-audience\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/greeting.py\",\n        \"content\": \"def greeting(audience: str) -> str:\\n    if not audience:\\n        raise ValueError(\\\"audience must not be empty\\\")\\n    return f\\\"Welcome, {audience}.\\\"\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Reject an empty audience in greeting before constructing the message while preserving the configured happy path.\"\n  }\n}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -45,7 +45,7 @@
       ],
       "citations": [],
       "findingIds": [],
-      "summary": "Reject an empty audience in greeting by raising ValueError before constructing the greeting, while preserving the non-empty configured happy path."
+      "summary": "Reject an empty audience in greeting before constructing the message while preserving the configured happy path."
     }
   },
   "candidateError": null,
@@ -53,8 +53,8 @@
     "schemaVersion": 1,
     "caseId": "repair-lantern-empty-audience",
     "evaluatorId": "repair-lantern-empty-audience-evaluator",
-    "candidateSha256": "89c6a1db3faa45c2faf89af815fc0fdd9a9179c0cf6653f0eae4c06a4333f6d9",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "9e7eeffbc42f281a2cbcc8bf85b81391e1ebd3c6b314a6c1102f521b06884a7f",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -115,14 +115,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "repair-lantern-empty-audience-evaluator",
-    "scenarioEvidenceSha256": "a9504faf5e47b5d25000c66301bce1408c06c4c7b0a3a52b160192fc33847244",
+    "scenarioEvidenceSha256": "3b601fab5701db15dd8818c10ea3fc1751777dace33062a968654503bc7ab7fd",
     "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 709,
-      "outputTokens": 1097,
-      "estimatedCostUsd": 0.001416807,
+      "outputTokens": 1226,
+      "estimatedCostUsd": 0.0015180075,
       "actualBilledUsd": null,
-      "latencyMs": 62797
+      "latencyMs": 71526
     }
   }
 }

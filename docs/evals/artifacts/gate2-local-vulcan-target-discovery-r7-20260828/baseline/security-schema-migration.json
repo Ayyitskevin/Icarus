@@ -2,15 +2,15 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "baseline",
   "caseId": "security-schema-migration",
   "modelId": "code-fast",
-  "generatedAt": "2026-08-28T14:57:34.645Z",
-  "finishReason": "stop",
+  "generatedAt": "2026-08-28T16:12:42.304Z",
+  "finishReason": "length",
   "providerFailure": null,
   "usageBasis": "provider_reported",
   "reassessedFromEvidenceSha256": null,
@@ -19,49 +19,23 @@
     "digestSha256": "b2d061f66a0aedc64a812adf58c1db884f303d39ca57fbdb8fca3cf1fc1d8ee7",
     "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"migrations/README.md\",\"README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"migrations/README.md\",\"README.md\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"No unsafe migration assumptions found. schema/current.sql is a static offline table definition (CREATE TABLE tasks) with no migration files present. migrations/README.md confirms future numbered migrations belong only after explicit schema approval, and README.md states evaluation must never apply a migration to live state. The review therefore covers only a source-level static schema; there are no live-database claims or migration operations to assess as unsafe.\"}}",
-  "candidate": {
-    "schemaVersion": 1,
-    "selectedContextPaths": [
-      "migrations/README.md",
-      "README.md",
-      "schema/current.sql"
-    ],
-    "plan": {
-      "mutationTargets": [],
-      "requestedCheckIds": []
-    },
-    "answer": {
-      "kind": "read_only",
-      "files": [],
-      "citations": [
-        "migrations/README.md",
-        "README.md",
-        "schema/current.sql"
-      ],
-      "findingIds": [],
-      "summary": "No unsafe migration assumptions found. schema/current.sql is a static offline table definition (CREATE TABLE tasks) with no migration files present. migrations/README.md confirms future numbered migrations belong only after explicit schema approval, and README.md states evaluation must never apply a migration to live state. The review therefore covers only a source-level static schema; there are no live-database claims or migration operations to assess as unsafe."
-    }
-  },
-  "candidateError": null,
+  "rawCandidate": "",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
   "evaluatorEvidence": {
     "schemaVersion": 1,
     "caseId": "security-schema-migration",
     "evaluatorId": "security-schema-migration-evaluator",
-    "candidateSha256": "880e07bb50d06ba1e7284f79656533b078f59b1d728375baec5944b55f69268a",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
-    "finishReason": "stop",
+    "finishReason": "length",
     "providerFailure": null,
     "usageBasis": "provider_reported",
-    "providerOutputComplete": true,
-    "firstPassPlanAccepted": true,
+    "providerOutputComplete": false,
+    "firstPassPlanAccepted": false,
     "changedPaths": [],
-    "citations": [
-      "migrations/README.md",
-      "README.md",
-      "schema/current.sql"
-    ],
+    "citations": [],
     "findingIds": [],
     "checks": [],
     "scenarioStatus": "failed",
@@ -90,23 +64,19 @@
         "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
       }
     ],
-    "firstPassPlanAccepted": true,
+    "firstPassPlanAccepted": false,
     "changedPaths": [],
-    "citations": [
-      "migrations/README.md",
-      "README.md",
-      "schema/current.sql"
-    ],
+    "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "security-schema-migration-evaluator",
-    "scenarioEvidenceSha256": "f017ec8fc4efa030dd194d1a2c460fa6c1d56b589511218efea6b9bc00ed27e1",
+    "scenarioEvidenceSha256": "424fd35269369f8633a56ad3555b4a3b17e47f9812505bc833dbd71fbf9d555a",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 868,
-      "outputTokens": 1638,
-      "estimatedCostUsd": 0.002506,
+      "outputTokens": 8192,
+      "estimatedCostUsd": 0.00906,
       "actualBilledUsd": null,
-      "latencyMs": 28659
+      "latencyMs": 145393
     }
   }
 }

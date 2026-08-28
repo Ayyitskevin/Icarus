@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "explain-parser-failure",
   "modelId": "code",
-  "generatedAt": "2026-08-28T15:32:14.545Z",
+  "generatedAt": "2026-08-28T16:44:41.937Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "8a49f0257f9f94bf99a6fcd40d416c52efe8f9bfcf679083e6a21c1dd58f4dd4",
     "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_parser.py\",\"src/parser.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"checks/test_parser.py\",\"src/parser.py\"],\"findingIds\":[],\"summary\":\"parse_enabled is implemented as `return bool(value)` (src/parser.py). In Python, `bool()` on a non-empty string always yields True, so the literal string \\\"false\\\" is truthy and the function returns True. The test (checks/test_parser.py) asserts `parse_enabled(\\\"false\\\") is False`, which therefore fails. The repository contract (README.md) explicitly states the parser \\\"should recognize explicit true and false values\\\" and that the check \\\"currently fails on the false case.\\\" The root cause is that `bool(value)` performs a truthiness test on the string rather than a semantic comparison against the token \\\"false\\\"; any non-empty string—including \\\"false\\\"—is truthy, so the explicit-false branch is never reached.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_parser.py\",\"src/parser.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"checks/test_parser.py\",\"src/parser.py\"],\"findingIds\":[],\"summary\":\"parse_enabled is implemented as `return bool(value)` (src/parser.py). In Python, `bool(\\\"false\\\")` is True because any non-empty string is truthy; the function never inspects the semantic content of the string. The test (checks/test_parser.py) asserts `parse_enabled(\\\"false\\\") is False`, which fails because the call returns True. The repository contract (README.md) states the parser \\\"should recognize explicit true and false values\\\" and acknowledges the check \\\"currently fails on the false case.\\\" The root cause is that `bool(value)` is a truthiness check on string emptiness, not a semantic parse of the token, so the literal string \\\"false\\\" is indistinguishable from any other non-empty string.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -40,7 +40,7 @@
         "src/parser.py"
       ],
       "findingIds": [],
-      "summary": "parse_enabled is implemented as `return bool(value)` (src/parser.py). In Python, `bool()` on a non-empty string always yields True, so the literal string \"false\" is truthy and the function returns True. The test (checks/test_parser.py) asserts `parse_enabled(\"false\") is False`, which therefore fails. The repository contract (README.md) explicitly states the parser \"should recognize explicit true and false values\" and that the check \"currently fails on the false case.\" The root cause is that `bool(value)` performs a truthiness test on the string rather than a semantic comparison against the token \"false\"; any non-empty string—including \"false\"—is truthy, so the explicit-false branch is never reached."
+      "summary": "parse_enabled is implemented as `return bool(value)` (src/parser.py). In Python, `bool(\"false\")` is True because any non-empty string is truthy; the function never inspects the semantic content of the string. The test (checks/test_parser.py) asserts `parse_enabled(\"false\") is False`, which fails because the call returns True. The repository contract (README.md) states the parser \"should recognize explicit true and false values\" and acknowledges the check \"currently fails on the false case.\" The root cause is that `bool(value)` is a truthiness check on string emptiness, not a semantic parse of the token, so the literal string \"false\" is indistinguishable from any other non-empty string."
     }
   },
   "candidateError": null,
@@ -48,8 +48,8 @@
     "schemaVersion": 1,
     "caseId": "explain-parser-failure",
     "evaluatorId": "explain-parser-failure-evaluator",
-    "candidateSha256": "f820bef735cdaa57f5b857be81a8def0b555a476116313069d2b06421979d6b4",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "599c0756cf36b875cfca69af7b56f8ce1c522464794d3164c828052bb8e6d193",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -99,14 +99,14 @@
     ],
     "findingIds": [],
     "scenarioEvaluatorId": "explain-parser-failure-evaluator",
-    "scenarioEvidenceSha256": "600c7f409fa08f7f89e3c5281b77fde8dd1c31319e9a20b5c8c04691a650f88d",
+    "scenarioEvidenceSha256": "428b58c650c77be27eab7ae2ae17f38202f2c00a03fe49b5f2b6f60775937c82",
     "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 809,
-      "outputTokens": 871,
-      "estimatedCostUsd": 0.00131796,
+      "outputTokens": 571,
+      "estimatedCostUsd": 0.00108261,
       "actualBilledUsd": null,
-      "latencyMs": 46680
+      "latencyMs": 28048
     }
   }
 }

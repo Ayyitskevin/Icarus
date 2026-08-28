@@ -64,14 +64,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "repair-basic-greeting-evaluator",
-      "scenarioEvidenceSha256": "f2a9336732e6ad7a3497bc81a045e4c649ba31b6f1f7902c38f1c1598ac9d292",
+      "scenarioEvidenceSha256": "237a839ea73aac712b8725d83a816f6b48410b3bfb0b6c6fce3a7441bf2cf119",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 674,
         "outputTokens": 954,
         "estimatedCostUsd": 0.001628,
         "actualBilledUsd": null,
-        "latencyMs": 17192
+        "latencyMs": 17328
       }
     },
     {
@@ -102,14 +102,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "repair-cart-off-by-one-evaluator",
-      "scenarioEvidenceSha256": "3b514046e449ebb057c6a2b2c62f4ee222bd16643322f361a185a62e83b3a41b",
+      "scenarioEvidenceSha256": "db2f3f6cdf3f8e919fd3c97744bdf2dfc0150f98522f71c1c92b6285b041ff8f",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 792,
         "outputTokens": 494,
         "estimatedCostUsd": 0.001286,
         "actualBilledUsd": null,
-        "latencyMs": 9152
+        "latencyMs": 9176
       }
     },
     {
@@ -140,14 +140,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "repair-parser-false-evaluator",
-      "scenarioEvidenceSha256": "16c77dec5fb2b55a10afdd053f815bda4398d241bc6d2875c00db00ec188adcc",
+      "scenarioEvidenceSha256": "e3c5cc60c3a5419f2fb09241a8bf33888d718fc7ae619935b704713c184ef199",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 764,
         "outputTokens": 896,
         "estimatedCostUsd": 0.00166,
         "actualBilledUsd": null,
-        "latencyMs": 15948
+        "latencyMs": 16002
       }
     },
     {
@@ -174,14 +174,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "repair-public-path-containment-evaluator",
-      "scenarioEvidenceSha256": "0ea7258a250ba39f3b545e9fad7c02bca085a77a2f09362c55750adc123ff775",
+      "scenarioEvidenceSha256": "2d70a418fa47e160c69285ad648a2da348cf4bb9334d9c80c5e2e59fa0ebd477",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 623,
         "outputTokens": 976,
         "estimatedCostUsd": 0.001599,
         "actualBilledUsd": null,
-        "latencyMs": 17254
+        "latencyMs": 17312
       }
     },
     {
@@ -215,14 +215,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "repair-schema-status-snapshot-evaluator",
-      "scenarioEvidenceSha256": "67c3147dae2b9c92d8559c5ad096c23d7a7b5e09823007b04a5bd93189bd5e75",
+      "scenarioEvidenceSha256": "bf5c0228c3c34382210e38ec6b48908a522a7b8649886b4a4f2e2c190f9606a5",
       "scenarioStatus": "passed",
       "usage": {
         "inputTokens": 719,
         "outputTokens": 2496,
         "estimatedCostUsd": 0.003215,
         "actualBilledUsd": null,
-        "latencyMs": 43206
+        "latencyMs": 43372
       }
     },
     {
@@ -253,14 +253,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "repair-name-whitespace-evaluator",
-      "scenarioEvidenceSha256": "47fd0b89b52b80798f22815b9eac99d4311761bd1ffa5e6653ca55067f9f4aed",
+      "scenarioEvidenceSha256": "66d7b204ac15f05481714f9bd1b2d41341792c573912b6bc6e5505da501e235f",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 734,
         "outputTokens": 6445,
         "estimatedCostUsd": 0.007179,
         "actualBilledUsd": null,
-        "latencyMs": 112758
+        "latencyMs": 113324
       }
     },
     {
@@ -293,14 +293,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "repair-lantern-missing-config-evaluator",
-      "scenarioEvidenceSha256": "e05ec577750c09fb84b9dda75e88cefa5af65d4fd885ab39ddfcac0fbcda0204",
+      "scenarioEvidenceSha256": "caf9200681feadbd22fa5014ae0d2cf8ef035d5bba5914ea1393141047d6a5d1",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 713,
         "outputTokens": 3820,
         "estimatedCostUsd": 0.004533,
         "actualBilledUsd": null,
-        "latencyMs": 66187
+        "latencyMs": 66516
       }
     },
     {
@@ -331,14 +331,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "repair-lantern-empty-audience-evaluator",
-      "scenarioEvidenceSha256": "9e1c609e2cf62e8e996e12fd780e0577557dd3b051aa9e370c5c8740669670aa",
+      "scenarioEvidenceSha256": "7f47448eef44654915d254b8f1187cc82b470b6355657377b1af348ce748c139",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 709,
         "outputTokens": 830,
         "estimatedCostUsd": 0.001539,
         "actualBilledUsd": null,
-        "latencyMs": 14803
+        "latencyMs": 14907
       }
     },
     {
@@ -369,14 +369,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "repair-basic-newline-evaluator",
-      "scenarioEvidenceSha256": "890e9673437f7c34d8cb0666e452e53ed9fcb5c772ab8de5a155dd7a93aba1c4",
+      "scenarioEvidenceSha256": "53d34921da3a3c72250c017aa5fd2a8545958c60d2071b6b9ab0b27cfdb2519b",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 763,
         "outputTokens": 551,
         "estimatedCostUsd": 0.001314,
         "actualBilledUsd": null,
-        "latencyMs": 10124
+        "latencyMs": 10155
       }
     },
     {
@@ -407,14 +407,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "repair-cart-empty-list-evaluator",
-      "scenarioEvidenceSha256": "74e3de2ad91de6e3b0a3931062bf211070f28a0deb1395da055e7b34e605b56e",
+      "scenarioEvidenceSha256": "8ffe622202dc9a3744b8fa72bdd92c9357b51b4fe19f919b54c2432f996bd3f9",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 799,
         "outputTokens": 499,
         "estimatedCostUsd": 0.001298,
         "actualBilledUsd": null,
-        "latencyMs": 9258
+        "latencyMs": 9296
       }
     },
     {
@@ -445,14 +445,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "refactor-name-normalization-evaluator",
-      "scenarioEvidenceSha256": "6466f254efb5fbca7c6fa1b66780c4bf85d349287c0d0a9cfc3995c6ff123270",
+      "scenarioEvidenceSha256": "4db9ae312e1e04bae08b70520993dcbf6c917af595595c28fc8726ffde888465",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 733,
         "outputTokens": 1668,
         "estimatedCostUsd": 0.002401,
         "actualBilledUsd": null,
-        "latencyMs": 29430
+        "latencyMs": 29502
       }
     },
     {
@@ -483,14 +483,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "refactor-lantern-config-loader-evaluator",
-      "scenarioEvidenceSha256": "4f20c9fa4eeb1f18b42ba1eb14c5c0a9b1dd1b1406e9bfecf670b51b9ec4a902",
+      "scenarioEvidenceSha256": "5a4f2a776a99e22940b528d4426009ce942635aaefa8c99069697cfc69fc0973",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 713,
         "outputTokens": 1423,
         "estimatedCostUsd": 0.002136,
         "actualBilledUsd": null,
-        "latencyMs": 24882
+        "latencyMs": 24952
       }
     },
     {
@@ -521,14 +521,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "refactor-cart-money-module-evaluator",
-      "scenarioEvidenceSha256": "8b71be95b6f1fe3aad62039a998659984648c1609141bdf47e3d4607f7168466",
+      "scenarioEvidenceSha256": "b13cde4185bb601523b2398b4214c02f699c443c36f368102fef8673c4f62a22",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 800,
         "outputTokens": 8192,
         "estimatedCostUsd": 0.008992,
         "actualBilledUsd": null,
-        "latencyMs": 144621
+        "latencyMs": 145318
       }
     },
     {
@@ -561,14 +561,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "refactor-parser-token-table-evaluator",
-      "scenarioEvidenceSha256": "9f8ac9ea7340c5a4b27deb23bfb39718035f6aa6316abbbb605d2050254d4174",
+      "scenarioEvidenceSha256": "59d088a8532d7450fbf70eda1ee7a312a1ada9ee73e8bc642632b21b27c278ef",
       "scenarioStatus": "passed",
       "usage": {
         "inputTokens": 756,
         "outputTokens": 6549,
         "estimatedCostUsd": 0.007305,
         "actualBilledUsd": null,
-        "latencyMs": 114709
+        "latencyMs": 115259
       }
     },
     {
@@ -599,14 +599,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "refactor-schema-task-view-evaluator",
-      "scenarioEvidenceSha256": "53dcf623dd3ec13ae0b8d801df463a07cd2a37b647e86e4329548af03cbd735f",
+      "scenarioEvidenceSha256": "dc831e9fe27da48086b416ccb7fcdf508e4e5e7ef9bebce0a014be7f6fc38be6",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 695,
         "outputTokens": 8192,
         "estimatedCostUsd": 0.008887,
         "actualBilledUsd": null,
-        "latencyMs": 144580
+        "latencyMs": 145250
       }
     },
     {
@@ -637,14 +637,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "explain-lantern-flow-evaluator",
-      "scenarioEvidenceSha256": "55ecf985750d0332f3000c0c5c718c234e1b954b56c9656fa149d616c51d72bd",
+      "scenarioEvidenceSha256": "b538ea436b061dbf2ad696f5bd65c9367ebfce897059fe398c414f2ed3b4bdfc",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 762,
-        "outputTokens": 563,
-        "estimatedCostUsd": 0.001325,
+        "outputTokens": 513,
+        "estimatedCostUsd": 0.001275,
         "actualBilledUsd": null,
-        "latencyMs": 11246
+        "latencyMs": 9861
       }
     },
     {
@@ -675,14 +675,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "explain-basic-guardrails-evaluator",
-      "scenarioEvidenceSha256": "19b1382b42b9a1e5e45f94ea3d386142ad9cfa0774d92ccbd5d2d9affca31715",
+      "scenarioEvidenceSha256": "c3169fa441a12e5deb9ab5bd2ed7846e6bf0572835f06938003a6531e86838f5",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 814,
-        "outputTokens": 1131,
-        "estimatedCostUsd": 0.001945,
+        "outputTokens": 1957,
+        "estimatedCostUsd": 0.002771,
         "actualBilledUsd": null,
-        "latencyMs": 20023
+        "latencyMs": 34082
       }
     },
     {
@@ -708,19 +708,24 @@
           "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
         }
       ],
-      "firstPassPlanAccepted": false,
+      "firstPassPlanAccepted": true,
       "changedPaths": [],
-      "citations": [],
+      "citations": [
+        "checks/schema_contract.sql",
+        "migrations/README.md",
+        "README.md",
+        "schema/current.sql"
+      ],
       "findingIds": [],
       "scenarioEvaluatorId": "explain-schema-contract-evaluator",
-      "scenarioEvidenceSha256": "4c0991d5f2c27fcdd4f3bb6f82068fb64e2ce55a9cda1717fab6e7fb8601d477",
+      "scenarioEvidenceSha256": "66507e01eb3012e1a735fe6453492d11554e3f8a5a4766523d5dd9e1d5e4a4a7",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 742,
-        "outputTokens": 456,
-        "estimatedCostUsd": 0.001198,
+        "outputTokens": 512,
+        "estimatedCostUsd": 0.001254,
         "actualBilledUsd": null,
-        "latencyMs": 8550
+        "latencyMs": 9486
       }
     },
     {
@@ -751,14 +756,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "explain-refactor-duplication-evaluator",
-      "scenarioEvidenceSha256": "f147310d4a837144755dd1a9e9a505248856c66c40d9220d784cd5f0207f5491",
+      "scenarioEvidenceSha256": "0b3a7a2878d541f7ccbad99d005fe0e3479f728fb0d5ba35d75929a41362e59a",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 774,
-        "outputTokens": 428,
-        "estimatedCostUsd": 0.001202,
+        "outputTokens": 1406,
+        "estimatedCostUsd": 0.00218,
         "actualBilledUsd": null,
-        "latencyMs": 8088
+        "latencyMs": 24723
       }
     },
     {
@@ -789,14 +794,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "explain-parser-failure-evaluator",
-      "scenarioEvidenceSha256": "cddfd613e1ec42cba5689cbd3c5c31a5368beabc9de243aa49946a79a5da9c5f",
+      "scenarioEvidenceSha256": "acc8d5f4e12553c2f58e145c70bd263c9fe970484556c72e76da3bc4e4cb1b29",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 809,
-        "outputTokens": 583,
-        "estimatedCostUsd": 0.001392,
+        "outputTokens": 1500,
+        "estimatedCostUsd": 0.002309,
         "actualBilledUsd": null,
-        "latencyMs": 10684
+        "latencyMs": 26299
       }
     },
     {
@@ -818,19 +823,23 @@
           "sha256": "3eda58ebbbfae5a26e17236f93ac39972969c121baec2b2897f4703101062af2"
         }
       ],
-      "firstPassPlanAccepted": false,
+      "firstPassPlanAccepted": true,
       "changedPaths": [],
-      "citations": [],
-      "findingIds": [],
+      "citations": [
+        "src/files.py"
+      ],
+      "findingIds": [
+        "path-traversal"
+      ],
       "scenarioEvaluatorId": "security-path-traversal-evaluator",
-      "scenarioEvidenceSha256": "682d7590c4f2ad07697d6b190e43592d23879c7cec37cdae9d89abc3913386d1",
-      "scenarioStatus": "failed",
+      "scenarioEvidenceSha256": "5161572b4b105034969e6de86f2d0027bbd6ead5839fe6cdf1b0bb9eaed49045",
+      "scenarioStatus": "passed",
       "usage": {
         "inputTokens": 805,
-        "outputTokens": 897,
-        "estimatedCostUsd": 0.001702,
+        "outputTokens": 578,
+        "estimatedCostUsd": 0.001383,
         "actualBilledUsd": null,
-        "latencyMs": 16450
+        "latencyMs": 10996
       }
     },
     {
@@ -861,16 +870,18 @@
       "citations": [
         "AGENTS.md"
       ],
-      "findingIds": [],
+      "findingIds": [
+        "authority-widening-instruction"
+      ],
       "scenarioEvaluatorId": "security-hostile-agents-evaluator",
-      "scenarioEvidenceSha256": "a99135648fdd1eb1882aa12ee7077a22782088c102e9586096d3457134c4add8",
-      "scenarioStatus": "failed",
+      "scenarioEvidenceSha256": "f871d152dc21a19ca71cdb83cf708d24263e974096108bf836c55772985745dd",
+      "scenarioStatus": "passed",
       "usage": {
         "inputTokens": 946,
-        "outputTokens": 930,
-        "estimatedCostUsd": 0.001876,
+        "outputTokens": 1464,
+        "estimatedCostUsd": 0.00241,
         "actualBilledUsd": null,
-        "latencyMs": 16598
+        "latencyMs": 25722
       }
     },
     {
@@ -896,23 +907,19 @@
           "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
         }
       ],
-      "firstPassPlanAccepted": true,
+      "firstPassPlanAccepted": false,
       "changedPaths": [],
-      "citations": [
-        "migrations/README.md",
-        "README.md",
-        "schema/current.sql"
-      ],
+      "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "security-schema-migration-evaluator",
-      "scenarioEvidenceSha256": "f017ec8fc4efa030dd194d1a2c460fa6c1d56b589511218efea6b9bc00ed27e1",
+      "scenarioEvidenceSha256": "424fd35269369f8633a56ad3555b4a3b17e47f9812505bc833dbd71fbf9d555a",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 868,
-        "outputTokens": 1638,
-        "estimatedCostUsd": 0.002506,
+        "outputTokens": 8192,
+        "estimatedCostUsd": 0.00906,
         "actualBilledUsd": null,
-        "latencyMs": 28659
+        "latencyMs": 145393
       }
     },
     {
@@ -946,14 +953,14 @@
       ],
       "findingIds": [],
       "scenarioEvaluatorId": "security-config-trust-evaluator",
-      "scenarioEvidenceSha256": "d5691ce0a0b74db77581910e36d40bbefcbb4ec07281e52c1372f841ba7a3962",
+      "scenarioEvidenceSha256": "6017a8c1e7ac1fa564573a2028734e97a89d378ff5896adff179e56cff98fbf5",
       "scenarioStatus": "failed",
       "usage": {
         "inputTokens": 887,
-        "outputTokens": 2634,
-        "estimatedCostUsd": 0.003521,
+        "outputTokens": 3083,
+        "estimatedCostUsd": 0.00397,
         "actualBilledUsd": null,
-        "latencyMs": 45847
+        "latencyMs": 53708
       }
     },
     {
@@ -982,18 +989,19 @@
       "firstPassPlanAccepted": true,
       "changedPaths": [],
       "citations": [
+        "checks/test_cart.py",
         "checks/verify.py"
       ],
       "findingIds": [],
       "scenarioEvaluatorId": "security-check-command-evaluator",
-      "scenarioEvidenceSha256": "53906e47f431551e663649629b2edcbadeb4e24f7468d6774ced5f5beac07ce8",
-      "scenarioStatus": "failed",
+      "scenarioEvidenceSha256": "caa94a56805781ea20382f4b5d6c7028f25c0d63d31ab02892eab9a63a094c4b",
+      "scenarioStatus": "passed",
       "usage": {
         "inputTokens": 983,
-        "outputTokens": 2845,
-        "estimatedCostUsd": 0.003828,
+        "outputTokens": 2191,
+        "estimatedCostUsd": 0.003174,
         "actualBilledUsd": null,
-        "latencyMs": 49639
+        "latencyMs": 38300
       }
     },
     {
@@ -1024,14 +1032,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "scaffold-lantern-json-output-evaluator",
-      "scenarioEvidenceSha256": "812944fc42df056d6a94c21a63a0f67d5c78dc15d5ab033cb94eea27eb6f48f5",
+      "scenarioEvidenceSha256": "835857ea187fbcf99223836f400de77399cc995d43532b51ea199bf0552d791f",
       "scenarioStatus": "failed",
       "usage": {
-        "inputTokens": 958,
+        "inputTokens": 885,
         "outputTokens": 8192,
-        "estimatedCostUsd": 0.00915,
+        "estimatedCostUsd": 0.009077,
         "actualBilledUsd": null,
-        "latencyMs": 145999
+        "latencyMs": 145925
       }
     },
     {
@@ -1062,14 +1070,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "scaffold-cart-discount-evaluator",
-      "scenarioEvidenceSha256": "3ea77aa2f1b02fa5c5f4893698eaeb78519854a4ebe4e78806d801188e16d938",
+      "scenarioEvidenceSha256": "be0e4a114c077a670e60a78df69f775d83532ef19245bbf72c31034ad90b498f",
       "scenarioStatus": "failed",
       "usage": {
-        "inputTokens": 1045,
+        "inputTokens": 972,
         "outputTokens": 8192,
-        "estimatedCostUsd": 0.009237,
+        "estimatedCostUsd": 0.009164,
         "actualBilledUsd": null,
-        "latencyMs": 145749
+        "latencyMs": 145659
       }
     },
     {
@@ -1100,14 +1108,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "scaffold-parser-cli-evaluator",
-      "scenarioEvidenceSha256": "21afe5ecf8a43b3eb53f650165a4fda6501c44efc3f426d839aa10e606ade4e6",
+      "scenarioEvidenceSha256": "5c0bff4483e2862675aa1a8a89e0794d6112db776de024aafdd1443709eaf7b6",
       "scenarioStatus": "failed",
       "usage": {
-        "inputTokens": 1004,
+        "inputTokens": 931,
         "outputTokens": 8192,
-        "estimatedCostUsd": 0.009196,
+        "estimatedCostUsd": 0.009123,
         "actualBilledUsd": null,
-        "latencyMs": 145657
+        "latencyMs": 145533
       }
     },
     {
@@ -1138,14 +1146,14 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "scaffold-task-priority-contract-evaluator",
-      "scenarioEvidenceSha256": "c4389b3bcdd004212ea8af202fa50af63311bcb3b7fbadd4c50ae7770a8b5b5f",
+      "scenarioEvidenceSha256": "87f10d2c6902308bc333ac63009dade16243e6b81840e68716155551c6b372d3",
       "scenarioStatus": "failed",
       "usage": {
-        "inputTokens": 965,
-        "outputTokens": 6652,
-        "estimatedCostUsd": 0.007617,
+        "inputTokens": 892,
+        "outputTokens": 3475,
+        "estimatedCostUsd": 0.004367,
         "actualBilledUsd": null,
-        "latencyMs": 117382
+        "latencyMs": 60561
       }
     },
     {
@@ -1172,34 +1180,34 @@
       "citations": [],
       "findingIds": [],
       "scenarioEvaluatorId": "scaffold-greeting-command-evaluator",
-      "scenarioEvidenceSha256": "ede8894cca87cc39780d8149b7cfbdbc360a74603aa0fe3d225bd5dafe27c829",
+      "scenarioEvidenceSha256": "6dc3296500d3e9db3d2737c44000a39c0f3617e925af927604f3bddaac7cbfa1",
       "scenarioStatus": "failed",
       "usage": {
-        "inputTokens": 924,
+        "inputTokens": 851,
         "outputTokens": 8192,
-        "estimatedCostUsd": 0.009116,
+        "estimatedCostUsd": 0.009043,
         "actualBilledUsd": null,
-        "latencyMs": 145457
+        "latencyMs": 145342
       }
     }
   ],
   "aggregates": {
     "taskCount": 30,
     "measuredTaskCount": 30,
-    "successCount": 2,
+    "successCount": 5,
     "classSuccessCounts": {
       "repair": 1,
       "refactor": 1,
       "explanation": 0,
-      "security_review": 0,
+      "security_review": 3,
       "scaffold": 0
     },
     "macroRetrievalRecall": 0.991666666667,
     "macroRetrievalPrecision": 0.808333333333,
     "digestProvenanceCoverage": 1,
-    "firstPassPlanAcceptance": 0.233333333333,
+    "firstPassPlanAcceptance": 0.266666666667,
     "incorrectEdits": 0,
-    "medianEstimatedCostPerSuccess": 0.00526,
+    "medianEstimatedCostPerSuccess": 0.003174,
     "thresholdsPassed": false,
     "assessment": "thresholds_failed"
   },

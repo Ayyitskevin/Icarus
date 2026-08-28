@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "refactor-cart-money-module",
   "modelId": "code",
-  "generatedAt": "2026-08-28T15:24:58.148Z",
+  "generatedAt": "2026-08-28T16:36:39.602Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -54,7 +54,7 @@
     "caseId": "refactor-cart-money-module",
     "evaluatorId": "refactor-cart-money-module-evaluator",
     "candidateSha256": "79aac5e048bb03a7712d8b9d0ee08fccc71eb1d91123edbce1dc426318e6f4cc",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -96,14 +96,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "refactor-cart-money-module-evaluator",
-    "scenarioEvidenceSha256": "9777f25330e31e2e6850cf259b5acbdbc12af9341172552369a397bf570d0c21",
+    "scenarioEvidenceSha256": "c3ee61fac4af4aee797a35754136047f0bf51d7e1320da6004978c4bc12b825a",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 800,
       "outputTokens": 1039,
       "estimatedCostUsd": 0.0014426955,
       "actualBilledUsd": null,
-      "latencyMs": 47450
+      "latencyMs": 47406
     }
   }
 }

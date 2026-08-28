@@ -7,12 +7,12 @@
   "routedModelIds": [
     "code"
   ],
-  "baselineSuccessCount": 2,
-  "routedSuccessCount": 17,
-  "successCountRatio": 8.5,
-  "baselineMedianEstimatedCostPerSuccess": 0.00526,
-  "routedMedianEstimatedCostPerSuccess": 0.00131796,
-  "costReduction": 0.749437262357,
+  "baselineSuccessCount": 5,
+  "routedSuccessCount": 18,
+  "successCountRatio": 3.6,
+  "baselineMedianEstimatedCostPerSuccess": 0.003174,
+  "routedMedianEstimatedCostPerSuccess": 0.00128618775,
+  "costReduction": 0.594773865784,
   "passed": false,
   "assessment": "gate2-routing-comparison-failed"
 }

@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "baseline",
   "caseId": "repair-public-path-containment",
   "modelId": "code-fast",
-  "generatedAt": "2026-08-28T14:43:37.914Z",
+  "generatedAt": "2026-08-28T15:55:55.258Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -27,7 +27,7 @@
     "caseId": "repair-public-path-containment",
     "evaluatorId": "repair-public-path-containment-evaluator",
     "candidateSha256": "f10b6f40148e13bbcdd685f1cabf6437735f81015a74bb34a8dd95f41019f76a",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -65,14 +65,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "repair-public-path-containment-evaluator",
-    "scenarioEvidenceSha256": "0ea7258a250ba39f3b545e9fad7c02bca085a77a2f09362c55750adc123ff775",
+    "scenarioEvidenceSha256": "2d70a418fa47e160c69285ad648a2da348cf4bb9334d9c80c5e2e59fa0ebd477",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 623,
       "outputTokens": 976,
       "estimatedCostUsd": 0.001599,
       "actualBilledUsd": null,
-      "latencyMs": 17254
+      "latencyMs": 17312
     }
   }
 }

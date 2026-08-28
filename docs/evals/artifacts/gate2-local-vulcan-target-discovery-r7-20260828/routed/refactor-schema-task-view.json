@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "refactor-schema-task-view",
   "modelId": "code",
-  "generatedAt": "2026-08-28T15:28:41.708Z",
+  "generatedAt": "2026-08-28T16:40:56.384Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "c2e7a54ff177e3323d6fde7135618f8cdaeb578d4e9cd05398c352db0de311eb",
     "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[\"schema/current.sql\"],\"requestedCheckIds\":[\"schema-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"schema/current.sql\",\"content\":\"CREATE TABLE tasks (\\n  id INTEGER PRIMARY KEY,\\n  title TEXT NOT NULL\\n);\\n\\nCREATE VIEW task_projection AS\\n  SELECT id, title FROM tasks;\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a read-only VIEW (task_projection) to the offline schema contract that projects the tasks table columns, without altering the existing table definition or applying anything to a live database.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[\"checks/schema_contract.sql\"],\"requestedCheckIds\":[\"schema-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"checks/schema_contract.sql\",\"content\":\"-- A future evaluator should assert the tasks table remains readable.\\nSELECT id, title FROM tasks LIMIT 0;\\n\\n-- Read-only task projection.\\nCREATE VIEW task_projection AS\\nSELECT id, title FROM tasks;\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a read-only task projection (CREATE VIEW task_projection) to the offline schema contract file, preserving the existing readability check and without modifying the table definition or applying anything to a live database.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -30,7 +30,7 @@
     ],
     "plan": {
       "mutationTargets": [
-        "schema/current.sql"
+        "checks/schema_contract.sql"
       ],
       "requestedCheckIds": [
         "schema-contract"
@@ -40,13 +40,13 @@
       "kind": "mutation",
       "files": [
         {
-          "path": "schema/current.sql",
-          "content": "CREATE TABLE tasks (\n  id INTEGER PRIMARY KEY,\n  title TEXT NOT NULL\n);\n\nCREATE VIEW task_projection AS\n  SELECT id, title FROM tasks;\n"
+          "path": "checks/schema_contract.sql",
+          "content": "-- A future evaluator should assert the tasks table remains readable.\nSELECT id, title FROM tasks LIMIT 0;\n\n-- Read-only task projection.\nCREATE VIEW task_projection AS\nSELECT id, title FROM tasks;\n"
         }
       ],
       "citations": [],
       "findingIds": [],
-      "summary": "Added a read-only VIEW (task_projection) to the offline schema contract that projects the tasks table columns, without altering the existing table definition or applying anything to a live database."
+      "summary": "Added a read-only task projection (CREATE VIEW task_projection) to the offline schema contract file, preserving the existing readability check and without modifying the table definition or applying anything to a live database."
     }
   },
   "candidateError": null,
@@ -54,19 +54,36 @@
     "schemaVersion": 1,
     "caseId": "refactor-schema-task-view",
     "evaluatorId": "refactor-schema-task-view-evaluator",
-    "candidateSha256": "7aa172c8958d2750bf26369d00915cd0f13aaf5f90bcb2d4da70583c6b08e43f",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "3174363e44852abb680cb85c74dd04607d54ed21b65033b4a3c1f591dc59b404",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
     "usageBasis": "provider_reported",
     "providerOutputComplete": true,
-    "firstPassPlanAccepted": false,
-    "changedPaths": [],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "checks/schema_contract.sql"
+    ],
     "citations": [],
     "findingIds": [],
-    "checks": [],
-    "scenarioStatus": "failed",
+    "checks": [
+      {
+        "checkId": "schema-contract",
+        "argv": [
+          "python",
+          "-c",
+          "import sqlite3,pathlib; db=sqlite3.connect(\":memory:\"); db.executescript(pathlib.Path(\"schema/current.sql\").read_text(encoding=\"utf-8\")); db.executescript(pathlib.Path(\"checks/schema_contract.sql\").read_text(encoding=\"utf-8\")); assert db.execute(\"SELECT type,sql FROM sqlite_master WHERE name='tasks'\").fetchone() == (\"table\", \"CREATE TABLE tasks (\\n  id INTEGER PRIMARY KEY,\\n  title TEXT NOT NULL\\n)\")"
+        ],
+        "exitCode": 0,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
     "sourceCheckoutUnchanged": true
   },
   "observation": {
@@ -92,19 +109,21 @@
         "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
       }
     ],
-    "firstPassPlanAccepted": false,
-    "changedPaths": [],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "checks/schema_contract.sql"
+    ],
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "refactor-schema-task-view-evaluator",
-    "scenarioEvidenceSha256": "d01e5e99d87653eaa8b58db4554c90b77ea2e56dc47569521995356554b4bbc6",
-    "scenarioStatus": "failed",
+    "scenarioEvidenceSha256": "61a154f739bdc63963a1ac29df44d8912039c1352e74ff82bfaa0462a71dc1d1",
+    "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 695,
-      "outputTokens": 1183,
-      "estimatedCostUsd": 0.001473291,
+      "outputTokens": 1199,
+      "estimatedCostUsd": 0.001485843,
       "actualBilledUsd": null,
-      "latencyMs": 60221
+      "latencyMs": 58616
     }
   }
 }

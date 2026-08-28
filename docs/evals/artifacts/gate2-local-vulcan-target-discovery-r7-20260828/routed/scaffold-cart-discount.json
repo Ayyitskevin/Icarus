@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "scaffold-cart-discount",
   "modelId": "code",
-  "generatedAt": "2026-08-28T14:36:02.790Z",
+  "generatedAt": "2026-08-28T16:53:14.795Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "01b0f3af455841ae830f398d3247655f60d8e63773584ee99954189bd0a572ae",
     "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_cart.py\",\"checks/verify.py\",\"src/cart.py\"],\"plan\":{\"mutationTargets\":[\"checks/test_cart.py\",\"src/cart.py\"],\"requestedCheckIds\":[\"cart-discount\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/cart.py\",\"content\":\"def subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the cart subtotal in cents.\\\"\\\"\\\"\\n    return sum(cents) - 1\\n\\n\\ndef discount(cents: list[int], discount_cents: int) -> int:\\n    \\\"\\\"\\\"Return the cart total after applying a discount, in integer cents.\\n\\n    Bounds:\\n        - Every item price in *cents* must be a non-negative integer.\\n        - *discount_cents* must be a non-negative integer.\\n        - *discount_cents* must not exceed the sum of item prices.\\n\\n    Raises:\\n        ValueError: If any bound is violated.\\n    \\\"\\\"\\\"\\n    if any(c < 0 for c in cents):\\n        raise ValueError(\\\"Item prices must be non-negative integers\\\")\\n    if discount_cents < 0:\\n        raise ValueError(\\\"Discount must be a non-negative integer\\\")\\n    total = sum(cents)\\n    if discount_cents > total:\\n        raise ValueError(\\\"Discount cannot exceed the subtotal\\\")\\n    return total - discount_cents\\n\"},{\"path\":\"checks/test_cart.py\",\"content\":\"from src.cart import subtotal, discount\\n\\nassert subtotal([100, 200]) == 300\\n\\n# discount: basic application\\nassert discount([100, 200], 50) == 250\\n\\n# discount: zero discount\\nassert discount([100, 200], 0) == 300\\n\\n# discount: full discount\\nassert discount([100, 200], 300) == 0\\n\\n# discount: negative discount raises\\ntry:\\n    discount([100, 200], -1)\\n    assert False, \\\"Expected ValueError\\\"\\nexcept ValueError:\\n    pass\\n\\n# discount: discount exceeding subtotal raises\\ntry:\\n    discount([100, 200], 301)\\n    assert False, \\\"Expected ValueError\\\"\\nexcept ValueError:\\n    pass\\n\\n# discount: negative item price raises\\ntry:\\n    discount([-1, 200], 0)\\n    assert False, \\\"Expected ValueError\\\"\\nexcept ValueError:\\n    pass\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a `discount` helper to `src/cart.py` that applies an integer-cents discount with explicit bounds (non-negative item prices, non-negative discount, discount ≤ subtotal) and raises `ValueError` on violation. Added corresponding tests in `checks/test_cart.py` covering normal, zero, full, and out-of-bounds cases. The existing `subtotal` API is unchanged.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_cart.py\",\"checks/verify.py\",\"src/cart.py\"],\"plan\":{\"mutationTargets\":[\"checks/test_cart.py\",\"src/cart.py\"],\"requestedCheckIds\":[\"cart-discount\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/cart.py\",\"content\":\"def subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the cart subtotal in cents.\\\"\\\"\\\"\\n    return sum(cents) - 1\\n\\n\\ndef discount(price_cents: int, discount_cents: int) -> int:\\n    \\\"\\\"\\\"Apply an integer-cents discount to a price, bounded at zero.\\n\\n    Raises ValueError if either argument is negative.\\n    \\\"\\\"\\\"\\n    if price_cents < 0:\\n        raise ValueError(\\\"price_cents must be non-negative\\\")\\n    if discount_cents < 0:\\n        raise ValueError(\\\"discount_cents must be non-negative\\\")\\n    return max(0, price_cents - discount_cents)\\n\"},{\"path\":\"checks/test_cart.py\",\"content\":\"from src.cart import subtotal, discount\\n\\nassert subtotal([100, 200]) == 300\\n\\n# discount: normal application\\nassert discount(300, 50) == 250\\n\\n# discount: full discount floors at zero\\nassert discount(300, 300) == 0\\n\\n# discount: over-discount floors at zero\\nassert discount(300, 500) == 0\\n\\n# discount: zero price and zero discount\\nassert discount(0, 0) == 0\\n\\n# discount: negative discount raises\\ntry:\\n    discount(100, -1)\\n    raise AssertionError(\\\"expected ValueError for negative discount\\\")\\nexcept ValueError:\\n    pass\\n\\n# discount: negative price raises\\ntry:\\n    discount(-1, 10)\\n    raise AssertionError(\\\"expected ValueError for negative price\\\")\\nexcept ValueError:\\n    pass\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a `discount(price_cents, discount_cents)` helper to `src/cart.py` that applies an integer-cents discount bounded at zero and raises ValueError on negative inputs. Extended `checks/test_cart.py` with tests covering normal discount, full/over-discount flooring, zero edge case, and negative-argument rejection. The existing `subtotal` API is unchanged.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -42,16 +42,16 @@
       "files": [
         {
           "path": "checks/test_cart.py",
-          "content": "from src.cart import subtotal, discount\n\nassert subtotal([100, 200]) == 300\n\n# discount: basic application\nassert discount([100, 200], 50) == 250\n\n# discount: zero discount\nassert discount([100, 200], 0) == 300\n\n# discount: full discount\nassert discount([100, 200], 300) == 0\n\n# discount: negative discount raises\ntry:\n    discount([100, 200], -1)\n    assert False, \"Expected ValueError\"\nexcept ValueError:\n    pass\n\n# discount: discount exceeding subtotal raises\ntry:\n    discount([100, 200], 301)\n    assert False, \"Expected ValueError\"\nexcept ValueError:\n    pass\n\n# discount: negative item price raises\ntry:\n    discount([-1, 200], 0)\n    assert False, \"Expected ValueError\"\nexcept ValueError:\n    pass\n"
+          "content": "from src.cart import subtotal, discount\n\nassert subtotal([100, 200]) == 300\n\n# discount: normal application\nassert discount(300, 50) == 250\n\n# discount: full discount floors at zero\nassert discount(300, 300) == 0\n\n# discount: over-discount floors at zero\nassert discount(300, 500) == 0\n\n# discount: zero price and zero discount\nassert discount(0, 0) == 0\n\n# discount: negative discount raises\ntry:\n    discount(100, -1)\n    raise AssertionError(\"expected ValueError for negative discount\")\nexcept ValueError:\n    pass\n\n# discount: negative price raises\ntry:\n    discount(-1, 10)\n    raise AssertionError(\"expected ValueError for negative price\")\nexcept ValueError:\n    pass\n"
         },
         {
           "path": "src/cart.py",
-          "content": "def subtotal(cents: list[int]) -> int:\n    \"\"\"Return the cart subtotal in cents.\"\"\"\n    return sum(cents) - 1\n\n\ndef discount(cents: list[int], discount_cents: int) -> int:\n    \"\"\"Return the cart total after applying a discount, in integer cents.\n\n    Bounds:\n        - Every item price in *cents* must be a non-negative integer.\n        - *discount_cents* must be a non-negative integer.\n        - *discount_cents* must not exceed the sum of item prices.\n\n    Raises:\n        ValueError: If any bound is violated.\n    \"\"\"\n    if any(c < 0 for c in cents):\n        raise ValueError(\"Item prices must be non-negative integers\")\n    if discount_cents < 0:\n        raise ValueError(\"Discount must be a non-negative integer\")\n    total = sum(cents)\n    if discount_cents > total:\n        raise ValueError(\"Discount cannot exceed the subtotal\")\n    return total - discount_cents\n"
+          "content": "def subtotal(cents: list[int]) -> int:\n    \"\"\"Return the cart subtotal in cents.\"\"\"\n    return sum(cents) - 1\n\n\ndef discount(price_cents: int, discount_cents: int) -> int:\n    \"\"\"Apply an integer-cents discount to a price, bounded at zero.\n\n    Raises ValueError if either argument is negative.\n    \"\"\"\n    if price_cents < 0:\n        raise ValueError(\"price_cents must be non-negative\")\n    if discount_cents < 0:\n        raise ValueError(\"discount_cents must be non-negative\")\n    return max(0, price_cents - discount_cents)\n"
         }
       ],
       "citations": [],
       "findingIds": [],
-      "summary": "Added a `discount` helper to `src/cart.py` that applies an integer-cents discount with explicit bounds (non-negative item prices, non-negative discount, discount ≤ subtotal) and raises `ValueError` on violation. Added corresponding tests in `checks/test_cart.py` covering normal, zero, full, and out-of-bounds cases. The existing `subtotal` API is unchanged."
+      "summary": "Added a `discount(price_cents, discount_cents)` helper to `src/cart.py` that applies an integer-cents discount bounded at zero and raises ValueError on negative inputs. Extended `checks/test_cart.py` with tests covering normal discount, full/over-discount flooring, zero edge case, and negative-argument rejection. The existing `subtotal` API is unchanged."
     }
   },
   "candidateError": null,
@@ -59,8 +59,8 @@
     "schemaVersion": 1,
     "caseId": "scaffold-cart-discount",
     "evaluatorId": "scaffold-cart-discount-evaluator",
-    "candidateSha256": "128122ef33ebdd480f740954aa9c053bdf223fca9aff931bab482d4d71d92852",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "67c985fa6a139f4eacec12c55d4c3cd70e64634b5bdab2051f1f68147d5231c1",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -102,14 +102,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "scaffold-cart-discount-evaluator",
-    "scenarioEvidenceSha256": "9f7ec2ff50fd860f1486652ab70dcbb3fc01b3d6e5ac7e35254d365a3cbe99cf",
+    "scenarioEvidenceSha256": "fcbbaaf56e25d9538b828233fce15e61ad0e9541f74e86a276ee227fa59c289e",
     "scenarioStatus": "failed",
     "usage": {
-      "inputTokens": 1045,
-      "outputTokens": 2416,
-      "estimatedCostUsd": 0.0027151545,
+      "inputTokens": 972,
+      "outputTokens": 2257,
+      "estimatedCostUsd": 0.0025331505,
       "actualBilledUsd": null,
-      "latencyMs": 110190
+      "latencyMs": 101687
     }
   }
 }

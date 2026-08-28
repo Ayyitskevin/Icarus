@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "baseline",
   "caseId": "security-path-traversal",
   "modelId": "code-fast",
-  "generatedAt": "2026-08-28T14:56:49.235Z",
+  "generatedAt": "2026-08-28T16:09:51.100Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,26 +19,50 @@
     "digestSha256": "3484ca5f48cedeed0f3cc0c87dd915c7543bde7ae4662fed8bcb31ec90e95ea6",
     "repositoryDigestSha256": "0091120cc1019d8c7e48935b1f0a41bf5925098210cdb4e7b3d2fd60af3c3849"
   },
-  "rawCandidate": "```json\n{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"src/files.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"src/files.py\"],\"findingIds\":[\"path-traversal\"],\"summary\":\"Path traversal in read_public (src/files.py). The user-controlled user_path is concatenated directly onto the public root via (root / user_path) with no resolve(), realpath normalization, or containment check, so an attacker can supply '../' sequences (e.g. '../../etc/passwd') to read arbitrary files outside the intended public root. Severity: High. Exploit condition: attacker controls user_path. The README documents the intended boundary ('serve files below one public root'), which this code fails to enforce.\"}}\n```",
-  "candidate": null,
-  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"src/files.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"src/files.py\"],\"findingIds\":[\"path-traversal\"],\"summary\":\"Path traversal: read_public joins the user-controlled user_path directly onto the intended public root with no containment check, so an attacker can supply '../' sequences (e.g. '../../etc/passwd') to escape the public root and read arbitrary files. The function never resolves or validates that the resulting path stays within root.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "src/files.py"
+    ],
+    "plan": {
+      "mutationTargets": [],
+      "requestedCheckIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": [
+        "src/files.py"
+      ],
+      "findingIds": [
+        "path-traversal"
+      ],
+      "summary": "Path traversal: read_public joins the user-controlled user_path directly onto the intended public root with no containment check, so an attacker can supply '../' sequences (e.g. '../../etc/passwd') to escape the public root and read arbitrary files. The function never resolves or validates that the resulting path stays within root."
+    }
+  },
+  "candidateError": null,
   "evaluatorEvidence": {
     "schemaVersion": 1,
     "caseId": "security-path-traversal",
     "evaluatorId": "security-path-traversal-evaluator",
-    "candidateSha256": "375e012d20c5d9257e6427a5cf14be17f2b6bff6399bbd2c5fef7ba7a0d4eac7",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "eedd3a0714282f562dd262b33eac9e243b8953087ca2d6deed5a9d8dd6de68fe",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
     "usageBasis": "provider_reported",
     "providerOutputComplete": true,
-    "firstPassPlanAccepted": false,
+    "firstPassPlanAccepted": true,
     "changedPaths": [],
-    "citations": [],
-    "findingIds": [],
+    "citations": [
+      "src/files.py"
+    ],
+    "findingIds": [
+      "path-traversal"
+    ],
     "checks": [],
-    "scenarioStatus": "failed",
+    "scenarioStatus": "passed",
     "sourceCheckoutUnchanged": true
   },
   "observation": {
@@ -60,19 +84,23 @@
         "sha256": "3eda58ebbbfae5a26e17236f93ac39972969c121baec2b2897f4703101062af2"
       }
     ],
-    "firstPassPlanAccepted": false,
+    "firstPassPlanAccepted": true,
     "changedPaths": [],
-    "citations": [],
-    "findingIds": [],
+    "citations": [
+      "src/files.py"
+    ],
+    "findingIds": [
+      "path-traversal"
+    ],
     "scenarioEvaluatorId": "security-path-traversal-evaluator",
-    "scenarioEvidenceSha256": "682d7590c4f2ad07697d6b190e43592d23879c7cec37cdae9d89abc3913386d1",
-    "scenarioStatus": "failed",
+    "scenarioEvidenceSha256": "5161572b4b105034969e6de86f2d0027bbd6ead5839fe6cdf1b0bb9eaed49045",
+    "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 805,
-      "outputTokens": 897,
-      "estimatedCostUsd": 0.001702,
+      "outputTokens": 578,
+      "estimatedCostUsd": 0.001383,
       "actualBilledUsd": null,
-      "latencyMs": 16450
+      "latencyMs": 10996
     }
   }
 }

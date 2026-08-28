@@ -156,8 +156,8 @@ function selectBoundModel(config, mode, benchmarkClass) {
   return policy.overrides[benchmarkClass] ?? policy.defaultModelId;
 }
 
-function providerOutcomeBound(record, profile, config) {
-  if (config.evidenceRecordRevision < 4) return true;
+export function isGate2ProviderOutcomeBound(record, profile, evidenceRecordRevision) {
+  if (evidenceRecordRevision < 4) return true;
   const evaluator = record.evaluatorEvidence;
   const usage = record.observation?.usage;
   if (
@@ -231,7 +231,7 @@ async function validateEvidenceSet(evidenceDirectory, loaded, profile, config) {
           instructionPolicyBound(record.evaluatorEvidence, config) &&
           routingPolicyBound(record.evaluatorEvidence, config) &&
           record.evaluatorEvidence.finishReason === record.finishReason &&
-          providerOutcomeBound(record, profile, config) &&
+          isGate2ProviderOutcomeBound(record, profile, config.evidenceRecordRevision) &&
           record.evaluatorEvidence.providerOutputComplete === providerOutputComplete &&
           record.evaluatorEvidence.scenarioStatus === record.observation.scenarioStatus &&
           (providerOutputComplete || record.observation.scenarioStatus === "failed") &&
@@ -281,6 +281,12 @@ export async function verifyGate2PublishedEvidence(
   return { destination, manifest, ...validated };
 }
 
+export async function verifyGate2PublishedEvidenceSet(repositoryRoot = root) {
+  const v1 = await verifyGate2PublishedEvidence(repositoryRoot, "v1");
+  const v2 = await verifyGate2PublishedEvidence(repositoryRoot, "v2");
+  return { v1, v2 };
+}
+
 async function publish() {
   assertCondition((await realpath(root)) === root, "repository root must be canonical");
   const config = LIVE_EVIDENCE_CONFIGS[DEFAULT_PROFILE_VERSION];
@@ -299,9 +305,9 @@ async function publish() {
     throw error;
   });
   if (existing !== null) {
-    const verified = await verifyGate2PublishedEvidence(root, DEFAULT_PROFILE_VERSION);
+    const verified = await verifyGate2PublishedEvidenceSet(root);
     process.stdout.write(
-      `${JSON.stringify({ status: "verified-existing", ...verified.manifest })}\n`,
+      `${JSON.stringify({ status: "verified-existing", ...verified.v2.manifest })}\n`,
     );
     return;
   }
@@ -325,7 +331,7 @@ async function publish() {
     path.join(destination, "artifact-manifest.json"),
     Buffer.from(`${JSON.stringify(artifactManifest, null, 2)}\n`),
   );
-  await verifyGate2PublishedEvidence(root, DEFAULT_PROFILE_VERSION);
+  await verifyGate2PublishedEvidenceSet(root);
   process.stdout.write(`${JSON.stringify({ status: "published", ...artifactManifest })}\n`);
 }
 

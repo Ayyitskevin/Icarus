@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "scaffold-parser-cli",
   "modelId": "code",
-  "generatedAt": "2026-08-28T14:39:01.600Z",
+  "generatedAt": "2026-08-28T16:56:52.807Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,15 +19,53 @@
     "digestSha256": "a18c53e8bb7c4e5a7c4964c72d7fecec3fd96880b88c6a26fdb17533dd764322",
     "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2"
   },
-  "rawCandidate": "",
-  "candidate": null,
-  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_parser.py\",\"checks/verify.py\",\"src/parser.py\"],\"plan\":{\"mutationTargets\":[\"checks/test_cli.py\",\"checks/verify.py\",\"src/cli.py\"],\"requestedCheckIds\":[\"parser-cli\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/cli.py\",\"content\":\"import sys\\nfrom src.parser import parse_enabled\\n\\n\\ndef main(argv=None):\\n    if argv is None:\\n        argv = sys.argv[1:]\\n\\n    if len(argv) != 1:\\n        print(\\\"usage: parser-cli <value>\\\", file=sys.stderr)\\n        return 2\\n\\n    value = argv[0]\\n    result = parse_enabled(value)\\n\\n    if result:\\n        print(\\\"true\\\")\\n        return 0\\n    else:\\n        print(\\\"false\\\")\\n        return 1\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    sys.exit(main())\\n\"},{\"path\":\"checks/test_cli.py\",\"content\":\"from src.cli import main\\n\\nassert main([\\\"true\\\"]) == 0\\nassert main([\\\"\\\"]) == 1\\nassert main([]) == 2\\nassert main([\\\"a\\\", \\\"b\\\"]) == 2\\n\"},{\"path\":\"checks/verify.py\",\"content\":\"import sys\\nfrom pathlib import Path\\n\\n# Make the repository root importable, then execute the fixture's own check so\\n# the evaluator exercises the declared false-value regression in containment.\\nsys.path.insert(0, str(Path.cwd()))\\nsource = Path(\\\"checks/test_parser.py\\\").read_text(encoding=\\\"utf-8\\\")\\nexec(compile(source, \\\"checks/test_parser.py\\\", \\\"exec\\\"))\\nsource = Path(\\\"checks/test_cli.py\\\").read_text(encoding=\\\"utf-8\\\")\\nexec(compile(source, \\\"checks/test_cli.py\\\", \\\"exec\\\"))\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a dependency-free CLI entry point (src/cli.py) that wraps parse_enabled with deterministic exit codes (0=true, 1=false, 2=usage error), a test file (checks/test_cli.py) verifying all exit-code paths, and updated checks/verify.py to execute the new CLI test alongside the existing parser test.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/test_parser.py",
+      "checks/verify.py",
+      "README.md",
+      "src/parser.py"
+    ],
+    "plan": {
+      "mutationTargets": [
+        "checks/test_cli.py",
+        "checks/verify.py",
+        "src/cli.py"
+      ],
+      "requestedCheckIds": [
+        "parser-cli"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "checks/test_cli.py",
+          "content": "from src.cli import main\n\nassert main([\"true\"]) == 0\nassert main([\"\"]) == 1\nassert main([]) == 2\nassert main([\"a\", \"b\"]) == 2\n"
+        },
+        {
+          "path": "checks/verify.py",
+          "content": "import sys\nfrom pathlib import Path\n\n# Make the repository root importable, then execute the fixture's own check so\n# the evaluator exercises the declared false-value regression in containment.\nsys.path.insert(0, str(Path.cwd()))\nsource = Path(\"checks/test_parser.py\").read_text(encoding=\"utf-8\")\nexec(compile(source, \"checks/test_parser.py\", \"exec\"))\nsource = Path(\"checks/test_cli.py\").read_text(encoding=\"utf-8\")\nexec(compile(source, \"checks/test_cli.py\", \"exec\"))\n"
+        },
+        {
+          "path": "src/cli.py",
+          "content": "import sys\nfrom src.parser import parse_enabled\n\n\ndef main(argv=None):\n    if argv is None:\n        argv = sys.argv[1:]\n\n    if len(argv) != 1:\n        print(\"usage: parser-cli <value>\", file=sys.stderr)\n        return 2\n\n    value = argv[0]\n    result = parse_enabled(value)\n\n    if result:\n        print(\"true\")\n        return 0\n    else:\n        print(\"false\")\n        return 1\n\n\nif __name__ == \"__main__\":\n    sys.exit(main())\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Added a dependency-free CLI entry point (src/cli.py) that wraps parse_enabled with deterministic exit codes (0=true, 1=false, 2=usage error), a test file (checks/test_cli.py) verifying all exit-code paths, and updated checks/verify.py to execute the new CLI test alongside the existing parser test."
+    }
+  },
+  "candidateError": null,
   "evaluatorEvidence": {
     "schemaVersion": 1,
     "caseId": "scaffold-parser-cli",
     "evaluatorId": "scaffold-parser-cli-evaluator",
-    "candidateSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "candidateSha256": "b533b427508758117c6b1db274c9b3757127ccec636d82d8464f63f7b7fe34b0",
+    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -69,14 +107,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "scaffold-parser-cli-evaluator",
-    "scenarioEvidenceSha256": "4faf635a86329c7cbbb2218a44991d061b4fc5c1ad09ac6e44d9952bcfa9767f",
+    "scenarioEvidenceSha256": "7341472d3aacfe76a4c539c32b4021150c3cd5f98651d97920e214fd26acf3a9",
     "scenarioStatus": "failed",
     "usage": {
-      "inputTokens": 1004,
-      "outputTokens": 4550,
-      "estimatedCostUsd": 0.004357113,
+      "inputTokens": 931,
+      "outputTokens": 4667,
+      "estimatedCostUsd": 0.004391631,
       "actualBilledUsd": null,
-      "latencyMs": 178771
+      "latencyMs": 217972
     }
   }
 }
