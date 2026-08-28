@@ -5,7 +5,7 @@ export const GATE2_LIVE_ROUTING_POLICY = Object.freeze({
   baseline: Object.freeze({ defaultModelId: "code-fast", overrides: Object.freeze({}) }),
   routed: Object.freeze({
     defaultModelId: "code",
-    overrides: Object.freeze({ security_review: "code-fast" }),
+    overrides: Object.freeze({}),
   }),
 });
 

@@ -1,0 +1,35 @@
+{
+  "profileId": "gate2-local-vulcan-target-discovery-r7-20260828",
+  "profileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "baselineModelId": "code-fast",
+  "models": [
+    {
+      "modelId": "code",
+      "provider": "vulcan-local-ollama",
+      "adapterVersion": "vulcan-chat-completions-v1",
+      "modelVersion": "qwen3.8-27.3b-q4km-22130167c4c2",
+      "inputUsdPerMillion": 0.7845,
+      "outputUsdPerMillion": 0.7845
+    },
+    {
+      "modelId": "code-fast",
+      "provider": "vulcan-local-ollama",
+      "adapterVersion": "vulcan-chat-completions-v1",
+      "modelVersion": "ornith-1.5-35.5b-q4km-9f3b89b25219",
+      "inputUsdPerMillion": 1,
+      "outputUsdPerMillion": 1
+    }
+  ],
+  "pricing": {
+    "capturedAt": "2026-08-28",
+    "currency": "USD",
+    "sourceLabel": "local-artifact-size-proxy-v1",
+    "estimatedOnly": true
+  },
+  "budgets": {
+    "maxRuntimeSeconds": 300,
+    "maxInputTokens": 50000,
+    "maxOutputTokens": 8192,
+    "maxEstimatedCostUsd": 1
+  }
+}

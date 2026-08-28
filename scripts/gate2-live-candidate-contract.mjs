@@ -1,15 +1,14 @@
 import { parseStrictGate2Json } from "./gate2-benchmark-contract.mjs";
 
 const ROOT_KEYS = Object.freeze(["schemaVersion", "selectedContextPaths", "plan", "answer"]);
-const PLAN_KEYS = Object.freeze(["summary", "steps", "risks", "targets", "checkIds"]);
+const PLAN_KEYS = Object.freeze(["mutationTargets", "requestedCheckIds"]);
 const ANSWER_KEYS = Object.freeze(["kind", "files", "citations", "findingIds", "summary"]);
 const FILE_KEYS = Object.freeze(["path", "content"]);
 const MAX_CONTEXT_PATHS = 8;
 const MAX_FILES = 8;
-const MAX_STEPS = 12;
 const MAX_TEXT_BYTES = 32 * 1024;
 
-export const GATE2_LIVE_CANDIDATE_CONTRACT_REVISION = 3;
+export const GATE2_LIVE_CANDIDATE_CONTRACT_REVISION = 5;
 
 export const GATE2_LIVE_CANDIDATE_SCHEMA = Object.freeze({
   type: "object",
@@ -29,16 +28,13 @@ export const GATE2_LIVE_CANDIDATE_SCHEMA = Object.freeze({
       additionalProperties: false,
       required: PLAN_KEYS,
       properties: {
-        summary: { type: "string" },
-        steps: { type: "array", minItems: 1, maxItems: MAX_STEPS, items: { type: "string" } },
-        risks: { type: "array", maxItems: MAX_STEPS, items: { type: "string" } },
-        targets: {
+        mutationTargets: {
           type: "array",
           maxItems: MAX_FILES,
           uniqueItems: true,
           items: { type: "string" },
         },
-        checkIds: {
+        requestedCheckIds: {
           type: "array",
           maxItems: MAX_FILES,
           uniqueItems: true,
@@ -138,13 +134,6 @@ function sortedUniqueArray(value, label, maximum, decoder, minimum = 0) {
   return sorted;
 }
 
-function boundedTextArray(value, label, maximum, minimum = 0) {
-  if (!Array.isArray(value) || value.length < minimum || value.length > maximum) {
-    fail(`${label} must contain ${minimum}..${maximum} entries`);
-  }
-  return value.map((entry, index) => boundedText(entry, `${label}[${index}]`));
-}
-
 function exactArray(actual, expected, label) {
   return JSON.stringify(actual) === JSON.stringify(expected) || fail(`${label} does not match`);
 }
@@ -174,14 +163,23 @@ export function validateGate2LiveCandidate(value, authority) {
 
   const planValue = plainRecord(root.plan, "plan", PLAN_KEYS);
   const plan = {
-    summary: boundedText(planValue.summary, "plan.summary"),
-    steps: boundedTextArray(planValue.steps, "plan.steps", MAX_STEPS, 1),
-    risks: boundedTextArray(planValue.risks, "plan.risks", MAX_STEPS),
-    targets: sortedUniqueArray(planValue.targets, "plan.targets", MAX_FILES, safePath),
-    checkIds: sortedUniqueArray(planValue.checkIds, "plan.checkIds", MAX_FILES, safeToken),
+    mutationTargets: sortedUniqueArray(
+      planValue.mutationTargets,
+      "plan.mutationTargets",
+      MAX_FILES,
+      safePath,
+    ),
+    requestedCheckIds: sortedUniqueArray(
+      planValue.requestedCheckIds,
+      "plan.requestedCheckIds",
+      MAX_FILES,
+      safeToken,
+    ),
   };
-  for (const checkId of plan.checkIds) {
-    if (!authority.checkIds.includes(checkId)) fail("plan.checkIds exceeds registered checks");
+  for (const checkId of plan.requestedCheckIds) {
+    if (!authority.checkIds.includes(checkId)) {
+      fail("plan.requestedCheckIds exceeds registered checks");
+    }
   }
 
   const answerValue = plainRecord(root.answer, "answer", ANSWER_KEYS);
@@ -222,8 +220,12 @@ export function validateGate2LiveCandidate(value, authority) {
   if (answer.kind !== authority.expectedKind) fail("answer.kind does not match the benchmark case");
   if (answer.kind === "mutation") {
     if (files.length < 1) fail("mutation answer must propose at least one file");
-    exactArray(filePaths, plan.targets, "mutation file paths and plan targets");
-  } else if (files.length !== 0 || plan.targets.length !== 0 || plan.checkIds.length !== 0) {
+    exactArray(filePaths, plan.mutationTargets, "mutation file paths and plan mutationTargets");
+  } else if (
+    files.length !== 0 ||
+    plan.mutationTargets.length !== 0 ||
+    plan.requestedCheckIds.length !== 0
+  ) {
     fail("read-only answer must not request mutation or check authority");
   }
   for (const citation of answer.citations) {
@@ -248,9 +250,11 @@ export function assessGate2FirstPassPlan(candidate, benchmarkCase, registeredChe
   const expectedTargets = benchmarkCase.expectedOutcome.expectedChangedPaths;
   if (benchmarkCase.expectedOutcome.kind === "mutation") {
     return (
-      JSON.stringify(candidate.plan.targets) === JSON.stringify(expectedTargets) &&
-      JSON.stringify(candidate.plan.checkIds) === JSON.stringify(registeredCheckIds)
+      JSON.stringify(candidate.plan.mutationTargets) === JSON.stringify(expectedTargets) &&
+      JSON.stringify(candidate.plan.requestedCheckIds) === JSON.stringify(registeredCheckIds)
     );
   }
-  return candidate.plan.targets.length === 0 && candidate.plan.checkIds.length === 0;
+  return (
+    candidate.plan.mutationTargets.length === 0 && candidate.plan.requestedCheckIds.length === 0
+  );
 }

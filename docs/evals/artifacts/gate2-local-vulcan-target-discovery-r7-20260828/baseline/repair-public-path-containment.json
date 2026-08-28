@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 4,
+  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "repair-public-path-containment",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T14:43:37.914Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "retrieval": {
+    "baseCommit": "7485f907c0d8627bd67b050b1da5050d5999dcdf",
+    "digestSha256": "44a05e53bc87b1adb802836a6e44e257035b980b2d6684d51bcfdf0041ec75b2",
+    "repositoryDigestSha256": "0091120cc1019d8c7e48935b1f0a41bf5925098210cdb4e7b3d2fd60af3c3849"
+  },
+  "rawCandidate": "```json\n{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/expected_finding.md\",\"src/files.py\"],\"plan\":{\"mutationTargets\":[\"src/files.py\"],\"requestedCheckIds\":[\"public-path-containment\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/files.py\",\"content\":\"from pathlib import Path\\n\\n\\ndef read_public(root: Path, user_path: str) -> str:\\n    resolved = (root / user_path).resolve()\\n    root_resolved = root.resolve()\\n    if root_resolved != resolved and root_resolved not in resolved.parents:\\n        raise ValueError(\\\"path escapes the public root\\\")\\n    return resolved.read_text(encoding=\\\"utf8\\\")\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Resolve the user-controlled path against the public root and reject it if it escapes the root before reading, preserving the original function signature.\"}}",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-public-path-containment",
+    "evaluatorId": "repair-public-path-containment-evaluator",
+    "candidateSha256": "f10b6f40148e13bbcdd685f1cabf6437735f81015a74bb34a8dd95f41019f76a",
+    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-public-path-containment",
+    "repositoryRevisionSha256": "131ff18d492a97bbab9a590d5a0a9ef9e21fd25baadf648bab4bbbd5b200e132",
+    "taskSha256": "4f011f95d5801dcc105f431785f874161f565404173cfd94e6ec8f34821eb0e4",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/expected_finding.md",
+        "sha256": "2fdc9c401165ab469355887fe2b44069a6e7d231d2c4406e516c72fd872dbbd1"
+      },
+      {
+        "path": "README.md",
+        "sha256": "078e8880de0bfd549d6dcd9e16967d35693988c38343c5b6ad6f231f2aac426f"
+      },
+      {
+        "path": "src/files.py",
+        "sha256": "3eda58ebbbfae5a26e17236f93ac39972969c121baec2b2897f4703101062af2"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-public-path-containment-evaluator",
+    "scenarioEvidenceSha256": "0ea7258a250ba39f3b545e9fad7c02bca085a77a2f09362c55750adc123ff775",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 623,
+      "outputTokens": 976,
+      "estimatedCostUsd": 0.001599,
+      "actualBilledUsd": null,
+      "latencyMs": 17254
+    }
+  }
+}

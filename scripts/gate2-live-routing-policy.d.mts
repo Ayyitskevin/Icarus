@@ -3,7 +3,7 @@ export const GATE2_LIVE_ROUTING_POLICY: Readonly<{
   baseline: Readonly<{ defaultModelId: "code-fast"; overrides: Readonly<Record<string, never>> }>;
   routed: Readonly<{
     defaultModelId: "code";
-    overrides: Readonly<{ security_review: "code-fast" }>;
+    overrides: Readonly<Record<string, never>>;
   }>;
 }>;
 export const GATE2_LIVE_ROUTING_POLICY_SHA256: string;

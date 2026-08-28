@@ -6,7 +6,8 @@
       "!**/dist",
       "!**/node_modules",
       "!**/.local",
-      "!docs/evals/artifacts/gate2-local-vulcan-code-routing-20260828"
+      "!docs/evals/artifacts/gate2-local-vulcan-code-routing-20260828",
+      "!docs/evals/artifacts/gate2-local-vulcan-target-discovery-r7-20260828"
     ]
   },
   "formatter": {

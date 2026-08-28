@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 4,
+  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "repair-cart-empty-list",
+  "modelId": "code",
+  "generatedAt": "2026-08-28T15:22:19.796Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "edecf75809e61138f698481771412c57c23154afc41bb288ae1dbb82095d1473",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_cart.py\",\"src/cart.py\"],\"plan\":{\"mutationTargets\":[\"src/cart.py\"],\"requestedCheckIds\":[\"cart-empty-list\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/cart.py\",\"content\":\"def subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the cart subtotal in cents.\\\"\\\"\\\"\\n    return sum(cents)\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Removed the erroneous '- 1' from the subtotal function so an empty cart returns 0 and populated carts return the correct sum of item prices in integer cents.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/test_cart.py",
+      "README.md",
+      "src/cart.py"
+    ],
+    "plan": {
+      "mutationTargets": [
+        "src/cart.py"
+      ],
+      "requestedCheckIds": [
+        "cart-empty-list"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/cart.py",
+          "content": "def subtotal(cents: list[int]) -> int:\n    \"\"\"Return the cart subtotal in cents.\"\"\"\n    return sum(cents)\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Removed the erroneous '- 1' from the subtotal function so an empty cart returns 0 and populated carts return the correct sum of item prices in integer cents."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-cart-empty-list",
+    "evaluatorId": "repair-cart-empty-list-evaluator",
+    "candidateSha256": "db65ac53337770ad89a9092763ea1e9a7aa6a20dbd44662b96f7d377ab543e23",
+    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-cart-empty-list",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "b663cdf70ad8934e8068f3c1619324945802e6f3b13ec5c74a754cc8dd9d2f61",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-cart-empty-list-evaluator",
+    "scenarioEvidenceSha256": "983b35492e6884b8418209b1054b0408e60d1cd46939e2dfe88d5c32f978e572",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 799,
+      "outputTokens": 438,
+      "estimatedCostUsd": 0.0009704265,
+      "actualBilledUsd": null,
+      "latencyMs": 21480
+    }
+  }
+}

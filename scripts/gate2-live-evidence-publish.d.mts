@@ -1,4 +1,7 @@
-export function verifyGate2PublishedEvidence(repositoryRoot?: string): Promise<{
+export function verifyGate2PublishedEvidence(
+  repositoryRoot?: string,
+  profileVersion?: "v1" | "v2",
+): Promise<{
   destination: string;
   manifest: Record<string, unknown>;
   files: Array<{ path: string; bytes: number; sha256: string }>;

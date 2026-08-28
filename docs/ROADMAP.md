@@ -17,7 +17,7 @@ The current sequence is:
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
 | 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
-| 2 | Context and agent quality — **live 30-case comparison measured; quality gate open** | deterministic v2 adoption remains 30/30 replay-valid; ADR 0066's local live comparison measured fixed `code-fast` at 5/30 and the digest-bound routed policy at 9/30, with unchanged retrieval/provenance, zero incorrect edits, and 36.996% lower estimated proxy cost per success; the routed run missed the predeclared 24/30 success and 0.80 first-plan thresholds, so Gate 2 remains open |
+| 2 | Context and agent quality — **target discovery improved; quality gate open** | deterministic v2 adoption remains 30/30 replay-valid; ADR 0067's versioned target-discovery profile measured fixed `code-fast` at 2/30 and routed `code` at 17/30, including security review 3/5 and scaffold 2/5, with unchanged retrieval/provenance and zero incorrect edits; the routed run still missed the predeclared 24/30 success and 0.80 first-plan thresholds, so Gate 2 remains open |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
 | C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
@@ -74,17 +74,20 @@ and binds those observations plus the two direct successors into one v2-ordered
 `1.0`, and incorrect edits are zero. This is deterministic
 contract-integration evidence, not live-model semantic/security judgment,
 whole-codebase coverage, autonomous planning quality, or general mutation
-quality. The first live-model run now covers all 30 v2 cases with autonomous
-selected context, targets, plans, and answers. Its fixed `code-fast` baseline
-passed 5/30; the route using `code` except `code-fast` for security review passed
-9/30, retained recall `0.9917`, precision `0.8083`, provenance `1.0`, and zero
-incorrect edits, and reduced median estimated local-compute proxy cost per
-success by 36.996%. Both results failed the absolute quality thresholds, with
-the routed plan-acceptance rate at `0.6667`; security review and scaffold each
-passed 0/5. ADR 0066 therefore records a failed comparison and leaves Gate 2
-open for target-discovery and exact-citation improvement. The separate
-Gate 2 contract now pins seven fixture repositories, 30 task documents and
-scenario evaluators, an admitted model pool with per-model estimated rates, and
+quality. The first live-model run covered all 30 v2 cases with autonomous
+selected context, targets, plans, and answers. ADR 0066 recorded fixed
+`code-fast` at 5/30 and its routed policy at 9/30. ADR 0067 then versioned a
+simpler first-plan contract, digest-bound class guidance, deterministic
+generation, and an all-`code` routed lane without supplying expected answers or
+widening authority. Its paired run measured fixed `code-fast` at 2/30 and routed
+`code` at 17/30, with recall `0.9917`, precision `0.8083`, provenance `1.0`,
+zero incorrect edits, plan acceptance `0.70`, security review 3/5, and scaffold
+2/5. One routed timeout remains a conservatively accounted failed case. Both
+absolute quality thresholds still fail, and the baseline regression is a model-
+stability limitation rather than evidence to hide. Gate 2 remains open for
+stable success of at least 24/30 and plan acceptance of at least 0.80. The
+separate Gate 2 contract now pins seven fixture repositories, 30 task documents
+and scenario evaluators, an admitted model pool with per-model estimated rates, and
 the exit thresholds. Its contract-only validator still reports 30 contract-valid
 cases and 0 executed cases by design. The adoption receipt proves explicit
 cross-revision replay, not runner authenticity, fresh execution, broad model

@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 4,
+  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "repair-cart-off-by-one",
+  "modelId": "code",
+  "generatedAt": "2026-08-28T15:11:56.116Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "0b23596084b9b87066c2bc4fea81d9ea1770749d5f728fef8943c83d3eab8dee",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d"
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"README.md\",\n    \"checks/test_cart.py\",\n    \"src/cart.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/cart.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"cart-subtotal\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/cart.py\",\n        \"content\": \"def subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the cart subtotal in cents.\\\"\\\"\\\"\\n    return sum(cents)\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Removed the deliberate one-cent subtraction so subtotal returns the exact sum of item prices.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/test_cart.py",
+      "README.md",
+      "src/cart.py"
+    ],
+    "plan": {
+      "mutationTargets": [
+        "src/cart.py"
+      ],
+      "requestedCheckIds": [
+        "cart-subtotal"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/cart.py",
+          "content": "def subtotal(cents: list[int]) -> int:\n    \"\"\"Return the cart subtotal in cents.\"\"\"\n    return sum(cents)\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Removed the deliberate one-cent subtraction so subtotal returns the exact sum of item prices."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-cart-off-by-one",
+    "evaluatorId": "repair-cart-off-by-one-evaluator",
+    "candidateSha256": "5af52fd701f8a87791b149fdade6ea7a8cf37446f5a884f1c6078fbd64ccbd15",
+    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "src/cart.py"
+    ],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "cart-subtotal",
+        "argv": [
+          "python",
+          "checks/verify.py"
+        ],
+        "exitCode": 0,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-cart-off-by-one",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "6b9ae490cf9226617faaa3bcf69b26cbf11e3fea28382531ddeb123e3ab51e7d",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "src/cart.py"
+    ],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-cart-off-by-one-evaluator",
+    "scenarioEvidenceSha256": "c5513eb9e698ac933664d28975440c1cfe9b617cc4a600bebee278a4b0e380cf",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 792,
+      "outputTokens": 565,
+      "estimatedCostUsd": 0.0010645665,
+      "actualBilledUsd": null,
+      "latencyMs": 30748
+    }
+  }
+}

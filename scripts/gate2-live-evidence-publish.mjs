@@ -14,23 +14,50 @@ import {
   GATE2_LIVE_CANDIDATE_CONTRACT_REVISION,
   isGate2ProviderOutputComplete,
 } from "./gate2-live-candidate-contract.mjs";
+import { GATE2_LIVE_INSTRUCTION_POLICY_SHA256 } from "./gate2-live-instruction-policy.mjs";
 import {
+  GATE2_LIVE_ROUTING_POLICY,
   GATE2_LIVE_ROUTING_POLICY_SHA256,
-  selectGate2LiveModel,
 } from "./gate2-live-routing-policy.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(scriptPath), "..");
 const manifestPath = path.join(root, "fixtures/evals/gate2/manifest.v2.json");
-const profilePath = path.join(root, "fixtures/evals/gate2/live-profile.v1.json");
-const localRoot = path.join(root, ".local/gate2-live-v1");
 const publishedRoot = path.join(root, "docs/evals/artifacts");
 const ALLOWED_FALSE_POSITIVE_SECRET_TOKENS = new Set([
   "sk-priority-contract",
   "sk-priority-contract-evaluator",
   "sk-v2-host-policy-compatible",
 ]);
-const LIVE_EVIDENCE_RECORD_REVISION = 2;
+const LEGACY_V1_ROUTING_POLICY = Object.freeze({
+  schemaVersion: 1,
+  baseline: Object.freeze({ defaultModelId: "code-fast", overrides: Object.freeze({}) }),
+  routed: Object.freeze({
+    defaultModelId: "code",
+    overrides: Object.freeze({ security_review: "code-fast" }),
+  }),
+});
+const LIVE_EVIDENCE_CONFIGS = Object.freeze({
+  v1: Object.freeze({
+    profileFile: "live-profile.v1.json",
+    localDirectory: ".local/gate2-live-v1",
+    candidateContractRevision: 3,
+    evidenceRecordRevision: 2,
+    instructionPolicySha256: null,
+    routingPolicy: LEGACY_V1_ROUTING_POLICY,
+    routingPolicySha256: sha256(stableJson(LEGACY_V1_ROUTING_POLICY)),
+  }),
+  v2: Object.freeze({
+    profileFile: "live-profile.v2.json",
+    localDirectory: ".local/gate2-live-v2",
+    candidateContractRevision: GATE2_LIVE_CANDIDATE_CONTRACT_REVISION,
+    evidenceRecordRevision: 4,
+    instructionPolicySha256: GATE2_LIVE_INSTRUCTION_POLICY_SHA256,
+    routingPolicy: GATE2_LIVE_ROUTING_POLICY,
+    routingPolicySha256: GATE2_LIVE_ROUTING_POLICY_SHA256,
+  }),
+});
+const DEFAULT_PROFILE_VERSION = "v2";
 const EXPECTED_LOCAL_PROVIDER = Object.freeze({
   id: "local-ollama",
   type: "ollama",
@@ -107,7 +134,53 @@ function sourceRelativePaths(manifest) {
   ];
 }
 
-async function validateEvidenceSet(evidenceDirectory, loaded, profile) {
+function instructionPolicyBound(record, config) {
+  if (record === null || typeof record !== "object" || Array.isArray(record)) return false;
+  return config.instructionPolicySha256 === null
+    ? !("instructionPolicySha256" in record)
+    : record.instructionPolicySha256 === config.instructionPolicySha256;
+}
+
+function routingPolicyBound(record, config) {
+  return (
+    record !== null &&
+    typeof record === "object" &&
+    !Array.isArray(record) &&
+    record.routingPolicySha256 === config.routingPolicySha256
+  );
+}
+
+function selectBoundModel(config, mode, benchmarkClass) {
+  const policy = config.routingPolicy[mode];
+  assertCondition(policy !== undefined, "published evidence mode is invalid");
+  return policy.overrides[benchmarkClass] ?? policy.defaultModelId;
+}
+
+function providerOutcomeBound(record, profile, config) {
+  if (config.evidenceRecordRevision < 4) return true;
+  const evaluator = record.evaluatorEvidence;
+  const usage = record.observation?.usage;
+  if (
+    evaluator?.providerFailure !== record.providerFailure ||
+    evaluator?.usageBasis !== record.usageBasis
+  ) {
+    return false;
+  }
+  if (record.finishReason === "timeout") {
+    return (
+      record.providerFailure === "request_timeout" &&
+      record.usageBasis === "declared_budget_upper_bound" &&
+      record.rawCandidate === "" &&
+      record.candidate === null &&
+      usage?.inputTokens === profile.budgets.maxInputTokens &&
+      usage?.outputTokens === profile.budgets.maxOutputTokens &&
+      usage?.latencyMs === profile.budgets.maxRuntimeSeconds * 1_000
+    );
+  }
+  return record.providerFailure === null && record.usageBasis === "provider_reported";
+}
+
+async function validateEvidenceSet(evidenceDirectory, loaded, profile, config) {
   const relativePaths = sourceRelativePaths(loaded.manifest);
   const files = [];
   const bytesByPath = new Map();
@@ -124,7 +197,8 @@ async function validateEvidenceSet(evidenceDirectory, loaded, profile) {
   assertCondition(
     preflight.manifestSha256 === loaded.manifestSha256 &&
       preflight.executionProfileDigestSha256 === profile.profileDigestSha256 &&
-      preflight.routingPolicySha256 === GATE2_LIVE_ROUTING_POLICY_SHA256 &&
+      routingPolicyBound(preflight, config) &&
+      instructionPolicyBound(preflight, config) &&
       stableJson(preflight.provider) === stableJson(EXPECTED_LOCAL_PROVIDER),
     "published preflight is not bound",
   );
@@ -145,16 +219,19 @@ async function validateEvidenceSet(evidenceDirectory, loaded, profile) {
       const record = parseStrictGate2Json(bytesByPath.get(relative).toString("utf8"));
       const providerOutputComplete = isGate2ProviderOutputComplete(record.finishReason);
       assertCondition(
-        record.candidateContractRevision === GATE2_LIVE_CANDIDATE_CONTRACT_REVISION &&
-          record.evidenceRecordRevision === LIVE_EVIDENCE_RECORD_REVISION &&
-          record.routingPolicySha256 === GATE2_LIVE_ROUTING_POLICY_SHA256 &&
+        record.candidateContractRevision === config.candidateContractRevision &&
+          record.evidenceRecordRevision === config.evidenceRecordRevision &&
+          instructionPolicyBound(record, config) &&
+          routingPolicyBound(record, config) &&
           record.manifestSha256 === loaded.manifestSha256 &&
           record.executionProfileDigestSha256 === profile.profileDigestSha256 &&
           record.mode === mode &&
           record.caseId === benchmarkCase.id &&
-          record.modelId === selectGate2LiveModel(mode, benchmarkCase.class) &&
-          record.evaluatorEvidence.routingPolicySha256 === GATE2_LIVE_ROUTING_POLICY_SHA256 &&
+          record.modelId === selectBoundModel(config, mode, benchmarkCase.class) &&
+          instructionPolicyBound(record.evaluatorEvidence, config) &&
+          routingPolicyBound(record.evaluatorEvidence, config) &&
           record.evaluatorEvidence.finishReason === record.finishReason &&
+          providerOutcomeBound(record, profile, config) &&
           record.evaluatorEvidence.providerOutputComplete === providerOutputComplete &&
           record.evaluatorEvidence.scenarioStatus === record.observation.scenarioStatus &&
           (providerOutputComplete || record.observation.scenarioStatus === "failed") &&
@@ -169,20 +246,25 @@ async function validateEvidenceSet(evidenceDirectory, loaded, profile) {
   return { relativePaths, files, bytesByPath, baseline, routed, comparison };
 }
 
-export async function verifyGate2PublishedEvidence(repositoryRoot = root) {
+export async function verifyGate2PublishedEvidence(
+  repositoryRoot = root,
+  profileVersion = DEFAULT_PROFILE_VERSION,
+) {
+  const config = LIVE_EVIDENCE_CONFIGS[profileVersion];
+  assertCondition(config !== undefined, "published profile version is invalid");
   const loaded = await loadGate2BenchmarkContract(
     path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v2.json"),
     repositoryRoot,
   );
   const profile = parseStrictGate2Json(
-    await readFile(path.join(repositoryRoot, "fixtures/evals/gate2/live-profile.v1.json"), "utf8"),
+    await readFile(path.join(repositoryRoot, "fixtures/evals/gate2", config.profileFile), "utf8"),
   );
   assertCondition(
     computeGate2ExecutionProfileDigest(profile) === profile.profileDigestSha256,
     "published profile digest is invalid",
   );
   const destination = path.join(repositoryRoot, "docs/evals/artifacts", profile.profileId);
-  const validated = await validateEvidenceSet(destination, loaded, profile);
+  const validated = await validateEvidenceSet(destination, loaded, profile, config);
   const manifest = parseStrictGate2Json(
     await readFile(path.join(destination, "artifact-manifest.json"), "utf8"),
   );
@@ -190,7 +272,8 @@ export async function verifyGate2PublishedEvidence(repositoryRoot = root) {
     manifest.schemaVersion === 1 &&
       manifest.benchmarkManifestSha256 === loaded.manifestSha256 &&
       manifest.executionProfileDigestSha256 === profile.profileDigestSha256 &&
-      manifest.routingPolicySha256 === GATE2_LIVE_ROUTING_POLICY_SHA256 &&
+      routingPolicyBound(manifest, config) &&
+      instructionPolicyBound(manifest, config) &&
       stableJson(manifest.files) === stableJson(validated.files) &&
       manifest.filesDigestSha256 === sha256(stableJson(validated.files)),
     "published artifact manifest is invalid",
@@ -200,26 +283,29 @@ export async function verifyGate2PublishedEvidence(repositoryRoot = root) {
 
 async function publish() {
   assertCondition((await realpath(root)) === root, "repository root must be canonical");
+  const config = LIVE_EVIDENCE_CONFIGS[DEFAULT_PROFILE_VERSION];
   const loaded = await loadGate2BenchmarkContract(manifestPath, root);
-  const profile = parseStrictGate2Json(await readFile(profilePath, "utf8"));
+  const profile = parseStrictGate2Json(
+    await readFile(path.join(root, "fixtures/evals/gate2", config.profileFile), "utf8"),
+  );
   assertCondition(
     computeGate2ExecutionProfileDigest(profile) === profile.profileDigestSha256,
     "live profile digest is invalid",
   );
-  const source = path.join(localRoot, profile.profileDigestSha256);
+  const source = path.join(root, config.localDirectory, profile.profileDigestSha256);
   const destination = path.join(publishedRoot, profile.profileId);
   const existing = await lstat(destination).catch((error) => {
     if (error?.code === "ENOENT") return null;
     throw error;
   });
   if (existing !== null) {
-    const verified = await verifyGate2PublishedEvidence(root);
+    const verified = await verifyGate2PublishedEvidence(root, DEFAULT_PROFILE_VERSION);
     process.stdout.write(
       `${JSON.stringify({ status: "verified-existing", ...verified.manifest })}\n`,
     );
     return;
   }
-  const validated = await validateEvidenceSet(source, loaded, profile);
+  const validated = await validateEvidenceSet(source, loaded, profile, config);
   await mkdir(publishedRoot, { recursive: true, mode: 0o755 });
   await mkdir(destination, { recursive: false, mode: 0o755 });
   for (const relative of validated.relativePaths) {
@@ -229,7 +315,8 @@ async function publish() {
     schemaVersion: 1,
     benchmarkManifestSha256: loaded.manifestSha256,
     executionProfileDigestSha256: profile.profileDigestSha256,
-    routingPolicySha256: GATE2_LIVE_ROUTING_POLICY_SHA256,
+    instructionPolicySha256: config.instructionPolicySha256,
+    routingPolicySha256: config.routingPolicySha256,
     generatedAt: new Date().toISOString(),
     files: validated.files,
     filesDigestSha256: sha256(stableJson(validated.files)),
@@ -238,7 +325,7 @@ async function publish() {
     path.join(destination, "artifact-manifest.json"),
     Buffer.from(`${JSON.stringify(artifactManifest, null, 2)}\n`),
   );
-  await verifyGate2PublishedEvidence(root);
+  await verifyGate2PublishedEvidence(root, DEFAULT_PROFILE_VERSION);
   process.stdout.write(`${JSON.stringify({ status: "published", ...artifactManifest })}\n`);
 }
 

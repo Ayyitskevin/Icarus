@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 4,
+  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "scaffold-parser-cli",
+  "modelId": "code",
+  "generatedAt": "2026-08-28T14:39:01.600Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "retrieval": {
+    "baseCommit": "6980aad15d1a2fd1aa0669ee11249aa4e0150a19",
+    "digestSha256": "a18c53e8bb7c4e5a7c4964c72d7fecec3fd96880b88c6a26fdb17533dd764322",
+    "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2"
+  },
+  "rawCandidate": "",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-parser-cli",
+    "evaluatorId": "scaffold-parser-cli-evaluator",
+    "candidateSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-parser-cli",
+    "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+    "taskSha256": "5e072062df28e307690786452e53acec3d94b0266c19dcc11a6a7b15f3804d5a",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_parser.py",
+        "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+      },
+      {
+        "path": "README.md",
+        "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+      },
+      {
+        "path": "src/parser.py",
+        "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-parser-cli-evaluator",
+    "scenarioEvidenceSha256": "4faf635a86329c7cbbb2218a44991d061b4fc5c1ad09ac6e44d9952bcfa9767f",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1004,
+      "outputTokens": 4550,
+      "estimatedCostUsd": 0.004357113,
+      "actualBilledUsd": null,
+      "latencyMs": 178771
+    }
+  }
+}

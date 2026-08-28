@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 4,
+  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "repair-schema-status-snapshot",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T14:44:21.491Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "retrieval": {
+    "baseCommit": "ef0d0ebbc5b42e5bb30129357f84a3b4bd7ea961",
+    "digestSha256": "6ca18145f0c3adc98525776c0bf2a232bb6e9b9b47eb309f5321f16a3587af15",
+    "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[\"checks/schema_contract.sql\",\"schema/current.sql\"],\"requestedCheckIds\":[\"schema-status-snapshot\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"schema/current.sql\",\"content\":\"CREATE TABLE tasks (\\n  id INTEGER PRIMARY KEY,\\n  title TEXT NOT NULL,\\n  status TEXT NOT NULL DEFAULT 'pending'\\n);\\n\"},{\"path\":\"checks/schema_contract.sql\",\"content\":\"-- A future evaluator should assert the tasks table remains readable.\\nSELECT id, title, status FROM tasks LIMIT 0;\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a non-null `status` column with a safe default of 'pending' to the offline schema snapshot in schema/current.sql, and updated the contract query in checks/schema_contract.sql to select the new status column. No migration was created and no database state was mutated; the offline check remains disposable.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
+      "README.md",
+      "schema/current.sql"
+    ],
+    "plan": {
+      "mutationTargets": [
+        "checks/schema_contract.sql",
+        "schema/current.sql"
+      ],
+      "requestedCheckIds": [
+        "schema-status-snapshot"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "checks/schema_contract.sql",
+          "content": "-- A future evaluator should assert the tasks table remains readable.\nSELECT id, title, status FROM tasks LIMIT 0;\n"
+        },
+        {
+          "path": "schema/current.sql",
+          "content": "CREATE TABLE tasks (\n  id INTEGER PRIMARY KEY,\n  title TEXT NOT NULL,\n  status TEXT NOT NULL DEFAULT 'pending'\n);\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Added a non-null `status` column with a safe default of 'pending' to the offline schema snapshot in schema/current.sql, and updated the contract query in checks/schema_contract.sql to select the new status column. No migration was created and no database state was mutated; the offline check remains disposable."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-schema-status-snapshot",
+    "evaluatorId": "repair-schema-status-snapshot-evaluator",
+    "candidateSha256": "96a0200708df258dfc37b6536705cc0b2f2f85539f0f95d456d22467308d2f5b",
+    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "checks/schema_contract.sql",
+      "schema/current.sql"
+    ],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "schema-status-snapshot",
+        "argv": [
+          "python",
+          "-c",
+          "import sqlite3,pathlib; db=sqlite3.connect(\":memory:\"); db.executescript(pathlib.Path(\"schema/current.sql\").read_text(encoding=\"utf-8\")); db.executescript(pathlib.Path(\"checks/schema_contract.sql\").read_text(encoding=\"utf-8\")); assert db.execute(\"SELECT id,title,status FROM tasks\").fetchall() == []; assert db.execute(\"PRAGMA table_info(tasks)\").fetchall() == [(0, \"id\", \"INTEGER\", 0, None, 1), (1, \"title\", \"TEXT\", 1, None, 0), (2, \"status\", \"TEXT\", 1, \"'pending'\", 0)]"
+        ],
+        "exitCode": 0,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-schema-status-snapshot",
+    "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+    "taskSha256": "5c5a211b88fe21da7b6d2ff968051eb4ef089fd142354b4454d251fc0d867dc7",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/schema_contract.sql",
+        "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+      },
+      {
+        "path": "migrations/README.md",
+        "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+      },
+      {
+        "path": "README.md",
+        "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+      },
+      {
+        "path": "schema/current.sql",
+        "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "checks/schema_contract.sql",
+      "schema/current.sql"
+    ],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-schema-status-snapshot-evaluator",
+    "scenarioEvidenceSha256": "67c3147dae2b9c92d8559c5ad096c23d7a7b5e09823007b04a5bd93189bd5e75",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 719,
+      "outputTokens": 2496,
+      "estimatedCostUsd": 0.003215,
+      "actualBilledUsd": null,
+      "latencyMs": 43206
+    }
+  }
+}

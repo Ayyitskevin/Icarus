@@ -40,11 +40,8 @@ function candidate(): Record<string, any> {
     schemaVersion: 1,
     selectedContextPaths: ["AGENTS.md", "checks/verify.py", "src/greeting.txt"],
     plan: {
-      summary: "Correct the greeting.",
-      steps: ["Update the greeting", "Run the registered check"],
-      risks: ["Newline mismatch"],
-      targets: ["src/greeting.txt"],
-      checkIds: ["basic-greeting"],
+      mutationTargets: ["src/greeting.txt"],
+      requestedCheckIds: ["basic-greeting"],
     },
     answer: {
       kind: "mutation",
@@ -61,7 +58,7 @@ describe("Gate 2 live candidate contract", () => {
     expect(GATE2_LIVE_ROUTING_POLICY_SHA256).toMatch(/^[0-9a-f]{64}$/);
     expect(selectGate2LiveModel("baseline", "security_review")).toBe("code-fast");
     expect(selectGate2LiveModel("routed", "repair")).toBe("code");
-    expect(selectGate2LiveModel("routed", "security_review")).toBe("code-fast");
+    expect(selectGate2LiveModel("routed", "security_review")).toBe("code");
   });
   it("accepts one authority-bounded model candidate and measures its first plan", () => {
     const decoded = validateGate2LiveCandidate(candidate(), authority);
@@ -82,11 +79,8 @@ describe("Gate 2 live candidate contract", () => {
         kind: value.answer.kind,
       },
       plan: {
-        checkIds: value.plan.checkIds,
-        targets: value.plan.targets,
-        risks: value.plan.risks,
-        steps: value.plan.steps,
-        summary: value.plan.summary,
+        requestedCheckIds: value.plan.requestedCheckIds,
+        mutationTargets: value.plan.mutationTargets,
       },
       selectedContextPaths: value.selectedContextPaths,
       schemaVersion: value.schemaVersion,
@@ -100,6 +94,7 @@ describe("Gate 2 live candidate contract", () => {
     expect(isGate2ProviderOutputComplete("stop")).toBe(true);
     expect(isGate2ProviderOutputComplete("legacy-stop")).toBe(true);
     expect(isGate2ProviderOutputComplete("length")).toBe(false);
+    expect(isGate2ProviderOutputComplete("timeout")).toBe(false);
     expect(isGate2ProviderOutputComplete("unknown")).toBe(false);
   });
 
@@ -163,8 +158,9 @@ describe("Gate 2 live candidate contract", () => {
   it.each([
     ["extra root field", (value: any) => (value.extra = true)],
     ["retrieval escape", (value: any) => (value.selectedContextPaths = ["secret.txt"])],
-    ["path traversal", (value: any) => (value.plan.targets = ["../outside.py"])],
-    ["undeclared check", (value: any) => (value.plan.checkIds = ["shell-anything"])],
+    ["path traversal", (value: any) => (value.plan.mutationTargets = ["../outside.py"])],
+    ["undeclared check", (value: any) => (value.plan.requestedCheckIds = ["shell-anything"])],
+    ["obsolete plan prose", (value: any) => (value.plan.summary = "Do extra work")],
     ["plan/file disagreement", (value: any) => (value.answer.files[0].path = "src/other.py")],
   ])("rejects %s", (_label, mutate) => {
     const value = candidate();
@@ -185,7 +181,7 @@ describe("Gate 2 live candidate contract", () => {
 
   it("keeps plan acceptance distinct from structurally valid output", () => {
     const value = candidate();
-    value.plan.targets = ["src/other.py"];
+    value.plan.mutationTargets = ["src/other.py"];
     value.answer.files[0].path = "src/other.py";
     const decoded = validateGate2LiveCandidate(value, {
       ...authority,
@@ -205,8 +201,8 @@ describe("Gate 2 live candidate contract", () => {
 
   it("admits evidence-only answers without mutation authority", () => {
     const value = candidate();
-    value.plan.targets = [];
-    value.plan.checkIds = [];
+    value.plan.mutationTargets = [];
+    value.plan.requestedCheckIds = [];
     value.answer = {
       kind: "read_only",
       files: [],

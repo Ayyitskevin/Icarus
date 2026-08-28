@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 4,
+  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "repair-name-whitespace",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T14:46:14.277Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "retrieval": {
+    "baseCommit": "3c3bb16f72a899265802e94c5c6d5abb537bfc03",
+    "digestSha256": "7028df214f34a192436e2fa21d9969a7abe3a61067a2f6279d8a4a8603fff21f",
+    "repositoryDigestSha256": "ba8451fe227e973c5c9e255880235e00488f9c204bbe8cd5fbca73e3c8d2f47f"
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"README.md\",\n    \"checks/test_profile.py\",\n    \"src/format_name.py\",\n    \"src/profile.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/format_name.py\",\n      \"src/profile.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"profile-contract\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/format_name.py\",\n        \"content\": \"def normalize_name(value: str) -> str:\\n    return \\\" \\\".join(value.strip().split()).title()\\n\\n\\ndef format_name(value: str) -> str:\\n    return normalize_name(value)\\n\"\n      },\n      {\n        \"path\": \"src/profile.py\",\n        \"content\": \"from src.format_name import normalize_name\\n\\n\\ndef display_name(value: str) -> str:\\n    return normalize_name(value)\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Extracted the duplicated whitespace-normalization logic into a shared normalize_name helper in src/format_name.py and refactored both public functions to delegate to it, preserving behavior for repeated whitespace. The existing check in checks/test_profile.py is retained to prove format_name and display_name remain identical.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/test_profile.py",
+      "README.md",
+      "src/format_name.py",
+      "src/profile.py"
+    ],
+    "plan": {
+      "mutationTargets": [
+        "src/format_name.py",
+        "src/profile.py"
+      ],
+      "requestedCheckIds": [
+        "profile-contract"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/format_name.py",
+          "content": "def normalize_name(value: str) -> str:\n    return \" \".join(value.strip().split()).title()\n\n\ndef format_name(value: str) -> str:\n    return normalize_name(value)\n"
+        },
+        {
+          "path": "src/profile.py",
+          "content": "from src.format_name import normalize_name\n\n\ndef display_name(value: str) -> str:\n    return normalize_name(value)\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Extracted the duplicated whitespace-normalization logic into a shared normalize_name helper in src/format_name.py and refactored both public functions to delegate to it, preserving behavior for repeated whitespace. The existing check in checks/test_profile.py is retained to prove format_name and display_name remain identical."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-name-whitespace",
+    "evaluatorId": "repair-name-whitespace-evaluator",
+    "candidateSha256": "faf9a5ca5b0cfa8b79552e32f7d5321347c1395ab5df986c0fe5dee488be267e",
+    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-name-whitespace",
+    "repositoryRevisionSha256": "5ce751efcdb138a9a0db315936567d9a6a1a86df45c49df9027b5bab8f605bd1",
+    "taskSha256": "90b39677638e8c3e863fe51788252718c4f24eaf2b2df0fb69aaaab1e644f974",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_profile.py",
+        "sha256": "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c"
+      },
+      {
+        "path": "README.md",
+        "sha256": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6"
+      },
+      {
+        "path": "src/format_name.py",
+        "sha256": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f"
+      },
+      {
+        "path": "src/profile.py",
+        "sha256": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-name-whitespace-evaluator",
+    "scenarioEvidenceSha256": "47fd0b89b52b80798f22815b9eac99d4311761bd1ffa5e6653ca55067f9f4aed",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 734,
+      "outputTokens": 6445,
+      "estimatedCostUsd": 0.007179,
+      "actualBilledUsd": null,
+      "latencyMs": 112758
+    }
+  }
+}

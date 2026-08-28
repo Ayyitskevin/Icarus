@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 4,
+  "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "repair-lantern-missing-config",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T14:47:20.996Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "b7b9dc15cad034deef17f65be56873075a043c5c15993597f27a5fc049a6fb06",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff"
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"src/greeting.py\",\n    \"src/main.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/main.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"lantern-missing-config\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/main.py\",\n        \"content\": \"import json\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\nCONFIG_PATH = Path(\\\"config/app.json\\\")\\n\\n\\nclass ConfigurationError(Exception):\\n    \\\"\\\"\\\"Raised when the Lantern configuration cannot be loaded.\\\"\\\"\\\"\\n\\n\\ndef load_audience(config_path: Path = CONFIG_PATH) -> str:\\n    if not config_path.exists():\\n        raise ConfigurationError(f\\\"Configuration file not found: {config_path}\\\")\\n    return json.loads(config_path.read_text())[\\\"audience\\\"]\\n\\n\\nprint(greeting(load_audience()))\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"src/main.py read config/app.json directly, so a missing file surfaced as a raw FileNotFoundError. Introduced a bounded ConfigurationError and a load_audience helper that raises it with a clear message when the config is absent, while leaving the greeting call unchanged.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "src/greeting.py",
+      "src/main.py"
+    ],
+    "plan": {
+      "mutationTargets": [
+        "src/main.py"
+      ],
+      "requestedCheckIds": [
+        "lantern-missing-config"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/main.py",
+          "content": "import json\nfrom pathlib import Path\n\nfrom src.greeting import greeting\n\nCONFIG_PATH = Path(\"config/app.json\")\n\n\nclass ConfigurationError(Exception):\n    \"\"\"Raised when the Lantern configuration cannot be loaded.\"\"\"\n\n\ndef load_audience(config_path: Path = CONFIG_PATH) -> str:\n    if not config_path.exists():\n        raise ConfigurationError(f\"Configuration file not found: {config_path}\")\n    return json.loads(config_path.read_text())[\"audience\"]\n\n\nprint(greeting(load_audience()))\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "src/main.py read config/app.json directly, so a missing file surfaced as a raw FileNotFoundError. Introduced a bounded ConfigurationError and a load_audience helper that raises it with a clear message when the config is absent, while leaving the greeting call unchanged."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-lantern-missing-config",
+    "evaluatorId": "repair-lantern-missing-config-evaluator",
+    "candidateSha256": "95ae23832a113047454cc0f6f4f7185417e6fdac35a46eda6f7b99dd79e3148e",
+    "instructionPolicySha256": "d4993a35669f17c3dc26e873b8afb8a5699bb792fbbab6f9d52838275986d39b",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "src/main.py"
+    ],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "lantern-missing-config",
+        "argv": [
+          "python",
+          "-c",
+          "import os,subprocess,sys,tempfile; happy=subprocess.run([sys.executable,\"-m\",\"src.main\"],capture_output=True,text=True); assert happy.returncode == 0 and happy.stdout == \"Welcome, traveler.\\n\" and happy.stderr == \"\"; temporary=tempfile.TemporaryDirectory(); environment=os.environ.copy(); environment[\"PYTHONPATH\"]=os.getcwd(); missing=subprocess.run([sys.executable,\"-m\",\"src.main\"],cwd=temporary.name,env=environment,capture_output=True,text=True); assert missing.returncode == 1 and missing.stdout == \"\" and missing.stderr == \"Lantern configuration is unavailable.\\n\"; temporary.cleanup()"
+        ],
+        "exitCode": 1,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "09a596a85bd2c6b81ed1c4f1519e29c8f5cdb5b6a1f7e3b5bde6b48fad697970",
+        "truncated": false,
+        "outcome": "failed"
+      }
+    ],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-lantern-missing-config",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "b868e7ab109623a17a0d40b598c0af13e55c4b0d1f8a9f364dfc417741ac53d6",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "src/main.py"
+    ],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-lantern-missing-config-evaluator",
+    "scenarioEvidenceSha256": "e05ec577750c09fb84b9dda75e88cefa5af65d4fd885ab39ddfcac0fbcda0204",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 713,
+      "outputTokens": 3820,
+      "estimatedCostUsd": 0.004533,
+      "actualBilledUsd": null,
+      "latencyMs": 66187
+    }
+  }
+}

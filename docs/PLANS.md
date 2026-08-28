@@ -11,12 +11,12 @@ replaces the two protected migration-path tasks; both replacements now execute
 as a separate deterministic successor cohort. Seven frozen source reports now
 feed a strict adoption/replay contract that produces one closed 30-case v2
 deterministic receipt without rewriting historical evidence. Live-model
-execution and the fixed-model/routed comparison are now measured under ADR 0066.
-Routing improved success from 5/30 to 9/30 and reduced the configured local-
-compute proxy cost per success by 36.996%, but the routed result still missed
-the 24/30 success and 0.80 first-plan thresholds. Gate 2 remains open for
-quality improvement, especially autonomous target discovery and exact read-only
-evidence. The separate
+execution and fixed-model/routed comparisons are now measured under ADRs 0066
+and 0067. The versioned target-discovery profile improved its routed result from
+the historical 9/30 to 17/30, including security review 3/5 and scaffold 2/5,
+but the paired baseline regressed to 2/30 and the routed result still missed the
+24/30 success and 0.80 first-plan thresholds. Gate 2 remains open for broader
+quality and stability improvement. The separate
 supervised active-repository canary remains **HOLD** after the 2026-08-27
 secret-scanner survey; live-state migration, merge, deployment, unattended use,
 effectful/control session continuation, and wider Vulcan authority remain
@@ -106,10 +106,14 @@ remain open.
       fixed single-model baseline without reducing successful-task count. The
       routed run improved 5/30 to 9/30 and lowered estimated proxy cost per
       success by 36.996%, but failed the absolute Gate 2 thresholds.
-- [ ] Improve autonomous target discovery and minimal exact citations/findings,
+- [x] Improve autonomous target discovery and minimal exact citations/findings,
       then rerun a new versioned live profile without weakening manifest-v2
-      thresholds. Prioritize scaffold and security-review failures, followed by
-      explanation and plan acceptance.
+      thresholds. The r7 routed run reached 17/30, including security review
+      3/5 and scaffold 2/5, but did not pass Gate 2.
+- [ ] Raise stable routed quality from 17/30 to at least 24/30 and first-plan
+      acceptance from 0.70 to at least 0.80 across predeclared repeated runs,
+      without losing retrieval/provenance gates, introducing incorrect edits,
+      or widening authority.
 
 The explanation and security-review cohorts add bounded read-only provider
 analysis. The refactor, repair-A, repair-B, and scaffold-A cohorts grant
@@ -124,9 +128,9 @@ policy bypass or an in-place rewrite of immutable input. Manifest v2 makes that
 versioned decision. The adoption contract—not arithmetic over headline totals—
 strictly replays the 28 unchanged identities and two direct successor outcomes
 under one v2 receipt. That closes deterministic case coverage while leaving
-live-model quality evidence open. ADR 0066 now supplies the first autonomous
-planning and routing measurement, but its failed absolute thresholds do not
-complete Gate 2.
+live-model quality evidence open. ADRs 0066 and 0067 now supply versioned
+autonomous planning and routing measurements, but their failed absolute
+thresholds do not complete Gate 2.
 
 ## Headless Vulcan proposal admission
 

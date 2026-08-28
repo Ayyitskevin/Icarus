@@ -9,11 +9,8 @@ export interface Gate2LiveCandidate {
   schemaVersion: 1;
   selectedContextPaths: string[];
   plan: {
-    summary: string;
-    steps: string[];
-    risks: string[];
-    targets: string[];
-    checkIds: string[];
+    mutationTargets: string[];
+    requestedCheckIds: string[];
   };
   answer: {
     kind: "mutation" | "read_only";
@@ -25,7 +22,7 @@ export interface Gate2LiveCandidate {
 }
 
 export const GATE2_LIVE_CANDIDATE_SCHEMA: Readonly<Record<string, unknown>>;
-export const GATE2_LIVE_CANDIDATE_CONTRACT_REVISION: 3;
+export const GATE2_LIVE_CANDIDATE_CONTRACT_REVISION: 5;
 export function validateGate2LiveCandidate(
   value: unknown,
   authority: Gate2LiveCandidateAuthority,
