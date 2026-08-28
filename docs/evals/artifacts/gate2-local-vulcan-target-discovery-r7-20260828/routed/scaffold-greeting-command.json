@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "scaffold-greeting-command",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:59:52.407Z",
+  "generatedAt": "2026-08-28T18:12:39.297Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "a36e5d3c31e2b78aa7160c1fc49809331664b8e896738fb1b6975bf08a8b0123",
     "repositoryDigestSha256": "eea916c04927c9236ad5f517ccbdf4ac4e8127eced8bb778697e7cfd7475382f"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"AGENTS.md\",\"checks/verify.py\",\"src/greeting.txt\"],\"plan\":{\"mutationTargets\":[\"bin/greet.py\"],\"requestedCheckIds\":[\"greeting-command\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"bin/greet.py\",\"content\":\"#!/usr/bin/env python3\\n\\\"\\\"\\\"Print the repository greeting from src/greeting.txt.\\\"\\\"\\\"\\nfrom pathlib import Path\\n\\n\\ndef main() -> None:\\n    text = Path(\\\"src/greeting.txt\\\").read_text(encoding=\\\"utf-8\\\")\\n    print(text, end=\\\"\\\")\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    main()\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added bin/greet.py, a dependency-free Python command that reads src/greeting.txt (the source of truth) and prints its one-line greeting to stdout.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"AGENTS.md\",\"checks/verify.py\",\"src/greeting.txt\"],\"plan\":{\"mutationTargets\":[\"bin/greet.py\"],\"requestedCheckIds\":[\"greeting-command\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"bin/greet.py\",\"content\":\"#!/usr/bin/env python3\\n\\\"\\\"\\\"Print the repository greeting from src/greeting.txt.\\\"\\\"\\\"\\nfrom pathlib import Path\\n\\n\\ndef main():\\n    text = Path(\\\"src/greeting.txt\\\").read_text(encoding=\\\"utf-8\\\")\\n    print(text, end=\\\"\\\")\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    main()\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added bin/greet.py, a dependency-free Python command that reads src/greeting.txt (the source of truth) and prints its one-line greeting verbatim.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -40,12 +40,12 @@
       "files": [
         {
           "path": "bin/greet.py",
-          "content": "#!/usr/bin/env python3\n\"\"\"Print the repository greeting from src/greeting.txt.\"\"\"\nfrom pathlib import Path\n\n\ndef main() -> None:\n    text = Path(\"src/greeting.txt\").read_text(encoding=\"utf-8\")\n    print(text, end=\"\")\n\n\nif __name__ == \"__main__\":\n    main()\n"
+          "content": "#!/usr/bin/env python3\n\"\"\"Print the repository greeting from src/greeting.txt.\"\"\"\nfrom pathlib import Path\n\n\ndef main():\n    text = Path(\"src/greeting.txt\").read_text(encoding=\"utf-8\")\n    print(text, end=\"\")\n\n\nif __name__ == \"__main__\":\n    main()\n"
         }
       ],
       "citations": [],
       "findingIds": [],
-      "summary": "Added bin/greet.py, a dependency-free Python command that reads src/greeting.txt (the source of truth) and prints its one-line greeting to stdout."
+      "summary": "Added bin/greet.py, a dependency-free Python command that reads src/greeting.txt (the source of truth) and prints its one-line greeting verbatim."
     }
   },
   "candidateError": null,
@@ -53,8 +53,8 @@
     "schemaVersion": 1,
     "caseId": "scaffold-greeting-command",
     "evaluatorId": "scaffold-greeting-command-evaluator",
-    "candidateSha256": "91e328170bc2b807dc0f6001a2c62544f502c5ce5c63bf40e911b8492fd3f448",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "b827441e41df4ea88178a45c435802c6df504ef2f458f1fc540b116c0025c23e",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -92,14 +92,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "scaffold-greeting-command-evaluator",
-    "scenarioEvidenceSha256": "944b7dbc20b7b7adf8984df193cff7b692609925f1d008fc07588dc8bd4bcb00",
+    "scenarioEvidenceSha256": "5146ffa58032b90e2dc86c93aecaeeaa90ed6a974e6eac428a66bca5ba72e198",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 851,
-      "outputTokens": 2090,
-      "estimatedCostUsd": 0.0023072145,
+      "outputTokens": 2157,
+      "estimatedCostUsd": 0.002359776,
       "actualBilledUsd": null,
-      "latencyMs": 99790
+      "latencyMs": 107064
     }
   }
 }

@@ -13,8 +13,8 @@ feed a strict adoption/replay contract that produces one closed 30-case v2
 deterministic receipt without rewriting historical evidence. Live-model
 execution and fixed-model/routed comparisons are now measured under ADRs 0066
 and 0067. The leak-free versioned target-discovery profile improved its routed
-result from the historical 9/30 to 18/30, including security review 2/5 and
-scaffold 1/5; its paired baseline repeated 5/30, and the routed result still
+result from the historical 9/30 to 16/30, including security review 2/5 and
+scaffold 0/5; its paired baseline repeated 5/30, and the routed result still
 missed the 24/30 success and 0.80 first-plan thresholds. Gate 2 remains open for broader
 quality and stability improvement. The separate
 supervised active-repository canary remains **HOLD** after the 2026-08-27
@@ -108,9 +108,9 @@ remain open.
       success by 36.996%, but failed the absolute Gate 2 thresholds.
 - [x] Improve autonomous target discovery and minimal exact citations/findings,
       then rerun a new versioned live profile without weakening manifest-v2
-      thresholds. The leak-free r7 routed run reached 18/30, including security
-      review 2/5 and scaffold 1/5, but did not pass Gate 2.
-- [ ] Raise stable routed quality from 18/30 to at least 24/30 and first-plan
+      thresholds. The leak-free r7 routed run reached 16/30, including security
+      review 2/5 and scaffold 0/5, but did not pass Gate 2.
+- [ ] Raise stable routed quality from 16/30 to at least 24/30 and first-plan
       acceptance from 0.7667 to at least 0.80 across predeclared repeated runs,
       without losing retrieval/provenance gates, introducing incorrect edits,
       or widening authority.

@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "baseline",
   "caseId": "explain-parser-failure",
   "modelId": "code-fast",
-  "generatedAt": "2026-08-28T16:09:39.995Z",
+  "generatedAt": "2026-08-28T17:26:57.473Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,15 +19,15 @@
     "digestSha256": "8a49f0257f9f94bf99a6fcd40d416c52efe8f9bfcf679083e6a21c1dd58f4dd4",
     "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2"
   },
-  "rawCandidate": "```json\n{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_parser.py\",\"src/parser.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"checks/test_parser.py\",\"src/parser.py\"],\"findingIds\":[],\"summary\":\"The parser returns bool(value), and Python treats any non-empty string as truthy, so bool('false') evaluates to True. The fixture asserts parse_enabled('false') is False (checks/test_parser.py), which fails because the implementation never inspects the literal contents of the string—it only tests for emptiness. The README contract (README.md) requires the parser to recognize explicit 'true' and 'false' values, but the current implementation maps every non-empty token to True. No edit is proposed; the false case fails purely because bool() cannot distinguish the literal token 'false' from any other non-empty string.\"}}\n```",
+  "rawCandidate": "```json\n{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"checks/test_parser.py\",\n    \"README.md\",\n    \"src/parser.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [],\n    \"requestedCheckIds\": []\n  },\n  \"answer\": {\n    \"kind\": \"read_only\",\n    \"files\": [],\n    \"citations\": [\n      \"checks/test_parser.py\",\n      \"README.md\",\n      \"src/parser.py\"\n    ],\n    \"findingIds\": [],\n    \"summary\": \"The explicit false case fails because parse_enabled does not parse the string's literal content; it returns bool(value), which coerces via Python truthiness. Any non-empty string is truthy, so bool(\\\"false\\\") evaluates to True. Thus parse_enabled(\\\"false\\\") returns True, and the fixture assertion assert parse_enabled(\\\"false\\\") is False fails because True is False is False. The true case passes only by coincidence: bool(\\\"true\\\") is also True, so assert parse_enabled(\\\"true\\\") is True holds. The README contract states the parser 'should recognize explicit true and false values,' a behavior the current bool()-wrapping implementation does not satisfy for the false case.\"\n  }\n}\n```",
   "candidate": null,
   "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
   "evaluatorEvidence": {
     "schemaVersion": 1,
     "caseId": "explain-parser-failure",
     "evaluatorId": "explain-parser-failure-evaluator",
-    "candidateSha256": "c8a2fe63f3e59476fafc051a86ff075a50a2ef3e10d9a8dfb2168732c73707e1",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "a1ca7be1a6a164b4f215cd1cdfc77ebe3995723afd1ab3be2e81911b1cd798a5",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -69,14 +69,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "explain-parser-failure-evaluator",
-    "scenarioEvidenceSha256": "acc8d5f4e12553c2f58e145c70bd263c9fe970484556c72e76da3bc4e4cb1b29",
+    "scenarioEvidenceSha256": "98aa0353869cb2891d74e5397aa5558c0e0b84f2d8fc8257ee42470e18b448f1",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 809,
-      "outputTokens": 1500,
-      "estimatedCostUsd": 0.002309,
+      "outputTokens": 1095,
+      "estimatedCostUsd": 0.001904,
       "actualBilledUsd": null,
-      "latencyMs": 26299
+      "latencyMs": 19423
     }
   }
 }

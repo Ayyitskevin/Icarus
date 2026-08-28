@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "scaffold-parser-cli",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:56:52.807Z",
+  "generatedAt": "2026-08-28T18:09:40.415Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "a18c53e8bb7c4e5a7c4964c72d7fecec3fd96880b88c6a26fdb17533dd764322",
     "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_parser.py\",\"checks/verify.py\",\"src/parser.py\"],\"plan\":{\"mutationTargets\":[\"checks/test_cli.py\",\"checks/verify.py\",\"src/cli.py\"],\"requestedCheckIds\":[\"parser-cli\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/cli.py\",\"content\":\"import sys\\nfrom src.parser import parse_enabled\\n\\n\\ndef main(argv=None):\\n    if argv is None:\\n        argv = sys.argv[1:]\\n\\n    if len(argv) != 1:\\n        print(\\\"usage: parser-cli <value>\\\", file=sys.stderr)\\n        return 2\\n\\n    value = argv[0]\\n    result = parse_enabled(value)\\n\\n    if result:\\n        print(\\\"true\\\")\\n        return 0\\n    else:\\n        print(\\\"false\\\")\\n        return 1\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    sys.exit(main())\\n\"},{\"path\":\"checks/test_cli.py\",\"content\":\"from src.cli import main\\n\\nassert main([\\\"true\\\"]) == 0\\nassert main([\\\"\\\"]) == 1\\nassert main([]) == 2\\nassert main([\\\"a\\\", \\\"b\\\"]) == 2\\n\"},{\"path\":\"checks/verify.py\",\"content\":\"import sys\\nfrom pathlib import Path\\n\\n# Make the repository root importable, then execute the fixture's own check so\\n# the evaluator exercises the declared false-value regression in containment.\\nsys.path.insert(0, str(Path.cwd()))\\nsource = Path(\\\"checks/test_parser.py\\\").read_text(encoding=\\\"utf-8\\\")\\nexec(compile(source, \\\"checks/test_parser.py\\\", \\\"exec\\\"))\\nsource = Path(\\\"checks/test_cli.py\\\").read_text(encoding=\\\"utf-8\\\")\\nexec(compile(source, \\\"checks/test_cli.py\\\", \\\"exec\\\"))\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a dependency-free CLI entry point (src/cli.py) that wraps parse_enabled with deterministic exit codes (0=true, 1=false, 2=usage error), a test file (checks/test_cli.py) verifying all exit-code paths, and updated checks/verify.py to execute the new CLI test alongside the existing parser test.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_parser.py\",\"checks/verify.py\",\"src/parser.py\"],\"plan\":{\"mutationTargets\":[\"checks/test_cli.py\",\"checks/verify.py\",\"src/cli.py\"],\"requestedCheckIds\":[\"parser-cli\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/cli.py\",\"content\":\"\\\"\\\"\\\"Dependency-free CLI entry point for boolean parsing.\\\"\\\"\\\"\\nimport sys\\n\\n_TRUE = {\\\"true\\\", \\\"1\\\", \\\"yes\\\"}\\n_FALSE = {\\\"false\\\", \\\"0\\\", \\\"no\\\"}\\n\\n\\ndef parse(value: str) -> bool:\\n    \\\"\\\"\\\"Parse a boolean value. Raises ValueError for unrecognized input.\\\"\\\"\\\"\\n    v = value.strip().lower()\\n    if v in _TRUE:\\n        return True\\n    if v in _FALSE:\\n        return False\\n    raise ValueError(f\\\"unrecognized boolean value: {value!r}\\\")\\n\\n\\ndef main(argv=None) -> int:\\n    \\\"\\\"\\\"Entry point returning a deterministic exit code.\\n\\n    0 – value parsed as true\\n    1 – value parsed as false\\n    2 – usage or parse error\\n    \\\"\\\"\\\"\\n    if argv is None:\\n        argv = sys.argv[1:]\\n\\n    if len(argv) != 1:\\n        print(\\\"usage: parser-cli <value>\\\", file=sys.stderr)\\n        return 2\\n\\n    try:\\n        result = parse(argv[0])\\n    except ValueError as exc:\\n        print(f\\\"error: {exc}\\\", file=sys.stderr)\\n        return 2\\n\\n    if result:\\n        print(\\\"true\\\")\\n        return 0\\n    print(\\\"false\\\")\\n    return 1\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    sys.exit(main())\\n\"},{\"path\":\"checks/test_cli.py\",\"content\":\"import io\\nfrom contextlib import redirect_stderr, redirect_stdout\\n\\nfrom src.cli import main, parse\\n\\n# parse function\\nassert parse(\\\"true\\\") is True\\nassert parse(\\\"false\\\") is False\\nassert parse(\\\"TRUE\\\") is True\\nassert parse(\\\"False\\\") is False\\nassert parse(\\\"1\\\") is True\\nassert parse(\\\"0\\\") is False\\ntry:\\n    parse(\\\"maybe\\\")\\n    assert False, \\\"expected ValueError\\\"\\nexcept ValueError:\\n    pass\\n\\n# main: true -> exit 0\\nbuf = io.StringIO()\\nwith redirect_stdout(buf):\\n    rc = main([\\\"true\\\"])\\nassert rc == 0\\nassert buf.getvalue().strip() == \\\"true\\\"\\n\\n# main: false -> exit 1\\nbuf = io.StringIO()\\nwith redirect_stdout(buf):\\n    rc = main([\\\"false\\\"])\\nassert rc == 1\\nassert buf.getvalue().strip() == \\\"false\\\"\\n\\n# main: no args -> exit 2\\nbuf = io.StringIO()\\nwith redirect_stderr(buf):\\n    rc = main([])\\nassert rc == 2\\n\\n# main: too many args -> exit 2\\nbuf = io.StringIO()\\nwith redirect_stderr(buf):\\n    rc = main([\\\"a\\\", \\\"b\\\"])\\nassert rc == 2\\n\\n# main: invalid value -> exit 2\\nbuf = io.StringIO()\\nwith redirect_stderr(buf):\\n    rc = main([\\\"maybe\\\"])\\nassert rc == 2\\n\"},{\"path\":\"checks/verify.py\",\"content\":\"import sys\\nfrom pathlib import Path\\n\\n# Make the repository root importable, then execute the CLI check so the\\n# evaluator exercises the parser-cli entry point in containment.\\nsys.path.insert(0, str(Path.cwd()))\\nsource = Path(\\\"checks/test_cli.py\\\").read_text(encoding=\\\"utf-8\\\")\\nexec(compile(source, \\\"checks/test_cli.py\\\", \\\"exec\\\"))\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a dependency-free CLI module (src/cli.py) that parses boolean values with deterministic exit codes (0=true, 1=false, 2=error), a test file (checks/test_cli.py) covering parse and main exit-code contracts, and updated checks/verify.py to execute the new CLI test under the registered parser-cli check.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -43,20 +43,20 @@
       "files": [
         {
           "path": "checks/test_cli.py",
-          "content": "from src.cli import main\n\nassert main([\"true\"]) == 0\nassert main([\"\"]) == 1\nassert main([]) == 2\nassert main([\"a\", \"b\"]) == 2\n"
+          "content": "import io\nfrom contextlib import redirect_stderr, redirect_stdout\n\nfrom src.cli import main, parse\n\n# parse function\nassert parse(\"true\") is True\nassert parse(\"false\") is False\nassert parse(\"TRUE\") is True\nassert parse(\"False\") is False\nassert parse(\"1\") is True\nassert parse(\"0\") is False\ntry:\n    parse(\"maybe\")\n    assert False, \"expected ValueError\"\nexcept ValueError:\n    pass\n\n# main: true -> exit 0\nbuf = io.StringIO()\nwith redirect_stdout(buf):\n    rc = main([\"true\"])\nassert rc == 0\nassert buf.getvalue().strip() == \"true\"\n\n# main: false -> exit 1\nbuf = io.StringIO()\nwith redirect_stdout(buf):\n    rc = main([\"false\"])\nassert rc == 1\nassert buf.getvalue().strip() == \"false\"\n\n# main: no args -> exit 2\nbuf = io.StringIO()\nwith redirect_stderr(buf):\n    rc = main([])\nassert rc == 2\n\n# main: too many args -> exit 2\nbuf = io.StringIO()\nwith redirect_stderr(buf):\n    rc = main([\"a\", \"b\"])\nassert rc == 2\n\n# main: invalid value -> exit 2\nbuf = io.StringIO()\nwith redirect_stderr(buf):\n    rc = main([\"maybe\"])\nassert rc == 2\n"
         },
         {
           "path": "checks/verify.py",
-          "content": "import sys\nfrom pathlib import Path\n\n# Make the repository root importable, then execute the fixture's own check so\n# the evaluator exercises the declared false-value regression in containment.\nsys.path.insert(0, str(Path.cwd()))\nsource = Path(\"checks/test_parser.py\").read_text(encoding=\"utf-8\")\nexec(compile(source, \"checks/test_parser.py\", \"exec\"))\nsource = Path(\"checks/test_cli.py\").read_text(encoding=\"utf-8\")\nexec(compile(source, \"checks/test_cli.py\", \"exec\"))\n"
+          "content": "import sys\nfrom pathlib import Path\n\n# Make the repository root importable, then execute the CLI check so the\n# evaluator exercises the parser-cli entry point in containment.\nsys.path.insert(0, str(Path.cwd()))\nsource = Path(\"checks/test_cli.py\").read_text(encoding=\"utf-8\")\nexec(compile(source, \"checks/test_cli.py\", \"exec\"))\n"
         },
         {
           "path": "src/cli.py",
-          "content": "import sys\nfrom src.parser import parse_enabled\n\n\ndef main(argv=None):\n    if argv is None:\n        argv = sys.argv[1:]\n\n    if len(argv) != 1:\n        print(\"usage: parser-cli <value>\", file=sys.stderr)\n        return 2\n\n    value = argv[0]\n    result = parse_enabled(value)\n\n    if result:\n        print(\"true\")\n        return 0\n    else:\n        print(\"false\")\n        return 1\n\n\nif __name__ == \"__main__\":\n    sys.exit(main())\n"
+          "content": "\"\"\"Dependency-free CLI entry point for boolean parsing.\"\"\"\nimport sys\n\n_TRUE = {\"true\", \"1\", \"yes\"}\n_FALSE = {\"false\", \"0\", \"no\"}\n\n\ndef parse(value: str) -> bool:\n    \"\"\"Parse a boolean value. Raises ValueError for unrecognized input.\"\"\"\n    v = value.strip().lower()\n    if v in _TRUE:\n        return True\n    if v in _FALSE:\n        return False\n    raise ValueError(f\"unrecognized boolean value: {value!r}\")\n\n\ndef main(argv=None) -> int:\n    \"\"\"Entry point returning a deterministic exit code.\n\n    0 – value parsed as true\n    1 – value parsed as false\n    2 – usage or parse error\n    \"\"\"\n    if argv is None:\n        argv = sys.argv[1:]\n\n    if len(argv) != 1:\n        print(\"usage: parser-cli <value>\", file=sys.stderr)\n        return 2\n\n    try:\n        result = parse(argv[0])\n    except ValueError as exc:\n        print(f\"error: {exc}\", file=sys.stderr)\n        return 2\n\n    if result:\n        print(\"true\")\n        return 0\n    print(\"false\")\n    return 1\n\n\nif __name__ == \"__main__\":\n    sys.exit(main())\n"
         }
       ],
       "citations": [],
       "findingIds": [],
-      "summary": "Added a dependency-free CLI entry point (src/cli.py) that wraps parse_enabled with deterministic exit codes (0=true, 1=false, 2=usage error), a test file (checks/test_cli.py) verifying all exit-code paths, and updated checks/verify.py to execute the new CLI test alongside the existing parser test."
+      "summary": "Added a dependency-free CLI module (src/cli.py) that parses boolean values with deterministic exit codes (0=true, 1=false, 2=error), a test file (checks/test_cli.py) covering parse and main exit-code contracts, and updated checks/verify.py to execute the new CLI test under the registered parser-cli check."
     }
   },
   "candidateError": null,
@@ -64,8 +64,8 @@
     "schemaVersion": 1,
     "caseId": "scaffold-parser-cli",
     "evaluatorId": "scaffold-parser-cli-evaluator",
-    "candidateSha256": "b533b427508758117c6b1db274c9b3757127ccec636d82d8464f63f7b7fe34b0",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "794fdf49bebd7457530a3f88d163aa876756690e4169863ea4b01f8790a7538d",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -107,14 +107,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "scaffold-parser-cli-evaluator",
-    "scenarioEvidenceSha256": "7341472d3aacfe76a4c539c32b4021150c3cd5f98651d97920e214fd26acf3a9",
+    "scenarioEvidenceSha256": "b4c11ee1f4a240e4b98341c8427cc7601273d2af975beaee4b2f106ea5ed6c99",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 931,
-      "outputTokens": 4667,
-      "estimatedCostUsd": 0.004391631,
+      "outputTokens": 5585,
+      "estimatedCostUsd": 0.005111802,
       "actualBilledUsd": null,
-      "latencyMs": 217972
+      "latencyMs": 262804
     }
   }
 }

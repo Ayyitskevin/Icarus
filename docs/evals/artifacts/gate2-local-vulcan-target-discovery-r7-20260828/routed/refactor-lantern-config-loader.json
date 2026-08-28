@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "refactor-lantern-config-loader",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:35:52.162Z",
+  "generatedAt": "2026-08-28T17:49:00.022Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -59,7 +59,7 @@
     "caseId": "refactor-lantern-config-loader",
     "evaluatorId": "refactor-lantern-config-loader-evaluator",
     "candidateSha256": "218b1dbcbd1a6a68a0a078dd6dd8e4b24d6d32e8a7dde1be2ce9fc3815dfc466",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -122,14 +122,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "refactor-lantern-config-loader-evaluator",
-    "scenarioEvidenceSha256": "7fbd0fcf10be5cc2542f27c8638b408c7ec4c9ad0ea702a1b31a723b6f9df8b3",
+    "scenarioEvidenceSha256": "ebb6c1e8e564005658f84d60b0cc136dd6f4005c907a57a26fd92036118b9082",
     "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 713,
       "outputTokens": 733,
       "estimatedCostUsd": 0.001134387,
       "actualBilledUsd": null,
-      "latencyMs": 34318
+      "latencyMs": 34026
     }
   }
 }

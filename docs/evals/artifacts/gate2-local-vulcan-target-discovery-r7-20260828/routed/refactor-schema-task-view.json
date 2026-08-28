@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "refactor-schema-task-view",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:40:56.384Z",
+  "generatedAt": "2026-08-28T17:52:57.427Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -55,7 +55,7 @@
     "caseId": "refactor-schema-task-view",
     "evaluatorId": "refactor-schema-task-view-evaluator",
     "candidateSha256": "3174363e44852abb680cb85c74dd04607d54ed21b65033b4a3c1f591dc59b404",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -116,14 +116,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "refactor-schema-task-view-evaluator",
-    "scenarioEvidenceSha256": "61a154f739bdc63963a1ac29df44d8912039c1352e74ff82bfaa0462a71dc1d1",
+    "scenarioEvidenceSha256": "cbc359c45374ec990cc8c1c2a8ab2906914e5e153803a606746b3d13f7c00c20",
     "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 695,
-      "outputTokens": 1199,
-      "estimatedCostUsd": 0.001485843,
+      "outputTokens": 1210,
+      "estimatedCostUsd": 0.0014944725,
       "actualBilledUsd": null,
-      "latencyMs": 58616
+      "latencyMs": 58839
     }
   }
 }

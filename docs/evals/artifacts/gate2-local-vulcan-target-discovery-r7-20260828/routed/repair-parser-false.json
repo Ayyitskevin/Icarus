@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "repair-parser-false",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:27:50.781Z",
+  "generatedAt": "2026-08-28T17:41:52.016Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "b2c2bc01223be3fd26a6ef2c23e22e5ec6769eeb065920f18a955c49596573d5",
     "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2"
   },
-  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"checks/test_parser.py\",\n    \"src/parser.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/parser.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"parser-explicit-false\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/parser.py\",\n        \"content\": \"def parse_enabled(value: str) -> bool:\\n    if value == \\\"true\\\":\\n        return True\\n    if value == \\\"false\\\":\\n        return False\\n    raise ValueError(\\\"value must be 'true' or 'false'\\\")\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Restrict parse_enabled to explicit true and false values and reject other inputs.\"\n  }\n}",
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"checks/test_parser.py\",\n    \"src/parser.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/parser.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"parser-explicit-false\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/parser.py\",\n        \"content\": \"def parse_enabled(value: str) -> bool:\\n    if value == \\\"true\\\":\\n        return True\\n    if value == \\\"false\\\":\\n        return False\\n    raise ValueError(\\\"parse_enabled expects 'true' or 'false'\\\")\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Update parse_enabled to accept only the explicit strings 'true' and 'false' and reject other values instead of treating arbitrary non-empty strings as truthy.\"\n  }\n}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -39,12 +39,12 @@
       "files": [
         {
           "path": "src/parser.py",
-          "content": "def parse_enabled(value: str) -> bool:\n    if value == \"true\":\n        return True\n    if value == \"false\":\n        return False\n    raise ValueError(\"value must be 'true' or 'false'\")\n"
+          "content": "def parse_enabled(value: str) -> bool:\n    if value == \"true\":\n        return True\n    if value == \"false\":\n        return False\n    raise ValueError(\"parse_enabled expects 'true' or 'false'\")\n"
         }
       ],
       "citations": [],
       "findingIds": [],
-      "summary": "Restrict parse_enabled to explicit true and false values and reject other inputs."
+      "summary": "Update parse_enabled to accept only the explicit strings 'true' and 'false' and reject other values instead of treating arbitrary non-empty strings as truthy."
     }
   },
   "candidateError": null,
@@ -52,8 +52,8 @@
     "schemaVersion": 1,
     "caseId": "repair-parser-false",
     "evaluatorId": "repair-parser-false-evaluator",
-    "candidateSha256": "d9818ce265f0b0d5e68e65882b71620ca33f4faafee3554d12d660f8708686f2",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "230b4cff61e0c670eb1f70b2852aa08cd80dbcd35a3cf17a4d78283b42d89c69",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -113,14 +113,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "repair-parser-false-evaluator",
-    "scenarioEvidenceSha256": "61e9210125c4e271bc881092c532fb7c03254b84b0001e167590a383a972a698",
+    "scenarioEvidenceSha256": "1facfb3531ac49ea4d1cbea3ac1cc362b3c6574b7e8ec6d860b0b834156cd047",
     "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 764,
-      "outputTokens": 1873,
-      "estimatedCostUsd": 0.0020687265,
+      "outputTokens": 1157,
+      "estimatedCostUsd": 0.0015070245,
       "actualBilledUsd": null,
-      "latencyMs": 112266
+      "latencyMs": 67396
     }
   }
 }

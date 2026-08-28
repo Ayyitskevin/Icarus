@@ -47,7 +47,7 @@ describe("Gate 2 published live evidence", () => {
     expect(verified.manifest).toMatchObject({
       executionProfileDigestSha256:
         "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
-      instructionPolicySha256: "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+      instructionPolicySha256: "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
       routingPolicySha256: "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     });
     expect(verified.baseline.aggregates).toMatchObject({
@@ -60,16 +60,16 @@ describe("Gate 2 published live evidence", () => {
     expect(verified.routed.aggregates).toMatchObject({
       taskCount: 30,
       measuredTaskCount: 30,
-      successCount: 18,
+      successCount: 16,
       firstPassPlanAcceptance: 0.766666666667,
       incorrectEdits: 0,
       thresholdsPassed: false,
     });
     expect(verified.comparison).toMatchObject({
       baselineSuccessCount: 5,
-      routedSuccessCount: 18,
-      successCountRatio: 3.6,
-      costReduction: 0.594773865784,
+      routedSuccessCount: 16,
+      successCountRatio: 3.2,
+      costReduction: 0.554217121588,
       passed: false,
     });
   });

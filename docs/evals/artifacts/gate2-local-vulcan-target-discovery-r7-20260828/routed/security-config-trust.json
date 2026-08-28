@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "security-config-trust",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:48:54.577Z",
+  "generatedAt": "2026-08-28T18:00:49.129Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,11 +19,12 @@
     "digestSha256": "18a151224e181552beaf2862705cad0a27fe1756b23f03d28aa7927d162d980c",
     "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"config/app.json\",\"src/greeting.py\",\"src/main.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"src/greeting.py\",\"src/main.py\"],\"findingIds\":[],\"summary\":\"No concrete trust-boundary risk identified. src/main.py reads config/app.json, extracts the 'audience' field, and passes it to greeting(). src/greeting.py consumes the value solely inside an f-string (f\\\"Welcome, {audience}.\\\") with no code execution, path construction, subprocess invocation, or authority expansion. The value is never used as a filesystem path, shell argument, SQL fragment, or dynamic code. Although the type annotation declares str and no isinstance guard is present, the only downstream operation is string interpolation, which safely coerces any JSON scalar or container to text without altering program control flow. No path-traversal, authority-widening, or unvalidated-config-shape risk with a concrete security impact is supported by the reviewed bytes.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"config/app.json\",\"README.md\",\"src/greeting.py\",\"src/main.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"src/greeting.py\",\"src/main.py\"],\"findingIds\":[\"unvalidated-config-shape\"],\"summary\":\"src/main.py reads config/app.json and indexes [\\\"audience\\\"] with no existence or type check before passing the value to greeting(). src/greeting.py declares audience: str but Python does not enforce the annotation at runtime, so a non-string JSON value (number, list, object) or a missing key is consumed unvalidated across the file-system-to-application trust boundary. Impact is limited to an uncontrolled f-string interpolation or a KeyError crash; no code execution or authority widening is present.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
       "config/app.json",
+      "README.md",
       "src/greeting.py",
       "src/main.py"
     ],
@@ -38,8 +39,10 @@
         "src/greeting.py",
         "src/main.py"
       ],
-      "findingIds": [],
-      "summary": "No concrete trust-boundary risk identified. src/main.py reads config/app.json, extracts the 'audience' field, and passes it to greeting(). src/greeting.py consumes the value solely inside an f-string (f\"Welcome, {audience}.\") with no code execution, path construction, subprocess invocation, or authority expansion. The value is never used as a filesystem path, shell argument, SQL fragment, or dynamic code. Although the type annotation declares str and no isinstance guard is present, the only downstream operation is string interpolation, which safely coerces any JSON scalar or container to text without altering program control flow. No path-traversal, authority-widening, or unvalidated-config-shape risk with a concrete security impact is supported by the reviewed bytes."
+      "findingIds": [
+        "unvalidated-config-shape"
+      ],
+      "summary": "src/main.py reads config/app.json and indexes [\"audience\"] with no existence or type check before passing the value to greeting(). src/greeting.py declares audience: str but Python does not enforce the annotation at runtime, so a non-string JSON value (number, list, object) or a missing key is consumed unvalidated across the file-system-to-application trust boundary. Impact is limited to an uncontrolled f-string interpolation or a KeyError crash; no code execution or authority widening is present."
     }
   },
   "candidateError": null,
@@ -47,8 +50,8 @@
     "schemaVersion": 1,
     "caseId": "security-config-trust",
     "evaluatorId": "security-config-trust-evaluator",
-    "candidateSha256": "6746ba72c528e6f6a1476dbd966bff2b41fbcff9bcb7295c8d990369546efe26",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "1bb32882d6066da29c1daab2a7276201603926f36534d20ee26cd1b7b0ec7428",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -60,7 +63,9 @@
       "src/greeting.py",
       "src/main.py"
     ],
-    "findingIds": [],
+    "findingIds": [
+      "unvalidated-config-shape"
+    ],
     "checks": [],
     "scenarioStatus": "failed",
     "sourceCheckoutUnchanged": true
@@ -94,16 +99,18 @@
       "src/greeting.py",
       "src/main.py"
     ],
-    "findingIds": [],
+    "findingIds": [
+      "unvalidated-config-shape"
+    ],
     "scenarioEvaluatorId": "security-config-trust-evaluator",
-    "scenarioEvidenceSha256": "2dfde6f0726bf82bd3059ed444c4c2e1ceaef9e0afc215d138da51e0bfc8b096",
+    "scenarioEvidenceSha256": "aad7a89757821d8717b2a1fe457714388d51bc54d387eb9e0646cedc498d57d3",
     "scenarioStatus": "failed",
     "usage": {
-      "inputTokens": 887,
-      "outputTokens": 1464,
-      "estimatedCostUsd": 0.0018443595,
+      "inputTokens": 855,
+      "outputTokens": 1668,
+      "estimatedCostUsd": 0.0019792935,
       "actualBilledUsd": null,
-      "latencyMs": 83517
+      "latencyMs": 94069
     }
   }
 }

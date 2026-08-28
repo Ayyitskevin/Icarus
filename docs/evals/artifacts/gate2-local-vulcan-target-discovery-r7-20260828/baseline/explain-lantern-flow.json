@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "baseline",
   "caseId": "explain-lantern-flow",
   "modelId": "code-fast",
-  "generatedAt": "2026-08-28T16:08:05.061Z",
+  "generatedAt": "2026-08-28T17:25:49.798Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,15 +19,15 @@
     "digestSha256": "2e10df3104605700d8c30aae5c8d63f8d19df5215bf21c3eb6e0f239de6d4cb1",
     "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff"
   },
-  "rawCandidate": "```json\n{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"README.md\",\n    \"config/app.json\",\n    \"src/greeting.py\",\n    \"src/main.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [],\n    \"requestedCheckIds\": []\n  },\n  \"answer\": {\n    \"kind\": \"read_only\",\n    \"files\": [],\n    \"citations\": [\n      \"README.md\",\n      \"config/app.json\",\n      \"src/greeting.py\",\n      \"src/main.py\"\n    ],\n    \"findingIds\": [],\n    \"summary\": \"The configured audience reaches stdout through a four-step chain. README.md documents the entry point and configuration location: 'Configuration lives in `config/app.json`; execution begins in `src/main.py`.' config/app.json supplies the value, containing the field \\\"audience\\\": \\\"traveler\\\". src/main.py is the entry point that reads that file, extracts the audience, and prints the result: it does `json.loads(Path(\\\"config/app.json\\\").read_text())[\\\"audience\\\"]` and passes it to `greeting(...)`, with the whole call wrapped in `print(...)` so the string is written to stdout. src/greeting.py defines the greeting behavior: `def greeting(audience: str) -> str: return f\\\"Welcome, {audience}.\\\"`, which formats the audience into the final message. The end-to-end output is therefore `Welcome, traveler.`\"\n  }\n}\n```",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"config/app.json\",\"src/main.py\",\"src/greeting.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"config/app.json\",\"src/greeting.py\",\"src/main.py\"],\"findingIds\":[],\"summary\":\"Execution begins in src/main.py, the entry point documented by README.md as where 'execution begins' while configuration lives in config/app.json. main.py reads config/app.json, parses the JSON, and extracts the 'audience' field (the configured value 'traveler'). That audience string is passed to greeting() in src/greeting.py, which returns the formatted string 'Welcome, {audience}.'. main.py wraps that return value in print(), emitting the greeting to stdout. Thus the configured audience flows: config/app.json (source of 'audience') -> main.py (reads JSON, extracts field) -> greeting.py (formats message) -> print() (stdout).\"}",
   "candidate": null,
   "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
   "evaluatorEvidence": {
     "schemaVersion": 1,
     "caseId": "explain-lantern-flow",
     "evaluatorId": "explain-lantern-flow-evaluator",
-    "candidateSha256": "6bd46e2844284665870dafa96dc265e8e2ce62543b362fbd60222fae6f899828",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "dd5074adece75a4fe39d3085730d3999e88a4e0cb78247fc5a9901eb0391c3bf",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -69,14 +69,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "explain-lantern-flow-evaluator",
-    "scenarioEvidenceSha256": "b538ea436b061dbf2ad696f5bd65c9367ebfce897059fe398c414f2ed3b4bdfc",
+    "scenarioEvidenceSha256": "e8e416cc664259cdb0f762ddf985402fe4d6e5cf51da3db5b055fd67e2dd59bf",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 762,
-      "outputTokens": 513,
-      "estimatedCostUsd": 0.001275,
+      "outputTokens": 514,
+      "estimatedCostUsd": 0.001276,
       "actualBilledUsd": null,
-      "latencyMs": 9861
+      "latencyMs": 9909
     }
   }
 }

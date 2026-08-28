@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "baseline",
   "caseId": "explain-schema-contract",
   "modelId": "code-fast",
-  "generatedAt": "2026-08-28T16:08:48.818Z",
+  "generatedAt": "2026-08-28T17:26:28.671Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,52 +19,23 @@
     "digestSha256": "8ece9a7a15ebf6c9dff084f62841871793550a4231fe6dac5b4f1fab4a072d64",
     "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/schema_contract.sql\",\"migrations/README.md\",\"README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"checks/schema_contract.sql\",\"migrations/README.md\",\"README.md\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"The current task table is defined in schema/current.sql as tasks(id INTEGER PRIMARY KEY, title TEXT NOT NULL). The offline contract query in checks/schema_contract.sql (SELECT id, title FROM tasks LIMIT 0) exists so a future evaluator can assert the tasks table remains readable without mutating state. This is intentional because README.md states the fixture models an offline application schema and evaluation must never apply a migration to live state, and migrations/README.md reserves numbered migrations for after explicit schema approval. The LIMIT 0 ensures the query reads schema/row structure only and performs no data changes.\"}}",
-  "candidate": {
-    "schemaVersion": 1,
-    "selectedContextPaths": [
-      "checks/schema_contract.sql",
-      "migrations/README.md",
-      "README.md",
-      "schema/current.sql"
-    ],
-    "plan": {
-      "mutationTargets": [],
-      "requestedCheckIds": []
-    },
-    "answer": {
-      "kind": "read_only",
-      "files": [],
-      "citations": [
-        "checks/schema_contract.sql",
-        "migrations/README.md",
-        "README.md",
-        "schema/current.sql"
-      ],
-      "findingIds": [],
-      "summary": "The current task table is defined in schema/current.sql as tasks(id INTEGER PRIMARY KEY, title TEXT NOT NULL). The offline contract query in checks/schema_contract.sql (SELECT id, title FROM tasks LIMIT 0) exists so a future evaluator can assert the tasks table remains readable without mutating state. This is intentional because README.md states the fixture models an offline application schema and evaluation must never apply a migration to live state, and migrations/README.md reserves numbered migrations for after explicit schema approval. The LIMIT 0 ensures the query reads schema/row structure only and performs no data changes."
-    }
-  },
-  "candidateError": null,
+  "rawCandidate": "```json\n{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/schema_contract.sql\",\"migrations/README.md\",\"README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"checks/schema_contract.sql\",\"migrations/README.md\",\"README.md\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"The `tasks` table (schema/current.sql) has two columns: `id INTEGER PRIMARY KEY` and `title TEXT NOT NULL`. The offline contract query (checks/schema_contract.sql) asserts the table remains readable via `SELECT id, title FROM tasks LIMIT 0;` — a zero-row probe that validates the schema is queryable without mutating state. Repository documentation (README.md) states this is an offline application schema fixture and that evaluation must never apply a migration to live state; migrations/README.md reserves future numbered migrations for after explicit schema approval. Together these define the contract: the table shape is fixed and read-only-checked, and no live migration is applied during evaluation.\"}}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
   "evaluatorEvidence": {
     "schemaVersion": 1,
     "caseId": "explain-schema-contract",
     "evaluatorId": "explain-schema-contract-evaluator",
-    "candidateSha256": "c3eb69b11b6da208dd4dfd03a58bafac6ad033ff93a7a4185f45859e8d3f9a29",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "e801594e696a07a6fb8ef54d7b14e4851ac07a6021bcd656f152a8da9a7c6b16",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
     "usageBasis": "provider_reported",
     "providerOutputComplete": true,
-    "firstPassPlanAccepted": true,
+    "firstPassPlanAccepted": false,
     "changedPaths": [],
-    "citations": [
-      "checks/schema_contract.sql",
-      "migrations/README.md",
-      "README.md",
-      "schema/current.sql"
-    ],
+    "citations": [],
     "findingIds": [],
     "checks": [],
     "scenarioStatus": "failed",
@@ -93,24 +64,19 @@
         "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
       }
     ],
-    "firstPassPlanAccepted": true,
+    "firstPassPlanAccepted": false,
     "changedPaths": [],
-    "citations": [
-      "checks/schema_contract.sql",
-      "migrations/README.md",
-      "README.md",
-      "schema/current.sql"
-    ],
+    "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "explain-schema-contract-evaluator",
-    "scenarioEvidenceSha256": "66507e01eb3012e1a735fe6453492d11554e3f8a5a4766523d5dd9e1d5e4a4a7",
+    "scenarioEvidenceSha256": "9d2f2b2f0245947742330e9ec4805555894f635b06c45f43b4ef2c10765ce04c",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 742,
-      "outputTokens": 512,
-      "estimatedCostUsd": 0.001254,
+      "outputTokens": 556,
+      "estimatedCostUsd": 0.001298,
       "actualBilledUsd": null,
-      "latencyMs": 9486
+      "latencyMs": 10223
     }
   }
 }

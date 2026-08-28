@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "baseline",
   "caseId": "repair-lantern-missing-config",
   "modelId": "code-fast",
-  "generatedAt": "2026-08-28T15:59:39.487Z",
+  "generatedAt": "2026-08-28T17:17:24.734Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -53,7 +53,7 @@
     "caseId": "repair-lantern-missing-config",
     "evaluatorId": "repair-lantern-missing-config-evaluator",
     "candidateSha256": "95ae23832a113047454cc0f6f4f7185417e6fdac35a46eda6f7b99dd79e3148e",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -114,14 +114,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "repair-lantern-missing-config-evaluator",
-    "scenarioEvidenceSha256": "caf9200681feadbd22fa5014ae0d2cf8ef035d5bba5914ea1393141047d6a5d1",
+    "scenarioEvidenceSha256": "f12fc21438da9acf2114971660358cf039128c22147d2f6740074334dcab8394",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 713,
       "outputTokens": 3820,
       "estimatedCostUsd": 0.004533,
       "actualBilledUsd": null,
-      "latencyMs": 66516
+      "latencyMs": 66473
     }
   }
 }

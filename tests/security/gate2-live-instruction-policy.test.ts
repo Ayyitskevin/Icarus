@@ -33,6 +33,12 @@ describe("Gate 2 live instruction policy", () => {
       "checks/",
       ".py",
       ".sql",
+      "expected-answer",
+      "configuration trust",
+      "dynamic execution",
+      "schema-versus-live-state",
+      "concrete source-code vulnerability",
+      "evaluator/check files",
     ]) {
       expect(combined).not.toContain(benchmarkShapedFragment);
     }
@@ -40,7 +46,7 @@ describe("Gate 2 live instruction policy", () => {
       "Do not repair unrelated defects",
     );
     expect(buildGate2LiveInstructions("security_review", "read_only")).toContain(
-      "cite the concrete input shape and its consuming code",
+      "Follow only the implemented data or control flow relevant to the task",
     );
     expect(buildGate2LiveInstructions("scaffold", "mutation")).not.toContain('"steps"');
   });

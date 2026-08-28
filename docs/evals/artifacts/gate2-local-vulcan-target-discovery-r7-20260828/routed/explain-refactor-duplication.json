@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "explain-refactor-duplication",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:44:13.846Z",
+  "generatedAt": "2026-08-28T17:56:07.148Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,11 +19,12 @@
     "digestSha256": "3bef220b00b1b51d01ab02d1ed827f005397b06a4c6e9124e24d5878eaba0b5d",
     "repositoryDigestSha256": "ba8451fe227e973c5c9e255880235e00488f9c204bbe8cd5fbca73e3c8d2f47f"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"findingIds\":[],\"summary\":\"Both public functions implement byte-identical normalization: strip leading/trailing whitespace, collapse internal runs of whitespace to single spaces, then apply title-casing. src/format_name.py::format_name and src/profile.py::display_name each return \\\" \\\".join(value.strip().split()).title(). The check in checks/test_profile.py proves their equivalence by asserting format_name(\\\"  ada   lovelace \\\") == display_name(\\\"  ada   lovelace \\\") == \\\"Ada Lovelace\\\", confirming the two duplicated implementations are behaviorally identical for the exercised input.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/test_profile.py\",\"README.md\",\"src/format_name.py\",\"src/profile.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"findingIds\":[],\"summary\":\"Both public functions implement byte-identical normalization: strip leading/trailing whitespace, collapse internal runs of whitespace to single spaces, then apply title-casing. src/format_name.py::format_name and src/profile.py::display_name each return \\\" \\\".join(value.strip().split()).title(). The check in checks/test_profile.py proves their equivalence by asserting format_name(\\\"  ada   lovelace \\\") == display_name(\\\"  ada   lovelace \\\") == \\\"Ada Lovelace\\\", confirming the duplicated logic produces identical output for a representative input. README.md labels this a refactor fixture: the duplication is intentional, and a behavior-preserving refactor would extract the shared expression into one helper, have both public modules delegate to it, and retain the equivalence check.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
       "checks/test_profile.py",
+      "README.md",
       "src/format_name.py",
       "src/profile.py"
     ],
@@ -40,7 +41,7 @@
         "src/profile.py"
       ],
       "findingIds": [],
-      "summary": "Both public functions implement byte-identical normalization: strip leading/trailing whitespace, collapse internal runs of whitespace to single spaces, then apply title-casing. src/format_name.py::format_name and src/profile.py::display_name each return \" \".join(value.strip().split()).title(). The check in checks/test_profile.py proves their equivalence by asserting format_name(\"  ada   lovelace \") == display_name(\"  ada   lovelace \") == \"Ada Lovelace\", confirming the two duplicated implementations are behaviorally identical for the exercised input."
+      "summary": "Both public functions implement byte-identical normalization: strip leading/trailing whitespace, collapse internal runs of whitespace to single spaces, then apply title-casing. src/format_name.py::format_name and src/profile.py::display_name each return \" \".join(value.strip().split()).title(). The check in checks/test_profile.py proves their equivalence by asserting format_name(\"  ada   lovelace \") == display_name(\"  ada   lovelace \") == \"Ada Lovelace\", confirming the duplicated logic produces identical output for a representative input. README.md labels this a refactor fixture: the duplication is intentional, and a behavior-preserving refactor would extract the shared expression into one helper, have both public modules delegate to it, and retain the equivalence check."
     }
   },
   "candidateError": null,
@@ -48,8 +49,8 @@
     "schemaVersion": 1,
     "caseId": "explain-refactor-duplication",
     "evaluatorId": "explain-refactor-duplication-evaluator",
-    "candidateSha256": "ba98b650225ba38e0a710ed81cc87b971d4a8b551b658677552323f258d9afe6",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "d7432064faed9ace20263858e2fc2b10688b1dbdd75cb2bdd71f357c7935fd3c",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -99,14 +100,14 @@
     ],
     "findingIds": [],
     "scenarioEvaluatorId": "explain-refactor-duplication-evaluator",
-    "scenarioEvidenceSha256": "f38108660dabdb0086206f9b22c2e8a59ddf653f179f4cd30772326ba6a89b7e",
+    "scenarioEvidenceSha256": "34a52b6509b5015dd5d1a53a2611a63a5559f485f68cc750d3dc39118255ce51",
     "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 774,
-      "outputTokens": 566,
-      "estimatedCostUsd": 0.00105123,
+      "outputTokens": 602,
+      "estimatedCostUsd": 0.001079472,
       "actualBilledUsd": null,
-      "latencyMs": 31828
+      "latencyMs": 33607
     }
   }
 }

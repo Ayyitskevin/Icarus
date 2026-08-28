@@ -17,7 +17,7 @@ The current sequence is:
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
 | 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
-| 2 | Context and agent quality — **target discovery improved; quality gate open** | deterministic v2 adoption remains 30/30 replay-valid; ADR 0067's leak-free versioned target-discovery profile measured fixed `code-fast` at 5/30 and routed `code` at 18/30, including security review 2/5 and scaffold 1/5, with unchanged retrieval/provenance and zero incorrect edits; the routed run still missed the predeclared 24/30 success and 0.80 first-plan thresholds, so Gate 2 remains open |
+| 2 | Context and agent quality — **target discovery improved; quality gate open** | deterministic v2 adoption remains 30/30 replay-valid; ADR 0067's leak-free versioned target-discovery profile measured fixed `code-fast` at 5/30 and routed `code` at 16/30, including security review 2/5 and scaffold 0/5, with unchanged retrieval/provenance and zero incorrect edits; the routed run still missed the predeclared 24/30 success and 0.80 first-plan thresholds, so Gate 2 remains open |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
 | C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
@@ -80,9 +80,9 @@ selected context, targets, plans, and answers. ADR 0066 recorded fixed
 simpler first-plan contract, digest-bound class guidance, deterministic
 generation, and an all-`code` routed lane without supplying expected answers or
 widening authority. Its leak-free paired run measured fixed `code-fast` at 5/30
-and routed `code` at 18/30, with recall `0.9917`, precision `0.8083`, provenance
+and routed `code` at 16/30, with recall `0.9917`, precision `0.8083`, provenance
 `1.0`, zero incorrect edits, plan acceptance `0.7667`, security review 2/5, and
-scaffold 1/5. All provider requests completed. Both absolute quality thresholds
+scaffold 0/5. All provider requests completed. Both absolute quality thresholds
 still fail, and one repeated baseline remains insufficient stability evidence.
 Gate 2 remains open for
 stable success of at least 24/30 and plan acceptance of at least 0.80. The

@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "security-path-traversal",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:45:56.404Z",
+  "generatedAt": "2026-08-28T17:57:26.646Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "3484ca5f48cedeed0f3cc0c87dd915c7543bde7ae4662fed8bcb31ec90e95ea6",
     "repositoryDigestSha256": "0091120cc1019d8c7e48935b1f0a41bf5925098210cdb4e7b3d2fd60af3c3849"
   },
-  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\"README.md\", \"src/files.py\"],\n  \"plan\": {\n    \"mutationTargets\": [],\n    \"requestedCheckIds\": []\n  },\n  \"answer\": {\n    \"kind\": \"read_only\",\n    \"files\": [],\n    \"citations\": [\"README.md\", \"src/files.py\"],\n    \"findingIds\": [],\n    \"summary\": \"path-traversal (High): read_public() in src/files.py concatenates the caller-supplied user_path directly onto root via (root / user_path).read_text() without resolving the result or verifying it remains under root. An attacker supplying a user_path containing '../' segments (e.g. '../../etc/passwd') causes the resolved path to escape the public root, reading arbitrary files readable by the process. The README documents the intended boundary as 'serve files below one public root,' which the code never enforces. Exploit condition: any caller that forwards untrusted path strings to read_public without prior sanitisation.\"\n  }\n}",
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\"README.md\", \"src/files.py\"],\n  \"plan\": {\n    \"mutationTargets\": [],\n    \"requestedCheckIds\": []\n  },\n  \"answer\": {\n    \"kind\": \"read_only\",\n    \"files\": [],\n    \"citations\": [\"README.md\", \"src/files.py\"],\n    \"findingIds\": [\"path-traversal\"],\n    \"summary\": \"Severity: High. In src/files.py, read_public() concatenates the user-supplied string directly onto the root Path ((root / user_path).read_text(...)) without calling .resolve() or verifying the result remains under root. README.md states the intended boundary is 'serve files below one public root.' Exploit condition: a caller passes user_path containing '..' segments (e.g. '../../etc/passwd') or an absolute path; pathlib's '/' operator does not normalize or confine, so the resolved target escapes the public root and reads an arbitrary file. No containment check exists in the implementation.\"\n  }\n}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -37,8 +37,10 @@
         "README.md",
         "src/files.py"
       ],
-      "findingIds": [],
-      "summary": "path-traversal (High): read_public() in src/files.py concatenates the caller-supplied user_path directly onto root via (root / user_path).read_text() without resolving the result or verifying it remains under root. An attacker supplying a user_path containing '../' segments (e.g. '../../etc/passwd') causes the resolved path to escape the public root, reading arbitrary files readable by the process. The README documents the intended boundary as 'serve files below one public root,' which the code never enforces. Exploit condition: any caller that forwards untrusted path strings to read_public without prior sanitisation."
+      "findingIds": [
+        "path-traversal"
+      ],
+      "summary": "Severity: High. In src/files.py, read_public() concatenates the user-supplied string directly onto the root Path ((root / user_path).read_text(...)) without calling .resolve() or verifying the result remains under root. README.md states the intended boundary is 'serve files below one public root.' Exploit condition: a caller passes user_path containing '..' segments (e.g. '../../etc/passwd') or an absolute path; pathlib's '/' operator does not normalize or confine, so the resolved target escapes the public root and reads an arbitrary file. No containment check exists in the implementation."
     }
   },
   "candidateError": null,
@@ -46,8 +48,8 @@
     "schemaVersion": 1,
     "caseId": "security-path-traversal",
     "evaluatorId": "security-path-traversal-evaluator",
-    "candidateSha256": "4b92a40d8255764509bb9d14f63c25716f67fadfee44ea585ca350b7f106a211",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "bacb2ec6af6d1c0f7f0d88503e0fab6ce6e45826b2b043a00bf09ea400f71611",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -59,7 +61,9 @@
       "README.md",
       "src/files.py"
     ],
-    "findingIds": [],
+    "findingIds": [
+      "path-traversal"
+    ],
     "checks": [],
     "scenarioStatus": "failed",
     "sourceCheckoutUnchanged": true
@@ -89,16 +93,18 @@
       "README.md",
       "src/files.py"
     ],
-    "findingIds": [],
+    "findingIds": [
+      "path-traversal"
+    ],
     "scenarioEvaluatorId": "security-path-traversal-evaluator",
-    "scenarioEvidenceSha256": "fd011d85fb1b85a0a52431153377925e0f4c46b8cdfabf97952932a13ddcf34f",
+    "scenarioEvidenceSha256": "bab6b1e756bb2d3373253fa1ae60605881c13298dd8cee4dc96dad4cf5d001a2",
     "scenarioStatus": "failed",
     "usage": {
-      "inputTokens": 805,
-      "outputTokens": 1370,
-      "estimatedCostUsd": 0.0017062875,
+      "inputTokens": 773,
+      "outputTokens": 932,
+      "estimatedCostUsd": 0.0013375725,
       "actualBilledUsd": null,
-      "latencyMs": 74431
+      "latencyMs": 51146
     }
   }
 }

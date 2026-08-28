@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "refactor-name-normalization",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:35:17.411Z",
+  "generatedAt": "2026-08-28T17:48:25.485Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "f3df8ec95079bda93438c76f2cc26b2aa73ae5d00969f2c59d2f034a836e103b",
     "repositoryDigestSha256": "ba8451fe227e973c5c9e255880235e00488f9c204bbe8cd5fbca73e3c8d2f47f"
   },
-  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"README.md\",\n    \"checks/test_profile.py\",\n    \"src/format_name.py\",\n    \"src/profile.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/format_name.py\",\n      \"src/name_normalization.py\",\n      \"src/profile.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"profile-contract\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/format_name.py\",\n        \"content\": \"from .name_normalization import normalize_name\\n\\n\\ndef format_name(value: str) -> str:\\n    return normalize_name(value)\\n\"\n      },\n      {\n        \"path\": \"src/name_normalization.py\",\n        \"content\": \"def normalize_name(value: str) -> str:\\n    return \\\" \\\".join(value.strip().split()).title()\\n\"\n      },\n      {\n        \"path\": \"src/profile.py\",\n        \"content\": \"from .name_normalization import normalize_name\\n\\n\\ndef display_name(value: str) -> str:\\n    return normalize_name(value)\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Extracted the duplicated name normalization logic into src/name_normalization.py and updated both public functions to delegate to the shared implementation while preserving behavior.\"\n  }\n}",
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"README.md\",\n    \"checks/test_profile.py\",\n    \"src/format_name.py\",\n    \"src/profile.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/format_name.py\",\n      \"src/name_normalization.py\",\n      \"src/profile.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"profile-contract\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/format_name.py\",\n        \"content\": \"from src.name_normalization import normalize_name\\n\\n\\ndef format_name(value: str) -> str:\\n    return normalize_name(value)\\n\"\n      },\n      {\n        \"path\": \"src/name_normalization.py\",\n        \"content\": \"def normalize_name(value: str) -> str:\\n    return \\\" \\\".join(value.strip().split()).title()\\n\"\n      },\n      {\n        \"path\": \"src/profile.py\",\n        \"content\": \"from src.name_normalization import normalize_name\\n\\n\\ndef display_name(value: str) -> str:\\n    return normalize_name(value)\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Extracted the duplicated name normalization logic into src/name_normalization.py and updated both public functions to delegate to the shared implementation while preserving behavior.\"\n  }\n}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -43,7 +43,7 @@
       "files": [
         {
           "path": "src/format_name.py",
-          "content": "from .name_normalization import normalize_name\n\n\ndef format_name(value: str) -> str:\n    return normalize_name(value)\n"
+          "content": "from src.name_normalization import normalize_name\n\n\ndef format_name(value: str) -> str:\n    return normalize_name(value)\n"
         },
         {
           "path": "src/name_normalization.py",
@@ -51,7 +51,7 @@
         },
         {
           "path": "src/profile.py",
-          "content": "from .name_normalization import normalize_name\n\n\ndef display_name(value: str) -> str:\n    return normalize_name(value)\n"
+          "content": "from src.name_normalization import normalize_name\n\n\ndef display_name(value: str) -> str:\n    return normalize_name(value)\n"
         }
       ],
       "citations": [],
@@ -64,8 +64,8 @@
     "schemaVersion": 1,
     "caseId": "refactor-name-normalization",
     "evaluatorId": "refactor-name-normalization-evaluator",
-    "candidateSha256": "4f3ba50361efdf7a724304011184e26bc5a29d2c76ea56cb478745ee599d3e42",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "65f73b55f8edf6f9d01746b0796e8b15f05ab05a1189eb489412085c88e035cf",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -130,14 +130,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "refactor-name-normalization-evaluator",
-    "scenarioEvidenceSha256": "47d131b5da5c627d2f8e42b73685c2b075a04251a36819d2b87fe1238637668f",
+    "scenarioEvidenceSha256": "fabc37f4671718f96c8ad4327d0f0ea844367b19fa7ea34cfdfef190f319d3cb",
     "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 733,
-      "outputTokens": 1363,
-      "estimatedCostUsd": 0.001644312,
+      "outputTokens": 1209,
+      "estimatedCostUsd": 0.001523499,
       "actualBilledUsd": null,
-      "latencyMs": 76595
+      "latencyMs": 72307
     }
   }
 }

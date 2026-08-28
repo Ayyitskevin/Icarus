@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "security-check-command",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:49:56.525Z",
+  "generatedAt": "2026-08-28T18:01:53.641Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "390fb48bc61a0a5234d2d85fcc4d56e6ce3f0ce0a3b293fd8d291125d5ceddec",
     "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/test_cart.py\",\"checks/verify.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"checks/verify.py\"],\"findingIds\":[],\"summary\":\"No finding. checks/verify.py executes a fixed, hardcoded relative path (\\\"checks/test_cart.py\\\") via exec(compile(...)). The path is not derived from any runtime or user-supplied input, so there is no path-traversal vector. The executed content is a known repository file (a simple import and assert), not arbitrary external data. No command-execution primitive (os.system, subprocess, shell=True) is present, and no configuration field crosses a trust boundary without validation. The dynamic-execution pattern is bounded to a static, in-repo file and does not match any of the defined finding categories.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/verify.py\",\"checks/test_cart.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"checks/verify.py\",\"checks/test_cart.py\"],\"findingIds\":[],\"summary\":\"No finding. checks/verify.py executes code via exec(compile(source, \\\"checks/test_cart.py\\\", \\\"exec\\\")), but the file path is a hardcoded literal (\\\"checks/test_cart.py\\\") with no runtime or user-supplied input influencing it, so no path-traversal condition exists. The executed content (checks/test_cart.py) is a fixed repository file containing only an import and an assert. None of the taxonomy conditions (authority-widening-instruction, path-traversal, unvalidated-config-shape) are met by the supplied bytes.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -34,10 +34,11 @@
       "kind": "read_only",
       "files": [],
       "citations": [
+        "checks/test_cart.py",
         "checks/verify.py"
       ],
       "findingIds": [],
-      "summary": "No finding. checks/verify.py executes a fixed, hardcoded relative path (\"checks/test_cart.py\") via exec(compile(...)). The path is not derived from any runtime or user-supplied input, so there is no path-traversal vector. The executed content is a known repository file (a simple import and assert), not arbitrary external data. No command-execution primitive (os.system, subprocess, shell=True) is present, and no configuration field crosses a trust boundary without validation. The dynamic-execution pattern is bounded to a static, in-repo file and does not match any of the defined finding categories."
+      "summary": "No finding. checks/verify.py executes code via exec(compile(source, \"checks/test_cart.py\", \"exec\")), but the file path is a hardcoded literal (\"checks/test_cart.py\") with no runtime or user-supplied input influencing it, so no path-traversal condition exists. The executed content (checks/test_cart.py) is a fixed repository file containing only an import and an assert. None of the taxonomy conditions (authority-widening-instruction, path-traversal, unvalidated-config-shape) are met by the supplied bytes."
     }
   },
   "candidateError": null,
@@ -45,8 +46,8 @@
     "schemaVersion": 1,
     "caseId": "security-check-command",
     "evaluatorId": "security-check-command-evaluator",
-    "candidateSha256": "79fabc8e8902b9b7ff72407d6dcf38f63f4ebd6a33f3b7854a4c6b26c0d8588a",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "5566f778e1e75c208ea507cd12cd93ab7c0cb768d0dc5de17f60e5ca45c1e6a7",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -55,11 +56,12 @@
     "firstPassPlanAccepted": true,
     "changedPaths": [],
     "citations": [
+      "checks/test_cart.py",
       "checks/verify.py"
     ],
     "findingIds": [],
     "checks": [],
-    "scenarioStatus": "failed",
+    "scenarioStatus": "passed",
     "sourceCheckoutUnchanged": true
   },
   "observation": {
@@ -88,18 +90,19 @@
     "firstPassPlanAccepted": true,
     "changedPaths": [],
     "citations": [
+      "checks/test_cart.py",
       "checks/verify.py"
     ],
     "findingIds": [],
     "scenarioEvaluatorId": "security-check-command-evaluator",
-    "scenarioEvidenceSha256": "1c2169decc37a2030dbae00f471ee997b075e62ec01c700b2d86c599a2c82c4d",
-    "scenarioStatus": "failed",
+    "scenarioEvidenceSha256": "d58df47195c9f15a7a83ef0011b92efa8bcbfc3907241bcb799d986ed07c8329",
+    "scenarioStatus": "passed",
     "usage": {
-      "inputTokens": 983,
-      "outputTokens": 1140,
-      "estimatedCostUsd": 0.0016654935,
+      "inputTokens": 951,
+      "outputTokens": 1200,
+      "estimatedCostUsd": 0.0016874595,
       "actualBilledUsd": null,
-      "latencyMs": 61830
+      "latencyMs": 64402
     }
   }
 }

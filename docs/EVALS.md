@@ -400,41 +400,52 @@ inputs replay byte-identically. The dated measurement is
 
 ## Gate 2 live-model comparison
 
-ADR 0066 adds the first explicit live execution of all 30 manifest-v2 cases.
-It is separate from deterministic `pnpm eval` and runs only through the focused
-`benchmark:gate2:live:*` commands. A digest-bound profile pins local Vulcan's
-`code` and `code-fast` mappings, exact local Ollama model digests, positive
-estimated rates, the fixed baseline, and the model pool. A separate digest-bound
-routing policy uses `code-fast` for every baseline case and routes repair,
-refactor, explanation, and scaffold to `code`, retaining `code-fast` for
-security review.
+ADR 0066 added the first explicit live execution of all 30 manifest-v2 cases;
+ADR 0067 adds the current target-discovery successor without rewriting that
+evidence. Both are separate from deterministic `pnpm eval` and run only through
+the focused `benchmark:gate2:live:*` commands. A digest-bound profile pins local
+Vulcan's `code` and `code-fast` mappings, exact local Ollama model digests,
+positive estimated rates, the fixed baseline, and the model pool. ADR 0067's
+separately bound routing policy uses `code-fast` for every baseline case and
+`code` for every routed case.
 
 Each model independently selects its bounded retrieved context, first plan,
-targets, and answer through a closed candidate contract. The host does not
-repair semantic output. Exact-plan mutation candidates run only in disposable
-private copies through registered no-network Docker checks; read-only outcomes
-require exact manifest citations and finding IDs. Every case proves its source
-copy unchanged and retains structural, plan, evaluator, usage, and finish
-evidence. Truncated output remains a failed observation.
+targets, and answer through a closed candidate contract. The current profile
+supplies the complete eligible path inventory, removes unused plan prose, and
+binds target-independent revision-8 instructions under SHA-256
+`5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d`;
+it supplies no expected target, finding, citation, or evaluator answer. The host
+does not repair semantic output. Exact-plan mutation candidates run only in
+disposable private copies through registered no-network Docker checks;
+read-only outcomes require exact manifest citations and finding IDs. Every case
+proves its source copy unchanged and retains structural, plan, evaluator,
+usage, provider-completion, and finish evidence. Truncated output is a failed
+observation; a request timeout is retained as a failed case with declared-budget
+upper-bound accounting, while other transport failures abort the run.
 
-The fixed baseline succeeded 5/30 with first-plan acceptance `0.40`; the routed
-run succeeded 9/30 with acceptance `0.6667`. Both retained macro recall
-`0.9917`, precision `0.8083`, provenance `1.0`, and zero incorrect edits. The
-routed run improved the success count and lowered median estimated proxy cost
-per success by `0.369962846348`, but it still missed the predeclared 24/30 and
-0.80 absolute thresholds. The strict comparison therefore reports
-`gate2-routing-comparison-failed`. Security review and scaffold each measured
-0/5, making autonomous target discovery and minimal exact citations the next
-quality slice.
+The current leak-free run measured fixed `code-fast` at 5/30 with first-plan
+acceptance `0.2667`, and routed `code` at 16/30 with acceptance `0.7667`.
+Routed class success was repair 7/10, refactor 4/5, explanation 3/5, security
+review 2/5, and scaffold 0/5. Both retained macro recall `0.9917`, precision
+`0.8083`, provenance `1.0`, and zero incorrect edits. The routed run improved
+the success count and lowered median estimated proxy cost per success by
+`0.554217121588`, but it still missed the predeclared 24/30 and 0.80 absolute
+thresholds. The strict comparison therefore reports
+`gate2-routing-comparison-failed`; autonomous target discovery, especially
+scaffold, remains open quality work.
 
-The committed evidence directory contains all 60 case records, preflight, two
+Each committed evidence directory contains all 60 case records, preflight, two
 results, comparison, and a 64-source-file artifact manifest. Publication
-recomputes every contract and digest, checks each model against the routing
-policy, and rejects unknown secret-shaped spans. The configured rates are a
-relative local artifact-size proxy, not billed USD; all actual billed cost
-fields remain null. These unkeyed records establish reviewable self-consistency,
-not runner authentication, multi-seed generalization, new runtime authority, or
-Gate 2 completion. The dated record is
+revalidates immutable ADR 0066 v1 and current ADR 0067 v2 against their own
+candidate, evidence, instruction, and routing revisions; recomputes every
+contract and digest; checks each model against its routing policy; and rejects
+unknown secret-shaped spans. The configured rates are a relative local
+artifact-size proxy, not billed USD; all actual billed cost fields remain null.
+These unkeyed records establish reviewable self-consistency, not runner
+authentication, multi-seed generalization, new runtime authority, or Gate 2
+completion. The current dated record is
+[`docs/evals/2026-08-28-gate2-target-discovery-profile.md`](evals/2026-08-28-gate2-target-discovery-profile.md);
+the historical first comparison remains
 [`docs/evals/2026-08-28-gate2-live-model-comparison.md`](evals/2026-08-28-gate2-live-model-comparison.md).
 
 ## Measures

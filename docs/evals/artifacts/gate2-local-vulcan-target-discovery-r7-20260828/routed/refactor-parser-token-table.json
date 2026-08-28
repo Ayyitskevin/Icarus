@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "refactor-parser-token-table",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:39:57.419Z",
+  "generatedAt": "2026-08-28T17:51:58.239Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "bbce43c0a3e764576a31b5b2f5b3863b1c59ba3eeca32a38ebeaf18d789d133d",
     "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2"
   },
-  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"README.md\",\n    \"checks/test_parser.py\",\n    \"checks/verify.py\",\n    \"src/parser.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/parser.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"parser-contract\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/parser.py\",\n        \"content\": \"from types import MappingProxyType\\n\\n_BOOLEAN_TOKENS = MappingProxyType({\\n    \\\"true\\\": True,\\n    \\\"false\\\": False,\\n})\\n\\n\\ndef parse_enabled(value: str) -> bool:\\n    return _BOOLEAN_TOKENS[value]\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Replace the boolean coercion with an immutable token table that maps only the accepted tokens true and false to their boolean values.\"\n  }\n}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_parser.py\",\"checks/verify.py\",\"src/parser.py\"],\"plan\":{\"mutationTargets\":[\"src/parser.py\"],\"requestedCheckIds\":[\"parser-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/parser.py\",\"content\":\"from types import MappingProxyType\\n\\n_TOKENS = MappingProxyType({\\\"true\\\": True, \\\"false\\\": False})\\n\\ndef parse_enabled(value: str) -> bool:\\n    return _TOKENS[value]\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Replace boolean branching with an immutable token mapping that accepts only true and false.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -41,12 +41,12 @@
       "files": [
         {
           "path": "src/parser.py",
-          "content": "from types import MappingProxyType\n\n_BOOLEAN_TOKENS = MappingProxyType({\n    \"true\": True,\n    \"false\": False,\n})\n\n\ndef parse_enabled(value: str) -> bool:\n    return _BOOLEAN_TOKENS[value]\n"
+          "content": "from types import MappingProxyType\n\n_TOKENS = MappingProxyType({\"true\": True, \"false\": False})\n\ndef parse_enabled(value: str) -> bool:\n    return _TOKENS[value]\n"
         }
       ],
       "citations": [],
       "findingIds": [],
-      "summary": "Replace the boolean coercion with an immutable token table that maps only the accepted tokens true and false to their boolean values."
+      "summary": "Replace boolean branching with an immutable token mapping that accepts only true and false."
     }
   },
   "candidateError": null,
@@ -54,8 +54,8 @@
     "schemaVersion": 1,
     "caseId": "refactor-parser-token-table",
     "evaluatorId": "refactor-parser-token-table-evaluator",
-    "candidateSha256": "54401fe2422997c63df0b374fb3eaefb536da4e7e1cb88e7b455674df9083390",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "6e5fc6f5c80d346a559f52442d356450ba6958805e0d57146479726570b95e75",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -116,14 +116,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "refactor-parser-token-table-evaluator",
-    "scenarioEvidenceSha256": "0566870751b3c3f2013d8ebd2e4f2f724609d9bb0b2865afecc864b49981255b",
+    "scenarioEvidenceSha256": "93cbde291c1016bb75ddcc24f8ccfbd2d586e7f4dc67ffdda02f19569de7171d",
     "scenarioStatus": "passed",
     "usage": {
       "inputTokens": 756,
-      "outputTokens": 3125,
-      "estimatedCostUsd": 0.0030446445,
+      "outputTokens": 2175,
+      "estimatedCostUsd": 0.0022993695,
       "actualBilledUsd": null,
-      "latencyMs": 197422
+      "latencyMs": 130445
     }
   }
 }

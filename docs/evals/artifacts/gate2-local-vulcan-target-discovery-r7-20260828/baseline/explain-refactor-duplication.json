@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "baseline",
   "caseId": "explain-refactor-duplication",
   "modelId": "code-fast",
-  "generatedAt": "2026-08-28T16:09:13.654Z",
+  "generatedAt": "2026-08-28T17:26:37.941Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,15 +19,15 @@
     "digestSha256": "3bef220b00b1b51d01ab02d1ed827f005397b06a4c6e9124e24d5878eaba0b5d",
     "repositoryDigestSha256": "ba8451fe227e973c5c9e255880235e00488f9c204bbe8cd5fbca73e3c8d2f47f"
   },
-  "rawCandidate": "```json\n{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"checks/test_profile.py\",\n    \"README.md\",\n    \"src/format_name.py\",\n    \"src/profile.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [],\n    \"requestedCheckIds\": []\n  },\n  \"answer\": {\n    \"kind\": \"read_only\",\n    \"files\": [],\n    \"citations\": [\n      \"checks/test_profile.py\",\n      \"src/format_name.py\",\n      \"src/profile.py\"\n    ],\n    \"findingIds\": [],\n    \"summary\": \"Both public functions implement identical normalization. format_name (src/format_name.py) and display_name (src/profile.py) each return \\\" \\\".join(value.strip().split()).title(), which strips leading/trailing whitespace, collapses internal runs of whitespace to single spaces, and title-cases the result. checks/test_profile.py proves their equivalence by asserting format_name(\\\"  ada   lovelace \\\") == display_name(\\\"  ada   lovelace \\\") == \\\"Ada Lovelace\\\". README.md documents this as intentional duplication awaiting a behavior-preserving refactor that extracts a shared implementation while retaining the check.\"\n  }\n}\n```",
+  "rawCandidate": "```json\n{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"src/format_name.py\",\"src/profile.py\",\"checks/test_profile.py\"],\"findingIds\":[],\"summary\":\"Both public functions contain identical normalization logic. `format_name` in src/format_name.py and `display_name` in src/profile.py each return `\\\" \\\".join(value.strip().split()).title()`, duplicating the strip/split/title normalization. checks/test_profile.py proves their equivalence by asserting `format_name(\\\"  ada   lovelace \\\") == display_name(\\\"  ada   lovelace \\\") == \\\"Ada Lovelace\\\"`, exercising both implementations against the same input and requiring the same output.\"}}\n```",
   "candidate": null,
   "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
   "evaluatorEvidence": {
     "schemaVersion": 1,
     "caseId": "explain-refactor-duplication",
     "evaluatorId": "explain-refactor-duplication-evaluator",
-    "candidateSha256": "63d27db9f6f9a0bf17d30fccbef6d1128411ed1fa44b6d6884dd64d494c8ea7d",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "5cb7ddf7ae37fd61e4525ce168f4561f96291c34087e77b2086e80c6174dd3f1",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -69,14 +69,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "explain-refactor-duplication-evaluator",
-    "scenarioEvidenceSha256": "0b3a7a2878d541f7ccbad99d005fe0e3479f728fb0d5ba35d75929a41362e59a",
+    "scenarioEvidenceSha256": "bd1e09c88f3ab7d6006d55dbb110c353ecf1c72a9c4f5b40d02ae911cacd6a41",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 774,
-      "outputTokens": 1406,
-      "estimatedCostUsd": 0.00218,
+      "outputTokens": 494,
+      "estimatedCostUsd": 0.001268,
       "actualBilledUsd": null,
-      "latencyMs": 24723
+      "latencyMs": 9231
     }
   }
 }

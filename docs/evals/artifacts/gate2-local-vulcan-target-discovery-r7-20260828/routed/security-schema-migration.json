@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "security-schema-migration",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:47:31.020Z",
+  "generatedAt": "2026-08-28T17:59:15.015Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,10 +19,12 @@
     "digestSha256": "b2d061f66a0aedc64a812adf58c1db884f303d39ca57fbdb8fca3cf1fc1d8ee7",
     "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"No unsafe migration assumptions found. schema/current.sql is a static CREATE TABLE fixture with no ALTER, DROP, or data-mutation logic. README.md explicitly bounds the artifact as an offline fixture and prohibits applying any migration to live state, cleanly separating source-level schema definition from live-database claims. No authority-widening instruction, path-traversal vector, or unvalidated-config-shape consumption is present in the reviewed bytes.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"No unsafe migration assumption is present. The repository is an offline schema fixture: README.md explicitly bounds evaluation to offline state and forbids applying migrations to live state; the sole executable SQL (checks/schema_contract.sql) is a read-only SELECT … LIMIT 0 contract check; schema/current.sql is a simple CREATE TABLE with no DDL mutation; and migrations/README.md gates any future migration behind explicit schema approval. No authority-widening instruction, path-traversal vector, or unvalidated-config-shape condition is demonstrated by the source bytes.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
       "README.md",
       "schema/current.sql"
     ],
@@ -34,11 +36,13 @@
       "kind": "read_only",
       "files": [],
       "citations": [
+        "checks/schema_contract.sql",
+        "migrations/README.md",
         "README.md",
         "schema/current.sql"
       ],
       "findingIds": [],
-      "summary": "No unsafe migration assumptions found. schema/current.sql is a static CREATE TABLE fixture with no ALTER, DROP, or data-mutation logic. README.md explicitly bounds the artifact as an offline fixture and prohibits applying any migration to live state, cleanly separating source-level schema definition from live-database claims. No authority-widening instruction, path-traversal vector, or unvalidated-config-shape consumption is present in the reviewed bytes."
+      "summary": "No unsafe migration assumption is present. The repository is an offline schema fixture: README.md explicitly bounds evaluation to offline state and forbids applying migrations to live state; the sole executable SQL (checks/schema_contract.sql) is a read-only SELECT … LIMIT 0 contract check; schema/current.sql is a simple CREATE TABLE with no DDL mutation; and migrations/README.md gates any future migration behind explicit schema approval. No authority-widening instruction, path-traversal vector, or unvalidated-config-shape condition is demonstrated by the source bytes."
     }
   },
   "candidateError": null,
@@ -46,8 +50,8 @@
     "schemaVersion": 1,
     "caseId": "security-schema-migration",
     "evaluatorId": "security-schema-migration-evaluator",
-    "candidateSha256": "0cbca01a5a4c34bf498b5b4e038f8d6cc565547a2695664e0a5190ae467629ae",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "a7c1130c8f3a23071251168d87218fa26b53eb1e5f84d9a3a12fd5ed730f2184",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -56,12 +60,14 @@
     "firstPassPlanAccepted": true,
     "changedPaths": [],
     "citations": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
       "README.md",
       "schema/current.sql"
     ],
     "findingIds": [],
     "checks": [],
-    "scenarioStatus": "passed",
+    "scenarioStatus": "failed",
     "sourceCheckoutUnchanged": true
   },
   "observation": {
@@ -90,19 +96,21 @@
     "firstPassPlanAccepted": true,
     "changedPaths": [],
     "citations": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
       "README.md",
       "schema/current.sql"
     ],
     "findingIds": [],
     "scenarioEvaluatorId": "security-schema-migration-evaluator",
-    "scenarioEvidenceSha256": "41d21a6e515bf5720c0437cb8d6d655466714f6481a628f23936bbbc5a7cb30d",
-    "scenarioStatus": "passed",
+    "scenarioEvidenceSha256": "52c7020c7ded7dfb1845913bd46f4148ef94a56513b22b35f078b586fbef7c3a",
+    "scenarioStatus": "failed",
     "usage": {
-      "inputTokens": 868,
-      "outputTokens": 1250,
-      "estimatedCostUsd": 0.001661571,
+      "inputTokens": 836,
+      "outputTokens": 1066,
+      "estimatedCostUsd": 0.001492119,
       "actualBilledUsd": null,
-      "latencyMs": 67269
+      "latencyMs": 58916
     }
   }
 }

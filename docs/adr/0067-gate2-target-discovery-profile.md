@@ -59,16 +59,17 @@ and scenario status. Other transport errors remain fatal to the benchmark run.
 ## Outcome
 
 In the leak-free paired r7 run, fixed `code-fast` passed 5/30 and routed `code`
-passed 18/30. Routed class successes were repair 7/10, refactor 4/5,
-explanation 4/5, security review 2/5, and scaffold 1/5. First-pass plan
+passed 16/30. Routed class successes were repair 7/10, refactor 4/5,
+explanation 3/5, security review 2/5, and scaffold 0/5. First-pass plan
 acceptance was 0.7667, retrieval recall was 0.9917, precision was 0.8083,
 provenance was 1.0, and incorrect edits remained zero. All 60 provider requests
 completed without timeout or other transport failure.
 
-The 18/30 routed result improves on ADR 0066's historical 9/30 routed result,
-including its former 0/5 security-review and 0/5 scaffold results. The paired
-r7 baseline matched ADR 0066's historical 5/30, but the single 3.6 success
-ratio still must not be presented as evidence of general model stability.
+The 16/30 routed result improves on ADR 0066's historical 9/30 routed result,
+and security review rises from 0/5 to 2/5, while scaffold remains 0/5. The
+paired r7 baseline matched ADR 0066's historical 5/30, but the single 3.2
+success ratio still must not be presented as evidence of general model
+stability.
 
 Gate 2 remains open: routed success is below 24/30 and plan acceptance is below
 0.80. This single run proves neither general model quality nor authenticated

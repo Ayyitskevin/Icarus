@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "candidateContractRevision": 5,
   "evidenceRecordRevision": 4,
-  "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+  "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
   "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
   "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
   "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
   "mode": "routed",
   "caseId": "repair-lantern-missing-config",
   "modelId": "code",
-  "generatedAt": "2026-08-28T16:31:51.573Z",
+  "generatedAt": "2026-08-28T17:45:16.966Z",
   "finishReason": "stop",
   "providerFailure": null,
   "usageBasis": "provider_reported",
@@ -19,7 +19,7 @@
     "digestSha256": "b7b9dc15cad034deef17f65be56873075a043c5c15993597f27a5fc049a6fb06",
     "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff"
   },
-  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"config/app.json\",\"src/main.py\"],\"plan\":{\"mutationTargets\":[\"src/main.py\"],\"requestedCheckIds\":[\"lantern-missing-config\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/main.py\",\"content\":\"import json\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\nCONFIG_PATH = Path(\\\"config/app.json\\\")\\n\\nif not CONFIG_PATH.exists():\\n    raise SystemExit(\\\"Configuration error: config/app.json is missing.\\\")\\n\\nprint(greeting(json.loads(CONFIG_PATH.read_text())[\\\"audience\\\"]))\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Replaced the unguarded Path.read_text() call in src/main.py with an explicit existence check that raises a bounded SystemExit with a clear configuration error message when config/app.json is absent, instead of letting a raw FileNotFoundError propagate.\"}}",
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"config/app.json\",\"src/main.py\"],\"plan\":{\"mutationTargets\":[\"src/main.py\"],\"requestedCheckIds\":[\"lantern-missing-config\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/main.py\",\"content\":\"import json\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\nCONFIG_PATH = Path(\\\"config/app.json\\\")\\n\\nif not CONFIG_PATH.is_file():\\n    raise SystemExit(\\\"Lantern configuration error: config/app.json is missing.\\\")\\n\\nprint(greeting(json.loads(CONFIG_PATH.read_text())[\\\"audience\\\"]))\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added an explicit existence check for config/app.json in src/main.py so that a missing configuration file produces a bounded, descriptive SystemExit message instead of a raw FileNotFoundError.\"}}",
   "candidate": {
     "schemaVersion": 1,
     "selectedContextPaths": [
@@ -40,12 +40,12 @@
       "files": [
         {
           "path": "src/main.py",
-          "content": "import json\nfrom pathlib import Path\n\nfrom src.greeting import greeting\n\nCONFIG_PATH = Path(\"config/app.json\")\n\nif not CONFIG_PATH.exists():\n    raise SystemExit(\"Configuration error: config/app.json is missing.\")\n\nprint(greeting(json.loads(CONFIG_PATH.read_text())[\"audience\"]))\n"
+          "content": "import json\nfrom pathlib import Path\n\nfrom src.greeting import greeting\n\nCONFIG_PATH = Path(\"config/app.json\")\n\nif not CONFIG_PATH.is_file():\n    raise SystemExit(\"Lantern configuration error: config/app.json is missing.\")\n\nprint(greeting(json.loads(CONFIG_PATH.read_text())[\"audience\"]))\n"
         }
       ],
       "citations": [],
       "findingIds": [],
-      "summary": "Replaced the unguarded Path.read_text() call in src/main.py with an explicit existence check that raises a bounded SystemExit with a clear configuration error message when config/app.json is absent, instead of letting a raw FileNotFoundError propagate."
+      "summary": "Added an explicit existence check for config/app.json in src/main.py so that a missing configuration file produces a bounded, descriptive SystemExit message instead of a raw FileNotFoundError."
     }
   },
   "candidateError": null,
@@ -53,8 +53,8 @@
     "schemaVersion": 1,
     "caseId": "repair-lantern-missing-config",
     "evaluatorId": "repair-lantern-missing-config-evaluator",
-    "candidateSha256": "367d844c3d4f5ca986e4a2cfbc64027bfb5521d17a8ab1eb7e6f7cf41a3a1c6d",
-    "instructionPolicySha256": "313627170ec5639daa914ae3de799935f2147649f657216dbd7c07648fb365d3",
+    "candidateSha256": "d40b79c1f413f763ea0a449ca13e5714f0be3b474d8293b39eff4df0e47230d4",
+    "instructionPolicySha256": "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
     "finishReason": "stop",
     "providerFailure": null,
@@ -115,14 +115,14 @@
     "citations": [],
     "findingIds": [],
     "scenarioEvaluatorId": "repair-lantern-missing-config-evaluator",
-    "scenarioEvidenceSha256": "2ae1bd303b3f2ef50083e16aeeebb41e3f4ccc81b8c2d0adb5d4e3a8f4f25b5b",
+    "scenarioEvidenceSha256": "cdef31b4f9c5c90361cda4bf190ab7b022d4c33a1fbf24c0f26d92317cdd1199",
     "scenarioStatus": "failed",
     "usage": {
       "inputTokens": 713,
-      "outputTokens": 727,
-      "estimatedCostUsd": 0.00112968,
+      "outputTokens": 690,
+      "estimatedCostUsd": 0.0011006535,
       "actualBilledUsd": null,
-      "latencyMs": 35879
+      "latencyMs": 34923
     }
   }
 }

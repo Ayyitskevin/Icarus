@@ -8,11 +8,11 @@
     "code"
   ],
   "baselineSuccessCount": 5,
-  "routedSuccessCount": 18,
-  "successCountRatio": 3.6,
-  "baselineMedianEstimatedCostPerSuccess": 0.003174,
-  "routedMedianEstimatedCostPerSuccess": 0.00128618775,
-  "costReduction": 0.594773865784,
+  "routedSuccessCount": 16,
+  "successCountRatio": 3.2,
+  "baselineMedianEstimatedCostPerSuccess": 0.002821,
+  "routedMedianEstimatedCostPerSuccess": 0.0012575535,
+  "costReduction": 0.554217121588,
   "passed": false,
   "assessment": "gate2-routing-comparison-failed"
 }

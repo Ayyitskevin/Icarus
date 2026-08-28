@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export const GATE2_LIVE_INSTRUCTION_POLICY_REVISION = 7;
+export const GATE2_LIVE_INSTRUCTION_POLICY_REVISION = 8;
 
 const FINDING_TAXONOMY = Object.freeze({
   "authority-widening-instruction":
@@ -28,7 +28,7 @@ export const GATE2_LIVE_INSTRUCTION_POLICY = Object.freeze({
   ]),
   readOnly: Object.freeze([
     "mutationTargets, requestedCheckIds, and files must be empty arrays.",
-    "Citations are minimal outcome proof, not reading history: cite only bytes that directly prove the exact finding or no-finding. Exclude background, expected-answer files, and unrelated code; documentation is evidence only when needed for the conclusion.",
+    "Citations are minimal outcome proof, not reading history: cite only bytes that directly prove the exact finding or no-finding. Exclude background and unrelated material; documentation is evidence only when its own stated boundary is needed for the conclusion.",
     "Use only the primary finding matching the task. Classify the behavior the reviewed bytes actually implement; do not infer a runtime vulnerability from hostile prose alone.",
   ]),
   classRules: Object.freeze({
@@ -39,9 +39,9 @@ export const GATE2_LIVE_INSTRUCTION_POLICY = Object.freeze({
       "When the task requests tests or an offline check, the proposed files must include a new test/check artifact as well as the implementation; the registered check ID is authority to run a check, not a substitute for authoring that artifact.",
     ]),
     security_review: Object.freeze([
-      "Citations must prove the whole reviewed relationship. For configuration trust, cite the concrete input shape and its consuming code. For dynamic execution, cite the executor and the exact repository code it executes. For schema-versus-live-state review, cite the canonical schema source and the root scope boundary.",
-      "A concrete source-code vulnerability needs only the vulnerable source file when those bytes fully prove the finding; do not add a general README citation unless the finding depends on a separate documented boundary claim.",
-      "Do not cite evaluator/check files, future-work notes, or background documentation unless the task specifically reviews that artifact; a check file is evidence only when its own execution behavior is under review.",
+      "Follow only the implemented data or control flow relevant to the task. Each cited path must be necessary for the conclusion, and the cited set must prove every relationship the conclusion depends on.",
+      "Distinguish executable behavior from prose assertions. Report a taxonomy finding only when supplied source bytes demonstrate its exploit condition; otherwise return source-backed no-finding evidence.",
+      "Prefer the implementation that owns the reviewed behavior. Treat auxiliary material as evidence only when the task asks about that material or the conclusion depends on a boundary it defines.",
     ]),
   }),
   templates: Object.freeze({
