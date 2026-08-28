@@ -17,7 +17,7 @@ The current sequence is:
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
 | 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
-| 2 | Context and agent quality — **five-case deterministic explanation cohort measured; full 30-task benchmark open** | all five manifest-bound explanations retrieve every expected path under one independent eight-file budget and pass host-validated citation oracles through the production loopback adapter; recall/provenance are 1.0 and macro precision is 0.80, with observed source invariance and separately labelled design assertions for uninstrumented zero effects; the separate contract-only command still validates 30 and executes 0, while the cohort executes 5 and leaves 25 unexecuted; exit still requires live-model explanation quality, measured security/refactor evals, retrieval recall ≥0.90 and precision ≥0.60, and first-pass plan acceptance ≥80% |
+| 2 | Context and agent quality — **five explanation plus five security-review cases measured; full 30-task benchmark open** | separate deterministic cohorts run all five manifest-bound explanations and five security reviews through production retrieval and structured loopback adapters with host-validated citations, exact findings or explicit no-finding evidence, observed source/Git invariance, and zero mutation authority; explanation macro precision is 0.80, security macro precision is 0.75, and both have recall/provenance 1.0; each partial report executes 5 and leaves 25 unexecuted, while their union covers 10 distinct cases and leaves 20 untouched; the contract-only command still executes 0; exit still requires live-model quality, repair/refactor/scaffold execution, first-pass plan acceptance ≥80%, and fixed-model routing comparison |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
 | C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
@@ -37,13 +37,21 @@ leave source content and Git metadata unchanged. The cohort reports 5 executed,
 5 passed, and 25 unexecuted under one oracle-independent eight-file budget:
 recall and digest coverage are `1.0` in every case, while precision is `1.0`
 once and `0.75` four times (macro `0.80`). This is deterministic integration
-evidence, not live-model semantic quality. The separate
+evidence, not live-model semantic quality. A separate five-case security-review
+cohort uses the same independent retrieval budget and production adapter with a
+dedicated strict result seam: three cases bind exact finding IDs and two bind
+explicit no-finding evidence. Its recall/provenance are `1.0`; per-case
+precision is `1.0`, `0.50`, and `0.75` three times (macro `0.75`). Each partial
+report retains its own 5/25 accounting; together the two cohorts cover 10
+distinct manifest cases and leave 20 unexecuted. This is also deterministic
+contract-integration evidence, not live-model security judgment or whole-
+codebase coverage. The separate
 Gate 2 contract now pins seven fixture repositories, 30 task documents and
 scenario evaluators, an admitted model pool with per-model estimated rates, and
 the exit thresholds. Its contract-only validator still reports 30 contract-valid
 cases and 0 executed cases by design. It neither authenticates future evaluator
-evidence nor turns the frozen explanation cohort into broad quality or Gate 2
-exit evidence.
+evidence nor turns either frozen cohort into broad quality or Gate 2 exit
+evidence.
 The supervised
 active-repository canary is a separate security rollout lane and remains
 **HOLD** after the 2026-08-27 full-tree

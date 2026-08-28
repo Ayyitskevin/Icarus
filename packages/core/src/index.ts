@@ -105,6 +105,20 @@ export {
   MAX_CODEBASE_EXPLANATION_TEXT_BYTES,
 } from "./codebase-explanation.js";
 export {
+  type CodebaseSecurityCitationV1,
+  type CodebaseSecurityFindingV1,
+  type CodebaseSecurityNoFindingV1,
+  type CodebaseSecurityReviewResultV1,
+  type CodebaseSecuritySeverityV1,
+  CODEBASE_SECURITY_REVIEW_SCHEMA,
+  MAX_CODEBASE_SECURITY_CITATIONS,
+  MAX_CODEBASE_SECURITY_FINDINGS,
+  MAX_CODEBASE_SECURITY_INPUT_BYTES,
+  MAX_CODEBASE_SECURITY_OUTPUT_BYTES,
+  MAX_CODEBASE_SECURITY_TEXT_BYTES,
+  reviewCodebaseSecurityV1,
+} from "./codebase-security-review.js";
+export {
   type ContextPreviewCounts,
   type ContextPreviewEntry,
   createContextPreview,

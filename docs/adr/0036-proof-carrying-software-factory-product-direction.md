@@ -2,8 +2,9 @@
 
 - Status: Accepted product direction — Gate 0 released; Gate 1's bounded
   browser and landing paths plus credential-gated live 3/3 evidence are
-  complete; Gate 2 has a measured five-case deterministic explanation cohort
-  and a published 30-task contract whose full runner remains open. Canary,
+  complete; Gate 2 has measured five-case deterministic explanation and
+  security-review cohorts plus a published 30-task contract whose full runner
+  remains open. Canary,
   live-state migration, merge, deployment, and unattended authority remain
   closed
 - Date: 2026-07-30; progress status updated 2026-08-28
@@ -363,14 +364,22 @@ host-validates its file-and-line citations, binds task/base/retrieval/provider/
 evaluator evidence, and proves zero source or Git-metadata change. Recall and
 digest coverage are `1.0` in all cases; precision is `1.0` once and `0.75` four
 times (macro `0.80`). This is five-case contract-integration evidence, not
-live-model semantic quality or Gate 2 exit evidence. The required versioned
+live-model semantic quality or Gate 2 exit evidence. A second cohort executes
+all five manifest-bound security-review cases through a dedicated bounded result
+seam. Three cases require exact finding IDs and two require explicit
+source-backed no-finding evidence. Recall and digest coverage are `1.0`; precision
+is `1.0`, `0.50`, and `0.75` three times (macro `0.75`). It preserves the same
+source/Git and zero-mutation boundaries, but frozen responses and citations do
+not establish live-model security judgment, semantic entailment, or whole-
+codebase coverage. The required versioned
 30-task manifest and result vocabulary are published:
 they pin seven repository fixtures, task and evaluator identities, each selected
 model route, the common versioned model pool and per-model estimated rates, and
 all exit thresholds. The contract-only command still validates 30 cases and
-executes 0 by design; the separate explanation cohort executes 5 and leaves 25
-unexecuted. Neither supplies a routing claim, and security review plus
-behavior-preserving refactor evaluations remain unsupported.
+executes 0 by design. Each partial cohort executes 5 and leaves 25 unexecuted;
+their union covers 10 distinct cases and leaves 20 without execution evidence.
+Neither supplies a routing claim, and live-model quality plus
+behavior-preserving refactor evaluation remain open.
 
 ### Gate 3 — VS Code workbench
 

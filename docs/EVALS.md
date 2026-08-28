@@ -185,14 +185,16 @@ passing evidence, immutable source content and Git metadata, the exact target
 set, durable session boundaries, and bounded operation usage. It measures
 `failed_check_session_repair`, **not** autonomous diagnostic target selection.
 
-Two capabilities remain honestly unsupported: behavior-preserving module
-refactor and read-only security findings. ADR 0036 Gate 2 governs both. The
-manifest retains its integer `plannedMilestone` field for schema-v2 compatibility
-and records `2` for them and for the now-supported explanation case. Unsupported
-contracts validate their fixtures and capability classification but are never
-converted into passes.
+The schema-v2 Milestone 1 catalog still reports behavior-preserving module
+refactor and read-only security findings as unsupported representative
+scenarios. ADR 0036 Gate 2 governs both. The separate Gate 2 security-review
+cohort described below now measures the read-only retrieval/provider/result
+contract, but it does not retroactively convert the Milestone 1 scenario or
+live-model security quality into a pass. Unsupported catalog contracts validate
+their fixtures and capability classification but are never converted into
+passes.
 
-## Gate 2 deterministic retrieval baseline
+## Gate 2 deterministic read-only cohorts
 
 `pnpm benchmark:gate2:retrieval` is the first bounded Gate 2 measurement. Its
 closed one-case manifest is
@@ -250,8 +252,34 @@ counters. The dated measurement is
 
 Citation validation proves that each claim points to selected source lines; it
 does not prove semantic entailment. Frozen responses prove contract integration,
-not live-model explanation quality. The remaining 25 tasks, first-pass plan
-acceptance, security/refactor evaluators, and fixed-model routing-cost comparison
+not live-model explanation quality.
+
+`pnpm benchmark:gate2:security-review` separately executes the manifest's five
+`security_review` cases through the same production retriever and structured
+Ollama adapter. The dedicated `reviewCodebaseSecurityV1` seam accepts only a
+bounded retrieval receipt and exact task, makes one bounded provider call, and
+returns either one or more typed findings or an explicit source-backed
+`no_finding` record. The host rejects changed receipts, malformed assessment
+cardinality, repeated finding IDs or citations, unsafe IDs/severities,
+unselected/out-of-range/empty citation spans, secret-shaped or oversized text,
+non-strict JSON, and invalid provider usage. It exposes no command, repository,
+approval, or mutation interface.
+
+The security-review report also records 5 executed, 5 passed, and 25 unexecuted
+because each partial cohort is independently closed against the 30-case
+manifest. Across the explanation and security-review reports, 10 distinct
+manifest cases now have deterministic contract-integration evidence and 20 have
+not been executed by either cohort. Security retrieval recall and digest
+provenance are `1.0` in all five cases; precision is `1.0`, `0.50`, and `0.75`
+three times (macro `0.75`), satisfying the manifest's macro `0.60` floor without
+hiding the hostile-instruction case's extra context. Three cases bind exact
+finding IDs; two bind explicit no-finding evidence. The dated measurement is
+[`docs/evals/2026-08-28-gate2-security-review-cohort.md`](evals/2026-08-28-gate2-security-review-cohort.md).
+
+Frozen responses and source locations do not establish live-model security
+judgment, semantic entailment, or whole-codebase coverage. The remaining 20
+unexecuted repair/refactor/scaffold cases, live-model explanation/security
+measurement, first-pass plan acceptance, and fixed-model routing-cost comparison
 remain open.
 
 ## Measures
@@ -348,10 +376,11 @@ it has zero incorrect edits. Each case binds a stable
 `<case-id>-evaluator` identifier. Every observation must repeat that exact
 identifier and carry the digest of its retained evaluator evidence. The digest
 is a reference and self-consistency field, not authentication of the runner or
-proof that the referenced evidence exists. The separate cohort implements only
-the five explanation evaluator IDs and uses a narrower report that explicitly
-leaves 25 cases unexecuted; it never fabricates the full result's remaining
-observations. Unavailable full-suite execution remains incomplete.
+proof that the referenced evidence exists. The two separate cohorts implement
+only the five explanation and five security-review evaluator IDs. Each narrower
+report explicitly leaves 25 cases unexecuted and never fabricates the full
+result's remaining observations; their union covers 10 distinct cases while the
+full-suite runner remains unavailable and incomplete.
 
 The strict result contract recomputes retrieval, provenance, plan, outcome,
 usage, cost, and aggregate values from 30 manifest-bound observations. It
@@ -373,8 +402,8 @@ non-baseline model.
 This contract makes the benchmark reviewable; it is not benchmark evidence.
 Its strict JSON decoder is byte- and depth-bounded, and its result limitations
 state that structural self-consistency does not authenticate runner or evaluator
-evidence. The partial explanation runner retains its five outcomes inline; a
-trusted full runner must retain the exact evidence bytes named by every one of
-its 30 observations.
+evidence. The partial explanation and security-review runners retain their five
+outcomes inline; a trusted full runner must retain the exact evidence bytes
+named by every one of its 30 observations.
 Gate 2 remains open until the scenario evaluators and deterministic retrieval
 runtime execute the fixed suite and satisfy the accepted ADR 0036 exit gate.

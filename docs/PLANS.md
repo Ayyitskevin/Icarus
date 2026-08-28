@@ -4,20 +4,20 @@
 
 Gate 0 is released and Gate 1's credential-gated live 3/3 evidence completed
 2026-08-23. Current product-quality work is ADR 0036 Gate 2. All five frozen
-read-only explanation cases now execute as a deterministic fixture cohort;
-read-only security findings and
-behavior-preserving refactoring remain honestly unsupported. The separate
+read-only explanation and all five security-review cases now execute as
+separate deterministic fixture cohorts; live-model semantic/security quality
+and behavior-preserving refactoring remain open. The separate
 supervised active-repository canary remains **HOLD** after the 2026-08-27
 secret-scanner survey; live-state migration, merge, deployment, unattended use,
 effectful/control session continuation, and wider Vulcan authority remain
 closed. Older sections below retain the status that was true at their named
 checkpoint and must not be read as the current release state.
 
-## Gate 2 deterministic retrieval and explanation baseline
+## Gate 2 deterministic retrieval, explanation, and security-review baseline
 
-Status: the one-case retrieval baseline and all five manifest-bound explanation
-fixtures execute; live-model explanation quality and the Gate 2 exit gate remain
-open.
+Status: the one-case retrieval baseline plus all five manifest-bound explanation
+and five security-review fixtures execute; live-model quality, the other 20
+manifest cases, and the Gate 2 exit gate remain open.
 
 - [x] Add a reusable deterministic core retriever over one exact committed tree.
 - [x] Exclude linked, hidden, binary, invalid-UTF-8, and secret-shaped content
@@ -43,14 +43,21 @@ open.
       retain exact evaluator, citation, usage, and source-invariance evidence;
       distinguish observed effects from design assertions; and leave the other
       25 tasks unexecuted.
+- [x] Execute the five security-review cases through a dedicated bounded
+      `reviewCodebaseSecurityV1` seam; require exact finding IDs or explicit
+      source-backed no-finding evidence; recompute macro retrieval metrics;
+      preserve source/Git state and zero mutation authority; and retain a strict
+      independent partial report. The two cohorts cover 10 distinct cases, with
+      20 not executed by either.
 - [ ] Implement the manifest-bound scenario evaluators, execute all 30 tasks,
       measure first-pass plan acceptance, and compare the same pinned model pool
       against its fixed single-model baseline.
 
-The explanation cohort adds five bounded provider-assisted explanations over
-retrieval receipts. It grants no repository mutation, registered command,
-canary, landing, migration, merge, deployment, or unattended authority. Frozen
-responses prove contract integration, not live-model semantic quality.
+The explanation and security-review cohorts add bounded provider-assisted
+analysis over retrieval receipts. They grant no repository mutation, registered
+command, canary, landing, migration, merge, deployment, or unattended authority.
+Frozen responses prove contract integration, not live-model semantic or security
+judgment quality.
 
 ## Headless Vulcan proposal admission
 

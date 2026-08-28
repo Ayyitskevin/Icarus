@@ -30,9 +30,10 @@
     "benchmark:gate1": "pnpm build:node && node scripts/gate1-benchmark.mjs",
     "benchmark:gate2:retrieval": "pnpm build:node && node scripts/gate2-retrieval.mjs",
     "benchmark:gate2:explanation": "pnpm build:node && node scripts/gate2-explanation-cohort.mjs",
+    "benchmark:gate2:security-review": "pnpm build:node && node scripts/gate2-security-review-cohort.mjs",
     "benchmark:gate2:contract": "node scripts/gate2-benchmark-contract.mjs",
     "measure:gate1-executor": "pnpm build:node && node scripts/gate1-live-executor-measurement.mjs",
-    "eval": "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-benchmark-contract.mjs",
+    "eval": "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-benchmark-contract.mjs",
     "security": "pnpm build:node && vitest run tests/security && node scripts/security-check.mjs",
     "check": "pnpm workflow:lint && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm eval && pnpm security && pnpm build"
   },

@@ -147,6 +147,14 @@ const gate2ExplanationCohortRunnerSource = await readFile(
   "scripts/gate2-explanation-cohort.mjs",
   "utf8",
 );
+const gate2SecurityReviewCohortContractSource = await readFile(
+  "scripts/gate2-security-review-cohort-contract.mjs",
+  "utf8",
+);
+const gate2SecurityReviewCohortRunnerSource = await readFile(
+  "scripts/gate2-security-review-cohort.mjs",
+  "utf8",
+);
 const gate1BenchmarkManifestSource = await readFile(
   "fixtures/evals/gate1/manifest.v1.json",
   "utf8",
@@ -154,6 +162,10 @@ const gate1BenchmarkManifestSource = await readFile(
 const gate2RetrievalCoreSource = await readFile("packages/core/src/context-retrieval.ts", "utf8");
 const gate2ExplanationCoreSource = await readFile(
   "packages/core/src/codebase-explanation.ts",
+  "utf8",
+);
+const gate2SecurityReviewCoreSource = await readFile(
+  "packages/core/src/codebase-security-review.ts",
   "utf8",
 );
 const gate2RetrievalRunnerSource = await readFile("scripts/gate2-retrieval.mjs", "utf8");
@@ -2147,7 +2159,7 @@ const assertions = {
     packageJson.scripts["benchmark:gate1"] ===
       "pnpm build:node && node scripts/gate1-benchmark.mjs" &&
     packageJson.scripts.eval ===
-      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-benchmark-contract.mjs",
+      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-benchmark-contract.mjs",
   gate2RetrievalCommandIntegrated:
     packageJson.scripts["benchmark:gate2:retrieval"] ===
       "pnpm build:node && node scripts/gate2-retrieval.mjs" &&
@@ -2213,6 +2225,56 @@ const assertions = {
     ) &&
     !/(?:api\.github\.com|process\.env\.(?:GH|GITHUB|OPENAI|ANTHROPIC)|deploy|force-push)/.test(
       gate2ExplanationCohortRunnerSource,
+    ),
+  gate2SecurityReviewIsBoundedReadOnlyAndProvenanceChecked:
+    gate2SecurityReviewCoreSource.includes("MAX_CODEBASE_SECURITY_FINDINGS = 16") &&
+    gate2SecurityReviewCoreSource.includes("MAX_CODEBASE_SECURITY_CITATIONS = 8") &&
+    gate2SecurityReviewCoreSource.includes("MAX_CODEBASE_SECURITY_INPUT_BYTES = 1024 * 1024") &&
+    gate2SecurityReviewCoreSource.includes("MAX_CODEBASE_SECURITY_OUTPUT_BYTES = 128 * 1024") &&
+    gate2SecurityReviewCoreSource.includes("MAX_CODEBASE_SECURITY_TEXT_BYTES = 8 * 1024") &&
+    gate2SecurityReviewCoreSource.includes("assertRetrievalIntegrity(retrieval)") &&
+    gate2SecurityReviewCoreSource.includes("sha256(taskBytes) !== retrieval.querySha256") &&
+    gate2SecurityReviewCoreSource.includes('assessment === "findings"') &&
+    gate2SecurityReviewCoreSource.includes('assessment === "no_finding"') &&
+    gate2SecurityReviewCoreSource.includes("source === undefined") &&
+    gate2SecurityReviewCoreSource.includes("source.lineCount") &&
+    gate2SecurityReviewCoreSource.includes("containsSecretShapedContent(contentBytes)") &&
+    gate2SecurityReviewCoreSource.includes("parseStrictJson(generated.text)") &&
+    gate2SecurityReviewCoreSource.includes("const usage = decodeUsage(generated.usage)") &&
+    (gate2SecurityReviewCoreSource.match(/gateway\.generateStructured\(/g) ?? []).length === 1 &&
+    !/(?:node:child_process|node:fs|node:http|node:https|executeToolCall|DockerSandboxRunner)/.test(
+      gate2SecurityReviewCoreSource,
+    ),
+  gate2SecurityReviewCohortIsBoundedAndIntegrated:
+    packageJson.scripts["benchmark:gate2:security-review"] ===
+      "pnpm build:node && node scripts/gate2-security-review-cohort.mjs" &&
+    packageJson.scripts.eval.includes("&& node scripts/gate2-security-review-cohort.mjs") &&
+    gate2SecurityReviewCohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
+    gate2SecurityReviewCohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2SecurityReviewCohortRunnerSource.includes("reviewCodebaseSecurityV1(") &&
+    gate2SecurityReviewCohortRunnerSource.includes("sourceCheckoutUnchanged") &&
+    gate2SecurityReviewCohortRunnerSource.includes("fixtureWorkspaceUnchanged") &&
+    gate2SecurityReviewCohortRunnerSource.includes("await unlink(temporaryPath)") &&
+    gate2SecurityReviewCohortRunnerSource.includes("externalNetworkRequests: 0") &&
+    gate2SecurityReviewCohortRunnerSource.includes("remoteMutations: 0") &&
+    gate2SecurityReviewCohortRunnerSource.includes("repositoryCodeExecutions: 0") &&
+    gate2SecurityReviewCohortRunnerSource.includes("icarusRegisteredCommands: 0") &&
+    gate2SecurityReviewCohortRunnerSource.includes('externalNetworkRequests: "design-assertion"') &&
+    gate2SecurityReviewCohortRunnerSource.includes('remoteMutations: "design-assertion"') &&
+    gate2SecurityReviewCohortRunnerSource.includes(
+      'repositoryCodeExecutions: "design-assertion"',
+    ) &&
+    gate2SecurityReviewCohortRunnerSource.includes(
+      'icarusRegisteredCommands: "design-assertion"',
+    ) &&
+    gate2SecurityReviewCohortContractSource.includes(
+      '"five-security-review-cases-do-not-complete-thirty-task-gate2-benchmark"',
+    ) &&
+    gate2SecurityReviewCohortContractSource.includes(
+      '"selected-context-review-does-not-prove-whole-codebase-security"',
+    ) &&
+    !/(?:api\.github\.com|process\.env\.(?:GH|GITHUB|OPENAI|ANTHROPIC)|deploy|force-push)/.test(
+      gate2SecurityReviewCohortRunnerSource,
     ),
   gate2RetrievalRunnerUsesPinnedLocalReadOnlyEvidence:
     gate2RetrievalRunnerSource.includes('spawnSync(\n    "/usr/bin/git"') &&
