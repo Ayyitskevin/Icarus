@@ -87,6 +87,22 @@ describe("headless profile decode", () => {
     expect(headlessProfileDigest(original)).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it("normalizes an undefined mutation selection to the absent propose default", () => {
+    const absent = profile();
+    const withUndefinedMutation = profile({
+      worker: {
+        ...(absent.worker as Record<string, unknown>),
+        mutation: undefined,
+      },
+    });
+    const decodedWithUndefined = decodeHeadlessProfileV1(withUndefinedMutation);
+    const decodedAbsent = decodeHeadlessProfileV1(absent);
+
+    expect(Object.hasOwn(decodedWithUndefined.worker, "mutation")).toBe(false);
+    expect(decodedWithUndefined).toEqual(decodedAbsent);
+    expect(headlessProfileDigest(withUndefinedMutation)).toBe(headlessProfileDigest(absent));
+  });
+
   it("refuses unknown fields so a profile cannot smuggle provider or authority material", () => {
     expect(() => decodeHeadlessProfileV1(profile({ grants: [] }))).toThrowError(
       /missing or unknown keys/,

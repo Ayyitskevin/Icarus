@@ -7,6 +7,9 @@
 - Related: [ADR 0026](0026-agent-session-loop-and-tool-registry.md) (approved
   plan, capability grants, and closed tools),
   [ADR 0044](0044-headless-workspace-harness-direction.md) (headless workstream),
+  [ADR 0059](0059-headless-isolated-child-runs.md) (bounded child profiles),
+  [ADR 0060](0060-headless-propose-only-and-envelopes.md) (mutation policy),
+  [ADR 0065](0065-headless-vulcan-admission.md) (proposal-only Vulcan mapping),
   and [DeepSeek Harness comparison](../DEEPSEEK_HARNESS_COMPARISON.md)
 
 ## Context
@@ -33,7 +36,7 @@ until a host resolves it against the other two records.
 Introduce strict `HeadlessProfileV1` and pure
 `resolveHeadlessProfileV1` contracts.
 
-The source profile has exactly seven top-level fields:
+The base source profile has exactly seven required top-level fields:
 
 - `schemaVersion`, fixed at `1`;
 - canonical `profileId` and `providerProfileId` identifiers;
@@ -41,12 +44,19 @@ The source profile has exactly seven top-level fields:
   `TOOL_REGISTRY` (an empty list means no model-callable tools);
 - `budgets`, carrying every `SunCeiling` field plus `iterationCeiling`;
 - `output`, fixed to `{ "format": "jsonl" }`; and
-- `worker`, fixed in v1 to one task, concurrency one, child runs denied, and
-  scheduled runs denied.
+- `worker`, fixed in v1 to one task, concurrency one, and scheduled runs
+  denied. Child runs are denied by default.
+
+Later records extend this grammar without changing its selection-not-authority
+boundary: ADR 0059 adds optional bounded `children` plus a depth-one
+`worker.childRuns` allow record; ADR 0060 adds optional `worker.mutation`, with
+absence normalized to the proposal-only default; and ADR 0065 admits only a
+priced loopback Vulcan mapping for child-free proposals.
 
 Unknown fields, inherited prototypes, unknown or duplicate tools, malformed
-ceilings, alternate output modes, concurrency, child runs, and schedules are
-refused. Provider URLs, models, pricing, credentials, grants, targets,
+ceilings, alternate output modes, concurrency above one, unbounded child
+policies, and schedules are refused. Provider URLs, models, pricing,
+credentials, grants, targets,
 commands, approvals, and executable hooks have no field in the grammar.
 
 `headlessProfileDigest` hashes the strictly decoded canonical record. Tool IDs

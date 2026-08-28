@@ -119,6 +119,31 @@ describe("headless profile authority boundary", () => {
     );
   });
 
+  it("refuses malformed approved-plan targets before child authority comparison", () => {
+    const malformed = { ...plan(), targets: undefined } as unknown as PlanProposal;
+    const childProfile = profile({
+      worker: {
+        mode: "one_task",
+        maxConcurrency: 1,
+        childRuns: { maxDepth: 1, maxChildren: 1 },
+        scheduledRuns: "deny",
+      },
+      children: [
+        {
+          childId: "c1",
+          task: "Exercise one bounded child task",
+          targets: ["src/example.ts"],
+          toolIds: [],
+          budgets: { ...DEFAULT_CEILING, maxCostUsd: 0, iterationCeiling: 0 },
+        },
+      ],
+    });
+
+    expect(code(() => resolveHeadlessProfileV1(childProfile, authority(malformed)))).toBe(
+      "INVALID_HEADLESS_PROFILE_HOST",
+    );
+  });
+
   it("refuses every profile budget that exceeds the project ceiling", () => {
     const cases: readonly [keyof SunCeiling, number][] = [
       ["maxToolCalls", DEFAULT_CEILING.maxToolCalls + 1],

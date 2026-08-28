@@ -76,8 +76,10 @@ history remains authoritative.
 The offline H1 contract is implemented as strict `HeadlessProfileV1` plus
 host-owned resolution. A source profile names only a provider profile ID, an
 explicit sorted subset of the closed tool registry, tightening budgets, JSONL
-output, and a one-task/no-child/no-schedule worker policy. Empty tools means
-deny all. Resolution rebuilds provider configuration from the host catalog,
+output, and a one-task/no-schedule worker policy with child runs denied by
+default. ADR 0059 adds only bounded operator-declared children, and ADR 0060
+makes proposal-only mutation the default. Empty tools means deny all.
+Resolution rebuilds provider configuration from the host catalog,
 refuses tools without matching approved-plan capabilities, refuses budgets
 above the project or plan, and emits a mapping-sensitive digest. It creates no
 gateway, worker, grant, run, schedule, or I/O; H2 remains required for execution.

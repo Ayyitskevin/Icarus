@@ -306,7 +306,7 @@ function decodeWorker(value: unknown): HeadlessProfileWorkerPolicyV1 {
     maxConcurrency: 1,
     childRuns: decodeChildRuns(decoded.childRuns),
     scheduledRuns: "deny",
-    ...(hasMutation ? { mutation: decoded.mutation as "propose" | "apply" } : {}),
+    ...(decoded.mutation === undefined ? {} : { mutation: decoded.mutation }),
   };
 }
 
@@ -411,6 +411,12 @@ function assertApprovedPlanAuthority(approvedPlan: PlanProposal): void {
     approvedPlan.iterationCeiling > MAX_SESSION_ITERATIONS
   ) {
     invalidHost("Host approved plan has an invalid iterationCeiling");
+  }
+  if (
+    !Array.isArray(approvedPlan.targets) ||
+    !approvedPlan.targets.every((target: unknown) => typeof target === "string")
+  ) {
+    invalidHost("Host approved plan targets must be a string array");
   }
   if (!Array.isArray(approvedPlan.grants)) {
     invalidHost("Host approved plan grants must be an array");
