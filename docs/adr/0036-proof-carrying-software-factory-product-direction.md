@@ -357,10 +357,12 @@ measures one pinned unfamiliar-codebase fixture at recall `1.0` and precision
 deterministic source-reference hop from query-matched files inside the same
 file/byte ceilings. A separate cohort executes all five manifest-bound
 explanation cases through the production Ollama adapter against frozen loopback
-responses. Every case retrieves exactly its expected context at recall,
-precision, and digest coverage `1.0`, host-validates its file-and-line citations,
-binds task/base/retrieval/provider/evaluator evidence, and proves zero source or
-Git-metadata change. This is five-case contract-integration evidence, not
+responses. Every case retrieves every expected path under one independent
+eight-file budget,
+host-validates its file-and-line citations, binds task/base/retrieval/provider/
+evaluator evidence, and proves zero source or Git-metadata change. Recall and
+digest coverage are `1.0` in all cases; precision is `1.0` once and `0.75` four
+times (macro `0.80`). This is five-case contract-integration evidence, not
 live-model semantic quality or Gate 2 exit evidence. The required versioned
 30-task manifest and result vocabulary are published:
 they pin seven repository fixtures, task and evaluator identities, each selected

@@ -17,7 +17,7 @@ The current sequence is:
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
 | 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
-| 2 | Context and agent quality — **five-case deterministic explanation cohort measured; full 30-task benchmark open** | all five manifest-bound explanations retrieve their exact expected context and pass host-validated citation oracles through the production loopback adapter with zero mutation; the separate contract-only command still validates 30 and executes 0, while the cohort executes 5 and leaves 25 unexecuted; exit still requires live-model explanation quality, measured security/refactor evals, retrieval recall ≥0.90 and precision ≥0.60, and first-pass plan acceptance ≥80% |
+| 2 | Context and agent quality — **five-case deterministic explanation cohort measured; full 30-task benchmark open** | all five manifest-bound explanations retrieve every expected path under one independent eight-file budget and pass host-validated citation oracles through the production loopback adapter; recall/provenance are 1.0 and macro precision is 0.80, with observed source invariance and separately labelled design assertions for uninstrumented zero effects; the separate contract-only command still validates 30 and executes 0, while the cohort executes 5 and leaves 25 unexecuted; exit still requires live-model explanation quality, measured security/refactor evals, retrieval recall ≥0.90 and precision ≥0.60, and first-pass plan acceptance ≥80% |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
 | C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
@@ -34,9 +34,10 @@ All five manifest-bound explanation fixtures now use the production Ollama
 adapter against frozen loopback responses, validate their cited claims in the
 host, bind each receipt to task/base/retrieval/provider/evaluator identity, and
 leave source content and Git metadata unchanged. The cohort reports 5 executed,
-5 passed, and 25 unexecuted with exact-context recall, precision, and digest
-coverage of `1.0`; this is deterministic integration evidence, not live-model
-semantic quality. The separate
+5 passed, and 25 unexecuted under one oracle-independent eight-file budget:
+recall and digest coverage are `1.0` in every case, while precision is `1.0`
+once and `0.75` four times (macro `0.80`). This is deterministic integration
+evidence, not live-model semantic quality. The separate
 Gate 2 contract now pins seven fixture repositories, 30 task documents and
 scenario evaluators, an admitted model pool with per-model estimated rates, and
 the exit thresholds. Its contract-only validator still reports 30 contract-valid

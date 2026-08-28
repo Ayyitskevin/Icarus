@@ -16,6 +16,7 @@ const RESULT_KEYS = Object.freeze([
   "passed",
   "counts",
   "effects",
+  "effectEvidence",
   "observations",
   "limitations",
   "assessment",
@@ -73,6 +74,7 @@ const USAGE_KEYS = Object.freeze([
 ]);
 const HEX_40 = /^[0-9a-f]{40}$/;
 const HEX_64 = /^[0-9a-f]{64}$/;
+const MAX_CONTEXT_FILES_PER_CASE = 8;
 
 export const GATE2_EXPLANATION_PROVIDER = Object.freeze({
   kind: "ollama",
@@ -398,6 +400,20 @@ export function validateGate2ExplanationCohortResult(value, manifestInput, manif
   for (const [index, key] of EFFECT_KEYS.entries()) {
     literal(effects[key], expectedEffects[index], `effects.${key}`);
   }
+  const effectEvidence = exactRecord(result.effectEvidence, EFFECT_KEYS, "effectEvidence");
+  const expectedEffectEvidence = [
+    "observed",
+    "observed",
+    "design-assertion",
+    "design-assertion",
+    "observed",
+    "design-assertion",
+    "design-assertion",
+    "observed",
+  ];
+  for (const [index, key] of EFFECT_KEYS.entries()) {
+    literal(effectEvidence[key], expectedEffectEvidence[index], `effectEvidence.${key}`);
+  }
 
   const explanationCases = manifest.cases.filter((entry) => entry.class === "explanation");
   if (
@@ -464,11 +480,16 @@ export function validateGate2ExplanationCohortResult(value, manifestInput, manif
     }
 
     const digestByPath = new Map(repository.files.map((entry) => [entry.path, entry.sha256]));
-    const selected = exactArray(
-      observation.selectedContext,
-      benchmarkCase.expectedContextPaths.length,
-      `observations[${index}].selectedContext`,
-    );
+    if (
+      !Array.isArray(observation.selectedContext) ||
+      observation.selectedContext.length < benchmarkCase.expectedContextPaths.length ||
+      observation.selectedContext.length > MAX_CONTEXT_FILES_PER_CASE
+    ) {
+      fail(
+        `observations[${index}].selectedContext must contain ${benchmarkCase.expectedContextPaths.length}..${MAX_CONTEXT_FILES_PER_CASE} entries`,
+      );
+    }
+    const selected = observation.selectedContext;
     const selectedPaths = new Set();
     for (const [contextIndex, contextValue] of selected.entries()) {
       const context = exactRecord(
@@ -476,27 +497,49 @@ export function validateGate2ExplanationCohortResult(value, manifestInput, manif
         CONTEXT_KEYS,
         `observations[${index}].selectedContext[${contextIndex}]`,
       );
-      const expectedPath = benchmarkCase.expectedContextPaths[contextIndex];
-      literal(
+      const contextPath = safePath(
         context.path,
-        expectedPath,
         `observations[${index}].selectedContext[${contextIndex}].path`,
       );
+      if (selectedPaths.has(contextPath)) {
+        fail(`observations[${index}].selectedContext repeats ${contextPath}`);
+      }
+      const expectedDigest = digestByPath.get(contextPath);
+      if (expectedDigest === undefined) {
+        fail(`observations[${index}].selectedContext includes a file outside the fixture`);
+      }
       literal(
         context.sha256,
-        digestByPath.get(expectedPath),
+        expectedDigest,
         `observations[${index}].selectedContext[${contextIndex}].sha256`,
       );
-      selectedPaths.add(context.path);
+      selectedPaths.add(contextPath);
     }
+
+    const matchedExpectedPaths = benchmarkCase.expectedContextPaths.filter((expectedPath) =>
+      selectedPaths.has(expectedPath),
+    );
+    const expectedRecall = matchedExpectedPaths.length / benchmarkCase.expectedContextPaths.length;
+    const expectedPrecision = matchedExpectedPaths.length / selected.length;
 
     const metrics = exactRecord(
       observation.retrievalMetrics,
       RETRIEVAL_METRIC_KEYS,
       `observations[${index}].retrievalMetrics`,
     );
-    for (const key of RETRIEVAL_METRIC_KEYS) {
-      literal(metrics[key], 1, `observations[${index}].retrievalMetrics.${key}`);
+    literal(metrics.recall, expectedRecall, `observations[${index}].retrievalMetrics.recall`);
+    literal(
+      metrics.precision,
+      expectedPrecision,
+      `observations[${index}].retrievalMetrics.precision`,
+    );
+    literal(
+      metrics.digestProvenanceCoverage,
+      1,
+      `observations[${index}].retrievalMetrics.digestProvenanceCoverage`,
+    );
+    if (expectedRecall !== 1 || expectedPrecision < 0.6) {
+      fail(`observations[${index}] does not satisfy the explanation retrieval threshold`);
     }
     const citedPaths = validateOutcome(
       observation.outcome,

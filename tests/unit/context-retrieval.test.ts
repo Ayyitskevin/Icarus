@@ -146,7 +146,7 @@ describe("Gate 2 read-only context retrieval", () => {
       [
         "readme",
         Buffer.from(
-          "Name normalization is duplicated across two modules. A behavior-preserving refactor must extract a shared implementation, update both public modules, and retain the check.\n",
+          "Name normalization is duplicated across two modules, including src/profile.py and another public module. A behavior-preserving refactor must extract a shared implementation and retain the check.\n",
         ),
       ],
       [
@@ -195,7 +195,7 @@ describe("Gate 2 read-only context retrieval", () => {
       "/repository",
       BASE,
       "Trace normalization duplication through both public functions and the check proving equivalence.",
-      { maxFiles: 4, maxTotalBytes: 8_192, maxScanBytes: 16_384 },
+      { maxFiles: 5, maxTotalBytes: 8_192, maxScanBytes: 16_384 },
     );
 
     expect(result.entries.map((entry) => entry.path).sort()).toEqual([

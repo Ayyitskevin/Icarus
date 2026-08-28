@@ -226,8 +226,10 @@ function referencedEntries(
     .filter(
       (candidate) =>
         candidate.path !== source.path &&
-        referenceForms(candidate.path).some((form) =>
-          containsBoundedReference(source.content, form),
+        referenceForms(candidate.path).some(
+          (form) =>
+            (form === candidate.path || !candidates.has(form)) &&
+            containsBoundedReference(source.content, form),
         ),
     )
     .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));

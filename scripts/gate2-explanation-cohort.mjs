@@ -37,6 +37,7 @@ const manifestPath = path.join(root, "fixtures/evals/gate2/manifest.v1.json");
 const reportDirectory = path.join(root, ".local");
 const reportPath = path.join(reportDirectory, "gate2-explanation-cohort-report.json");
 const MAX_PROVIDER_REQUEST_BYTES = 2 * 1024 * 1024;
+const MAX_CONTEXT_FILES_PER_CASE = 8;
 process.umask(0o077);
 
 function assertCondition(condition, message) {
@@ -326,7 +327,7 @@ async function evaluateCase({
   const controller = new GitController(controlHome, runsRoot, "/usr/bin/git");
   const task = taskBytes.toString("utf8");
   const retrieval = await retrieveReadOnlyContextV1(controller, workspace, baseCommit, task, {
-    maxFiles: benchmarkCase.expectedContextPaths.length,
+    maxFiles: MAX_CONTEXT_FILES_PER_CASE,
     maxTotalBytes: 64 * 1024,
     maxScanBytes: 1024 * 1024,
   });
@@ -334,9 +335,12 @@ async function evaluateCase({
     .map((entry) => ({ path: entry.path, sha256: entry.sha256 }))
     .sort((left, right) => left.path.localeCompare(right.path));
   const selectedPaths = selectedContext.map((entry) => entry.path);
+  const expectedPathSet = new Set(benchmarkCase.expectedContextPaths);
   assertCondition(
-    JSON.stringify(selectedPaths) === JSON.stringify(benchmarkCase.expectedContextPaths),
-    `case ${benchmarkCase.id} selected ${JSON.stringify(retrieval.entries.map(({ path: entryPath, score, matchedTerms }) => ({ path: entryPath, score, matchedTerms })))} instead of ${JSON.stringify(benchmarkCase.expectedContextPaths)}`,
+    benchmarkCase.expectedContextPaths.every((expectedPath) =>
+      selectedPaths.includes(expectedPath),
+    ),
+    `case ${benchmarkCase.id} did not retrieve every expected path: ${JSON.stringify(retrieval.entries.map(({ path: entryPath, score, matchedTerms }) => ({ path: entryPath, score, matchedTerms })))}`,
   );
 
   const explanation = await explainCodebaseV1(provider, retrieval, task);
@@ -369,15 +373,19 @@ async function evaluateCase({
   const request = providerRequests.at(-1);
   assertProviderRequest(request, benchmarkCase.id, task, retrieval);
   const digestByPath = new Map(repository.files.map((entry) => [entry.path, entry.sha256]));
-  const matchedPaths = selectedContext.filter(
+  const provenanceMatchedPaths = selectedContext.filter(
     (entry) => digestByPath.get(entry.path) === entry.sha256,
   );
-  const recall = matchedPaths.length / benchmarkCase.expectedContextPaths.length;
-  const precision = selectedContext.length === 0 ? 0 : matchedPaths.length / selectedContext.length;
+  const matchedExpectedPaths = provenanceMatchedPaths.filter((entry) =>
+    expectedPathSet.has(entry.path),
+  );
+  const recall = matchedExpectedPaths.length / benchmarkCase.expectedContextPaths.length;
+  const precision =
+    selectedContext.length === 0 ? 0 : matchedExpectedPaths.length / selectedContext.length;
   const digestProvenanceCoverage =
-    selectedContext.length === 0 ? 0 : matchedPaths.length / selectedContext.length;
+    selectedContext.length === 0 ? 0 : provenanceMatchedPaths.length / selectedContext.length;
   assertCondition(
-    recall === 1 && precision === 1 && digestProvenanceCoverage === 1,
+    recall === 1 && precision >= 0.6 && digestProvenanceCoverage === 1,
     `case ${benchmarkCase.id} retrieval quality or provenance was incomplete`,
   );
   const observation = {
@@ -449,12 +457,18 @@ async function persistReport(report, manifest, manifestSha256) {
     reportDirectory,
     `.gate2-explanation-cohort-${process.pid}-${randomUUID()}`,
   );
-  const handle = await open(temporaryPath, "wx", 0o600);
+  let handle = await open(temporaryPath, "wx", 0o600);
   try {
     await handle.writeFile(serialized, "utf8");
     await handle.sync();
-  } finally {
     await handle.close();
+    handle = null;
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    await unlink(temporaryPath).catch((cleanupError) => {
+      if (!hasCode(cleanupError, "ENOENT")) throw cleanupError;
+    });
+    throw error;
   }
   await rename(temporaryPath, reportPath);
   const persisted = await readFile(reportPath);
@@ -540,6 +554,16 @@ async function main() {
         repositoryCodeExecutions: 0,
         icarusRegisteredCommands: 0,
         temporaryGitFixtureSetup: true,
+      },
+      effectEvidence: {
+        providerCalls: "observed",
+        loopbackProviderRequests: "observed",
+        externalNetworkRequests: "design-assertion",
+        remoteMutations: "design-assertion",
+        sourceCheckoutMutations: "observed",
+        repositoryCodeExecutions: "design-assertion",
+        icarusRegisteredCommands: "design-assertion",
+        temporaryGitFixtureSetup: "observed",
       },
       observations,
       limitations: GATE2_EXPLANATION_COHORT_LIMITATIONS,

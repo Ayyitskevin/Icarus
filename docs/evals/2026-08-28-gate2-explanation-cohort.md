@@ -26,7 +26,9 @@ retrieval failures: verification vocabulary selected a README instead of the
 registered check, and high-scoring refactor documentation displaced a source
 module. The retriever correction normalizes test/check terms, gives exact path
 matches stronger weight, and follows one deterministic source-reference hop
-from query-matched files. The evaluator never supplies expected paths as input.
+from query-matched files. The evaluator supplies neither expected paths nor
+their cardinality as retrieval input: it uses one fixed eight-file budget for
+every case.
 
 ## Result
 
@@ -36,16 +38,17 @@ from query-matched files. The evaluator never supplies expected paths as input.
 | Explanation cohort cases | 5 |
 | Executed / passed | 5 / 5 |
 | Unexecuted | 25 |
-| Exact-context recall | 1.0 in 5 / 5 |
-| Exact-context precision | 1.0 in 5 / 5 |
+| Expected-path recall | 1.0 in 5 / 5 |
+| Expected-path precision | 1.0 in 1 / 5; 0.75 in 4 / 5; macro 0.80 |
 | Digest provenance coverage | 1.0 in 5 / 5 |
 | Production-adapter provider calls | 5 |
 | Provider-reported input / output tokens | 576 / 360 |
 | Estimated / actual billed cost | $0 / not available |
 | Source checkout unchanged | 5 / 5 |
 | Temporary Git workspace unchanged after retrieval/explanation | 5 / 5 |
-| External network / remote mutation / source mutation | 0 / 0 / 0 |
-| Repository-code / registered-Icarus-command execution | 0 / 0 |
+| Observed source-checkout mutations | 0 |
+| Design-asserted external network / remote mutation | 0 / 0 |
+| Design-asserted repository-code / registered-command execution | 0 / 0 |
 
 The five scenario evaluators verify Lantern configuration flow, fixture
 guardrails, the offline task schema contract, duplicated name normalization,
@@ -67,6 +70,9 @@ gate remains required before shipment.
 
 - A citation proves a source location, not that prose is entailed by it.
 - Evidence digests prove self-consistency, not runner authenticity.
+- External-network, remote-mutation, repository-code, and registered-command
+  zeros are enforced by the closed evaluator design and labelled
+  `design-assertion`; they are not runtime telemetry counters.
 - Temporary Git initialization is local evaluator setup, not repository task
   execution or source mutation.
 - The contract-only validator still reports 30 validated and 0 executed because

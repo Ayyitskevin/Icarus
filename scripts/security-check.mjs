@@ -2196,10 +2196,15 @@ const assertions = {
     gate2ExplanationCohortRunnerSource.includes("explainCodebaseV1(") &&
     gate2ExplanationCohortRunnerSource.includes("sourceCheckoutUnchanged") &&
     gate2ExplanationCohortRunnerSource.includes("fixtureWorkspaceUnchanged") &&
+    gate2ExplanationCohortRunnerSource.includes("await unlink(temporaryPath)") &&
     gate2ExplanationCohortRunnerSource.includes("externalNetworkRequests: 0") &&
     gate2ExplanationCohortRunnerSource.includes("remoteMutations: 0") &&
     gate2ExplanationCohortRunnerSource.includes("repositoryCodeExecutions: 0") &&
     gate2ExplanationCohortRunnerSource.includes("icarusRegisteredCommands: 0") &&
+    gate2ExplanationCohortRunnerSource.includes('externalNetworkRequests: "design-assertion"') &&
+    gate2ExplanationCohortRunnerSource.includes('remoteMutations: "design-assertion"') &&
+    gate2ExplanationCohortRunnerSource.includes('repositoryCodeExecutions: "design-assertion"') &&
+    gate2ExplanationCohortRunnerSource.includes('icarusRegisteredCommands: "design-assertion"') &&
     gate2ExplanationCohortContractSource.includes(
       '"five-explanation-cases-do-not-complete-thirty-task-gate2-benchmark"',
     ) &&

@@ -40,8 +40,9 @@ open.
       `30 validated / 0 executed` assessment.
 - [x] Execute the manifest's five explanation cases through the production
       read-only retriever and Ollama adapter against frozen loopback responses;
-      retain exact evaluator, citation, usage, source-invariance, and zero-effect
-      evidence while leaving the other 25 tasks unexecuted.
+      retain exact evaluator, citation, usage, and source-invariance evidence;
+      distinguish observed effects from design assertions; and leave the other
+      25 tasks unexecuted.
 - [ ] Implement the manifest-bound scenario evaluators, execute all 30 tasks,
       measure first-pass plan acceptance, and compare the same pinned model pool
       against its fixed single-model baseline.

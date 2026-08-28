@@ -223,7 +223,7 @@ normalizes test/check vocabulary and follows one deterministic reference hop
 from query-matched files; referenced files remain subject to the same eligible
 file, byte, secret, and source-commit bounds. This closed the non-circular
 retrieval failures exposed by the guardrail and duplicated-module tasks without
-injecting manifest expected paths into the query.
+injecting manifest expected paths or their cardinality into retrieval.
 
 `pnpm benchmark:gate2:explanation` executes exactly the manifest's five
 explanation cases. Each case copies a pinned fixture into a temporary Git
@@ -237,12 +237,15 @@ work starts. Its strict validator refuses altered shapes, counts, effects,
 oracles, citations, usage, evidence digests, limitations, duplicate JSON keys,
 oversized input, and excessive depth.
 
-The frozen cohort reports 5 executed, 5 passed, and 25 unexecuted. Every case
-has exact-context recall, precision, and digest coverage `1.0`; the five
-production-adapter calls stay on loopback at configured zero rates; source and
-temporary Git state remain unchanged; and no repository code, registered Icarus
-command, external network request, or remote/source mutation occurs. The dated
-measurement is
+The frozen cohort reports 5 executed, 5 passed, and 25 unexecuted under one
+oracle-independent eight-file budget. Recall and digest provenance are `1.0` in
+all five cases; precision is `1.0` once and `0.75` four times (macro `0.80`).
+The five production-adapter calls stay on loopback at configured zero rates,
+and source plus temporary Git state remain observably unchanged. The report
+labels provider/request counts, source invariance, and fixture setup as observed;
+zero external-network, remote-mutation, repository-code, and registered-command
+effects are design assertions enforced by the closed runner, not instrumented
+counters. The dated measurement is
 [`docs/evals/2026-08-28-gate2-explanation-cohort.md`](evals/2026-08-28-gate2-explanation-cohort.md).
 
 Citation validation proves that each claim points to selected source lines; it

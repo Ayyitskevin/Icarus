@@ -111,6 +111,16 @@ function result(): Record<string, any> {
       icarusRegisteredCommands: 0,
       temporaryGitFixtureSetup: true,
     },
+    effectEvidence: {
+      providerCalls: "observed",
+      loopbackProviderRequests: "observed",
+      externalNetworkRequests: "design-assertion",
+      remoteMutations: "design-assertion",
+      sourceCheckoutMutations: "observed",
+      repositoryCodeExecutions: "design-assertion",
+      icarusRegisteredCommands: "design-assertion",
+      temporaryGitFixtureSetup: "observed",
+    },
     observations,
     limitations: [...GATE2_EXPLANATION_COHORT_LIMITATIONS],
     assessment: "deterministic_explanation_cohort_passed_gate2_incomplete",
@@ -142,13 +152,14 @@ describe("Gate 2 explanation cohort result contract", () => {
   });
 
   it("rejects widened effects, counts, shapes, and completion claims", () => {
-    const attacks = [result(), result(), result(), result(), result()];
+    const attacks = [result(), result(), result(), result(), result(), result()];
     requiredAt(attacks, 0).effects.externalNetworkRequests = 1;
     requiredAt(attacks, 1).counts.unexecutedCases = 0;
     const duplicateObservation = requiredAt(attacks, 2);
     duplicateObservation.observations.push(requiredAt(duplicateObservation.observations, 0));
     requiredAt(attacks, 3).limitations = [];
     requiredAt(attacks, 4).gate2Complete = true;
+    requiredAt(attacks, 5).effectEvidence.externalNetworkRequests = "observed";
 
     for (const attack of attacks) {
       expect(() =>
@@ -181,6 +192,27 @@ describe("Gate 2 explanation cohort result contract", () => {
         validateGate2ExplanationCohortResult(attack, manifest, manifestSha256),
       ).toThrow();
     }
+  });
+
+  it("accepts extra eligible context only with honestly recomputed precision", () => {
+    const candidate = result();
+    const observation = requiredAt(candidate.observations, 1) as Record<string, any>;
+    const repository = manifest.repositories.find((entry) => entry.id === observation.repositoryId);
+    const readme = repository?.files.find((entry) => entry.path === "README.md");
+    if (readme === undefined) throw new Error("basic fixture README is missing");
+    observation.selectedContext.push({ path: readme.path, sha256: readme.sha256 });
+    observation.retrievalMetrics.precision = 0.75;
+    observation.scenarioEvidenceSha256 = computeGate2ExplanationEvidenceDigest(observation);
+
+    expect(validateGate2ExplanationCohortResult(candidate, manifest, manifestSha256)).toBe(
+      candidate,
+    );
+
+    observation.retrievalMetrics.precision = 1;
+    observation.scenarioEvidenceSha256 = computeGate2ExplanationEvidenceDigest(observation);
+    expect(() =>
+      validateGate2ExplanationCohortResult(candidate, manifest, manifestSha256),
+    ).toThrow();
   });
 
   it("rejects a manifest that rebinds a case to a different evaluator", () => {
