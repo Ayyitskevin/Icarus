@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "scaffold-cart-discount",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:34.248Z",
+  "finishReason": "length",
+  "reassessedFromEvidenceSha256": "baf925c121b7df7896be0c4f0f36c4dc8e0b2ea1026438ba7cf27edda2bee41c",
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "01b0f3af455841ae830f398d3247655f60d8e63773584ee99954189bd0a572ae",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d"
+  },
+  "rawCandidate": "",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-cart-discount",
+    "evaluatorId": "scaffold-cart-discount-evaluator",
+    "candidateSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "length",
+    "providerOutputComplete": false,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-cart-discount",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "5ada358e6249ba212040762c7612184a9af7a6ff39d53c30ed7dd671f864fa26",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-cart-discount-evaluator",
+    "scenarioEvidenceSha256": "bcb87c2217a2a1c8b3943d1df8c430b5400a869002e839711e6d13cafcbccc50",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1087,
+      "outputTokens": 8192,
+      "estimatedCostUsd": 0.009279,
+      "actualBilledUsd": null,
+      "latencyMs": 156453
+    }
+  }
+}

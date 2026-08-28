@@ -398,6 +398,45 @@ report is `.local/gate2-v2-evidence-adoption-report.json`; identical immutable
 inputs replay byte-identically. The dated measurement is
 [`docs/evals/2026-08-28-gate2-v2-evidence-adoption.md`](evals/2026-08-28-gate2-v2-evidence-adoption.md).
 
+## Gate 2 live-model comparison
+
+ADR 0066 adds the first explicit live execution of all 30 manifest-v2 cases.
+It is separate from deterministic `pnpm eval` and runs only through the focused
+`benchmark:gate2:live:*` commands. A digest-bound profile pins local Vulcan's
+`code` and `code-fast` mappings, exact local Ollama model digests, positive
+estimated rates, the fixed baseline, and the model pool. A separate digest-bound
+routing policy uses `code-fast` for every baseline case and routes repair,
+refactor, explanation, and scaffold to `code`, retaining `code-fast` for
+security review.
+
+Each model independently selects its bounded retrieved context, first plan,
+targets, and answer through a closed candidate contract. The host does not
+repair semantic output. Exact-plan mutation candidates run only in disposable
+private copies through registered no-network Docker checks; read-only outcomes
+require exact manifest citations and finding IDs. Every case proves its source
+copy unchanged and retains structural, plan, evaluator, usage, and finish
+evidence. Truncated output remains a failed observation.
+
+The fixed baseline succeeded 5/30 with first-plan acceptance `0.40`; the routed
+run succeeded 9/30 with acceptance `0.6667`. Both retained macro recall
+`0.9917`, precision `0.8083`, provenance `1.0`, and zero incorrect edits. The
+routed run improved the success count and lowered median estimated proxy cost
+per success by `0.369962846348`, but it still missed the predeclared 24/30 and
+0.80 absolute thresholds. The strict comparison therefore reports
+`gate2-routing-comparison-failed`. Security review and scaffold each measured
+0/5, making autonomous target discovery and minimal exact citations the next
+quality slice.
+
+The committed evidence directory contains all 60 case records, preflight, two
+results, comparison, and a 64-source-file artifact manifest. Publication
+recomputes every contract and digest, checks each model against the routing
+policy, and rejects unknown secret-shaped spans. The configured rates are a
+relative local artifact-size proxy, not billed USD; all actual billed cost
+fields remain null. These unkeyed records establish reviewable self-consistency,
+not runner authentication, multi-seed generalization, new runtime authority, or
+Gate 2 completion. The dated record is
+[`docs/evals/2026-08-28-gate2-live-model-comparison.md`](evals/2026-08-28-gate2-live-model-comparison.md).
+
 ## Measures
 
 Every result contains:

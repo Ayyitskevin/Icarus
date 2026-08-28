@@ -1,0 +1,35 @@
+{
+  "profileId": "gate2-local-vulcan-code-routing-20260828",
+  "profileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "baselineModelId": "code-fast",
+  "models": [
+    {
+      "modelId": "code",
+      "provider": "vulcan-local-ollama",
+      "adapterVersion": "vulcan-chat-completions-v1",
+      "modelVersion": "qwen3.8-27.3b-q4km-22130167c4c2",
+      "inputUsdPerMillion": 0.7845,
+      "outputUsdPerMillion": 0.7845
+    },
+    {
+      "modelId": "code-fast",
+      "provider": "vulcan-local-ollama",
+      "adapterVersion": "vulcan-chat-completions-v1",
+      "modelVersion": "ornith-1.5-35.5b-q4km-9f3b89b25219",
+      "inputUsdPerMillion": 1,
+      "outputUsdPerMillion": 1
+    }
+  ],
+  "pricing": {
+    "capturedAt": "2026-08-28",
+    "currency": "USD",
+    "sourceLabel": "local-artifact-size-proxy-v1",
+    "estimatedOnly": true
+  },
+  "budgets": {
+    "maxRuntimeSeconds": 300,
+    "maxInputTokens": 50000,
+    "maxOutputTokens": 8192,
+    "maxEstimatedCostUsd": 1
+  }
+}

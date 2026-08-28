@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "repair-basic-greeting",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:31.242Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "e193c945d3e286c2ec5b26e18006ecd0051be0d33a9fcc55b911e0ee1accc289",
+  "retrieval": {
+    "baseCommit": "698075f5ca0747820e498bb1b3e65c4a5c772577",
+    "digestSha256": "2f30f744097df0e51474f42976c185060ca3f5b22e546d31a468cc48559a1564",
+    "repositoryDigestSha256": "eea916c04927c9236ad5f517ccbdf4ac4e8127eced8bb778697e7cfd7475382f"
+  },
+  "rawCandidate": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schemaVersion\",\"selectedContextPaths\",\"plan\",\"answer\"],\"properties\":{\"schemaVersion\":{\"const\":1},\"selectedContextPaths\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}},\"plan\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"summary\",\"steps\",\"risks\",\"targets\",\"checkIds\"],\"properties\":{\"summary\":{\"type\":\"string\"},\"steps\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":12,\"items\":{\"type\":\"string\"}},\"risks\":{\"type\":\"array\",\"maxItems\":12,\"items\":{\"type\":\"string\"}},\"targets\":{\"type\":\"array\",\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}},\"checkIds\":{\"type\":\"array\",\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}}}},\"answer\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"kind\",\"files\",\"citations\",\"findingIds\",\"summary\"],\"properties\":{\"kind\":{\"enum\":[\"mutation\",\"read_only\"]},\"files\":{\"type\":\"array\",\"maxItems\":8,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"path\",\"content\"],\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}}}},\"citations\":{\"type\":\"array\",\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}},\"findingIds\":{\"type\":\"array\",\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}},\"summary\":{\"type\":\"string\"}}}}}",
+  "candidate": null,
+  "candidateError": "Gate 2 live candidate: root must contain exactly: schemaVersion, selectedContextPaths, plan, answer",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-basic-greeting",
+    "evaluatorId": "repair-basic-greeting-evaluator",
+    "candidateSha256": "d8437ae59956bd79268f49f473afdb624ef1b78836b4db57cfa90f2ee3457d14",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-basic-greeting",
+    "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+    "taskSha256": "5724fe7e67cd1049a0c6e51f02023bc48dcc16cc7ac918b682287951acdb4e59",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+      },
+      {
+        "path": "src/greeting.txt",
+        "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-basic-greeting-evaluator",
+    "scenarioEvidenceSha256": "fcf1aa0348328d815205c7ef4897774c7d1c1c7cd6275e0452b8a693f9c639dc",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 959,
+      "outputTokens": 1703,
+      "estimatedCostUsd": 0.002662,
+      "actualBilledUsd": null,
+      "latencyMs": 32932
+    }
+  }
+}

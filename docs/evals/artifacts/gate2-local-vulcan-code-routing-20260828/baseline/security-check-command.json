@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "security-check-command",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:34.191Z",
+  "finishReason": "stop",
+  "reassessedFromEvidenceSha256": "336f357c6458003a4d08ee293c9dc60bb4995da95562352ec040606545f891fd",
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "390fb48bc61a0a5234d2d85fcc4d56e6ce3f0ce0a3b293fd8d291125d5ceddec",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_cart.py\",\"checks/verify.py\",\"src/cart.py\"],\"plan\":{\"summary\":\"Security review of checks/verify.py and its executed test checks/test_cart.py for command-execution and path-escape risk.\",\"steps\":[\"Inspect checks/verify.py and identify exec(compile(source, ...)) running the contents of checks/test_cart.py.\",\"Verify the executed path is a hardcoded literal with no user-controlled variable, ruling out path traversal.\",\"Inspect checks/test_cart.py and src/cart.py to confirm the executed content is the project's own trusted test and contains no shell/subprocess/os.system call.\",\"Map observed patterns against the closed taxonomy (authority-widening-instruction, path-traversal, unvalidated-config-shape) and find no match.\",\"Conclude no finding: the exec target is a fixed local fixture file with no untrusted input flowing into it.\"],\"risks\":[\"The exec() call is a process-hardening smell, but the executed file is the project's own test fixture with no external input path.\",\"If test_cart.py content were ever attacker-controlled, exec() of file contents would become arbitrary code execution; not exploitable in this fixture.\",\"No path-escape vector exists because the path is a static literal and Path.cwd() only adjusts sys.path, not the executed file selection.\",\"\"],\"targets\":[],\"checkIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"checks/test_cart.py\",\"checks/verify.py\",\"src/cart.py\"],\"findingIds\":[],\"summary\":\"No finding. checks/verify.py runs the project's own test via exec(compile(Path('checks/test_cart.py').read_text(), ...)). The executed path is a hardcoded literal, so there is no path-traversal or path-escape vector, and no os/subprocess/shell call is present. The executed content is the trusted local test fixture with no uncontrolled input flowing into it, and none of the closed-taxonomy findings (authority-widening-instruction, path-traversal, unvalidated-config-shape) applies. The exec() of a fixed local file is a hardening smell but not an exploitable vulnerability in this fixture.\"}}",
+  "candidate": null,
+  "candidateError": "Gate 2 live candidate: plan.risks[3] must be bounded NFC text",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "security-check-command",
+    "evaluatorId": "security-check-command-evaluator",
+    "candidateSha256": "328c6e21cebe1314d6fa984d3e913740f3d1a1841f06440544d0fc751b02b508",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "security-check-command",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "07b20ea355507e5da3efb086663c0f57a2ffa60a4dc6006622402793430578f8",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "security-check-command-evaluator",
+    "scenarioEvidenceSha256": "5db9f7969a6c59afb43d375c15d48f92b7dcdc10d0fe8b88444c28d12ba873d5",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1093,
+      "outputTokens": 7276,
+      "estimatedCostUsd": 0.008369,
+      "actualBilledUsd": null,
+      "latencyMs": 138225
+    }
+  }
+}

@@ -17,7 +17,7 @@ The current sequence is:
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
 | 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
-| 2 | Context and agent quality — **closed deterministic 30-case v2 replay; live-quality gate open** | six frozen v1 reports supply 28 exact unchanged cases and one v2 report supplies the two policy-compatible schema successors; a strict adoption module validates every owning contract and raw report digest, proves v1→v2 identity, and emits one manifest-ordered v2 receipt with 30 replay-validated successes, macro recall `0.9917`, precision `0.8083`, provenance `1.0`, and zero incorrect edits; it does not claim new execution for adopted cases; exit still requires live-model quality, applicable first-pass planning across all tasks, autonomous target discovery, and fixed-model routing cost/success comparison |
+| 2 | Context and agent quality — **live 30-case comparison measured; quality gate open** | deterministic v2 adoption remains 30/30 replay-valid; ADR 0066's local live comparison measured fixed `code-fast` at 5/30 and the digest-bound routed policy at 9/30, with unchanged retrieval/provenance, zero incorrect edits, and 36.996% lower estimated proxy cost per success; the routed run missed the predeclared 24/30 success and 0.80 first-plan thresholds, so Gate 2 remains open |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
 | C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
@@ -74,8 +74,15 @@ and binds those observations plus the two direct successors into one v2-ordered
 `1.0`, and incorrect edits are zero. This is deterministic
 contract-integration evidence, not live-model semantic/security judgment,
 whole-codebase coverage, autonomous planning quality, or general mutation
-quality. Plan evidence covers only the 20 mutation cases, and live-model,
-autonomous-discovery, and routing comparison evidence remains open. The separate
+quality. The first live-model run now covers all 30 v2 cases with autonomous
+selected context, targets, plans, and answers. Its fixed `code-fast` baseline
+passed 5/30; the route using `code` except `code-fast` for security review passed
+9/30, retained recall `0.9917`, precision `0.8083`, provenance `1.0`, and zero
+incorrect edits, and reduced median estimated local-compute proxy cost per
+success by 36.996%. Both results failed the absolute quality thresholds, with
+the routed plan-acceptance rate at `0.6667`; security review and scaffold each
+passed 0/5. ADR 0066 therefore records a failed comparison and leaves Gate 2
+open for target-discovery and exact-citation improvement. The separate
 Gate 2 contract now pins seven fixture repositories, 30 task documents and
 scenario evaluators, an admitted model pool with per-model estimated rates, and
 the exit thresholds. Its contract-only validator still reports 30 contract-valid

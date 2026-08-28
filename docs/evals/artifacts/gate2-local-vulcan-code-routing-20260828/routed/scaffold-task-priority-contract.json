@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "routed",
+  "caseId": "scaffold-task-priority-contract",
+  "modelId": "code",
+  "generatedAt": "2026-08-28T11:58:41.041Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "a9b1373af4f5729d1502e246d5a07ac3e27da3c7e945194f59793d4a396eff4e",
+  "retrieval": {
+    "baseCommit": "ef0d0ebbc5b42e5bb30129357f84a3b4bd7ea961",
+    "digestSha256": "357d8440c27bbbcb1d4fe6cdd0f1bddfb1aa24cdd5df459b11a667bdb211d81a",
+    "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"summary\":\"Add a non-null priority column with a safe integer default (0) to the offline tasks schema snapshot, and add a read-only contract query in the disposable check that asserts the column is present and selectable. No migration, no DB connection, no live-state mutation.\",\"steps\":[\"Add `priority INTEGER NOT NULL DEFAULT 0` to the tasks table definition in schema/current.sql\",\"Append a read-only contract SELECT against the priority column in checks/schema_contract.sql\",\"Verify no migration file is created and no live-state mutation occurs\"],\"risks\":[\"None: changes are confined to the offline schema snapshot and the disposable check file; no migration is produced and no database is contacted\"],\"targets\":[\"checks/schema_contract.sql\",\"schema/current.sql\"],\"checkIds\":[\"priority-schema-check\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"schema/current.sql\",\"content\":\"CREATE TABLE tasks (\\n  id INTEGER PRIMARY KEY,\\n  title TEXT NOT NULL,\\n  priority INTEGER NOT NULL DEFAULT 0\\n);\\n\"},{\"path\":\"checks/schema_contract.sql\",\"content\":\"-- A future evaluator should assert the tasks table remains readable.\\nSELECT id, title FROM tasks LIMIT 0;\\n\\n-- Read-only contract: verify the non-null priority column is present and selectable.\\nSELECT priority FROM tasks LIMIT 0;\\n\"}],\"citations\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"Added `priority INTEGER NOT NULL DEFAULT 0` to the offline tasks schema and a read-only contract query selecting the new column. No migration created; no database connected.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
+      "README.md",
+      "schema/current.sql"
+    ],
+    "plan": {
+      "summary": "Add a non-null priority column with a safe integer default (0) to the offline tasks schema snapshot, and add a read-only contract query in the disposable check that asserts the column is present and selectable. No migration, no DB connection, no live-state mutation.",
+      "steps": [
+        "Add `priority INTEGER NOT NULL DEFAULT 0` to the tasks table definition in schema/current.sql",
+        "Append a read-only contract SELECT against the priority column in checks/schema_contract.sql",
+        "Verify no migration file is created and no live-state mutation occurs"
+      ],
+      "risks": [
+        "None: changes are confined to the offline schema snapshot and the disposable check file; no migration is produced and no database is contacted"
+      ],
+      "targets": [
+        "checks/schema_contract.sql",
+        "schema/current.sql"
+      ],
+      "checkIds": [
+        "priority-schema-check"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "checks/schema_contract.sql",
+          "content": "-- A future evaluator should assert the tasks table remains readable.\nSELECT id, title FROM tasks LIMIT 0;\n\n-- Read-only contract: verify the non-null priority column is present and selectable.\nSELECT priority FROM tasks LIMIT 0;\n"
+        },
+        {
+          "path": "schema/current.sql",
+          "content": "CREATE TABLE tasks (\n  id INTEGER PRIMARY KEY,\n  title TEXT NOT NULL,\n  priority INTEGER NOT NULL DEFAULT 0\n);\n"
+        }
+      ],
+      "citations": [
+        "checks/schema_contract.sql",
+        "migrations/README.md",
+        "README.md",
+        "schema/current.sql"
+      ],
+      "findingIds": [],
+      "summary": "Added `priority INTEGER NOT NULL DEFAULT 0` to the offline tasks schema and a read-only contract query selecting the new column. No migration created; no database connected."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-task-priority-contract",
+    "evaluatorId": "scaffold-task-priority-contract-evaluator",
+    "candidateSha256": "75d20a148629efbda8a71411b5e83c4134e011a371278de8518db8f1e96ba874",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-task-priority-contract",
+    "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+    "taskSha256": "83ad152996cef7b8bad212357a65f59c5376023167785a2a01ea6f59f56a4401",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/schema_contract.sql",
+        "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+      },
+      {
+        "path": "migrations/README.md",
+        "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+      },
+      {
+        "path": "README.md",
+        "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+      },
+      {
+        "path": "schema/current.sql",
+        "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-task-priority-contract-evaluator",
+    "scenarioEvidenceSha256": "7bc30175700e74f69701310feebb8ad2a5830b84b4fa68b8c87bb1dbf038739b",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1006,
+      "outputTokens": 1067,
+      "estimatedCostUsd": 0.0016262685,
+      "actualBilledUsd": null,
+      "latencyMs": 56239
+    }
+  }
+}

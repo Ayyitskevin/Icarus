@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "routed",
+  "caseId": "refactor-cart-money-module",
+  "modelId": "code",
+  "generatedAt": "2026-08-28T11:58:40.382Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "de035b7a61c658e9d0c3f2efa39eba239427cbea2760769e2732b751c42b8ccd",
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "708a45521a4c60625d5b512d7d05df0a459d73d38c1b33228c17d0f3b0ff3191",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_cart.py\",\"src/cart.py\"],\"plan\":{\"summary\":\"Extract the subtotal arithmetic into a private helper function, fix the deliberate one-cent defect so the public API matches its test, and keep `subtotal` as the sole public entry point.\",\"steps\":[\"Read src/cart.py to identify the inline arithmetic (sum(cents) - 1) and the one-cent defect described in README.md.\",\"Read checks/test_cart.py to confirm the expected contract: subtotal([100, 200]) == 300.\",\"Create a private helper _compute_total that performs the correct sum-of-cents arithmetic.\",\"Refactor subtotal to delegate to _compute_total, removing the erroneous - 1 offset.\",\"Verify the public import name `subtotal` is unchanged so checks/test_cart.py and checks/verify.py continue to pass.\"],\"risks\":[\"Renaming or removing the public `subtotal` symbol would break the import in checks/test_cart.py.\",\"Introducing a different helper name or visibility could break tooling that introspects the module.\"],\"targets\":[\"src/cart.py\"],\"checkIds\":[\"cart-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/cart.py\",\"content\":\"def _compute_total(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Compute the total from a list of cent values.\\\"\\\"\\\"\\n    return sum(cents)\\n\\n\\ndef subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the cart subtotal in cents.\\\"\\\"\\\"\\n    return _compute_total(cents)\\n\"}],\"citations\":[\"README.md\",\"checks/test_cart.py\",\"src/cart.py\"],\"findingIds\":[],\"summary\":\"Extracted the subtotal arithmetic into a private `_compute_total` helper, removed the one-cent defect, and preserved `subtotal` as the public API so the existing test passes.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/test_cart.py",
+      "README.md",
+      "src/cart.py"
+    ],
+    "plan": {
+      "summary": "Extract the subtotal arithmetic into a private helper function, fix the deliberate one-cent defect so the public API matches its test, and keep `subtotal` as the sole public entry point.",
+      "steps": [
+        "Read src/cart.py to identify the inline arithmetic (sum(cents) - 1) and the one-cent defect described in README.md.",
+        "Read checks/test_cart.py to confirm the expected contract: subtotal([100, 200]) == 300.",
+        "Create a private helper _compute_total that performs the correct sum-of-cents arithmetic.",
+        "Refactor subtotal to delegate to _compute_total, removing the erroneous - 1 offset.",
+        "Verify the public import name `subtotal` is unchanged so checks/test_cart.py and checks/verify.py continue to pass."
+      ],
+      "risks": [
+        "Renaming or removing the public `subtotal` symbol would break the import in checks/test_cart.py.",
+        "Introducing a different helper name or visibility could break tooling that introspects the module."
+      ],
+      "targets": [
+        "src/cart.py"
+      ],
+      "checkIds": [
+        "cart-contract"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/cart.py",
+          "content": "def _compute_total(cents: list[int]) -> int:\n    \"\"\"Compute the total from a list of cent values.\"\"\"\n    return sum(cents)\n\n\ndef subtotal(cents: list[int]) -> int:\n    \"\"\"Return the cart subtotal in cents.\"\"\"\n    return _compute_total(cents)\n"
+        }
+      ],
+      "citations": [
+        "checks/test_cart.py",
+        "README.md",
+        "src/cart.py"
+      ],
+      "findingIds": [],
+      "summary": "Extracted the subtotal arithmetic into a private `_compute_total` helper, removed the one-cent defect, and preserved `subtotal` as the public API so the existing test passes."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "refactor-cart-money-module",
+    "evaluatorId": "refactor-cart-money-module-evaluator",
+    "candidateSha256": "3fc4351b7996ec7bf4cb4e28bf64dfb8034e7a879b8a9d8a51e18c32e3ff49a1",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "refactor-cart-money-module",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "22803a5c5a80217547c7058d12e2100640b669b85fafaf2fc5460e916ce40dfd",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "refactor-cart-money-module-evaluator",
+    "scenarioEvidenceSha256": "4a044d039a574c5b42a8d949dd1bcb4930e3a1cf72a402366a2832532390feac",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1089,
+      "outputTokens": 1311,
+      "estimatedCostUsd": 0.0018828,
+      "actualBilledUsd": null,
+      "latencyMs": 65842
+    }
+  }
+}

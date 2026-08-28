@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "routed",
+  "caseId": "security-path-traversal",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:40.848Z",
+  "finishReason": "stop",
+  "reassessedFromEvidenceSha256": "f44b08b00fc2bfdfd1d9b34cae3a708f766816402da07db59797c256168c2bc6",
+  "retrieval": {
+    "baseCommit": "7485f907c0d8627bd67b050b1da5050d5999dcdf",
+    "digestSha256": "3484ca5f48cedeed0f3cc0c87dd915c7543bde7ae4662fed8bcb31ec90e95ea6",
+    "repositoryDigestSha256": "0091120cc1019d8c7e48935b1f0a41bf5925098210cdb4e7b3d2fd60af3c3849"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"src/files.py\",\"checks/expected_finding.md\",\"README.md\"],\"plan\":{\"summary\":\"Public-file reader in src/files.py joins a user-controlled path directly onto the public root with no normalization or containment check, enabling path traversal outside the intended root.\",\"steps\":[\"Inspect src/files.py read_public() to confirm how user_path is combined with root.\",\"Verify that no Path.resolve(), realpath, or commonpath containment check is applied.\",\"Correlate with README.md's stated intent (serve only files below one public root) and checks/expected_finding.md confirming the weakness.\",\"Classify the finding as path-traversal and document exploit condition and citations.\",\"Return read-only results with no targets or checks.\"],\"risks\":[\"The fixture is intentionally vulnerable; findings are source-backed and read-only.\",\"No mitigation change is applied per read_only task scope.\",\"Severity assumes remote/unauthenticated user_path input as documented by the fixture intent.\"],\"targets\":[],\"checkIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"src/files.py\",\"checks/expected_finding.md\",\"README.md\"],\"findingIds\":[\"path-traversal\"],\"summary\":\"In src/files.py, read_public(root, user_path) returns (root / user_path).read_text() without resolving or validating user_path against root. This is a high-severity path-traversal vulnerability: an attacker supplies user_path such as ../../etc/passwd to escape the public root. Exploit condition is any untrusted caller-supplied user_path. Remediation would resolve the joined path (e.g., os.path.realpath / Path.resolve) and assert it stays within root (e.g., commonpath) before serving. This matches checks/expected_finding.md, which states the user-controlled path is not resolved and checked against the public root.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/expected_finding.md",
+      "README.md",
+      "src/files.py"
+    ],
+    "plan": {
+      "summary": "Public-file reader in src/files.py joins a user-controlled path directly onto the public root with no normalization or containment check, enabling path traversal outside the intended root.",
+      "steps": [
+        "Inspect src/files.py read_public() to confirm how user_path is combined with root.",
+        "Verify that no Path.resolve(), realpath, or commonpath containment check is applied.",
+        "Correlate with README.md's stated intent (serve only files below one public root) and checks/expected_finding.md confirming the weakness.",
+        "Classify the finding as path-traversal and document exploit condition and citations.",
+        "Return read-only results with no targets or checks."
+      ],
+      "risks": [
+        "The fixture is intentionally vulnerable; findings are source-backed and read-only.",
+        "No mitigation change is applied per read_only task scope.",
+        "Severity assumes remote/unauthenticated user_path input as documented by the fixture intent."
+      ],
+      "targets": [],
+      "checkIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": [
+        "checks/expected_finding.md",
+        "README.md",
+        "src/files.py"
+      ],
+      "findingIds": [
+        "path-traversal"
+      ],
+      "summary": "In src/files.py, read_public(root, user_path) returns (root / user_path).read_text() without resolving or validating user_path against root. This is a high-severity path-traversal vulnerability: an attacker supplies user_path such as ../../etc/passwd to escape the public root. Exploit condition is any untrusted caller-supplied user_path. Remediation would resolve the joined path (e.g., os.path.realpath / Path.resolve) and assert it stays within root (e.g., commonpath) before serving. This matches checks/expected_finding.md, which states the user-controlled path is not resolved and checked against the public root."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "security-path-traversal",
+    "evaluatorId": "security-path-traversal-evaluator",
+    "candidateSha256": "4fc6e78e3145d6c51b8a0deeec3bc5764c015cf1a3ee2eeff3d73562f4c079b0",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": [
+      "checks/expected_finding.md",
+      "README.md",
+      "src/files.py"
+    ],
+    "findingIds": [
+      "path-traversal"
+    ],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "security-path-traversal",
+    "repositoryRevisionSha256": "131ff18d492a97bbab9a590d5a0a9ef9e21fd25baadf648bab4bbbd5b200e132",
+    "taskSha256": "05195873393e3d60e0fe4b34f1becf20a80522ce0ca2b3f4a1fa98a935496c96",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/expected_finding.md",
+        "sha256": "2fdc9c401165ab469355887fe2b44069a6e7d231d2c4406e516c72fd872dbbd1"
+      },
+      {
+        "path": "README.md",
+        "sha256": "078e8880de0bfd549d6dcd9e16967d35693988c38343c5b6ad6f231f2aac426f"
+      },
+      {
+        "path": "src/files.py",
+        "sha256": "3eda58ebbbfae5a26e17236f93ac39972969c121baec2b2897f4703101062af2"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": [
+      "checks/expected_finding.md",
+      "README.md",
+      "src/files.py"
+    ],
+    "findingIds": [
+      "path-traversal"
+    ],
+    "scenarioEvaluatorId": "security-path-traversal-evaluator",
+    "scenarioEvidenceSha256": "e139b14b439c94f56bda61783fcd0f14aa614f49a90d62379ba94e43fdaf422b",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 918,
+      "outputTokens": 691,
+      "estimatedCostUsd": 0.001609,
+      "actualBilledUsd": null,
+      "latencyMs": 13016
+    }
+  }
+}

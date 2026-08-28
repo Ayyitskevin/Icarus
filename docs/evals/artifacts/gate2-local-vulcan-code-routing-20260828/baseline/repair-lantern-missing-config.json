@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "repair-lantern-missing-config",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:32.657Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "08ebbc67f350063b1bdecb1be2b3ae1fc377a2552904ad65839745f030b8260d",
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "b7b9dc15cad034deef17f65be56873075a043c5c15993597f27a5fc049a6fb06",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"config/app.json\",\"src/greeting.py\",\"src/main.py\"],\"plan\":{\"summary\":\"Replace the unguarded filesystem read of config/app.json in src/main.py with a bounded configuration error so a missing config produces a clear ConfigurationError instead of a raw FileNotFoundError.\",\"steps\":[\"Introduce a ConfigurationError exception in src/main.py to represent bounded configuration failures.\",\"Wrap the config file read/parse in a try/except that catches FileNotFoundError and re-raises ConfigurationError with a descriptive message.\",\"Expose the loaded audience via a load_audience helper and pass it to greeting, keeping behavior identical when config is present.\"],\"risks\":[\"If the JSON is malformed or missing the audience key, a different exception is still raised; that is outside the absent-file scope of this task.\",\"The hardcoded config path is unchanged, so behavior for present configs is unaffected.\"],\"targets\":[\"src/main.py\"],\"checkIds\":[\"lantern-missing-config\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/main.py\",\"content\":\"import json\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\n\\nclass ConfigurationError(Exception):\\n    \\\"\\\"\\\"Raised when the Lantern configuration cannot be loaded.\\\"\\\"\\\"\\n\\n\\ndef load_audience(path: str = \\\"config/app.json\\\") -> str:\\n    try:\\n        config = json.loads(Path(path).read_text())\\n    except FileNotFoundError as exc:\\n        raise ConfigurationError(\\n            f\\\"Configuration file not found: {path}\\\"\\n        ) from exc\\n    return config[\\\"audience\\\"]\\n\\n\\nprint(greeting(load_audience()))\\n\"}],\"citations\":[\"config/app.json\",\"src/greeting.py\",\"src/main.py\"],\"findingIds\":[],\"summary\":\"Guard the config/app.json read in src/main.py so a missing file raises a bounded ConfigurationError instead of a raw filesystem exception.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "config/app.json",
+      "src/greeting.py",
+      "src/main.py"
+    ],
+    "plan": {
+      "summary": "Replace the unguarded filesystem read of config/app.json in src/main.py with a bounded configuration error so a missing config produces a clear ConfigurationError instead of a raw FileNotFoundError.",
+      "steps": [
+        "Introduce a ConfigurationError exception in src/main.py to represent bounded configuration failures.",
+        "Wrap the config file read/parse in a try/except that catches FileNotFoundError and re-raises ConfigurationError with a descriptive message.",
+        "Expose the loaded audience via a load_audience helper and pass it to greeting, keeping behavior identical when config is present."
+      ],
+      "risks": [
+        "If the JSON is malformed or missing the audience key, a different exception is still raised; that is outside the absent-file scope of this task.",
+        "The hardcoded config path is unchanged, so behavior for present configs is unaffected."
+      ],
+      "targets": [
+        "src/main.py"
+      ],
+      "checkIds": [
+        "lantern-missing-config"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/main.py",
+          "content": "import json\nfrom pathlib import Path\n\nfrom src.greeting import greeting\n\n\nclass ConfigurationError(Exception):\n    \"\"\"Raised when the Lantern configuration cannot be loaded.\"\"\"\n\n\ndef load_audience(path: str = \"config/app.json\") -> str:\n    try:\n        config = json.loads(Path(path).read_text())\n    except FileNotFoundError as exc:\n        raise ConfigurationError(\n            f\"Configuration file not found: {path}\"\n        ) from exc\n    return config[\"audience\"]\n\n\nprint(greeting(load_audience()))\n"
+        }
+      ],
+      "citations": [
+        "config/app.json",
+        "src/greeting.py",
+        "src/main.py"
+      ],
+      "findingIds": [],
+      "summary": "Guard the config/app.json read in src/main.py so a missing file raises a bounded ConfigurationError instead of a raw filesystem exception."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-lantern-missing-config",
+    "evaluatorId": "repair-lantern-missing-config-evaluator",
+    "candidateSha256": "e96bfaa2d189adaf1e602e87b058831cca5262168f933879a3f8a3b1110e4149",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "src/main.py"
+    ],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "lantern-missing-config",
+        "argv": [
+          "python",
+          "-c",
+          "import os,subprocess,sys,tempfile; happy=subprocess.run([sys.executable,\"-m\",\"src.main\"],capture_output=True,text=True); assert happy.returncode == 0 and happy.stdout == \"Welcome, traveler.\\n\" and happy.stderr == \"\"; temporary=tempfile.TemporaryDirectory(); environment=os.environ.copy(); environment[\"PYTHONPATH\"]=os.getcwd(); missing=subprocess.run([sys.executable,\"-m\",\"src.main\"],cwd=temporary.name,env=environment,capture_output=True,text=True); assert missing.returncode == 1 and missing.stdout == \"\" and missing.stderr == \"Lantern configuration is unavailable.\\n\"; temporary.cleanup()"
+        ],
+        "exitCode": 1,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "09a596a85bd2c6b81ed1c4f1519e29c8f5cdb5b6a1f7e3b5bde6b48fad697970",
+        "truncated": false,
+        "outcome": "failed"
+      }
+    ],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-lantern-missing-config",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "b868e7ab109623a17a0d40b598c0af13e55c4b0d1f8a9f364dfc417741ac53d6",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "src/main.py"
+    ],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-lantern-missing-config-evaluator",
+    "scenarioEvidenceSha256": "4ff143d97e7251a84340108a71ed49b2b421f1d10986de7ae0b5517549ad852a",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1003,
+      "outputTokens": 2787,
+      "estimatedCostUsd": 0.00379,
+      "actualBilledUsd": null,
+      "latencyMs": 52788
+    }
+  }
+}

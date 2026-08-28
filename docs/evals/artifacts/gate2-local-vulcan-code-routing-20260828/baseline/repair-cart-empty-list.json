@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "repair-cart-empty-list",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:33.453Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "fe75960db327253abcad339a973b9a6ba82ef342b538c73466881095ac16104a",
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "edecf75809e61138f698481771412c57c23154afc41bb288ae1dbb82095d1473",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d"
+  },
+  "rawCandidate": "{\"type\":\"object\",\"additionalProperties\":false,\"schemaVersion\":1,\"selectedContextPaths\":[\"src/cart.py\",\"checks/test_cart.py\",\"checks/verify.py\",\"README.md\"],\"plan\":{\"summary\":\"Remove the deliberate one-cent defect in the cart subtotal so it returns the exact integer-cents sum. sum([]) is 0, so an empty cart now totals zero, while populated carts still return the correct sum and the integer-cents signature is unchanged.\",\"steps\":[\"Replace the body of subtotal in src/cart.py with `return sum(cents)` so the function returns the exact sum of the cents list.\",\"Verify that subtotal([]) equals 0 (empty cart) and subtotal([100, 200]) equals 300 (populated cart) via checks/test_cart.py run through checks/verify.py.\",\"Confirm the function signature and return type remain int to preserve the current integer-cents API.\",\"Run the registered check cart-empty-list to confirm no regression.\"],\"risks\":[\"None expected; the change only removes a subtracted constant and does not alter the API or return type.\",\"Ensure no other callers depend on the previous off-by-one behavior.\"],\"targets\":[\"src/cart.py\"],\"checkIds\":[\"cart-empty-list\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/cart.py\",\"content\":\"def subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the cart subtotal in cents.\\\"\\\"\\\"\\n    return sum(cents)\\n\"}],\"citations\":[\"src/cart.py\",\"checks/test_cart.py\",\"checks/verify.py\",\"README.md\"],\"findingIds\":[],\"summary\":\"The deliberate one-cent defect (`sum(cents) - 1`) caused the subtotal to disagree with the sum of item prices. Changing the return to `sum(cents)` makes an empty cart subtotal zero while preserving correct sums for populated carts and keeping the integer-cents API intact.\"}}",
+  "candidate": null,
+  "candidateError": "Gate 2 live candidate: root must contain exactly: schemaVersion, selectedContextPaths, plan, answer",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-cart-empty-list",
+    "evaluatorId": "repair-cart-empty-list-evaluator",
+    "candidateSha256": "4865168b73ff9887cf1a6aadd1a41af1ffd9d0b0971d6659e93c550d0830ae81",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-cart-empty-list",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "b663cdf70ad8934e8068f3c1619324945802e6f3b13ec5c74a754cc8dd9d2f61",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-cart-empty-list-evaluator",
+    "scenarioEvidenceSha256": "ef8c025c59e97ae28325d640b89544fef24e40fb74acd91c31ab698fd97a3e6a",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1088,
+      "outputTokens": 1283,
+      "estimatedCostUsd": 0.002371,
+      "actualBilledUsd": null,
+      "latencyMs": 24600
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "repair-schema-status-snapshot",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:32.065Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "f78de5c6bf7a9cab37da9dbf1e9c55d50de9c35a1679041804b874df55997866",
+  "retrieval": {
+    "baseCommit": "ef0d0ebbc5b42e5bb30129357f84a3b4bd7ea961",
+    "digestSha256": "6ca18145f0c3adc98525776c0bf2a232bb6e9b9b47eb309f5321f16a3587af15",
+    "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
+  },
+  "rawCandidate": "{\"type\":\"object\",\"additionalProperties\":false,\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/schema_contract.sql\",\"schema/current.sql\"],\"plan\":{\"summary\":\"Add a non-null task status column with a safe default to the offline schema snapshot (schema/current.sql) and update the existing contract query (checks/schema_contract.sql) to select the new status column, without creating a migration or touching live database state.\",\"steps\":[\"Add a `status TEXT NOT NULL DEFAULT 'pending'` column to the tasks table in schema/current.sql so the snapshot carries a non-null status with a safe default.\",\"Update the contract query in checks/schema_contract.sql to `SELECT id, title, status FROM tasks LIMIT 0;` so it selects the new status column and keeps asserting the table remains readable.\",\"Verify the changes stay within the offline snapshot and do not create a numbered migration or connect to a database.\"],\"risks\":[\"The literal default 'pending' is a convention; any string satisfying the NOT NULL constraint is acceptable and the safe default is intentionally permissive.\",\"Editing the contract query changes evaluation assertions, so it must remain a read-only `SELECT ... LIMIT 0` that never mutates state.\"],\"targets\":[\"checks/schema_contract.sql\",\"schema/current.sql\"],\"checkIds\":[\"schema-status-snapshot\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"checks/schema_contract.sql\",\"content\":\"-- A future evaluator should assert the tasks table remains readable.\\nSELECT id, title, status FROM tasks LIMIT 0;\\n\"},{\"path\":\"schema/current.sql\",\"content\":\"CREATE TABLE tasks (\\n  id INTEGER PRIMARY KEY,\\n  title TEXT NOT NULL,\\n  status TEXT NOT NULL DEFAULT 'pending'\\n);\\n\"}],\"citations\":[\"checks/schema_contract.sql\",\"migrations/README.md\",\"README.md\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"Introduced a non-null `status` column with a safe default ('pending') into the offline tasks schema and extended the contract query to select it, keeping all changes confined to the offline snapshot without creating a migration or mutating live database state.\"}}",
+  "candidate": null,
+  "candidateError": "Gate 2 live candidate: root must contain exactly: schemaVersion, selectedContextPaths, plan, answer",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-schema-status-snapshot",
+    "evaluatorId": "repair-schema-status-snapshot-evaluator",
+    "candidateSha256": "e16337b7f1f7c9afbc76901bbf589068063b05000e07e2dba767762c2bb2a5bb",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-schema-status-snapshot",
+    "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+    "taskSha256": "5c5a211b88fe21da7b6d2ff968051eb4ef089fd142354b4454d251fc0d867dc7",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/schema_contract.sql",
+        "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+      },
+      {
+        "path": "migrations/README.md",
+        "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+      },
+      {
+        "path": "README.md",
+        "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+      },
+      {
+        "path": "schema/current.sql",
+        "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-schema-status-snapshot-evaluator",
+    "scenarioEvidenceSha256": "53c74aa450b92b5bb247e5ae394aab52b397e26590056633bece6ef34b638f38",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1007,
+      "outputTokens": 1520,
+      "estimatedCostUsd": 0.002527,
+      "actualBilledUsd": null,
+      "latencyMs": 29081
+    }
+  }
+}

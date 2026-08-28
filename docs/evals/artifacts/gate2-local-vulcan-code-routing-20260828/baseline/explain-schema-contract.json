@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "explain-schema-contract",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:33.977Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "caebda99fb2c3836baa7238a1ede97f749c2074668ee4db2f05bce1815cf1c31",
+  "retrieval": {
+    "baseCommit": "ef0d0ebbc5b42e5bb30129357f84a3b4bd7ea961",
+    "digestSha256": "8ece9a7a15ebf6c9dff084f62841871793550a4231fe6dac5b4f1fab4a072d64",
+    "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
+  },
+  "rawCandidate": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schemaVersion\",\"selectedContextPaths\",\"plan\",\"answer\"],\"properties\":{\"schemaVersion\":{\"const\":1},\"selectedContextPaths\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}},\"plan\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"summary\",\"steps\",\"risks\",\"targets\",\"checkIds\"],\"properties\":{\"summary\":{\"type\":\"string\"},\"steps\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":12,\"items\":{\"type\":\"string\"}},\"risks\":{\"type\":\"array\",\"maxItems\":12,\"items\":{\"type\":\"string\"}},\"targets\":{\"type\":\"array\",\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}},\"checkIds\":{\"type\":\"array\",\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}}}},\"answer\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"kind\",\"files\",\"citations\",\"findingIds\",\"summary\"],\"properties\":{\"kind\":{\"enum\":[\"mutation\",\"read_only\"]},\"files\":{\"type\":\"array\",\"maxItems\":8,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"path\",\"content\"],\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}}}},\"citations\":{\"type\":\"array\",\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}},\"findingIds\":{\"type\":\"array\",\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}},\"summary\":{\"type\":\"string\"}}}},\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"summary\":\"Explain the current tasks table schema and the purpose of the offline contract query without mutating any state.\",\"steps\":[\"Describe the tasks table columns and constraints from schema/current.sql.\",\"Explain that the fixture models an offline application schema that must never have a migration applied to live state.\",\"Interpret the contract query in checks/schema_contract.sql as a readability assertion.\",\"Note that future numbered migrations belong after explicit schema approval per migrations/README.md.\",\"Confirm the task is read-only with no file changes, targets, or checks requested.\"],\"risks\":[],\"targets\":[],\"checkIds\":[],\"summary\":\"Explain the current tasks table schema and the purpose of the offline contract query without mutating any state.\"},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"The tasks table (schema/current.sql) has an INTEGER PRIMARY KEY id column and a NOT NULL title TEXT column, modeling an offline application schema fixture (README.md) that must never have a migration applied to live state. The contract query checks/schema_contract.sql runs 'SELECT id, title FROM tasks LIMIT 0' so a future evaluator can assert the tasks table remains readable against the frozen schema without inserting or altering any data. Per migrations/README.md, any future numbered migrations belong in that directory only after explicit schema approval. This is a read-only explanation task, so no files are changed and no targets or check IDs are requested.\"}}",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must not contain duplicate JSON object members",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "explain-schema-contract",
+    "evaluatorId": "explain-schema-contract-evaluator",
+    "candidateSha256": "6f484fb49121993ec539d96e5532ac4dc7aa683219e80d133e69d86b90c7a18b",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "explain-schema-contract",
+    "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+    "taskSha256": "d85e5ab2982ecd2d229ddbbfaca21a86d99dfe94f1c754d51ae6c42d231be85b",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/schema_contract.sql",
+        "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+      },
+      {
+        "path": "migrations/README.md",
+        "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+      },
+      {
+        "path": "README.md",
+        "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+      },
+      {
+        "path": "schema/current.sql",
+        "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "explain-schema-contract-evaluator",
+    "scenarioEvidenceSha256": "cf03c90e513b5cc323808aa5c7f766b55aebc0e6265ea4ecef2b9fce48560d53",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 982,
+      "outputTokens": 804,
+      "estimatedCostUsd": 0.001786,
+      "actualBilledUsd": null,
+      "latencyMs": 15506
+    }
+  }
+}

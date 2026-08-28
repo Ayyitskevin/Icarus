@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "routed",
+  "caseId": "explain-schema-contract",
+  "modelId": "code",
+  "generatedAt": "2026-08-28T11:58:40.781Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "043811bf1897a82f8e8c7530ac8ebe5b0fbad1ef6fbb475ac93d8baf7a744481",
+  "retrieval": {
+    "baseCommit": "ef0d0ebbc5b42e5bb30129357f84a3b4bd7ea961",
+    "digestSha256": "8ece9a7a15ebf6c9dff084f62841871793550a4231fe6dac5b4f1fab4a072d64",
+    "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"summary\":\"Explain the tasks table definition and the purpose of the offline contract query by reading the schema, check, and repository documentation sources.\",\"steps\":[\"Read schema/current.sql to identify the tasks table columns and constraints\",\"Read checks/schema_contract.sql to understand the contract query and its stated intent\",\"Read README.md for repository-level context on the offline fixture nature\",\"Read migrations/README.md to note the governance policy for future schema changes\"],\"risks\":[\"None — read-only explanation task with no mutation or security implications\"],\"targets\":[],\"checkIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"The current schema (schema/current.sql) defines a single table called `tasks` with two columns: `id` (INTEGER PRIMARY KEY, auto-identifying row) and `title` (TEXT NOT NULL, a required descriptive string). This is the entirety of the live schema in this fixture.\\n\\nThe contract query in checks/schema_contract.sql performs `SELECT id, title FROM tasks LIMIT 0;`. Its purpose, as stated in the accompanying comment, is to let a future evaluator assert that the tasks table remains readable. By selecting only the column names with `LIMIT 0`, the query validates that the table exists and the referenced columns are present without fetching or mutating any rows. This makes it a safe, side-effect-free contract check.\\n\\nThe repository README.md clarifies that this is an offline application schema fixture and that evaluation must never apply a migration to live state, reinforcing why the contract query is limited to a zero-row read rather than any DDL or DML. The migrations/README.md further establishes that any future schema changes require explicit approval and numbered migration files, meaning the tasks table shape shown in schema/current.sql is the authoritative current contract.\\n\\nIn summary, the tasks table is a minimal two-column record (id, title), and the offline contract query serves as a lightweight, non-destructive assertion that those columns remain accessible, supporting future automated evaluation without risk of state mutation.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
+      "README.md",
+      "schema/current.sql"
+    ],
+    "plan": {
+      "summary": "Explain the tasks table definition and the purpose of the offline contract query by reading the schema, check, and repository documentation sources.",
+      "steps": [
+        "Read schema/current.sql to identify the tasks table columns and constraints",
+        "Read checks/schema_contract.sql to understand the contract query and its stated intent",
+        "Read README.md for repository-level context on the offline fixture nature",
+        "Read migrations/README.md to note the governance policy for future schema changes"
+      ],
+      "risks": [
+        "None — read-only explanation task with no mutation or security implications"
+      ],
+      "targets": [],
+      "checkIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": [
+        "checks/schema_contract.sql",
+        "migrations/README.md",
+        "README.md",
+        "schema/current.sql"
+      ],
+      "findingIds": [],
+      "summary": "The current schema (schema/current.sql) defines a single table called `tasks` with two columns: `id` (INTEGER PRIMARY KEY, auto-identifying row) and `title` (TEXT NOT NULL, a required descriptive string). This is the entirety of the live schema in this fixture.\n\nThe contract query in checks/schema_contract.sql performs `SELECT id, title FROM tasks LIMIT 0;`. Its purpose, as stated in the accompanying comment, is to let a future evaluator assert that the tasks table remains readable. By selecting only the column names with `LIMIT 0`, the query validates that the table exists and the referenced columns are present without fetching or mutating any rows. This makes it a safe, side-effect-free contract check.\n\nThe repository README.md clarifies that this is an offline application schema fixture and that evaluation must never apply a migration to live state, reinforcing why the contract query is limited to a zero-row read rather than any DDL or DML. The migrations/README.md further establishes that any future schema changes require explicit approval and numbered migration files, meaning the tasks table shape shown in schema/current.sql is the authoritative current contract.\n\nIn summary, the tasks table is a minimal two-column record (id, title), and the offline contract query serves as a lightweight, non-destructive assertion that those columns remain accessible, supporting future automated evaluation without risk of state mutation."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "explain-schema-contract",
+    "evaluatorId": "explain-schema-contract-evaluator",
+    "candidateSha256": "1b7952156df05a1a50bdbd7428717183ada2f1575493024339e0f897c82ed3d3",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
+      "README.md",
+      "schema/current.sql"
+    ],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "explain-schema-contract",
+    "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+    "taskSha256": "d85e5ab2982ecd2d229ddbbfaca21a86d99dfe94f1c754d51ae6c42d231be85b",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/schema_contract.sql",
+        "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+      },
+      {
+        "path": "migrations/README.md",
+        "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+      },
+      {
+        "path": "README.md",
+        "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+      },
+      {
+        "path": "schema/current.sql",
+        "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
+      "README.md",
+      "schema/current.sql"
+    ],
+    "findingIds": [],
+    "scenarioEvaluatorId": "explain-schema-contract-evaluator",
+    "scenarioEvidenceSha256": "01a7a62528cce182a8d25496018804f720eb8f2e3206e31c7f647ab2dd0888ac",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 982,
+      "outputTokens": 732,
+      "estimatedCostUsd": 0.001344633,
+      "actualBilledUsd": null,
+      "latencyMs": 47306
+    }
+  }
+}

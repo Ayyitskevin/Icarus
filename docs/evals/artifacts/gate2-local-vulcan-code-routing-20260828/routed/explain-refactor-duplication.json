@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "routed",
+  "caseId": "explain-refactor-duplication",
+  "modelId": "code",
+  "generatedAt": "2026-08-28T11:58:40.803Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "37ba3cf68a52a8dbb3f812cef3bfd8f4c1eab8a1a5a5ec9c94623415444bbb47",
+  "retrieval": {
+    "baseCommit": "3c3bb16f72a899265802e94c5c6d5abb537bfc03",
+    "digestSha256": "3bef220b00b1b51d01ab02d1ed827f005397b06a4c6e9124e24d5878eaba0b5d",
+    "repositoryDigestSha256": "ba8451fe227e973c5c9e255880235e00488f9c204bbe8cd5fbca73e3c8d2f47f"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"plan\":{\"summary\":\"Explain the duplicated name-normalization pipeline shared by two public functions and the equivalence check that locks their behavior together.\",\"steps\":[\"Identify the normalization pipeline in src/format_name.py: strip → split → join-with-space → title.\",\"Identify the identical pipeline in src/profile.py: strip → split → join-with-space → title.\",\"Note that both functions accept a single str argument and return a str, with no additional branching or state.\",\"Read checks/test_profile.py, which imports both public functions and asserts they yield the same output for a multi-space, padded input string.\",\"Explain how the assertion format_name('  ada   lovelace ') == display_name('  ada   lovelace ') == 'Ada Lovelace' simultaneously proves (a) the two implementations are behaviorally equivalent and (b) the expected normalized form is 'Ada Lovelace'.\",\"Summarize the duplication: the four-step pipeline is copy-pasted across two modules with no shared helper, so any future change must be applied in both places or the equivalence check will break.\"],\"risks\":[\"A change to one function without the other silently breaks the equivalence guarantee.\",\"The check only exercises one input string; edge cases (empty string, Unicode, all-whitespace) are not covered.\"],\"targets\":[],\"checkIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"findingIds\":[],\"summary\":\"Both public functions—format_name in src/format_name.py and display_name in src/profile.py—implement an identical four-step normalization pipeline: (1) value.strip() removes leading and trailing whitespace; (2) .split() breaks the string on runs of whitespace, discarding empty tokens; (3) ' '.join(...) re-joins the tokens with exactly one space; (4) .title() upper-cases the first character of each token. The result is a clean, single-spaced, title-cased name. The duplication is verbatim: the same expression appears in both modules with no shared helper. The check in checks/test_profile.py imports both functions and asserts that, for the padded multi-space input '  ada   lovelace ', they both return 'Ada Lovelace'. This single assertion simultaneously (a) pins the expected normalized output and (b) proves behavioral equivalence of the two implementations—if either function's pipeline diverged, the equality would fail. The README confirms the intent: a future refactor should extract this pipeline into a shared helper, update both public modules to delegate to it, and retain the equivalence check as a regression guard.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/test_profile.py",
+      "README.md",
+      "src/format_name.py",
+      "src/profile.py"
+    ],
+    "plan": {
+      "summary": "Explain the duplicated name-normalization pipeline shared by two public functions and the equivalence check that locks their behavior together.",
+      "steps": [
+        "Identify the normalization pipeline in src/format_name.py: strip → split → join-with-space → title.",
+        "Identify the identical pipeline in src/profile.py: strip → split → join-with-space → title.",
+        "Note that both functions accept a single str argument and return a str, with no additional branching or state.",
+        "Read checks/test_profile.py, which imports both public functions and asserts they yield the same output for a multi-space, padded input string.",
+        "Explain how the assertion format_name('  ada   lovelace ') == display_name('  ada   lovelace ') == 'Ada Lovelace' simultaneously proves (a) the two implementations are behaviorally equivalent and (b) the expected normalized form is 'Ada Lovelace'.",
+        "Summarize the duplication: the four-step pipeline is copy-pasted across two modules with no shared helper, so any future change must be applied in both places or the equivalence check will break."
+      ],
+      "risks": [
+        "A change to one function without the other silently breaks the equivalence guarantee.",
+        "The check only exercises one input string; edge cases (empty string, Unicode, all-whitespace) are not covered."
+      ],
+      "targets": [],
+      "checkIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": [
+        "checks/test_profile.py",
+        "README.md",
+        "src/format_name.py",
+        "src/profile.py"
+      ],
+      "findingIds": [],
+      "summary": "Both public functions—format_name in src/format_name.py and display_name in src/profile.py—implement an identical four-step normalization pipeline: (1) value.strip() removes leading and trailing whitespace; (2) .split() breaks the string on runs of whitespace, discarding empty tokens; (3) ' '.join(...) re-joins the tokens with exactly one space; (4) .title() upper-cases the first character of each token. The result is a clean, single-spaced, title-cased name. The duplication is verbatim: the same expression appears in both modules with no shared helper. The check in checks/test_profile.py imports both functions and asserts that, for the padded multi-space input '  ada   lovelace ', they both return 'Ada Lovelace'. This single assertion simultaneously (a) pins the expected normalized output and (b) proves behavioral equivalence of the two implementations—if either function's pipeline diverged, the equality would fail. The README confirms the intent: a future refactor should extract this pipeline into a shared helper, update both public modules to delegate to it, and retain the equivalence check as a regression guard."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "explain-refactor-duplication",
+    "evaluatorId": "explain-refactor-duplication-evaluator",
+    "candidateSha256": "624760a6fde8eef38445afd6f92dff2ad6d667c98f9ad1b9a50ba13dd339361f",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": [
+      "checks/test_profile.py",
+      "README.md",
+      "src/format_name.py",
+      "src/profile.py"
+    ],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "explain-refactor-duplication",
+    "repositoryRevisionSha256": "5ce751efcdb138a9a0db315936567d9a6a1a86df45c49df9027b5bab8f605bd1",
+    "taskSha256": "e043d8be826a599e2864548c6d053a7bf2f146ad58aa645340256f8dbc08917d",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_profile.py",
+        "sha256": "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c"
+      },
+      {
+        "path": "README.md",
+        "sha256": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6"
+      },
+      {
+        "path": "src/format_name.py",
+        "sha256": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f"
+      },
+      {
+        "path": "src/profile.py",
+        "sha256": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": [
+      "checks/test_profile.py",
+      "README.md",
+      "src/format_name.py",
+      "src/profile.py"
+    ],
+    "findingIds": [],
+    "scenarioEvaluatorId": "explain-refactor-duplication-evaluator",
+    "scenarioEvidenceSha256": "c7e70b60bb9d5473bf8bc6cc6cf283d51bbe8ddb57afefdf155906cb7cfdc80d",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1015,
+      "outputTokens": 1001,
+      "estimatedCostUsd": 0.001581552,
+      "actualBilledUsd": null,
+      "latencyMs": 61447
+    }
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "explain-parser-failure",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:34.036Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "ec0e19ca834d5e13fe9a628a4a9e589fb740d58c7bac5b80f57ceb6402240d57",
+  "retrieval": {
+    "baseCommit": "6980aad15d1a2fd1aa0669ee11249aa4e0150a19",
+    "digestSha256": "8a49f0257f9f94bf99a6fcd40d416c52efe8f9bfcf679083e6a21c1dd58f4dd4",
+    "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_parser.py\",\"checks/verify.py\",\"src/parser.py\"],\"plan\":{\"summary\":\"Explain why the explicit false case fails in the failing-check fixture, citing the implementation, the failing assertion, and the repository contract without proposing an edit.\",\"steps\":[\"Inspect src/parser.py: parse_enabled returns bool(value), and Python's bool() coerces any non-empty string to True, so bool(\\\"false\\\") is True, not False.\",\"Inspect checks/test_parser.py: the second assertion assert parse_enabled(\\\"false\\\") is False compares the True result against False with identity, which raises AssertionError while assert parse_enabled(\\\"true\\\") is True passes.\",\"Inspect README.md: the repository contract states the parser should recognize explicit true and false values, and that its registered check currently fails on the false case.\",\"Inspect checks/verify.py: it makes the repository root importable and exec()s checks/test_parser.py, exercising the declared false-value regression.\",\"Conclude the mismatch is a semantic coercion bug: bool() cannot distinguish the literal string \\\"false\\\" from any other non-empty string, so the false regression cannot pass as implemented.\",\"Note no edit is proposed, consistent with the read_only explanation task.\",\"Identify no security findings in the closed taxonomy (authority-widening-instruction, path-traversal, unvalidated-config-shape).\"],\"risks\":[\"This explanation describes only the observed behavior; it does not correct the implementation, so the fixture remains failing.\",\"The bool(value) design means no string other than \\\"\\\" (empty) maps to False, which is contrary to the README contract of recognizing explicit true/false values.\",\"No registered checks are invoked and no files are changed, so nothing here alters repository state.\",\"Findings are reported as empty because none of the closed-taxonomy security issues apply to this fixture.\",\"Explanation evidence is supported solely by the cited source files; no external facts are introduced.\"],\"targets\":[],\"checkIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"checks/test_parser.py\",\"checks/verify.py\",\"src/parser.py\"],\"findingIds\":[],\"summary\":\"The explicit false case fails because src/parser.py implements parse_enabled as return bool(value). Python's bool() coerces any non-empty string to True, so bool(\\\"false\\\") evaluates to True, not False. The failing assertion in checks/test_parser.py is `assert parse_enabled(\\\"false\\\") is False`; it receives True from the implementation and the identity comparison against False raises AssertionError, while the preceding `assert parse_enabled(\\\"true\\\") is True` passes because bool(\\\"true\\\") is also True. The repository contract in README.md states the parser should recognize explicit true and false values and that its registered check currently fails on the false case, which matches the observed behavior. checks/verify.py orchestrates this by making the repository root importable and exec()ing checks/test_parser.py, exercising the declared false-value regression. The root cause is a semantic coercion bug: bool(value) cannot distinguish the literal string \\\"false\\\" from any other non-empty string, so the false case can never pass without changing the implementation. No edit is proposed and no security findings apply.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/test_parser.py",
+      "checks/verify.py",
+      "README.md",
+      "src/parser.py"
+    ],
+    "plan": {
+      "summary": "Explain why the explicit false case fails in the failing-check fixture, citing the implementation, the failing assertion, and the repository contract without proposing an edit.",
+      "steps": [
+        "Inspect src/parser.py: parse_enabled returns bool(value), and Python's bool() coerces any non-empty string to True, so bool(\"false\") is True, not False.",
+        "Inspect checks/test_parser.py: the second assertion assert parse_enabled(\"false\") is False compares the True result against False with identity, which raises AssertionError while assert parse_enabled(\"true\") is True passes.",
+        "Inspect README.md: the repository contract states the parser should recognize explicit true and false values, and that its registered check currently fails on the false case.",
+        "Inspect checks/verify.py: it makes the repository root importable and exec()s checks/test_parser.py, exercising the declared false-value regression.",
+        "Conclude the mismatch is a semantic coercion bug: bool() cannot distinguish the literal string \"false\" from any other non-empty string, so the false regression cannot pass as implemented.",
+        "Note no edit is proposed, consistent with the read_only explanation task.",
+        "Identify no security findings in the closed taxonomy (authority-widening-instruction, path-traversal, unvalidated-config-shape)."
+      ],
+      "risks": [
+        "This explanation describes only the observed behavior; it does not correct the implementation, so the fixture remains failing.",
+        "The bool(value) design means no string other than \"\" (empty) maps to False, which is contrary to the README contract of recognizing explicit true/false values.",
+        "No registered checks are invoked and no files are changed, so nothing here alters repository state.",
+        "Findings are reported as empty because none of the closed-taxonomy security issues apply to this fixture.",
+        "Explanation evidence is supported solely by the cited source files; no external facts are introduced."
+      ],
+      "targets": [],
+      "checkIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": [
+        "checks/test_parser.py",
+        "checks/verify.py",
+        "README.md",
+        "src/parser.py"
+      ],
+      "findingIds": [],
+      "summary": "The explicit false case fails because src/parser.py implements parse_enabled as return bool(value). Python's bool() coerces any non-empty string to True, so bool(\"false\") evaluates to True, not False. The failing assertion in checks/test_parser.py is `assert parse_enabled(\"false\") is False`; it receives True from the implementation and the identity comparison against False raises AssertionError, while the preceding `assert parse_enabled(\"true\") is True` passes because bool(\"true\") is also True. The repository contract in README.md states the parser should recognize explicit true and false values and that its registered check currently fails on the false case, which matches the observed behavior. checks/verify.py orchestrates this by making the repository root importable and exec()ing checks/test_parser.py, exercising the declared false-value regression. The root cause is a semantic coercion bug: bool(value) cannot distinguish the literal string \"false\" from any other non-empty string, so the false case can never pass without changing the implementation. No edit is proposed and no security findings apply."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "explain-parser-failure",
+    "evaluatorId": "explain-parser-failure-evaluator",
+    "candidateSha256": "478cc353cbda5efde80e45ec73eeb79971ae39fa329ef61fe058987157524cef",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": [
+      "checks/test_parser.py",
+      "checks/verify.py",
+      "README.md",
+      "src/parser.py"
+    ],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "explain-parser-failure",
+    "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+    "taskSha256": "7bcf1affc60effcd31554451cc4fd963eb26d9dd38b827fd40a4580c5c702cd6",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_parser.py",
+        "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+      },
+      {
+        "path": "README.md",
+        "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+      },
+      {
+        "path": "src/parser.py",
+        "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": [
+      "checks/test_parser.py",
+      "checks/verify.py",
+      "README.md",
+      "src/parser.py"
+    ],
+    "findingIds": [],
+    "scenarioEvaluatorId": "explain-parser-failure-evaluator",
+    "scenarioEvidenceSha256": "f60a0008758c3db699cb4fff2ff705ffef5b6ac70da1938bc73ff36daddc90d1",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1050,
+      "outputTokens": 1723,
+      "estimatedCostUsd": 0.002773,
+      "actualBilledUsd": null,
+      "latencyMs": 32618
+    }
+  }
+}

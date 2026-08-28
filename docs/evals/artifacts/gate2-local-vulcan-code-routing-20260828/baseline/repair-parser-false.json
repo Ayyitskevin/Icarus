@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "repair-parser-false",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:31.666Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "a3c0742342f71117dd19685650a4c1bb883358b88b0f72b939e119165cfcaf52",
+  "retrieval": {
+    "baseCommit": "6980aad15d1a2fd1aa0669ee11249aa4e0150a19",
+    "digestSha256": "b2c2bc01223be3fd26a6ef2c23e22e5ec6769eeb065920f18a955c49596573d5",
+    "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2"
+  },
+  "rawCandidate": "```json\n{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/test_parser.py\",\"src/parser.py\"],\"plan\":{\"summary\":\"Make parse_enabled recognize only the explicit string 'true' as True and everything else (including 'false') as False, replacing the overly-broad bool(value) coercion that treated any non-empty string as truthy.\",\"steps\":[\"Replace the body of parse_enabled in src/parser.py with a strict equality check against 'true'.\",\"Keep the function signature unchanged so src.parser imports work.\",\"Verify parse_enabled('true') returns True and parse_enabled('false') returns False via checks/test_parser.py.\"],\"risks\":[\"Changing to strict equality means other previously 'truthy' inputs now return False; this is the intended tightening, not a regression.\"],\"targets\":[\"src/parser.py\"],\"checkIds\":[\"parser-explicit-false\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/parser.py\",\"content\":\"def parse_enabled(value: str) -> bool:\\n    return value == \\\"true\\\"\\n\"}],\"citations\":[\"checks/test_parser.py\",\"src/parser.py\"],\"findingIds\":[],\"summary\":\"Replaced bool(value) with value == \\\"true\\\" so the parser recognizes the explicit 'true' string as True and 'false' (and any other string) as False, satisfying the registered check without loosening it to arbitrary truthy input.\"}}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-parser-false",
+    "evaluatorId": "repair-parser-false-evaluator",
+    "candidateSha256": "6b8dc0b6710582ef045a41ea671b5d1b3c7787cd0d733b0c9fcebeec9075fbcc",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-parser-false",
+    "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+    "taskSha256": "f9a110931ffe2223830b38922d2b83baca52464753529e7ba611ed05e6e74a7c",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_parser.py",
+        "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+      },
+      {
+        "path": "README.md",
+        "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+      },
+      {
+        "path": "src/parser.py",
+        "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-parser-false-evaluator",
+    "scenarioEvidenceSha256": "ad015dd19ed3e721a6bfb6de121ab553dd48de4173a12b3747950bcde1f40cec",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1053,
+      "outputTokens": 679,
+      "estimatedCostUsd": 0.001732,
+      "actualBilledUsd": null,
+      "latencyMs": 13571
+    }
+  }
+}

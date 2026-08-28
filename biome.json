@@ -1,7 +1,13 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.4/schema.json",
   "files": {
-    "includes": ["**", "!**/dist", "!**/node_modules", "!**/.local"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/node_modules",
+      "!**/.local",
+      "!docs/evals/artifacts/gate2-local-vulcan-code-routing-20260828"
+    ]
   },
   "formatter": {
     "enabled": true,

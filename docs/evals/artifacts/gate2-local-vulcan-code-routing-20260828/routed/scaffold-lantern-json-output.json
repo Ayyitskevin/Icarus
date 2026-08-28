@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "routed",
+  "caseId": "scaffold-lantern-json-output",
+  "modelId": "code",
+  "generatedAt": "2026-08-28T11:58:40.969Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "238b81be294c8c7090317d67551589633e9093036b6c3ca13af8753f39fed09f",
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "6be29a3381578a6469fb1d3675b434ac7367241dd2fe3d4e492a833bb5ca4927",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"config/app.json\",\"src/main.py\",\"src/greeting.py\",\"README.md\"],\"plan\":{\"summary\":\"Add a --json CLI flag (via stdlib argparse) to src/main.py so that invoking `python src/main.py --json` emits a JSON object with a 'greeting' key, while the default invocation still prints the plain-text greeting. Create an offline check at checks/lantern-json-output.py that runs the --json path and validates the output shape.\",\"steps\":[\"Modify src/main.py to parse a --json flag with argparse (stdlib only).\",\"When --json is present, emit json.dumps({\\\"greeting\\\": <text>}); otherwise emit the plain string as before.\",\"Create checks/lantern-json-output.py that subprocess-runs `python src/main.py --json`, parses stdout as JSON, and asserts the 'greeting' key is a non-empty string.\",\"Register the check under id 'lantern-json-output' as the offline validation for this scaffold.\"],\"risks\":[\"The original script had no argparse; adding one changes the CLI surface (though defaults remain compatible).\",\"If CWD is not the repo root, the relative config/app.json path will fail (pre-existing).\"],\"targets\":[\"src/main.py\",\"checks/lantern-json-output.py\"],\"checkIds\":[\"lantern-json-output\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/main.py\",\"content\":\"import argparse\\nimport json\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\n\\ndef main() -> None:\\n    parser = argparse.ArgumentParser(description=\\\"Lantern greeting\\\")\\n    parser.add_argument(\\n        \\\"--json\\\",\\n        action=\\\"store_true\\\",\\n        dest=\\\"json_output\\\",\\n        help=\\\"Emit the greeting as a JSON object instead of plain text\\\",\\n    )\\n    args = parser.parse_args()\\n\\n    config = json.loads(Path(\\\"config/app.json\\\").read_text())\\n    text = greeting(config[\\\"audience\\\"])\\n\\n    if args.json_output:\\n        print(json.dumps({\\\"greeting\\\": text}))\\n    else:\\n        print(text)\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    main()\\n\"},{\"path\":\"checks/lantern-json-output.py\",\"content\":\"\\\"\\\"\\\"Offline check: lantern-json-output\\n\\nRuns `python src/main.py --json` and validates that stdout is a JSON object\\ncontaining a 'greeting' key whose value is a non-empty string.\\n\\\"\\\"\\\"\\nimport json\\nimport subprocess\\nimport sys\\nfrom pathlib import Path\\n\\n\\nCHECK_ID = \\\"lantern-json-output\\\"\\n\\n\\ndef run() -> tuple[bool, str]:\\n    root = Path(__file__).resolve().parent.parent\\n    result = subprocess.run(\\n        [sys.executable, str(root / \\\"src\\\" / \\\"main.py\\\"), \\\"--json\\\"],\\n        capture_output=True,\\n        text=True,\\n        cwd=str(root),\\n    )\\n    if result.returncode != 0:\\n        return False, f\\\"{CHECK_ID} FAIL: non-zero exit {result.returncode}; stderr={result.stderr.strip()!r}\\\"\\n\\n    try:\\n        data = json.loads(result.stdout)\\n    except json.JSONDecodeError as exc:\\n        return False, f\\\"{CHECK_ID} FAIL: stdout is not valid JSON: {exc}\\\"\\n\\n    if not isinstance(data, dict):\\n        return False, f\\\"{CHECK_ID} FAIL: expected a JSON object, got {type(data).__name__}\\\"\\n\\n    if \\\"greeting\\\" not in data:\\n        return False, f\\\"{CHECK_ID} FAIL: missing 'greeting' key in {data!r}\\\"\\n\\n    if not isinstance(data[\\\"greeting\\\"], str) or not data[\\\"greeting\\\"]:\\n        return False, f\\\"{CHECK_ID} FAIL: 'greeting' must be a non-empty string, got {data['greeting']!r}\\\"\\n\\n    return True, f\\\"{CHECK_ID} PASS\\\"\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    ok, message = run()\\n    print(message)\\n    sys.exit(0 if ok else 1)\\n\"}],\"citations\":[\"src/main.py\",\"src/greeting.py\",\"config/app.json\",\"README.md\"],\"findingIds\":[],\"summary\":\"Added a stdlib-only --json flag to src/main.py for dependency-free JSON output (default text mode unchanged) and created an offline check at checks/lantern-json-output.py registered as 'lantern-json-output'.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "config/app.json",
+      "README.md",
+      "src/greeting.py",
+      "src/main.py"
+    ],
+    "plan": {
+      "summary": "Add a --json CLI flag (via stdlib argparse) to src/main.py so that invoking `python src/main.py --json` emits a JSON object with a 'greeting' key, while the default invocation still prints the plain-text greeting. Create an offline check at checks/lantern-json-output.py that runs the --json path and validates the output shape.",
+      "steps": [
+        "Modify src/main.py to parse a --json flag with argparse (stdlib only).",
+        "When --json is present, emit json.dumps({\"greeting\": <text>}); otherwise emit the plain string as before.",
+        "Create checks/lantern-json-output.py that subprocess-runs `python src/main.py --json`, parses stdout as JSON, and asserts the 'greeting' key is a non-empty string.",
+        "Register the check under id 'lantern-json-output' as the offline validation for this scaffold."
+      ],
+      "risks": [
+        "The original script had no argparse; adding one changes the CLI surface (though defaults remain compatible).",
+        "If CWD is not the repo root, the relative config/app.json path will fail (pre-existing)."
+      ],
+      "targets": [
+        "checks/lantern-json-output.py",
+        "src/main.py"
+      ],
+      "checkIds": [
+        "lantern-json-output"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "checks/lantern-json-output.py",
+          "content": "\"\"\"Offline check: lantern-json-output\n\nRuns `python src/main.py --json` and validates that stdout is a JSON object\ncontaining a 'greeting' key whose value is a non-empty string.\n\"\"\"\nimport json\nimport subprocess\nimport sys\nfrom pathlib import Path\n\n\nCHECK_ID = \"lantern-json-output\"\n\n\ndef run() -> tuple[bool, str]:\n    root = Path(__file__).resolve().parent.parent\n    result = subprocess.run(\n        [sys.executable, str(root / \"src\" / \"main.py\"), \"--json\"],\n        capture_output=True,\n        text=True,\n        cwd=str(root),\n    )\n    if result.returncode != 0:\n        return False, f\"{CHECK_ID} FAIL: non-zero exit {result.returncode}; stderr={result.stderr.strip()!r}\"\n\n    try:\n        data = json.loads(result.stdout)\n    except json.JSONDecodeError as exc:\n        return False, f\"{CHECK_ID} FAIL: stdout is not valid JSON: {exc}\"\n\n    if not isinstance(data, dict):\n        return False, f\"{CHECK_ID} FAIL: expected a JSON object, got {type(data).__name__}\"\n\n    if \"greeting\" not in data:\n        return False, f\"{CHECK_ID} FAIL: missing 'greeting' key in {data!r}\"\n\n    if not isinstance(data[\"greeting\"], str) or not data[\"greeting\"]:\n        return False, f\"{CHECK_ID} FAIL: 'greeting' must be a non-empty string, got {data['greeting']!r}\"\n\n    return True, f\"{CHECK_ID} PASS\"\n\n\nif __name__ == \"__main__\":\n    ok, message = run()\n    print(message)\n    sys.exit(0 if ok else 1)\n"
+        },
+        {
+          "path": "src/main.py",
+          "content": "import argparse\nimport json\nfrom pathlib import Path\n\nfrom src.greeting import greeting\n\n\ndef main() -> None:\n    parser = argparse.ArgumentParser(description=\"Lantern greeting\")\n    parser.add_argument(\n        \"--json\",\n        action=\"store_true\",\n        dest=\"json_output\",\n        help=\"Emit the greeting as a JSON object instead of plain text\",\n    )\n    args = parser.parse_args()\n\n    config = json.loads(Path(\"config/app.json\").read_text())\n    text = greeting(config[\"audience\"])\n\n    if args.json_output:\n        print(json.dumps({\"greeting\": text}))\n    else:\n        print(text)\n\n\nif __name__ == \"__main__\":\n    main()\n"
+        }
+      ],
+      "citations": [
+        "config/app.json",
+        "README.md",
+        "src/greeting.py",
+        "src/main.py"
+      ],
+      "findingIds": [],
+      "summary": "Added a stdlib-only --json flag to src/main.py for dependency-free JSON output (default text mode unchanged) and created an offline check at checks/lantern-json-output.py registered as 'lantern-json-output'."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-lantern-json-output",
+    "evaluatorId": "scaffold-lantern-json-output-evaluator",
+    "candidateSha256": "ab78ccd44efb3e9a2b9d7b34ad2dfaa490a8826295549572ff47d803341b7d02",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-lantern-json-output",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "2580a2eb9e31e3953d7ac4ac00ac25be1c25142b6ebad8d2129cf8d16fbf4301",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-lantern-json-output-evaluator",
+    "scenarioEvidenceSha256": "6291021fe5503a3e86e0eaf838fd821487b8eee245e79cf984a6fb9f2f24b182",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1001,
+      "outputTokens": 2103,
+      "estimatedCostUsd": 0.002435088,
+      "actualBilledUsd": null,
+      "latencyMs": 113448
+    }
+  }
+}

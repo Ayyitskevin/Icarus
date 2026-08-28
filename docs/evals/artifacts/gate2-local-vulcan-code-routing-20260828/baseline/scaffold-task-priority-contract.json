@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "scaffold-task-priority-contract",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:34.306Z",
+  "finishReason": "stop",
+  "reassessedFromEvidenceSha256": "1bf4f59b133f4744b621ed760fdba7994e01205404c37a10426a4f98ea8a7bd6",
+  "retrieval": {
+    "baseCommit": "ef0d0ebbc5b42e5bb30129357f84a3b4bd7ea961",
+    "digestSha256": "357d8440c27bbbcb1d4fe6cdd0f1bddfb1aa24cdd5df459b11a667bdb211d81a",
+    "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
+  },
+  "rawCandidate": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"schemaVersion\",\"selectedContextPaths\",\"plan\",\"answer\"],\"properties\":{\"schemaVersion\":{\"const\":1},\"selectedContextPaths\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}},\"plan\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"summary\",\"steps\",\"risks\",\"targets\",\"checkIds\"],\"properties\":{\"summary\":{\"type\":\"string\"},\"steps\":{\"type\":\"array\",\"minItems\":1,\"maxItems\":12,\"items\":{\"type\":\"string\"}},\"risks\":{\"type\":\"array\",\"maxItems\":12,\"items\":{\"type\":\"string\"}},\"targets\":{\"type\":\"array\",\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}},\"checkIds\":{\"type\":\"array\",\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}}}},\"answer\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"kind\",\"files\",\"citations\",\"findingIds\",\"summary\"],\"properties\":{\"kind\":{\"enum\":[\"mutation\",\"read_only\"]},\"files\":{\"type\":\"array\",\"maxItems\":8,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"path\",\"content\"],\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}}}},\"citations\":{\"type\":\"array\",\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}},\"findingIds\":{\"type\":\"array\",\"maxItems\":8,\"uniqueItems\":true,\"items\":{\"type\":\"string\"}},\"summary\":{\"type\":\"string\"}}}}}",
+  "candidate": null,
+  "candidateError": "Gate 2 live candidate: root must contain exactly: schemaVersion, selectedContextPaths, plan, answer",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-task-priority-contract",
+    "evaluatorId": "scaffold-task-priority-contract-evaluator",
+    "candidateSha256": "d8437ae59956bd79268f49f473afdb624ef1b78836b4db57cfa90f2ee3457d14",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-task-priority-contract",
+    "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+    "taskSha256": "83ad152996cef7b8bad212357a65f59c5376023167785a2a01ea6f59f56a4401",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/schema_contract.sql",
+        "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+      },
+      {
+        "path": "migrations/README.md",
+        "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+      },
+      {
+        "path": "README.md",
+        "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+      },
+      {
+        "path": "schema/current.sql",
+        "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-task-priority-contract-evaluator",
+    "scenarioEvidenceSha256": "c53d95646e5c1cd90377b90c533d29ee7db0b1645f88df9a786d7eb5c1721efc",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1006,
+      "outputTokens": 1681,
+      "estimatedCostUsd": 0.002687,
+      "actualBilledUsd": null,
+      "latencyMs": 31989
+    }
+  }
+}

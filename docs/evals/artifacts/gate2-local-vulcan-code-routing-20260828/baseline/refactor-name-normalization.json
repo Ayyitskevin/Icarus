@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "refactor-name-normalization",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:33.482Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "7aadfd43fdc92fe9944fcc34613569228bcb826ee9ee1cbe9be478b25c5c4737",
+  "retrieval": {
+    "baseCommit": "3c3bb16f72a899265802e94c5c6d5abb537bfc03",
+    "digestSha256": "f3df8ec95079bda93438c76f2cc26b2aa73ae5d00969f2c59d2f034a836e103b",
+    "repositoryDigestSha256": "ba8451fe227e973c5c9e255880235e00488f9c204bbe8cd5fbca73e3c8d2f47f"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"plan\":{\"summary\":\"Extract the duplicated name-normalization logic shared by format_name and display_name into a single private module (src/_normalize.py), then have both public functions delegate to it. Behavior and the existing check are preserved unchanged.\",\"steps\":[\"Create src/_normalize.py exposing normalize_name() that performs the strip/split/join/title normalization.\", \"Update src/format_name.py to import normalize_name and delegate format_name to it.\", \"Update src/profile.py to import normalize_name and delegate display_name to it.\", \"Verify checks/test_profile.py still passes with no behavior change.\"],\"risks\":[\"Import must use the src package (from src._normalize import normalize_name) so it resolves like the existing imports.\", \"The shared function must replicate exact original semantics (strip, split on any whitespace, single-space join, title-case) to avoid a behavior change.\"],\"targets\":[\"README.md\",\"checks/test_profile.py\",\"src/_normalize.py\",\"src/format_name.py\",\"src/profile.py\"],\"checkIds\":[\"profile-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/_normalize.py\",\"content\":\"def normalize_name(value: str) -> str:\\n    return \\\" \\\".join(value.strip().split()).title()\\n\"},{\"path\":\"src/format_name.py\",\"content\":\"from src._normalize import normalize_name\\n\\n\\ndef format_name(value: str) -> str:\\n    return normalize_name(value)\\n\"},{\"path\":\"src/profile.py\",\"content\":\"from src._normalize import normalize_name\\n\\n\\ndef display_name(value: str) -> str:\\n    return normalize_name(value)\\n\"}],\"citations\":[\"README.md\",\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"findingIds\":[],\"summary\":\"Both format_name and display_name implemented identical strip/split/join/title normalization. The logic is now centralized in src/_normalize.py and both public modules delegate to it, preserving the observed behavior validated by checks/test_profile.py.\"}}",
+  "candidate": null,
+  "candidateError": "Gate 2 live candidate: mutation file paths and plan targets does not match",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "refactor-name-normalization",
+    "evaluatorId": "refactor-name-normalization-evaluator",
+    "candidateSha256": "b1580ce0eac5d98123c829993dd972953a720e391b8d7617630ec9d6dd47523e",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "refactor-name-normalization",
+    "repositoryRevisionSha256": "5ce751efcdb138a9a0db315936567d9a6a1a86df45c49df9027b5bab8f605bd1",
+    "taskSha256": "5d77edacac31f30555640b014c2c9c4cea003dd57dc23bf42c3993fed7d52920",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_profile.py",
+        "sha256": "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c"
+      },
+      {
+        "path": "README.md",
+        "sha256": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6"
+      },
+      {
+        "path": "src/format_name.py",
+        "sha256": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f"
+      },
+      {
+        "path": "src/profile.py",
+        "sha256": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "refactor-name-normalization-evaluator",
+    "scenarioEvidenceSha256": "1f2079b61f510f43edb71739409206e246c2ec981123ba914a0c18f273d86bb4",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1022,
+      "outputTokens": 2769,
+      "estimatedCostUsd": 0.003791,
+      "actualBilledUsd": null,
+      "latencyMs": 52799
+    }
+  }
+}

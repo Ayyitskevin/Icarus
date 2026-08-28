@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "routed",
+  "caseId": "repair-parser-false",
+  "modelId": "code",
+  "generatedAt": "2026-08-28T11:58:37.837Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "e015bca839401c614a794d7047e4786c99ea440b750e45cb04cd428946726de3",
+  "retrieval": {
+    "baseCommit": "6980aad15d1a2fd1aa0669ee11249aa4e0150a19",
+    "digestSha256": "b2c2bc01223be3fd26a6ef2c23e22e5ec6769eeb065920f18a955c49596573d5",
+    "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/test_parser.py\",\"README.md\",\"src/parser.py\"],\"plan\":{\"summary\":\"Replace the loose bool(value) truthiness check in parse_enabled with explicit recognition of the strings 'true' and 'false', raising ValueError for any other input to avoid loosening to arbitrary truthy values.\",\"steps\":[\"Read the failing test to confirm expected behavior: 'true'→True, 'false'→False\",\"Rewrite parse_enabled to compare the lowercased input against 'true' and 'false' explicitly\",\"Raise ValueError for any unrecognized input to prevent arbitrary truthy acceptance\"],\"risks\":[\"Callers passing other truthy strings (e.g. '1', 'yes') will now receive ValueError instead of True — intentional tightening\"],\"targets\":[\"src/parser.py\"],\"checkIds\":[\"parser-explicit-false\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/parser.py\",\"content\":\"def parse_enabled(value: str) -> bool:\\n    lowered = value.lower()\\n    if lowered == \\\"true\\\":\\n        return True\\n    if lowered == \\\"false\\\":\\n        return False\\n    raise ValueError(f\\\"Expected 'true' or 'false', got {value!r}\\\")\\n\"}],\"citations\":[\"checks/test_parser.py\",\"src/parser.py\"],\"findingIds\":[],\"summary\":\"parse_enabled now explicitly maps the strings 'true' and 'false' (case-insensitive) to True/False and rejects all other inputs with ValueError, satisfying the registered check without loosening to arbitrary truthy values.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/test_parser.py",
+      "README.md",
+      "src/parser.py"
+    ],
+    "plan": {
+      "summary": "Replace the loose bool(value) truthiness check in parse_enabled with explicit recognition of the strings 'true' and 'false', raising ValueError for any other input to avoid loosening to arbitrary truthy values.",
+      "steps": [
+        "Read the failing test to confirm expected behavior: 'true'→True, 'false'→False",
+        "Rewrite parse_enabled to compare the lowercased input against 'true' and 'false' explicitly",
+        "Raise ValueError for any unrecognized input to prevent arbitrary truthy acceptance"
+      ],
+      "risks": [
+        "Callers passing other truthy strings (e.g. '1', 'yes') will now receive ValueError instead of True — intentional tightening"
+      ],
+      "targets": [
+        "src/parser.py"
+      ],
+      "checkIds": [
+        "parser-explicit-false"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/parser.py",
+          "content": "def parse_enabled(value: str) -> bool:\n    lowered = value.lower()\n    if lowered == \"true\":\n        return True\n    if lowered == \"false\":\n        return False\n    raise ValueError(f\"Expected 'true' or 'false', got {value!r}\")\n"
+        }
+      ],
+      "citations": [
+        "checks/test_parser.py",
+        "src/parser.py"
+      ],
+      "findingIds": [],
+      "summary": "parse_enabled now explicitly maps the strings 'true' and 'false' (case-insensitive) to True/False and rejects all other inputs with ValueError, satisfying the registered check without loosening to arbitrary truthy values."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-parser-false",
+    "evaluatorId": "repair-parser-false-evaluator",
+    "candidateSha256": "ce0d979d37e47ca03f8ff6fe8abd6df2ff86e6e3e5f6235742e676146f17e818",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "src/parser.py"
+    ],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "parser-explicit-false",
+        "argv": [
+          "python",
+          "checks/verify.py"
+        ],
+        "exitCode": 0,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-parser-false",
+    "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+    "taskSha256": "f9a110931ffe2223830b38922d2b83baca52464753529e7ba611ed05e6e74a7c",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_parser.py",
+        "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+      },
+      {
+        "path": "README.md",
+        "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+      },
+      {
+        "path": "src/parser.py",
+        "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "src/parser.py"
+    ],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-parser-false-evaluator",
+    "scenarioEvidenceSha256": "9883dcf578188f716acde47151b058830d3f3c635293d0be5230108b86cf0525",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 1053,
+      "outputTokens": 952,
+      "estimatedCostUsd": 0.0015729225,
+      "actualBilledUsd": null,
+      "latencyMs": 50869
+    }
+  }
+}

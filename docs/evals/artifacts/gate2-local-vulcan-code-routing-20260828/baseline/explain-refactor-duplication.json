@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "explain-refactor-duplication",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:34.008Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "6e25dbb0ec0eafd61288aaccfa36a6a253581f8aa5a3031ad4768d4f0eb1a8a6",
+  "retrieval": {
+    "baseCommit": "3c3bb16f72a899265802e94c5c6d5abb537bfc03",
+    "digestSha256": "3bef220b00b1b51d01ab02d1ed827f005397b06a4c6e9124e24d5878eaba0b5d",
+    "repositoryDigestSha256": "ba8451fe227e973c5c9e255880235e00488f9c204bbe8cd5fbca73e3c8d2f47f"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"plan\":{\"summary\":\"Trace the duplicated name-normalization behavior shared by format_name (src/format_name.py) and display_name (src/profile.py), and show how checks/test_profile.py asserts their equivalence to 'Ada Lovelace'.\",\"steps\":[\"1. Read src/format_name.py and src/profile.py to identify the identical normalization body `' '.join(value.strip().split()).title()`.\",\"2. Decompose the pipeline: .strip() trims leading/trailing whitespace, .split() collapses internal whitespace runs into a list of bare words, ' '.join() rejoins with single spaces, and .title() title-cases each word.\",\"3. Trace the input '  ada   lovelace ' through the pipeline: strip -> 'ada   lovelace', split -> ['ada','lovelace'], join -> 'ada lovelace', title -> 'Ada Lovelace'.\",\"4. Confirm both public functions carry the same source text, so for any input they must yield identical outputs.\",\"5. Read checks/test_profile.py to see the single assertion that asserts format_name(...) == display_name(...) == 'Ada Lovelace', which proves the two implementations are behaviorally equivalent.\",\"6. Note README.md documents this duplication as the motivation for a future behavior-preserving refactor (extract shared implementation, update both modules, retain the check).\"],\"risks\":[\"The .title() method uppercases apostrophe-less forms in ways that may not match every locale, but this does not affect the equivalence argument.\",\"The equivalence relies on both modules importing identical code text; a divergence after refactor would be caught only by the retained check.\",\"No automated checkIds are registered, so equivalence is demonstrated by reading the assertion rather than executing a registered check.\"],\"targets\":[\"src/format_name.py\",\"src/profile.py\",\"checks/test_profile.py\"],\"checkIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"README.md\",\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"findingIds\":[],\"summary\":\"Both public functions format_name (src/format_name.py) and display_name (src/profile.py) contain an identical normalization body: `' '.join(value.strip().split()).title()`. The pipeline strips leading/trailing whitespace, splits the remainder on any run of whitespace into a list of bare words, rejoins those words with single spaces, and applies .title() to capitalize the first letter of each word. For the input '  ada   lovelace ' this yields: strip -> 'ada   lovelace', split -> ['ada', 'lovelace'], join -> 'ada lovelace', title -> 'Ada Lovelace'. Because the two modules share byte-identical code, they produce the same output for every input. checks/test_profile.py proves this equivalence with a single assertion, `format_name(\\\"  ada   lovelace \\\") == display_name(\\\"  ada   lovelace \\\") == \\\"Ada Lovelace\\\"`, which simultaneously checks each function's value and their mutual equality. README.md frames this duplication as the reason a behavior-preserving refactor should extract a shared implementation while retaining the check. Since this is a read-only explanation task, no files are changed and no registered checks are requested.\"}}",
+  "candidate": null,
+  "candidateError": "Gate 2 live candidate: read-only answer must not request mutation or check authority",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "explain-refactor-duplication",
+    "evaluatorId": "explain-refactor-duplication-evaluator",
+    "candidateSha256": "d3266f69bccad33ad8999b00d0908719a2d49e6cba489bc281bd6b3a51d9edd2",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "explain-refactor-duplication",
+    "repositoryRevisionSha256": "5ce751efcdb138a9a0db315936567d9a6a1a86df45c49df9027b5bab8f605bd1",
+    "taskSha256": "e043d8be826a599e2864548c6d053a7bf2f146ad58aa645340256f8dbc08917d",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_profile.py",
+        "sha256": "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c"
+      },
+      {
+        "path": "README.md",
+        "sha256": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6"
+      },
+      {
+        "path": "src/format_name.py",
+        "sha256": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f"
+      },
+      {
+        "path": "src/profile.py",
+        "sha256": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "explain-refactor-duplication-evaluator",
+    "scenarioEvidenceSha256": "5d221e6319803aec93f25be2877ca1a9599d6c4801cfba1d4e3ac9eaf7ec68bc",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1015,
+      "outputTokens": 1523,
+      "estimatedCostUsd": 0.002538,
+      "actualBilledUsd": null,
+      "latencyMs": 29120
+    }
+  }
+}

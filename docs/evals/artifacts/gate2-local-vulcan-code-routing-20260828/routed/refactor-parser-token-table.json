@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "routed",
+  "caseId": "refactor-parser-token-table",
+  "modelId": "code",
+  "generatedAt": "2026-08-28T11:58:40.674Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "2cce949507f9135a8fa4691a59915d297e8cc68865422116ba281c92a6b06b38",
+  "retrieval": {
+    "baseCommit": "6980aad15d1a2fd1aa0669ee11249aa4e0150a19",
+    "digestSha256": "bbce43c0a3e764576a31b5b2f5b3863b1c59ba3eeca32a38ebeaf18d789d133d",
+    "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/test_parser.py\",\"README.md\",\"src/parser.py\"],\"plan\":{\"summary\":\"Replace the broken bool(value) call with a module-level immutable token table (dict constant) that maps exactly the two accepted tokens to their boolean values, eliminating branching and fixing the false-case regression.\",\"steps\":[\"Identify that bool('false') is True in Python, causing the registered check to fail\",\"Replace the branching/truthiness logic with a module-level constant dict mapping 'true'→True and 'false'→False\",\"Make parse_enabled a simple table lookup that raises KeyError for any unrecognised token (no new tokens accepted)\",\"Verify the registered check parser-contract passes for both 'true' and 'false'\"],\"risks\":[\"Any caller passing an empty string or other token will now get KeyError instead of a silent True/False; this is the intended stricter contract\",\"The dict is technically mutable at runtime (Python limitation), but it is treated as a frozen constant by convention and naming\"],\"targets\":[\"src/parser.py\"],\"checkIds\":[\"parser-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/parser.py\",\"content\":\"_TOKENS: dict[str, bool] = {\\\"false\\\": False, \\\"true\\\": True}\\n\\n\\ndef parse_enabled(value: str) -> bool:\\n    return _TOKENS[value]\\n\"}],\"citations\":[\"checks/test_parser.py\",\"README.md\",\"src/parser.py\"],\"findingIds\":[],\"summary\":\"Refactored parse_enabled to use a module-level immutable token table (_TOKENS) instead of branching/truthiness, fixing the false-case regression while accepting no new tokens.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/test_parser.py",
+      "README.md",
+      "src/parser.py"
+    ],
+    "plan": {
+      "summary": "Replace the broken bool(value) call with a module-level immutable token table (dict constant) that maps exactly the two accepted tokens to their boolean values, eliminating branching and fixing the false-case regression.",
+      "steps": [
+        "Identify that bool('false') is True in Python, causing the registered check to fail",
+        "Replace the branching/truthiness logic with a module-level constant dict mapping 'true'→True and 'false'→False",
+        "Make parse_enabled a simple table lookup that raises KeyError for any unrecognised token (no new tokens accepted)",
+        "Verify the registered check parser-contract passes for both 'true' and 'false'"
+      ],
+      "risks": [
+        "Any caller passing an empty string or other token will now get KeyError instead of a silent True/False; this is the intended stricter contract",
+        "The dict is technically mutable at runtime (Python limitation), but it is treated as a frozen constant by convention and naming"
+      ],
+      "targets": [
+        "src/parser.py"
+      ],
+      "checkIds": [
+        "parser-contract"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/parser.py",
+          "content": "_TOKENS: dict[str, bool] = {\"false\": False, \"true\": True}\n\n\ndef parse_enabled(value: str) -> bool:\n    return _TOKENS[value]\n"
+        }
+      ],
+      "citations": [
+        "checks/test_parser.py",
+        "README.md",
+        "src/parser.py"
+      ],
+      "findingIds": [],
+      "summary": "Refactored parse_enabled to use a module-level immutable token table (_TOKENS) instead of branching/truthiness, fixing the false-case regression while accepting no new tokens."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "refactor-parser-token-table",
+    "evaluatorId": "refactor-parser-token-table-evaluator",
+    "candidateSha256": "ff6900e8a26cccb45e85395f37bada6a24418c11fc2e9a29106dded6c0bdb43c",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "src/parser.py"
+    ],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "parser-contract",
+        "argv": [
+          "python",
+          "-m",
+          "checks.test_parser"
+        ],
+        "exitCode": 0,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "refactor-parser-token-table",
+    "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+    "taskSha256": "8d0cfc0d46c55137207ffdaab0c92e035aa387ea1f76a3d5017d20a823ee5d25",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_parser.py",
+        "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+      },
+      {
+        "path": "README.md",
+        "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+      },
+      {
+        "path": "src/parser.py",
+        "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [
+      "src/parser.py"
+    ],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "refactor-parser-token-table-evaluator",
+    "scenarioEvidenceSha256": "fc50d34991e4e628510207d070ccb111c416af6920c2d1465b98803098f7a5c6",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 1045,
+      "outputTokens": 1128,
+      "estimatedCostUsd": 0.0017047185,
+      "actualBilledUsd": null,
+      "latencyMs": 63332
+    }
+  }
+}

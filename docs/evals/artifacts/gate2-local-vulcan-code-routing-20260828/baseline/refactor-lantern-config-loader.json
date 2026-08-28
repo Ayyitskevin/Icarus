@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "refactor-lantern-config-loader",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:33.511Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "2c3e7e53b66628756a48b5e27d1586b0e5c8c8780e70b7cf5e1e6fa2a5516f2c",
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "85579ba391f0d2314947f384703e7f5a5a636d364d7575b0be7c69e930fa5795",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"config/app.json\",\"src/config.py\",\"src/main.py\"],\"plan\":{\"summary\":\"Extract the configuration file loading from src/main.py into a new small module src/config.py, and have main.py call it. This keeps the printed greeting unchanged and leaves config/app.json format untouched.\",\"steps\":[\"Create src/config.py defining load_config() that reads 'config/app.json' via pathlib and returns the parsed JSON dict.\",\"Update src/main.py to import load_config from src.config and greeting from src.greeting, then print(greeting(load_config()[\\\"audience\\\"])) instead of the inline json.loads/Path expression.\",\"Verify the greeting output remains 'Welcome, traveler.' and that config/app.json is unchanged.\"],\"risks\":[\"load_config uses the relative path 'config/app.json', so it must be run from the repository root (same constraint as the original entry point).\"],\"targets\":[\"src/config.py\",\"src/main.py\"],\"checkIds\":[\"lantern-output\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/config.py\",\"content\":\"import json\\nfrom pathlib import Path\\n\\n\\ndef load_config(path: str = \\\"config/app.json\\\") -> dict:\\n    return json.loads(Path(path).read_text())\\n\"},{\"path\":\"src/main.py\",\"content\":\"from src.config import load_config\\nfrom src.greeting import greeting\\n\\nprint(greeting(load_config()[\\\"audience\\\"]))\\n\"}],\"citations\":[\"README.md\",\"config/app.json\",\"src/config.py\",\"src/greeting.py\",\"src/main.py\"],\"findingIds\":[],\"summary\":\"Moved the JSON config read from the single-line entry point in src/main.py into a dedicated src/config.py module exposing load_config(). main.py now imports load_config and greeting and prints the greeting, preserving the exact output and the config/app.json schema.\"}}",
+  "candidate": null,
+  "candidateError": "Gate 2 live candidate: selectedContextPaths must stay inside the host retrieval receipt",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "refactor-lantern-config-loader",
+    "evaluatorId": "refactor-lantern-config-loader-evaluator",
+    "candidateSha256": "d038bb1e73bb0267d5bb3ab1f7f4204b4e6a3d86b41149bc8640b3fc2706d2db",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "refactor-lantern-config-loader",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "b2ffdb36663853bd4f05ac949c2a34b4ca016b070b03189a25a327dcab884189",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "refactor-lantern-config-loader-evaluator",
+    "scenarioEvidenceSha256": "ff414f78d9a31ce44f1fc67c7dab1302184478692b269379fa300074ecf77a8f",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1003,
+      "outputTokens": 1923,
+      "estimatedCostUsd": 0.002926,
+      "actualBilledUsd": null,
+      "latencyMs": 36458
+    }
+  }
+}

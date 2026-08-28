@@ -11,8 +11,12 @@ replaces the two protected migration-path tasks; both replacements now execute
 as a separate deterministic successor cohort. Seven frozen source reports now
 feed a strict adoption/replay contract that produces one closed 30-case v2
 deterministic receipt without rewriting historical evidence. Live-model
-quality, all-task plan acceptance, autonomous target discovery, and fixed-model
-routing comparison remain open. The separate
+execution and the fixed-model/routed comparison are now measured under ADR 0066.
+Routing improved success from 5/30 to 9/30 and reduced the configured local-
+compute proxy cost per success by 36.996%, but the routed result still missed
+the 24/30 success and 0.80 first-plan thresholds. Gate 2 remains open for
+quality improvement, especially autonomous target discovery and exact read-only
+evidence. The separate
 supervised active-repository canary remains **HOLD** after the 2026-08-27
 secret-scanner survey; live-state migration, merge, deployment, unattended use,
 effectful/control session continuation, and wider Vulcan authority remain
@@ -25,8 +29,9 @@ Status: the one-case retrieval baseline plus manifest-bound explanation,
 security-review, refactor, repair-A, repair-B, scaffold-A, and schema-successor
 fixtures execute. Manifest v2 resolves the two incompatible task definitions
 without weakening policy, and the explicit adoption path closes deterministic
-v2 case coverage. Live-model quality, all-task plan evidence, autonomous target
-discovery, routed-vs-fixed comparison, and the Gate 2 exit gate remain open.
+v2 case coverage. The first live fixed-vs-routed comparison is complete and
+failed honestly; autonomous target/citation quality and the Gate 2 exit gate
+remain open.
 
 - [x] Add a reusable deterministic core retriever over one exact committed tree.
 - [x] Exclude linked, hidden, binary, invalid-UTF-8, and secret-shaped content
@@ -95,10 +100,16 @@ discovery, routed-vs-fixed comparison, and the Gate 2 exit gate remain open.
       two direct v2 successor executions, and replay one manifest-ordered
       30-case v2 aggregate receipt. Keep plan and routing thresholds explicitly
       unmet rather than upgrading partial measurements.
-- [ ] Execute the full v2 task set with live models and operator-independent
+- [x] Execute the full v2 task set with live models and operator-independent
       target discovery, obtain applicable first-pass planning evidence across
       all 30 tasks, and compare the same pinned routed model pool against its
-      fixed single-model baseline without reducing successful-task count.
+      fixed single-model baseline without reducing successful-task count. The
+      routed run improved 5/30 to 9/30 and lowered estimated proxy cost per
+      success by 36.996%, but failed the absolute Gate 2 thresholds.
+- [ ] Improve autonomous target discovery and minimal exact citations/findings,
+      then rerun a new versioned live profile without weakening manifest-v2
+      thresholds. Prioritize scaffold and security-review failures, followed by
+      explanation and plan acceptance.
 
 The explanation and security-review cohorts add bounded read-only provider
 analysis. The refactor, repair-A, repair-B, and scaffold-A cohorts grant
@@ -113,7 +124,9 @@ policy bypass or an in-place rewrite of immutable input. Manifest v2 makes that
 versioned decision. The adoption contract—not arithmetic over headline totals—
 strictly replays the 28 unchanged identities and two direct successor outcomes
 under one v2 receipt. That closes deterministic case coverage while leaving
-live-model, autonomous-planning, and routing evidence open.
+live-model quality evidence open. ADR 0066 now supplies the first autonomous
+planning and routing measurement, but its failed absolute thresholds do not
+complete Gate 2.
 
 ## Headless Vulcan proposal admission
 

@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "scaffold-parser-cli",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:34.277Z",
+  "finishReason": "stop",
+  "reassessedFromEvidenceSha256": "93d2de9e9a75b24d8bb86b03041f65baaa46e55bb76cbfe1706fb66bab11d2c5",
+  "retrieval": {
+    "baseCommit": "6980aad15d1a2fd1aa0669ee11249aa4e0150a19",
+    "digestSha256": "a18c53e8bb7c4e5a7c4964c72d7fecec3fd96880b88c6a26fdb17533dd764322",
+    "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2"
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"checks/test_parser.py\",\n    \"checks/verify.py\",\n    \"src/cli.py\",\n    \"src/parser.py\"\n  ],\n  \"plan\": {\n    \"summary\": \"Make the boolean parser recognize explicit 'true'/'false' literals (the registered parser-cli check fails on the false case because parse_enabled currently returns True for any non-empty string), then wrap it in a dependency-free CLI with deterministic exit codes and add tests.\",\n    \"steps\": [\n      \"Update src/parser.py so parse_enabled('true') is True, parse_enabled('false') is False, and any other value raises ValueError.\",\n      \"Create src/cli.py exposing main(argv) with deterministic exit codes (0=true, 1=false, 2=usage/invalid) plus a __main__ entry point.\",\n      \"Add checks/test_parser_cli.py asserting both the parser results and the CLI exit codes.\"\n    ],\n    \"risks\": [\n      \"Case-insensitive parsing slightly expands the contract, but stays compatible with the lowercase literals used by the check.\",\n      \"Both usage errors and invalid values map to exit code 2; they are distinguished only by the stderr message.\",\n      \"The relative import in cli.py requires running via 'python -m src.cli'; direct file execution will not resolve the package.\"\n    ],\n    \"targets\": [\n      \"checks/test_parser_cli.py\",\n      \"src/cli.py\",\n      \"src/parser.py\"\n    ],\n    \"checkIds\": [\n      \"parser-cli\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/parser.py\",\n        \"content\": \"\\\"\\\"\\\"Boolean parser utilities.\\n\\nThe parser recognizes the explicit boolean literals ``\\\"true\\\"`` and ``\\\"false\\\"``\\n(case-insensitive) and rejects everything else.\\n\\\"\\\"\\\"\\n\\n\\ndef parse_enabled(value: str) -> bool:\\n    \\\"\\\"\\\"Parse an explicit boolean string.\\n\\n    Args:\\n        value: The string to parse.\\n\\n    Returns:\\n        ``True`` for ``\\\"true\\\"``, ``False`` for ``\\\"false\\\"``.\\n\\n    Raises:\\n        ValueError: If ``value`` is not a recognized literal.\\n    \\\"\\\"\\\"\\n    normalized = value.strip().lower()\\n    if normalized == \\\"true\\\":\\n        return True\\n    if normalized == \\\"false\\\":\\n        return False\\n    raise ValueError(f\\\"invalid boolean value: {value!r}\\\")\\n\"\n      },\n      {\n        \"path\": \"src/cli.py\",\n        \"content\": \"\\\"\\\"\\\"Dependency-free command-line entry point for the boolean parser.\\n\\nUsage::\\n\\n    python -m src.cli <true|false>\\n\\nExit codes are deterministic:\\n\\n* ``0`` – the argument parsed to ``True``.\\n* ``1`` – the argument parsed to ``False``.\\n* ``2`` – a usage error or an invalid argument.\\n\\\"\\\"\\\"\\nfrom __future__ import annotations\\n\\nimport sys\\n\\nfrom .parser import parse_enabled\\n\\nEXIT_TRUE = 0\\nEXIT_FALSE = 1\\nEXIT_USAGE = 2\\n\\n\\ndef main(argv: list[str] | None = None) -> int:\\n    \\\"\\\"\\\"Run the CLI entry point.\\n\\n    Args:\\n        argv: Optional argument list. Defaults to ``sys.argv[1:]``.\\n\\n    Returns:\\n        A deterministic exit code (see module docstring).\\n    \\\"\\\"\\\"\\n    args = sys.argv[1:] if argv is None else list(argv)\\n    if len(args) != 1:\\n        print(\\\"usage: python -m src.cli <true|false>\\\", file=sys.stderr)\\n        return EXIT_USAGE\\n    try:\\n        enabled = parse_enabled(args[0])\\n    except ValueError as exc:\\n        print(f\\\"error: {exc}\\\", file=sys.stderr)\\n        return EXIT_USAGE\\n    return EXIT_TRUE if enabled else EXIT_FALSE\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    raise SystemExit(main())\\n\"\n      },\n      {\n        \"path\": \"checks/test_parser_cli.py\",\n        \"content\": \"\\\"\\\"\\\"Tests for the parser CLI entry point and its deterministic exit codes.\\\"\\\"\\\"\\n\\nfrom src.cli import EXIT_FALSE, EXIT_TRUE, EXIT_USAGE, main\\n\\nassert main([\\\"true\\\"]) == EXIT_TRUE\\nassert main([\\\"false\\\"]) == EXIT_FALSE\\nassert main([\\\"TRUE\\\"]) == EXIT_TRUE\\nassert main([\\\"bogus\\\"]) == EXIT_USAGE\\nassert main([]) == EXIT_USAGE\\nassert main([\\\"true\\\", \\\"false\\\"]) == EXIT_USAGE\\n\"\n      }\n    ],\n    \"citations\": [\n      \"checks/test_parser.py\",\n      \"checks/verify.py\",\n      \"src/cli.py\",\n      \"src/parser.py\"\n    ],\n    \"findingIds\": [],\n    \"summary\": \"Fixed src/parser.py so parse_enabled('true') is True and parse_enabled('false') is False (raising ValueError otherwise, fixing the failing false-value regression); added src/cli.py, a stdlib-only CLI mapping true->0, false->1, usage/invalid->2; and added checks/test_parser_cli.py asserting both the parser results and the CLI exit codes.\"\n  }\n}",
+  "candidate": null,
+  "candidateError": "Gate 2 live candidate: selectedContextPaths must stay inside the host retrieval receipt",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-parser-cli",
+    "evaluatorId": "scaffold-parser-cli-evaluator",
+    "candidateSha256": "bbcf6a8343a09859bf072e5475afc803cb609f5e1ca52ad1decde96f9d1be0ce",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-parser-cli",
+    "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+    "taskSha256": "5e072062df28e307690786452e53acec3d94b0266c19dcc11a6a7b15f3804d5a",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_parser.py",
+        "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+      },
+      {
+        "path": "README.md",
+        "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+      },
+      {
+        "path": "src/parser.py",
+        "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-parser-cli-evaluator",
+    "scenarioEvidenceSha256": "bbbe224638369440387316cb4dca3a3e82c4532c37c5a35ca0273688676041a5",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1046,
+      "outputTokens": 7362,
+      "estimatedCostUsd": 0.008408,
+      "actualBilledUsd": null,
+      "latencyMs": 140263
+    }
+  }
+}

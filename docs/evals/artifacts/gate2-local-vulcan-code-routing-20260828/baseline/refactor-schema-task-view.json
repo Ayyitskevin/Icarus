@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 3,
+  "evidenceRecordRevision": 2,
+  "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "d7dae6a514130a11aee8c8be1e52dbe591440d36df452db4bc75b8f7f1d77e58",
+  "mode": "baseline",
+  "caseId": "refactor-schema-task-view",
+  "modelId": "code-fast",
+  "generatedAt": "2026-08-28T11:58:33.880Z",
+  "finishReason": "legacy-stop",
+  "reassessedFromEvidenceSha256": "5fa7cf3b40798b9910ef6828bfa9ef57ed1e6b8ad190d38b882be9c18e62165f",
+  "retrieval": {
+    "baseCommit": "ef0d0ebbc5b42e5bb30129357f84a3b4bd7ea961",
+    "digestSha256": "c2e7a54ff177e3323d6fde7135618f8cdaeb578d4e9cd05398c352db0de311eb",
+    "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d"
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"summary\":\"Introduce a read-only task projection as a VIEW over the existing tasks table in the offline schema contract, leaving the tasks table DDL unchanged and applying nothing to a live database.\",\"steps\":[\"Add a CREATE VIEW projection that selects id and title from tasks in schema/current.sql.\",\"Leave the existing CREATE TABLE tasks definition untouched.\",\"Do not create a numbered migration; the projection stays in the offline schema contract.\",\"Confirm the schema-contract check still reads tasks via SELECT id, title.\"],\"risks\":[\"A VIEW is read-only, so no write path is added to the contract.\",\"No DDL change to the tasks table, so existing consumers are unaffected.\",\"No migration is applied, keeping evaluation off live state.\"],\"targets\":[\"schema/current.sql\"],\"checkIds\":[\"schema-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"schema/current.sql\",\"content\":\"CREATE TABLE tasks (\\n  id INTEGER PRIMARY KEY,\\n  title TEXT NOT NULL\\n);\\n\\nCREATE VIEW task_projection AS\\nSELECT id, title FROM tasks;\\n\"}],\"citations\":[\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"Added a read-only task projection (a VIEW) over the tasks table in schema/current.sql without modifying the table or creating a migration. The schema-contract check that reads tasks remains valid.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
+      "schema/current.sql"
+    ],
+    "plan": {
+      "summary": "Introduce a read-only task projection as a VIEW over the existing tasks table in the offline schema contract, leaving the tasks table DDL unchanged and applying nothing to a live database.",
+      "steps": [
+        "Add a CREATE VIEW projection that selects id and title from tasks in schema/current.sql.",
+        "Leave the existing CREATE TABLE tasks definition untouched.",
+        "Do not create a numbered migration; the projection stays in the offline schema contract.",
+        "Confirm the schema-contract check still reads tasks via SELECT id, title."
+      ],
+      "risks": [
+        "A VIEW is read-only, so no write path is added to the contract.",
+        "No DDL change to the tasks table, so existing consumers are unaffected.",
+        "No migration is applied, keeping evaluation off live state."
+      ],
+      "targets": [
+        "schema/current.sql"
+      ],
+      "checkIds": [
+        "schema-contract"
+      ]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "schema/current.sql",
+          "content": "CREATE TABLE tasks (\n  id INTEGER PRIMARY KEY,\n  title TEXT NOT NULL\n);\n\nCREATE VIEW task_projection AS\nSELECT id, title FROM tasks;\n"
+        }
+      ],
+      "citations": [
+        "checks/schema_contract.sql",
+        "migrations/README.md",
+        "schema/current.sql"
+      ],
+      "findingIds": [],
+      "summary": "Added a read-only task projection (a VIEW) over the tasks table in schema/current.sql without modifying the table or creating a migration. The schema-contract check that reads tasks remains valid."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "refactor-schema-task-view",
+    "evaluatorId": "refactor-schema-task-view-evaluator",
+    "candidateSha256": "c6617f32ae89caeeba01f86cdce923de1ec1aee13aaf6e1df74fc922a2935d01",
+    "routingPolicySha256": "f4919cde1a36b13850726a7ff72b6a9bbeb64afd1583f0d64dc8804043f0a80d",
+    "finishReason": "legacy-stop",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "refactor-schema-task-view",
+    "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+    "taskSha256": "d5305c2a35958248b3a3b432af7f0f011ece696c3c7a90a2f8429f2b465d2dbd",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/schema_contract.sql",
+        "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+      },
+      {
+        "path": "migrations/README.md",
+        "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+      },
+      {
+        "path": "README.md",
+        "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+      },
+      {
+        "path": "schema/current.sql",
+        "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "refactor-schema-task-view-evaluator",
+    "scenarioEvidenceSha256": "366a227b75c0554f176dec957e8ea1bc5815c122dd7d1380bfc1e0b38d7dc9f9",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 983,
+      "outputTokens": 3317,
+      "estimatedCostUsd": 0.0043,
+      "actualBilledUsd": null,
+      "latencyMs": 62968
+    }
+  }
+}
