@@ -171,6 +171,27 @@ function summarizeChecks(checks) {
   }));
 }
 
+function countOfflineInMemoryDatabaseChecks(observations) {
+  const schemaOracle = GATE2_REFACTOR_ORACLES.find(
+    (entry) => entry.caseId === "refactor-schema-task-view",
+  );
+  assertCondition(schemaOracle !== undefined, "offline schema oracle is missing");
+  const expectedArgv = JSON.stringify(schemaOracle.check.argv);
+  return observations.reduce(
+    (count, observation) =>
+      count +
+      [...observation.baseline.checks, ...observation.mutation.checks].filter(
+        (check) =>
+          check.checkId === schemaOracle.check.id &&
+          JSON.stringify(check.argv) === expectedArgv &&
+          check.signal === null &&
+          check.truncated === false &&
+          Number.isSafeInteger(check.exitCode),
+      ).length,
+    0,
+  );
+}
+
 function operatorTargets(benchmarkCase, repository) {
   const targets = [...benchmarkCase.expectedOutcome.expectedChangedPaths];
   const sourcePaths = new Set(repository.files.map((file) => file.path));
@@ -775,6 +796,11 @@ async function main() {
     const macroPrecision =
       observations.reduce((sum, entry) => sum + entry.retrievalMetrics.precision, 0) /
       observations.length;
+    const offlineInMemoryDatabaseChecks = countOfflineInMemoryDatabaseChecks(observations);
+    assertCondition(
+      offlineInMemoryDatabaseChecks === 2,
+      "offline in-memory database effect count changed",
+    );
     const report = {
       schemaVersion: 1,
       benchmarkId: loaded.manifest.benchmarkId,
@@ -813,7 +839,7 @@ async function main() {
         sandboxCheckExecutions: observations.length * 2,
         icarusRegisteredCheckExecutions: observations.length,
         liveDatabaseConnections: 0,
-        offlineInMemoryDatabaseChecks: 2,
+        offlineInMemoryDatabaseChecks,
         temporaryGitFixtureSetup: true,
         runtimeReopens: observations.length,
       },

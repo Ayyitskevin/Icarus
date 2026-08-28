@@ -2295,6 +2295,9 @@ const assertions = {
     gate2RefactorCohortRunnerSource.includes("sourceCheckoutUnchanged") &&
     gate2RefactorCohortRunnerSource.includes("sourceGitDirectoryUnchanged") &&
     gate2RefactorCohortRunnerSource.includes("durableRunRecovered") &&
+    gate2RefactorCohortRunnerSource.includes("function countOfflineInMemoryDatabaseChecks(") &&
+    gate2RefactorCohortRunnerSource.includes("offlineInMemoryDatabaseChecks,") &&
+    !gate2RefactorCohortRunnerSource.includes("offlineInMemoryDatabaseChecks: 2") &&
     gate2RefactorCohortRunnerSource.includes("externalNetworkRequests: 0") &&
     gate2RefactorCohortRunnerSource.includes("remoteMutations: 0") &&
     gate2RefactorCohortRunnerSource.includes("liveDatabaseConnections: 0") &&
