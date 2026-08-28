@@ -139,6 +139,14 @@ const gate2BenchmarkResultContractSource = await readFile(
   "scripts/gate2-benchmark-result-contract.mjs",
   "utf8",
 );
+const gate2ExplanationCohortContractSource = await readFile(
+  "scripts/gate2-explanation-cohort-contract.mjs",
+  "utf8",
+);
+const gate2ExplanationCohortRunnerSource = await readFile(
+  "scripts/gate2-explanation-cohort.mjs",
+  "utf8",
+);
 const gate1BenchmarkManifestSource = await readFile(
   "fixtures/evals/gate1/manifest.v1.json",
   "utf8",
@@ -2139,7 +2147,7 @@ const assertions = {
     packageJson.scripts["benchmark:gate1"] ===
       "pnpm build:node && node scripts/gate1-benchmark.mjs" &&
     packageJson.scripts.eval ===
-      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-benchmark-contract.mjs",
+      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-benchmark-contract.mjs",
   gate2RetrievalCommandIntegrated:
     packageJson.scripts["benchmark:gate2:retrieval"] ===
       "pnpm build:node && node scripts/gate2-retrieval.mjs" &&
@@ -2178,6 +2186,28 @@ const assertions = {
     (gate2ExplanationCoreSource.match(/gateway\.generateStructured\(/g) ?? []).length === 1 &&
     !/(?:node:child_process|node:fs|node:http|node:https|executeToolCall|DockerSandboxRunner)/.test(
       gate2ExplanationCoreSource,
+    ),
+  gate2ExplanationCohortIsBoundedAndIntegrated:
+    packageJson.scripts["benchmark:gate2:explanation"] ===
+      "pnpm build:node && node scripts/gate2-explanation-cohort.mjs" &&
+    packageJson.scripts.eval.includes("&& node scripts/gate2-explanation-cohort.mjs") &&
+    gate2ExplanationCohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
+    gate2ExplanationCohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2ExplanationCohortRunnerSource.includes("explainCodebaseV1(") &&
+    gate2ExplanationCohortRunnerSource.includes("sourceCheckoutUnchanged") &&
+    gate2ExplanationCohortRunnerSource.includes("fixtureWorkspaceUnchanged") &&
+    gate2ExplanationCohortRunnerSource.includes("externalNetworkRequests: 0") &&
+    gate2ExplanationCohortRunnerSource.includes("remoteMutations: 0") &&
+    gate2ExplanationCohortRunnerSource.includes("repositoryCodeExecutions: 0") &&
+    gate2ExplanationCohortRunnerSource.includes("icarusRegisteredCommands: 0") &&
+    gate2ExplanationCohortContractSource.includes(
+      '"five-explanation-cases-do-not-complete-thirty-task-gate2-benchmark"',
+    ) &&
+    gate2ExplanationCohortContractSource.includes(
+      '"citation-range-validation-does-not-prove-semantic-entailment"',
+    ) &&
+    !/(?:api\.github\.com|process\.env\.(?:GH|GITHUB|OPENAI|ANTHROPIC)|deploy|force-push)/.test(
+      gate2ExplanationCohortRunnerSource,
     ),
   gate2RetrievalRunnerUsesPinnedLocalReadOnlyEvidence:
     gate2RetrievalRunnerSource.includes('spawnSync(\n    "/usr/bin/git"') &&

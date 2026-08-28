@@ -215,24 +215,41 @@ fixed `0.90` recall and `0.60` precision thresholds and refuses nonzero
 provider, network, repository-mutation, or registered-command effects.
 
 The focused retrieval-only benchmark remains a foothold, not Gate 2 completion:
-it calls no model and produces no explanation. The schema-v2 catalog now runs a
-separate real `explain_codebase` evaluator over the same pinned application. It
-uses the production Ollama adapter against one deterministic loopback response,
-sends only the bounded retrieval sources, validates a closed summary/claims
-schema and every selected-path inclusive line range in the host, binds the task,
-base commit, retrieval digest, provider identity, and explanation into a digest,
-and proves source content and Git metadata unchanged. The frozen explanation
-passes with one provider request, four selected paths, three cited claims, zero
-incorrect edits, and zero repository-mutation or arbitrary-command effects.
-Citation validation proves that each claim points to selected source lines; it
-does not prove that the prose is entailed by those lines. The frozen oracle
-checks one exact canned response, while broader semantic quality remains for the
-versioned benchmark.
+it calls no model and produces no explanation. The schema-v2 catalog separately
+runs one `explain_codebase` evaluator over the same pinned application.
 
-This is one deterministic explanation measurement, not broad explanation
-quality or Gate 2 exit evidence. The required versioned 30-task benchmark,
-first-pass plan acceptance measurement, security and refactor evaluators, and
-fixed-model routing-cost comparison remain open.
+The 30-task manifest now has its own five-case explanation cohort. The retriever
+normalizes test/check vocabulary and follows one deterministic reference hop
+from query-matched files; referenced files remain subject to the same eligible
+file, byte, secret, and source-commit bounds. This closed the non-circular
+retrieval failures exposed by the guardrail and duplicated-module tasks without
+injecting manifest expected paths into the query.
+
+`pnpm benchmark:gate2:explanation` executes exactly the manifest's five
+explanation cases. Each case copies a pinned fixture into a temporary Git
+repository, runs the production retriever and production Ollama adapter against
+one case-specific frozen loopback response, validates a closed summary/claims
+schema plus every selected-path inclusive line range in the host, and binds its
+manifest, task, repository, Git tree, evaluator, retrieval, provider, usage,
+outcome, and source-invariance evidence. The atomic ignored report is
+`.local/gate2-explanation-cohort-report.json`; stale success is removed before
+work starts. Its strict validator refuses altered shapes, counts, effects,
+oracles, citations, usage, evidence digests, limitations, duplicate JSON keys,
+oversized input, and excessive depth.
+
+The frozen cohort reports 5 executed, 5 passed, and 25 unexecuted. Every case
+has exact-context recall, precision, and digest coverage `1.0`; the five
+production-adapter calls stay on loopback at configured zero rates; source and
+temporary Git state remain unchanged; and no repository code, registered Icarus
+command, external network request, or remote/source mutation occurs. The dated
+measurement is
+[`docs/evals/2026-08-28-gate2-explanation-cohort.md`](evals/2026-08-28-gate2-explanation-cohort.md).
+
+Citation validation proves that each claim points to selected source lines; it
+does not prove semantic entailment. Frozen responses prove contract integration,
+not live-model explanation quality. The remaining 25 tasks, first-pass plan
+acceptance, security/refactor evaluators, and fixed-model routing-cost comparison
+remain open.
 
 ## Measures
 
@@ -312,7 +329,7 @@ cases, zero executed cases, and `contract_validated_gate2_execution_not_run`.
 It reads no credentials, invokes no provider or repository code, performs no
 network or Git operation, mutates no source checkout, and cannot complete Gate 2.
 
-The manifest publishes these quality gates before a live runner exists:
+The manifest publishes these quality gates before a full runner exists:
 
 - at least 24 of 30 successful tasks;
 - macro retrieval recall at least 0.90 and macro precision at least 0.60;
@@ -328,9 +345,10 @@ it has zero incorrect edits. Each case binds a stable
 `<case-id>-evaluator` identifier. Every observation must repeat that exact
 identifier and carry the digest of its retained evaluator evidence. The digest
 is a reference and self-consistency field, not authentication of the runner or
-proof that the referenced evidence exists. This slice defines that vocabulary
-but does not implement or impersonate those evaluators; unavailable execution
-must be reported as `unsupported` and makes a result incomplete.
+proof that the referenced evidence exists. The separate cohort implements only
+the five explanation evaluator IDs and uses a narrower report that explicitly
+leaves 25 cases unexecuted; it never fabricates the full result's remaining
+observations. Unavailable full-suite execution remains incomplete.
 
 The strict result contract recomputes retrieval, provenance, plan, outcome,
 usage, cost, and aggregate values from 30 manifest-bound observations. It
@@ -352,7 +370,8 @@ non-baseline model.
 This contract makes the benchmark reviewable; it is not benchmark evidence.
 Its strict JSON decoder is byte- and depth-bounded, and its result limitations
 state that structural self-consistency does not authenticate runner or evaluator
-evidence. A trusted future runner must retain the exact evidence bytes named by
-each observation.
+evidence. The partial explanation runner retains its five outcomes inline; a
+trusted full runner must retain the exact evidence bytes named by every one of
+its 30 observations.
 Gate 2 remains open until the scenario evaluators and deterministic retrieval
 runtime execute the fixed suite and satisfy the accepted ADR 0036 exit gate.

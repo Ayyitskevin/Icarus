@@ -90,9 +90,21 @@ const STOP_WORDS = new Set([
 ]);
 
 const TOKEN_ALIASES = new Map([
+  ["assert", "test"],
+  ["assertion", "test"],
+  ["assertions", "test"],
+  ["check", "check"],
+  ["checks", "check"],
   ["configuration", "config"],
   ["configurations", "config"],
   ["configured", "config"],
+  ["test", "test"],
+  ["tests", "test"],
+  ["verification", "check"],
+  ["verifications", "check"],
+  ["verified", "check"],
+  ["verify", "check"],
+  ["verifies", "check"],
 ]);
 
 function invalid(message: string): never {
@@ -161,11 +173,10 @@ function scoreEntry(
   content: string,
   queryTerms: readonly string[],
   source: { readonly bytes: number; readonly sha256: string },
-): ScoredEntry | null {
+): ScoredEntry {
   const pathTerms = new Set(tokenize(entry.path));
   const contentTerms = new Set(tokenize(content));
   const matchedTerms = queryTerms.filter((term) => pathTerms.has(term) || contentTerms.has(term));
-  if (matchedTerms.length === 0) return null;
   const pathMatches = matchedTerms.filter((term) => pathTerms.has(term)).length;
   const contentMatches = matchedTerms.filter((term) => contentTerms.has(term)).length;
   const seedBonus = /^(?:readme(?:\.[^/]*)?|package\.json|pyproject\.toml|cargo\.toml)$/i.test(
@@ -177,13 +188,49 @@ function scoreEntry(
     path: entry.path,
     bytes: source.bytes,
     sha256: source.sha256,
-    score: pathMatches * 8 + contentMatches * 2 + seedBonus,
+    score: pathMatches * 16 + contentMatches * 2 + seedBonus,
     pathMatches,
     matchedTerms,
     lineCount: content.split("\n").length,
     matches: lineMatches(content, matchedTerms),
     content,
   };
+}
+
+function referenceForms(filePath: string): readonly string[] {
+  const extensionIndex = filePath.lastIndexOf(".");
+  const withoutExtension =
+    extensionIndex > filePath.lastIndexOf("/") ? filePath.slice(0, extensionIndex) : filePath;
+  return [...new Set([filePath, withoutExtension, withoutExtension.replaceAll("/", ".")])].filter(
+    (form) => form.length >= 3,
+  );
+}
+
+function containsBoundedReference(content: string, reference: string): boolean {
+  const referenceCharacter = /[A-Za-z0-9_./-]/;
+  let start = content.indexOf(reference);
+  while (start !== -1) {
+    const before = start === 0 ? "" : (content[start - 1] ?? "");
+    const after = content[start + reference.length] ?? "";
+    if (!referenceCharacter.test(before) && !referenceCharacter.test(after)) return true;
+    start = content.indexOf(reference, start + 1);
+  }
+  return false;
+}
+
+function referencedEntries(
+  source: ScoredEntry,
+  candidates: ReadonlyMap<string, ScoredEntry>,
+): readonly ScoredEntry[] {
+  return [...candidates.values()]
+    .filter(
+      (candidate) =>
+        candidate.path !== source.path &&
+        referenceForms(candidate.path).some((form) =>
+          containsBoundedReference(source.content, form),
+        ),
+    )
+    .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
 }
 
 function publicEntry(entry: ScoredEntry): ContextRetrievalEntryV1 {
@@ -240,7 +287,7 @@ export async function retrieveReadOnlyContextV1(
   );
 
   const repositoryFiles: Array<{ path: string; bytes: number; sha256: string }> = [];
-  const scored: ScoredEntry[] = [];
+  const eligible = new Map<string, ScoredEntry>();
   let scannedFiles = 0;
   let scannedBytes = 0;
   for (const entry of tree) {
@@ -270,9 +317,10 @@ export async function retrieveReadOnlyContextV1(
     const file = { path: entry.path, bytes: bytes.length, sha256: sha256(bytes) };
     repositoryFiles.push(file);
     const candidate = scoreEntry(entry, content, queryTerms, file);
-    if (candidate !== null) scored.push(candidate);
+    eligible.set(candidate.path, candidate);
   }
 
+  const scored = [...eligible.values()].filter((candidate) => candidate.matchedTerms.length > 0);
   scored.sort(
     (left, right) =>
       right.score - left.score ||
@@ -280,13 +328,29 @@ export async function retrieveReadOnlyContextV1(
       (left.path < right.path ? -1 : left.path > right.path ? 1 : 0),
   );
   const entries: ContextRetrievalEntryV1[] = [];
+  const selectedPaths = new Set<string>();
   let totalBytes = 0;
+  function select(candidate: ScoredEntry): boolean {
+    if (selectedPaths.has(candidate.path)) return true;
+    if (entries.length >= budget.maxFiles) return false;
+    const accountedBytes = candidate.bytes + Buffer.byteLength(candidate.path, "utf8");
+    if (totalBytes + accountedBytes > budget.maxTotalBytes) return false;
+    entries.push(publicEntry(candidate));
+    selectedPaths.add(candidate.path);
+    totalBytes += accountedBytes;
+    return true;
+  }
   for (const candidate of scored) {
     if (entries.length >= budget.maxFiles) break;
-    const accountedBytes = candidate.bytes + Buffer.byteLength(candidate.path, "utf8");
-    if (totalBytes + accountedBytes > budget.maxTotalBytes) continue;
-    entries.push(publicEntry(candidate));
-    totalBytes += accountedBytes;
+    if (!select(candidate)) continue;
+    // Follow one deterministic reference hop only from files that matched the
+    // operator's query. Repository text can influence ordering inside the
+    // already-approved byte/file ceilings, but cannot widen either ceiling or
+    // make linked, generated, binary, invalid, or secret-shaped files eligible.
+    for (const referenced of referencedEntries(candidate, eligible)) {
+      if (entries.length >= budget.maxFiles) break;
+      select(referenced);
+    }
   }
 
   const unsigned = {

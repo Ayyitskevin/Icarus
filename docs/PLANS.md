@@ -3,8 +3,9 @@
 ## Current execution status
 
 Gate 0 is released and Gate 1's credential-gated live 3/3 evidence completed
-2026-08-23. Current product-quality work is ADR 0036 Gate 2. One frozen
-read-only codebase explanation is now measured; read-only security findings and
+2026-08-23. Current product-quality work is ADR 0036 Gate 2. All five frozen
+read-only explanation cases now execute as a deterministic fixture cohort;
+read-only security findings and
 behavior-preserving refactoring remain honestly unsupported. The separate
 supervised active-repository canary remains **HOLD** after the 2026-08-27
 secret-scanner survey; live-state migration, merge, deployment, unattended use,
@@ -14,8 +15,9 @@ checkpoint and must not be read as the current release state.
 
 ## Gate 2 deterministic retrieval and explanation baseline
 
-Status: one pinned read-only retrieval and explanation case implemented; broad
-explanation quality and the Gate 2 exit gate remain open.
+Status: the one-case retrieval baseline and all five manifest-bound explanation
+fixtures execute; live-model explanation quality and the Gate 2 exit gate remain
+open.
 
 - [x] Add a reusable deterministic core retriever over one exact committed tree.
 - [x] Exclude linked, hidden, binary, invalid-UTF-8, and secret-shaped content
@@ -36,13 +38,18 @@ explanation quality and the Gate 2 exit gate remain open.
       contract with exact fixture/task pins, evaluator-evidence references,
       selected-model routes, per-model captured rates, and an offline-only
       `30 validated / 0 executed` assessment.
+- [x] Execute the manifest's five explanation cases through the production
+      read-only retriever and Ollama adapter against frozen loopback responses;
+      retain exact evaluator, citation, usage, source-invariance, and zero-effect
+      evidence while leaving the other 25 tasks unexecuted.
 - [ ] Implement the manifest-bound scenario evaluators, execute all 30 tasks,
       measure first-pass plan acceptance, and compare the same pinned model pool
       against its fixed single-model baseline.
 
-This slice adds one bounded provider-assisted explanation over the retrieval
-receipt. It grants no repository mutation, registered command, canary, landing,
-migration, merge, deployment, or unattended authority.
+The explanation cohort adds five bounded provider-assisted explanations over
+retrieval receipts. It grants no repository mutation, registered command,
+canary, landing, migration, merge, deployment, or unattended authority. Frozen
+responses prove contract integration, not live-model semantic quality.
 
 ## Headless Vulcan proposal admission
 

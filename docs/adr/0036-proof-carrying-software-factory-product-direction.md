@@ -2,8 +2,8 @@
 
 - Status: Accepted product direction — Gate 0 released; Gate 1's bounded
   browser and landing paths plus credential-gated live 3/3 evidence are
-  complete; Gate 2 has one measured retrieval/explanation foothold and a
-  published but unexecuted 30-task contract. Canary,
+  complete; Gate 2 has a measured five-case deterministic explanation cohort
+  and a published 30-task contract whose full runner remains open. Canary,
   live-state migration, merge, deployment, and unattended authority remain
   closed
 - Date: 2026-07-30; progress status updated 2026-08-28
@@ -351,21 +351,24 @@ zero incorrect edits. Compare the same model versions, captured price table,
 and tasks against a fixed single-provider baseline; routing must lower median
 cost per success by at least 30% without lowering the success count.
 
-Progress checkpoint (2026-08-28): the first closed, deterministic retrieval
-baseline measures one pinned unfamiliar-codebase fixture at recall `1.0` and
-precision `1.0`, with digest/line provenance, unchanged source and temporary
-worktree, and zero provider, network, repository-mutation, or registered-command
-effects. A separate evaluator now makes one bounded call through the production
-Ollama adapter, host-validates three file-and-line-cited claims, digest-binds the
-explanation to its task/base/retrieval/provider identity, and proves zero source
-or Git-metadata change. This flips the frozen `explain_codebase` case to measured
-but remains a one-case foothold, not broad quality or Gate 2 exit evidence. The
-required versioned 30-task manifest and result vocabulary are now published:
+Progress checkpoint (2026-08-28): the first closed retrieval baseline still
+measures one pinned unfamiliar-codebase fixture at recall `1.0` and precision
+`1.0`. The retriever now also normalizes test/check vocabulary and follows one
+deterministic source-reference hop from query-matched files inside the same
+file/byte ceilings. A separate cohort executes all five manifest-bound
+explanation cases through the production Ollama adapter against frozen loopback
+responses. Every case retrieves exactly its expected context at recall,
+precision, and digest coverage `1.0`, host-validates its file-and-line citations,
+binds task/base/retrieval/provider/evaluator evidence, and proves zero source or
+Git-metadata change. This is five-case contract-integration evidence, not
+live-model semantic quality or Gate 2 exit evidence. The required versioned
+30-task manifest and result vocabulary are published:
 they pin seven repository fixtures, task and evaluator identities, each selected
 model route, the common versioned model pool and per-model estimated rates, and
-all exit thresholds. The offline command validates 30 contract cases and
-executes 0, so it supplies no routing or broad-quality claim; security review
-and behavior-preserving refactor evaluations remain unsupported.
+all exit thresholds. The contract-only command still validates 30 cases and
+executes 0 by design; the separate explanation cohort executes 5 and leaves 25
+unexecuted. Neither supplies a routing claim, and security review plus
+behavior-preserving refactor evaluations remain unsupported.
 
 ### Gate 3 — VS Code workbench
 

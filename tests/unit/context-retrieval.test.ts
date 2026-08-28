@@ -140,4 +140,106 @@ describe("Gate 2 read-only context retrieval", () => {
     expect(result.entries).toEqual([]);
     expect(result.totalBytes).toBe(0);
   });
+
+  it("normalizes check vocabulary and follows one bounded source-reference hop", async () => {
+    const blobs = new Map<string, Buffer>([
+      [
+        "readme",
+        Buffer.from(
+          "Name normalization is duplicated across two modules. A behavior-preserving refactor must extract a shared implementation, update both public modules, and retain the check.\n",
+        ),
+      ],
+      [
+        "check",
+        Buffer.from(
+          "from src.format_name import format_name\nfrom src.profile import display_name\n\nassert format_name('  ada  ') == display_name('  ada  ')\n",
+        ),
+      ],
+      [
+        "format",
+        Buffer.from(
+          'def format_name(value: str) -> str:\n    return " ".join(value.strip().split()).title()\n',
+        ),
+      ],
+      [
+        "profile",
+        Buffer.from(
+          'def display_name(value: str) -> str:\n    return " ".join(value.strip().split()).title()\n',
+        ),
+      ],
+      ["profile-decoy", Buffer.from("This file is not imported.\n")],
+    ]);
+    const tree: TreeEntry[] = [
+      { mode: "100644", type: "blob", objectId: "readme", path: "README.md" },
+      { mode: "100644", type: "blob", objectId: "check", path: "checks/test_profile.py" },
+      { mode: "100644", type: "blob", objectId: "format", path: "src/format_name.py" },
+      { mode: "100644", type: "blob", objectId: "profile", path: "src/profile.py" },
+      {
+        mode: "100644",
+        type: "blob",
+        objectId: "profile-decoy",
+        path: "src/profile.py.bak",
+      },
+    ];
+    const git = {
+      listTree: vi.fn(async () => tree),
+      readBlob: vi.fn(async (_repository: string, objectId: string) => {
+        const value = blobs.get(objectId);
+        if (value === undefined) throw new Error(`unknown object ${objectId}`);
+        return value;
+      }),
+    };
+
+    const result = await retrieveReadOnlyContextV1(
+      git,
+      "/repository",
+      BASE,
+      "Trace normalization duplication through both public functions and the check proving equivalence.",
+      { maxFiles: 4, maxTotalBytes: 8_192, maxScanBytes: 16_384 },
+    );
+
+    expect(result.entries.map((entry) => entry.path).sort()).toEqual([
+      "README.md",
+      "checks/test_profile.py",
+      "src/format_name.py",
+      "src/profile.py",
+    ]);
+    expect(result.entries.find((entry) => entry.path === "src/format_name.py")).toMatchObject({
+      score: 0,
+      matchedTerms: [],
+      matches: [],
+    });
+  });
+
+  it("treats verification and verify as the same retrieval term", async () => {
+    const blobs = new Map<string, Buffer>([
+      ["readme", Buffer.from("A fixture overview.\n")],
+      ["verify", Buffer.from("assert True\n")],
+    ]);
+    const git = {
+      listTree: vi.fn(
+        async () =>
+          [
+            { mode: "100644", type: "blob", objectId: "readme", path: "README.md" },
+            { mode: "100644", type: "blob", objectId: "verify", path: "checks/verify.py" },
+          ] satisfies TreeEntry[],
+      ),
+      readBlob: vi.fn(async (_repository: string, objectId: string) => {
+        const value = blobs.get(objectId);
+        if (value === undefined) throw new Error(`unknown object ${objectId}`);
+        return value;
+      }),
+    };
+
+    const result = await retrieveReadOnlyContextV1(
+      git,
+      "/repository",
+      BASE,
+      "Cite the registered verification.",
+      { maxFiles: 1, maxTotalBytes: 8_192, maxScanBytes: 16_384 },
+    );
+
+    expect(result.entries.map((entry) => entry.path)).toEqual(["checks/verify.py"]);
+    expect(result.queryTerms).toContain("check");
+  });
 });
