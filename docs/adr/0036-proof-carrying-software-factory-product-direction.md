@@ -401,7 +401,15 @@ pass, source/Git state remains unchanged, and durable runs reopen. Its
 recall/provenance are `1.0` and macro precision is `0.875`. The five partial
 reports cover 24 distinct cases and leave 6 unexecuted, but their union is not a
 synthetic full-suite result or a claim that the 24/30 threshold passed. None
-supplies a routing claim, and live-model quality,
+supplies a routing claim. A sixth cohort executes four policy-compatible
+scaffold cases through the same lifecycle: all four failing baselines reproduce,
+seven creates and one modification reach their exact final bytes, and every
+completed run survives reopen. Scaffold-A retrieval provenance is `1.0`, macro
+precision is `0.875`, and macro recall is honestly `0.9375` because one expected
+greeting context path is absent. The six partial reports cover 28 distinct
+cases and leave only the schema-repair and task-priority migration cases
+unexecuted. Their identity union remains neither a synthetic full-suite result
+nor a claim that the full-suite threshold passed. Live-model quality,
 autonomous target discovery, the full-suite threshold, and paired routing
 comparison remain open.
 

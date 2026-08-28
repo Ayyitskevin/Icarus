@@ -4,22 +4,22 @@
 
 Gate 0 is released and Gate 1's credential-gated live 3/3 evidence completed
 2026-08-23. Current product-quality work is ADR 0036 Gate 2. Five frozen
-read-only explanation, five security-review, five refactor, five repair-A, and
-four repair-B cases now execute as separate deterministic fixture cohorts;
-live-model quality, autonomous target discovery, and six remaining cases
-execution remain open. The separate
+read-only explanation, five security-review, five refactor, five repair-A, four
+repair-B, and four scaffold-A cases now execute as separate deterministic
+fixture cohorts; live-model quality, autonomous target discovery, and two
+remaining migration-path cases remain open. The separate
 supervised active-repository canary remains **HOLD** after the 2026-08-27
 secret-scanner survey; live-state migration, merge, deployment, unattended use,
 effectful/control session continuation, and wider Vulcan authority remain
 closed. Older sections below retain the status that was true at their named
 checkpoint and must not be read as the current release state.
 
-## Gate 2 deterministic retrieval, analysis, refactor, and repair baseline
+## Gate 2 deterministic retrieval, analysis, refactor, repair, and scaffold baseline
 
-Status: the one-case retrieval baseline plus five manifest-bound explanation,
-security-review, refactor, repair-A, and repair-B fixtures execute; live-model
-quality, the remaining 6 cases, autonomous target discovery, and the
-Gate 2 exit gate remain open.
+Status: the one-case retrieval baseline plus manifest-bound explanation,
+security-review, refactor, repair-A, repair-B, and scaffold-A fixtures execute;
+live-model quality, the remaining 2 migration-path cases, autonomous target
+discovery, and the Gate 2 exit gate remain open.
 
 - [x] Add a reusable deterministic core retriever over one exact committed tree.
 - [x] Exclude linked, hidden, binary, invalid-UTF-8, and secret-shaped content
@@ -66,16 +66,25 @@ Gate 2 exit gate remain open.
 - [x] Execute four additional modify-only repair cases through the same
       production lifecycle. Reproduce all four intended baseline failures,
       bind exact final bytes and effect provenance, recover each completed run,
-      and leave the protected schema migration excluded. The five partial
-      cohorts cover 24 distinct cases, with 6 not executed by any cohort.
+      and leave the protected schema migration excluded. At that checkpoint,
+      the five partial cohorts covered 24 distinct cases, with 6 not executed
+      by any cohort.
+- [x] Execute four current-host-policy-compatible scaffold cases through the
+      same production lifecycle. Reproduce all four intended baseline failures,
+      bind seven creates and one modification to exact final bytes, recover
+      every completed run, retain the greeting case's honest `0.75` retrieval
+      recall, and leave the protected task-priority migration excluded. The six
+      partial cohorts cover 28 distinct cases, with 2 not executed by any
+      cohort.
 - [ ] Implement the manifest-bound scenario evaluators, execute all 30 tasks,
-      execute the remaining repair and scaffold cases, measure live-model plan
-      quality and autonomous target discovery, and compare the same pinned
-      model pool against its fixed single-model baseline.
+      resolve or version the two protected migration-path cases, measure live-
+      model plan quality and autonomous target discovery, and compare the same
+      pinned model pool against its fixed single-model baseline.
 
 The explanation and security-review cohorts add bounded read-only provider
-analysis. The refactor, repair-A, and repair-B cohorts grant mutation only inside
-disposable private workspaces and run fixed checks without network; none grants
+analysis. The refactor, repair-A, repair-B, and scaffold-A cohorts grant
+mutation only inside disposable private workspaces and run fixed checks without
+network; none grants
 source, remote, canary, landing, migration, merge, deployment, live-database,
 or unattended authority. Frozen responses prove contract integration, not
 live-model quality. Manifest v1's schema repair and scaffold cases name

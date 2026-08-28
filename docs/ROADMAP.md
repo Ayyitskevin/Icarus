@@ -17,7 +17,7 @@ The current sequence is:
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
 | 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
-| 2 | Context and agent quality — **five explanation, five security-review, five refactor, five repair-A, and four repair-B cases measured; full 30-task benchmark open** | five deterministic cohorts cover 24 distinct manifest cases through production retrieval/adapters; refactor and both repair cohorts additionally traverse plan approval, private PatchSet mutation, sandbox checks, review, and durable reopen with exact final bytes; explanation/refactor/repair-A macro precision is 0.80, security is 0.75, repair-B is 0.875, and all have recall/provenance 1.0; each report keeps independent accounting while their distinct-case union leaves 6 cases untouched and does not establish a full-suite threshold pass; mutation-cohort first-pass host-contract acceptance is 100% but operator-selected targets do not measure autonomous discovery; manifest v1's two migration-path cases remain held by protected-path policy; exit still requires live-model quality, the full 30-task threshold, autonomous planning evidence, and fixed-model routing comparison |
+| 2 | Context and agent quality — **five explanation, five security-review, five refactor, five repair-A, four repair-B, and four scaffold-A cases measured; full 30-task benchmark open** | six deterministic cohorts cover 28 distinct manifest cases through production retrieval/adapters; refactor, repair, and scaffold cohorts additionally traverse plan approval, private PatchSet mutation, sandbox checks, review, and durable reopen with exact final bytes; explanation/refactor/repair-A macro precision is 0.80, security is 0.75, and repair-B/scaffold-A are 0.875; scaffold-A macro recall is 0.9375 and every other cohort has recall 1.0, while provenance is 1.0 throughout; each report keeps independent accounting while their distinct-case union leaves 2 migration-path cases untouched and does not establish a full-suite threshold pass; mutation-cohort first-pass host-contract acceptance is 100% but operator-selected targets do not measure autonomous discovery; manifest v1's two migration-path cases remain held by protected-path policy; exit still requires live-model quality, the full 30-task threshold, autonomous planning evidence, and fixed-model routing comparison |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
 | C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
@@ -54,9 +54,14 @@ one passing and four failing baseline checks, five passing final checks, source/
 Git invariance, and durable reopen. Repair-A recall/provenance are `1.0` and
 macro precision is `0.80`. A fifth cohort executes four more modify-only
 repairs, reproduces all four failing baselines, and records recall/provenance
-`1.0` with macro precision `0.875`. Together the five cohorts cover 24 distinct
-manifest cases and leave 6 unexecuted; that union is not a synthetic full-suite
-threshold result. Manifest v1's schema repair and scaffold cases
+`1.0` with macro precision `0.875`. A sixth cohort executes four policy-
+compatible scaffolds through the same lifecycle: all four failing baselines
+reproduce, seven creates and one modification reach their exact final bytes,
+and all four completed runs reopen. Its retrieval provenance is `1.0`, macro
+precision is `0.875`, and macro recall is honestly `0.9375` because the greeting
+case omits one expected context path. Together the six cohorts cover 28
+distinct manifest cases and leave 2 unexecuted; that union is not a synthetic
+full-suite threshold result. Manifest v1's schema repair and scaffold cases
 name protected `migrations/` paths and correctly remain held pending an explicit
 benchmark-versioning decision. This is deterministic
 contract-integration evidence, not live-model semantic/security judgment,

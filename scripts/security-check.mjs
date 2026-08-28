@@ -170,6 +170,14 @@ const gate2RepairBCohortContractSource = await readFile(
   "utf8",
 );
 const gate2RepairBCohortRunnerSource = await readFile("scripts/gate2-repair-cohort-b.mjs", "utf8");
+const gate2ScaffoldACohortContractSource = await readFile(
+  "scripts/gate2-scaffold-cohort-a-contract.mjs",
+  "utf8",
+);
+const gate2ScaffoldACohortRunnerSource = await readFile(
+  "scripts/gate2-scaffold-cohort-a.mjs",
+  "utf8",
+);
 const gate1BenchmarkManifestSource = await readFile(
   "fixtures/evals/gate1/manifest.v1.json",
   "utf8",
@@ -2174,7 +2182,7 @@ const assertions = {
     packageJson.scripts["benchmark:gate1"] ===
       "pnpm build:node && node scripts/gate1-benchmark.mjs" &&
     packageJson.scripts.eval ===
-      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-refactor-cohort.mjs && node scripts/gate2-repair-cohort-a.mjs && node scripts/gate2-repair-cohort-b.mjs && node scripts/gate2-benchmark-contract.mjs",
+      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-refactor-cohort.mjs && node scripts/gate2-repair-cohort-a.mjs && node scripts/gate2-repair-cohort-b.mjs && node scripts/gate2-scaffold-cohort-a.mjs && node scripts/gate2-benchmark-contract.mjs",
   gate2RetrievalCommandIntegrated:
     packageJson.scripts["benchmark:gate2:retrieval"] ===
       "pnpm build:node && node scripts/gate2-retrieval.mjs" &&
@@ -2406,6 +2414,58 @@ const assertions = {
     !gate2RepairBCohortContractSource.includes('file.op === "create"') &&
     !/(?:api\.github\.com|process\.env\.(?:GH|GITHUB|OPENAI|ANTHROPIC)|deploy|force-push)/.test(
       gate2RepairBCohortRunnerSource,
+    ),
+  gate2ScaffoldACohortIsBoundedAndIntegrated:
+    packageJson.scripts["benchmark:gate2:scaffold-a"] ===
+      "pnpm build:node && node scripts/gate2-scaffold-cohort-a.mjs" &&
+    packageJson.scripts.eval.includes("&& node scripts/gate2-scaffold-cohort-a.mjs") &&
+    gate2ScaffoldACohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
+    gate2ScaffoldACohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2ScaffoldACohortRunnerSource.includes("createIcarusRuntime(") &&
+    gate2ScaffoldACohortRunnerSource.includes(".service.planRun(") &&
+    gate2ScaffoldACohortRunnerSource.includes(".service.approvePlan(") &&
+    gate2ScaffoldACohortRunnerSource.includes(".service.review(") &&
+    gate2ScaffoldACohortRunnerSource.includes("new DockerSandboxRunner(") &&
+    gate2ScaffoldACohortRunnerSource.includes("sourceCheckoutUnchanged") &&
+    gate2ScaffoldACohortRunnerSource.includes("sourceGitDirectoryUnchanged") &&
+    gate2ScaffoldACohortRunnerSource.includes("durableRunRecovered") &&
+    gate2ScaffoldACohortRunnerSource.includes(
+      "const privateWorkspaceMutations = observations.filter(",
+    ) &&
+    gate2ScaffoldACohortRunnerSource.includes(
+      "const sandboxCheckExecutions = observations.reduce(",
+    ) &&
+    gate2ScaffoldACohortRunnerSource.includes(
+      "const icarusRegisteredCheckExecutions = observations.reduce(",
+    ) &&
+    gate2ScaffoldACohortRunnerSource.includes("const runtimeReopens = observations.filter(") &&
+    gate2ScaffoldACohortRunnerSource.includes("externalNetworkRequests: 0") &&
+    gate2ScaffoldACohortRunnerSource.includes("remoteMutations: 0") &&
+    gate2ScaffoldACohortRunnerSource.includes("liveDatabaseConnections: 0") &&
+    gate2ScaffoldACohortRunnerSource.includes("offlineInMemoryDatabaseChecks: 0") &&
+    gate2ScaffoldACohortRunnerSource.includes('externalNetworkRequests: "design-assertion"') &&
+    gate2ScaffoldACohortRunnerSource.includes('remoteMutations: "design-assertion"') &&
+    gate2ScaffoldACohortRunnerSource.includes('liveDatabaseConnections: "design-assertion"') &&
+    gate2ScaffoldACohortRunnerSource.includes(
+      'offlineInMemoryDatabaseChecks: "design-assertion"',
+    ) &&
+    gate2ScaffoldACohortContractSource.includes(
+      'GATE2_SCAFFOLD_A_EXCLUDED_CASE_ID = "scaffold-task-priority"',
+    ) &&
+    [
+      "scaffold-lantern-json-output",
+      "scaffold-cart-discount",
+      "scaffold-parser-cli",
+      "scaffold-greeting-command",
+    ].every((caseId) => gate2ScaffoldACohortContractSource.includes(`caseId: "${caseId}"`)) &&
+    gate2ScaffoldACohortContractSource.includes(
+      '"protected-migration-scaffold-remains-unexecuted-without-gate5-authority"',
+    ) &&
+    gate2ScaffoldACohortContractSource.includes(
+      '"macro-recall-can-pass-while-one-case-omits-expected-context"',
+    ) &&
+    !/(?:api\.github\.com|process\.env\.(?:GH|GITHUB|OPENAI|ANTHROPIC)|deploy|force-push)/.test(
+      gate2ScaffoldACohortRunnerSource,
     ),
   gate2RetrievalRunnerUsesPinnedLocalReadOnlyEvidence:
     gate2RetrievalRunnerSource.includes('spawnSync(\n    "/usr/bin/git"') &&

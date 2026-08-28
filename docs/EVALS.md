@@ -328,16 +328,31 @@ provenance are `1.0`; precision is `1.0` twice and `0.75` twice (macro
 dated measurement is
 [`docs/evals/2026-08-28-gate2-repair-cohort-b.md`](evals/2026-08-28-gate2-repair-cohort-b.md).
 
-Across the explanation, security-review, refactor, repair-A, and repair-B
-reports, 24 distinct manifest cases now have deterministic contract-integration
-evidence and 6 cases have not been executed by any partial cohort. Each partial
-report retains its own independent unexecuted count; this union is not a
-synthetic full-suite result or a claim that the 24/30 exit threshold passed.
-Manifest v1's schema repair and scaffold cases request protected `migrations/`
-paths, so the ordinary lifecycle correctly refuses them; resolving that input
-contract requires an explicit benchmark-versioning decision, not a policy
-bypass. Live-model quality, autonomous target discovery, the full 30-task
-threshold, and fixed-model routing-cost comparison remain open.
+`pnpm benchmark:gate2:scaffold-a` executes four scaffold cases compatible with
+current host policy: Lantern JSON output, integer-cents cart discounts, the
+parser CLI, and the greeting command. All four intended baseline failures
+reproduce. Seven files are created and one is modified only inside private Git
+workspaces; all four registered final checks pass, and every completed run
+survives runtime reopen with source files and complete source Git directories
+unchanged. Retrieval provenance is `1.0`; recall is `1.0` in three cases and
+`0.75` in the greeting case (macro `0.9375`), while precision is `1.0` twice
+and `0.75` twice (macro `0.875`). The report retains that expected-context
+omission rather than forging a perfect per-case score. Eight loopback requests,
+eight sandbox checks, four private mutations, four final checks, and four
+reopens are observed. The protected task-priority migration scaffold remains
+excluded. The dated measurement is
+[`docs/evals/2026-08-28-gate2-scaffold-cohort-a.md`](evals/2026-08-28-gate2-scaffold-cohort-a.md).
+
+Across the explanation, security-review, refactor, repair-A, repair-B, and
+scaffold-A reports, 28 distinct manifest cases now have deterministic contract-
+integration evidence and 2 cases have not been executed by any partial cohort.
+Each partial report retains its own independent unexecuted count; this union is
+not a synthetic full-suite result or a claim that the full-suite threshold
+passed. Manifest v1's schema repair and scaffold cases request protected
+`migrations/` paths, so the ordinary lifecycle correctly refuses them;
+resolving that input contract requires an explicit benchmark-versioning
+decision, not a policy bypass. Live-model quality, autonomous target discovery,
+the full 30-task threshold, and fixed-model routing-cost comparison remain open.
 
 ## Measures
 
@@ -433,13 +448,14 @@ it has zero incorrect edits. Each case binds a stable
 `<case-id>-evaluator` identifier. Every observation must repeat that exact
 identifier and carry the digest of its retained evaluator evidence. The digest
 is a reference and self-consistency field, not authentication of the runner or
-proof that the referenced evidence exists. Five separate partial cohorts
+proof that the referenced evidence exists. Six separate partial cohorts
 implement five explanation, five security-review, five refactor, five repair-A,
-and four repair-B evaluator IDs. The four five-case reports each leave 25 cases
-unexecuted; repair-B independently leaves 26. No partial report fabricates the
-full result's remaining observations. Their distinct-case union covers 24 cases
-but is not a synthetic full result or threshold pass; the full-suite runner
-remains unavailable and incomplete.
+four repair-B, and four scaffold-A evaluator IDs. The four five-case reports
+each leave 25 cases unexecuted; repair-B and scaffold-A independently leave 26.
+No partial report fabricates the full result's remaining observations. Their
+distinct-case union covers 28 cases and leaves 2 unexecuted, but is not a
+synthetic full result or threshold pass; the full-suite runner remains
+unavailable and incomplete.
 
 The strict result contract recomputes retrieval, provenance, plan, outcome,
 usage, cost, and aggregate values from 30 manifest-bound observations. It
@@ -462,8 +478,8 @@ This contract makes the benchmark reviewable; it is not benchmark evidence.
 Its strict JSON decoder is byte- and depth-bounded, and its result limitations
 state that structural self-consistency does not authenticate runner or evaluator
 evidence. The partial explanation, security-review, refactor, and repair-A
-runners retain five outcomes each, while repair-B retains four; a trusted full
-runner must retain the exact evidence bytes named by every one of its 30
-observations.
+runners retain five outcomes each, while repair-B and scaffold-A retain four
+each; a trusted full runner must retain the exact evidence bytes named by every
+one of its 30 observations.
 Gate 2 remains open until the scenario evaluators and deterministic retrieval
 runtime execute the fixed suite and satisfy the accepted ADR 0036 exit gate.
