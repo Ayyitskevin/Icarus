@@ -155,6 +155,11 @@ const gate2SecurityReviewCohortRunnerSource = await readFile(
   "scripts/gate2-security-review-cohort.mjs",
   "utf8",
 );
+const gate2RefactorCohortContractSource = await readFile(
+  "scripts/gate2-refactor-cohort-contract.mjs",
+  "utf8",
+);
+const gate2RefactorCohortRunnerSource = await readFile("scripts/gate2-refactor-cohort.mjs", "utf8");
 const gate1BenchmarkManifestSource = await readFile(
   "fixtures/evals/gate1/manifest.v1.json",
   "utf8",
@@ -2159,7 +2164,7 @@ const assertions = {
     packageJson.scripts["benchmark:gate1"] ===
       "pnpm build:node && node scripts/gate1-benchmark.mjs" &&
     packageJson.scripts.eval ===
-      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-benchmark-contract.mjs",
+      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-refactor-cohort.mjs && node scripts/gate2-benchmark-contract.mjs",
   gate2RetrievalCommandIntegrated:
     packageJson.scripts["benchmark:gate2:retrieval"] ===
       "pnpm build:node && node scripts/gate2-retrieval.mjs" &&
@@ -2275,6 +2280,35 @@ const assertions = {
     ) &&
     !/(?:api\.github\.com|process\.env\.(?:GH|GITHUB|OPENAI|ANTHROPIC)|deploy|force-push)/.test(
       gate2SecurityReviewCohortRunnerSource,
+    ),
+  gate2RefactorCohortIsBoundedAndIntegrated:
+    packageJson.scripts["benchmark:gate2:refactor"] ===
+      "pnpm build:node && node scripts/gate2-refactor-cohort.mjs" &&
+    packageJson.scripts.eval.includes("&& node scripts/gate2-refactor-cohort.mjs") &&
+    gate2RefactorCohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
+    gate2RefactorCohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2RefactorCohortRunnerSource.includes("createIcarusRuntime(") &&
+    gate2RefactorCohortRunnerSource.includes(".service.planRun(") &&
+    gate2RefactorCohortRunnerSource.includes(".service.approvePlan(") &&
+    gate2RefactorCohortRunnerSource.includes(".service.review(") &&
+    gate2RefactorCohortRunnerSource.includes("new DockerSandboxRunner(") &&
+    gate2RefactorCohortRunnerSource.includes("sourceCheckoutUnchanged") &&
+    gate2RefactorCohortRunnerSource.includes("sourceGitDirectoryUnchanged") &&
+    gate2RefactorCohortRunnerSource.includes("durableRunRecovered") &&
+    gate2RefactorCohortRunnerSource.includes("externalNetworkRequests: 0") &&
+    gate2RefactorCohortRunnerSource.includes("remoteMutations: 0") &&
+    gate2RefactorCohortRunnerSource.includes("liveDatabaseConnections: 0") &&
+    gate2RefactorCohortRunnerSource.includes('externalNetworkRequests: "design-assertion"') &&
+    gate2RefactorCohortRunnerSource.includes('remoteMutations: "design-assertion"') &&
+    gate2RefactorCohortRunnerSource.includes('liveDatabaseConnections: "design-assertion"') &&
+    gate2RefactorCohortContractSource.includes(
+      '"five-refactor-cases-do-not-complete-thirty-task-gate2-benchmark"',
+    ) &&
+    gate2RefactorCohortContractSource.includes(
+      '"operator-selected-target-authority-does-not-measure-autonomous-target-discovery"',
+    ) &&
+    !/(?:api\.github\.com|process\.env\.(?:GH|GITHUB|OPENAI|ANTHROPIC)|deploy|force-push)/.test(
+      gate2RefactorCohortRunnerSource,
     ),
   gate2RetrievalRunnerUsesPinnedLocalReadOnlyEvidence:
     gate2RetrievalRunnerSource.includes('spawnSync(\n    "/usr/bin/git"') &&

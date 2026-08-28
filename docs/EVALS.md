@@ -277,10 +277,38 @@ finding IDs; two bind explicit no-finding evidence. The dated measurement is
 [`docs/evals/2026-08-28-gate2-security-review-cohort.md`](evals/2026-08-28-gate2-security-review-cohort.md).
 
 Frozen responses and source locations do not establish live-model security
-judgment, semantic entailment, or whole-codebase coverage. The remaining 20
-unexecuted repair/refactor/scaffold cases, live-model explanation/security
-measurement, first-pass plan acceptance, and fixed-model routing-cost comparison
-remain open.
+judgment, semantic entailment, or whole-codebase coverage.
+
+`pnpm benchmark:gate2:refactor` executes the five `refactor` cases through
+the production retriever and ordinary `IcarusService` plan, digest-bound
+approval, PatchSet, private-workspace check, local review, and runtime-reopen
+lifecycle. Frozen loopback responses propose exact byte-pinned scenario
+oracles. Each evaluator runs the same registered check before and after the
+mutation in the digest-pinned, no-network Docker sandbox; the cart and parser
+fixtures reproduce their deliberate baseline failures, and all five final
+checks pass. Exact changed paths and final-file digests, provider prompts and
+usage, retrieval provenance, source plus complete Git-directory invariance,
+and durable completed-run recovery are retained in the ignored atomic report
+`.local/gate2-refactor-cohort-report.json`.
+
+The cohort records 5 executed, 5 passed, and 25 unexecuted. Retrieval recall and
+digest provenance are `1.0` in every case; precision is `1.0` once and
+`0.75` four times (macro `0.80`). All five first plans reach approval, but
+the operator supplies the allowed target set and, where a new path sorts first,
+an existing non-mutating anchor. The reported `1.0` therefore measures
+first-pass host-contract acceptance, not autonomous target discovery or live-
+model planning quality. Ten loopback provider requests, ten sandbox checks,
+five private-workspace mutations, five registered final checks, and five
+runtime reopens are observed. External network, remote mutation, and live-
+database connection zeros are closed-design assertions; the schema evaluator
+runs twice only against in-memory SQLite. The dated measurement is
+[`docs/evals/2026-08-28-gate2-refactor-cohort.md`](evals/2026-08-28-gate2-refactor-cohort.md).
+
+Across the explanation, security-review, and refactor reports, 15 distinct
+manifest cases now have deterministic contract-integration evidence and 15
+repair/scaffold cases have not been executed by any partial cohort. Live-model
+quality, autonomous target discovery, the full 30-task threshold, and fixed-
+model routing-cost comparison remain open.
 
 ## Measures
 
@@ -402,8 +430,8 @@ non-baseline model.
 This contract makes the benchmark reviewable; it is not benchmark evidence.
 Its strict JSON decoder is byte- and depth-bounded, and its result limitations
 state that structural self-consistency does not authenticate runner or evaluator
-evidence. The partial explanation and security-review runners retain their five
-outcomes inline; a trusted full runner must retain the exact evidence bytes
-named by every one of its 30 observations.
+evidence. The partial explanation, security-review, and refactor runners retain
+their five outcomes inline; a trusted full runner must retain the exact
+evidence bytes named by every one of its 30 observations.
 Gate 2 remains open until the scenario evaluators and deterministic retrieval
 runtime execute the fixed suite and satisfy the accepted ADR 0036 exit gate.

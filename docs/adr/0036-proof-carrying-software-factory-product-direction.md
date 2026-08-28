@@ -2,9 +2,9 @@
 
 - Status: Accepted product direction — Gate 0 released; Gate 1's bounded
   browser and landing paths plus credential-gated live 3/3 evidence are
-  complete; Gate 2 has measured five-case deterministic explanation and
-  security-review cohorts plus a published 30-task contract whose full runner
-  remains open. Canary,
+  complete; Gate 2 has measured five-case deterministic explanation,
+  security-review, and refactor cohorts plus a published 30-task contract whose
+  full runner remains open. Canary,
   live-state migration, merge, deployment, and unattended authority remain
   closed
 - Date: 2026-07-30; progress status updated 2026-08-28
@@ -371,15 +371,24 @@ source-backed no-finding evidence. Recall and digest coverage are `1.0`; precisi
 is `1.0`, `0.50`, and `0.75` three times (macro `0.75`). It preserves the same
 source/Git and zero-mutation boundaries, but frozen responses and citations do
 not establish live-model security judgment, semantic entailment, or whole-
-codebase coverage. The required versioned
+codebase coverage. A third cohort executes all five refactor cases through
+production plan approval, PatchSet application in private workspaces,
+digest-pinned no-network Docker checks, local review, and durable runtime
+reopen. Every final check passes with exact changed paths and final bytes;
+retrieval recall/provenance are `1.0`, macro precision is `0.80`, and all five
+first plans reach approval. Operator-selected targets, including one existing
+non-mutating create-path anchor, mean that acceptance measures host-contract
+integration rather than autonomous discovery or live-model planning quality.
+The required versioned
 30-task manifest and result vocabulary are published:
 they pin seven repository fixtures, task and evaluator identities, each selected
 model route, the common versioned model pool and per-model estimated rates, and
 all exit thresholds. The contract-only command still validates 30 cases and
 executes 0 by design. Each partial cohort executes 5 and leaves 25 unexecuted;
-their union covers 10 distinct cases and leaves 20 without execution evidence.
-Neither supplies a routing claim, and live-model quality plus
-behavior-preserving refactor evaluation remain open.
+their union covers 15 distinct cases and leaves 15 repair/scaffold cases
+without execution evidence. None supplies a routing claim, and live-model
+quality, autonomous target discovery, the full-suite threshold, and paired
+routing comparison remain open.
 
 ### Gate 3 — VS Code workbench
 

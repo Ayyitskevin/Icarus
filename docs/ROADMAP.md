@@ -17,7 +17,7 @@ The current sequence is:
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
 | 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
-| 2 | Context and agent quality — **five explanation plus five security-review cases measured; full 30-task benchmark open** | separate deterministic cohorts run all five manifest-bound explanations and five security reviews through production retrieval and structured loopback adapters with host-validated citations, exact findings or explicit no-finding evidence, observed source/Git invariance, and zero mutation authority; explanation macro precision is 0.80, security macro precision is 0.75, and both have recall/provenance 1.0; each partial report executes 5 and leaves 25 unexecuted, while their union covers 10 distinct cases and leaves 20 untouched; the contract-only command still executes 0; exit still requires live-model quality, repair/refactor/scaffold execution, first-pass plan acceptance ≥80%, and fixed-model routing comparison |
+| 2 | Context and agent quality — **five explanation, five security-review, and five refactor cases measured; full 30-task benchmark open** | three deterministic cohorts cover 15 distinct manifest cases through production retrieval/adapters; refactors additionally traverse plan approval, private PatchSet mutation, sandbox checks, review, and durable reopen with exact final bytes; explanation/refactor macro precision is 0.80, security macro precision is 0.75, and all have recall/provenance 1.0; each partial report executes 5 and leaves 25 unexecuted, while their union leaves 15 repair/scaffold cases untouched; refactor first-pass host-contract acceptance is 100% but operator-selected targets do not measure autonomous discovery; exit still requires live-model quality, the full 30-task threshold, autonomous planning evidence, and fixed-model routing comparison |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
 | C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
@@ -42,15 +42,22 @@ cohort uses the same independent retrieval budget and production adapter with a
 dedicated strict result seam: three cases bind exact finding IDs and two bind
 explicit no-finding evidence. Its recall/provenance are `1.0`; per-case
 precision is `1.0`, `0.50`, and `0.75` three times (macro `0.75`). Each partial
-report retains its own 5/25 accounting; together the two cohorts cover 10
-distinct manifest cases and leave 20 unexecuted. This is also deterministic
-contract-integration evidence, not live-model security judgment or whole-
-codebase coverage. The separate
+report retains its own 5/25 accounting. A third cohort executes all five
+refactors through the production service lifecycle: exact operator-selected
+targets are narrowed by an accepted first plan, frozen PatchSets change only
+private workspaces, fixed no-network Docker checks pass, local review completes,
+and the durable run survives reopen. Refactor recall/provenance are `1.0` and
+macro precision is `0.80`; first-pass host-contract acceptance is `1.0`,
+but target discovery is not measured. Together the three cohorts cover 15
+distinct manifest cases and leave 15 unexecuted. This is deterministic
+contract-integration evidence, not live-model semantic/security judgment,
+whole-codebase coverage, autonomous planning quality, or general refactor
+quality. The separate
 Gate 2 contract now pins seven fixture repositories, 30 task documents and
 scenario evaluators, an admitted model pool with per-model estimated rates, and
 the exit thresholds. Its contract-only validator still reports 30 contract-valid
 cases and 0 executed cases by design. It neither authenticates future evaluator
-evidence nor turns either frozen cohort into broad quality or Gate 2 exit
+evidence nor turns any frozen cohort into broad quality or Gate 2 exit
 evidence.
 The supervised
 active-repository canary is a separate security rollout lane and remains

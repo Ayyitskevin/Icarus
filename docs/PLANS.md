@@ -3,21 +3,22 @@
 ## Current execution status
 
 Gate 0 is released and Gate 1's credential-gated live 3/3 evidence completed
-2026-08-23. Current product-quality work is ADR 0036 Gate 2. All five frozen
-read-only explanation and all five security-review cases now execute as
-separate deterministic fixture cohorts; live-model semantic/security quality
-and behavior-preserving refactoring remain open. The separate
+2026-08-23. Current product-quality work is ADR 0036 Gate 2. Five frozen
+read-only explanation, five security-review, and five refactor cases now execute
+as separate deterministic fixture cohorts; live-model quality, autonomous
+target discovery, and repair/scaffold execution remain open. The separate
 supervised active-repository canary remains **HOLD** after the 2026-08-27
 secret-scanner survey; live-state migration, merge, deployment, unattended use,
 effectful/control session continuation, and wider Vulcan authority remain
 closed. Older sections below retain the status that was true at their named
 checkpoint and must not be read as the current release state.
 
-## Gate 2 deterministic retrieval, explanation, and security-review baseline
+## Gate 2 deterministic retrieval, analysis, and refactor baseline
 
-Status: the one-case retrieval baseline plus all five manifest-bound explanation
-and five security-review fixtures execute; live-model quality, the other 20
-manifest cases, and the Gate 2 exit gate remain open.
+Status: the one-case retrieval baseline plus all five manifest-bound explanation,
+security-review, and refactor fixtures execute; live-model quality, the remaining
+15 repair/scaffold cases, autonomous target discovery, and the Gate 2 exit gate
+remain open.
 
 - [x] Add a reusable deterministic core retriever over one exact committed tree.
 - [x] Exclude linked, hidden, binary, invalid-UTF-8, and secret-shaped content
@@ -49,15 +50,23 @@ manifest cases, and the Gate 2 exit gate remain open.
       preserve source/Git state and zero mutation authority; and retain a strict
       independent partial report. The two cohorts cover 10 distinct cases, with
       20 not executed by either.
+- [x] Execute the five refactor cases through production retrieval, plan
+      approval, PatchSet mutation, sandbox verification, local review, and
+      durable runtime reopen. Bind exact final bytes and changed paths, retain
+      honest baseline outcomes and effect provenance, and report 100% first-pass
+      host-contract acceptance without claiming autonomous target discovery.
+      The three partial cohorts cover 15 distinct cases, with 15 not executed
+      by any cohort.
 - [ ] Implement the manifest-bound scenario evaluators, execute all 30 tasks,
-      measure first-pass plan acceptance, and compare the same pinned model pool
-      against its fixed single-model baseline.
+      execute the remaining repair and scaffold cases, measure live-model plan
+      quality and autonomous target discovery, and compare the same pinned
+      model pool against its fixed single-model baseline.
 
-The explanation and security-review cohorts add bounded provider-assisted
-analysis over retrieval receipts. They grant no repository mutation, registered
-command, canary, landing, migration, merge, deployment, or unattended authority.
-Frozen responses prove contract integration, not live-model semantic or security
-judgment quality.
+The explanation and security-review cohorts add bounded read-only provider
+analysis. The refactor cohort grants mutation only inside disposable private
+workspaces and runs fixed checks without network; none grants source, remote,
+canary, landing, migration, merge, deployment, live-database, or unattended
+authority. Frozen responses prove contract integration, not live-model quality.
 
 ## Headless Vulcan proposal admission
 
