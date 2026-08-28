@@ -1,0 +1,547 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "gate2-context-agent-quality",
+  "benchmarkRevision": "gate2-thirty-task-v1",
+  "manifestSha256": "43159d8a174312e7fd720fbb625173601e7c90f6e5983c62c206b69ce99c9558",
+  "cohortClass": "scaffold",
+  "evaluatorRevision": "deterministic-production-lifecycle-v1",
+  "generatedAt": "2026-08-28T09:09:46.100Z",
+  "passed": true,
+  "counts": {
+    "manifestCases": 30,
+    "cohortCases": 4,
+    "executedCases": 4,
+    "passedCases": 4,
+    "failedCases": 0,
+    "unexecutedCases": 26
+  },
+  "retrievalAggregate": {
+    "macroRecall": 0.9375,
+    "macroPrecision": 0.875,
+    "digestProvenanceCoverage": 1
+  },
+  "planAggregate": {
+    "firstPassAcceptedCases": 4,
+    "firstPassAcceptanceRate": 1,
+    "autonomousTargetDiscoveryMeasured": false,
+    "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths"
+  },
+  "effects": {
+    "providerCalls": 8,
+    "loopbackProviderRequests": 8,
+    "externalNetworkRequests": 0,
+    "remoteMutations": 0,
+    "sourceCheckoutMutations": 0,
+    "privateWorkspaceMutations": 4,
+    "sandboxCheckExecutions": 8,
+    "icarusRegisteredCheckExecutions": 4,
+    "liveDatabaseConnections": 0,
+    "offlineInMemoryDatabaseChecks": 0,
+    "temporaryGitFixtureSetup": true,
+    "runtimeReopens": 4
+  },
+  "effectEvidence": {
+    "providerCalls": "observed",
+    "loopbackProviderRequests": "observed",
+    "externalNetworkRequests": "design-assertion",
+    "remoteMutations": "design-assertion",
+    "sourceCheckoutMutations": "observed",
+    "privateWorkspaceMutations": "observed",
+    "sandboxCheckExecutions": "observed",
+    "icarusRegisteredCheckExecutions": "observed",
+    "liveDatabaseConnections": "design-assertion",
+    "offlineInMemoryDatabaseChecks": "design-assertion",
+    "temporaryGitFixtureSetup": "observed",
+    "runtimeReopens": "observed"
+  },
+  "observations": [
+    {
+      "caseId": "scaffold-lantern-json-output",
+      "repositoryId": "unfamiliar",
+      "scenarioEvaluatorId": "scaffold-lantern-json-output-evaluator",
+      "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+      "taskSha256": "2580a2eb9e31e3953d7ac4ac00ac25be1c25142b6ebad8d2129cf8d16fbf4301",
+      "baseCommit": "77163633d602f8ebed4b5da44860bd798c9f6529",
+      "treeSha1": "65f958d96cda8563886c14c09f971c0f17c40dff",
+      "retrievalDigestSha256": "8b6a74f761ac095961284a109ac350ddfb273279070829cf5329a063cbf2a1ff",
+      "repositoryDigestSha256": "d7217b6c8b811b2a2244e62390bac3326f1c59f7b14d39d73b6ea107d3935b91",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-scaffold-a-fixture",
+        "adapterVersion": "production-ollama-plan-patchset-v1",
+        "transport": "loopback-http",
+        "instructionDigests": [
+          "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+          "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+        ],
+        "loopbackRequests": 2,
+        "requestDigests": [
+          "1800ce21f3e94348f6001fbe07c65f5a492b3778ad2a2a32766f12157821e618",
+          "8be3395daa794da1d10098fa470f2baf1238f93448becb78e4653eef6f9077a9"
+        ]
+      },
+      "selectedContext": [
+        {
+          "path": "config/app.json",
+          "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+        },
+        {
+          "path": "README.md",
+          "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+        },
+        {
+          "path": "src/greeting.py",
+          "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+        },
+        {
+          "path": "src/main.py",
+          "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 1,
+        "digestProvenanceCoverage": 1
+      },
+      "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths",
+      "plan": {
+        "firstPassAccepted": true,
+        "operatorSelectedTargets": ["src/main.py", "tests/test_json_output.py"],
+        "approvedTargets": ["src/main.py", "tests/test_json_output.py"],
+        "checkIds": ["lantern-json-output"],
+        "planSha256": "9233eeff970f67589e759930b588daeff820e28e28a836f3e17bdabfca4117b5",
+        "autonomousTargetDiscoveryMeasured": false
+      },
+      "baseline": {
+        "outcome": "failed",
+        "checks": [
+          {
+            "checkId": "lantern-json-output",
+            "argv": ["python", "-m", "tests.test_json_output"],
+            "exitCode": 1,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 140,
+            "stderrSha256": "3c78b5e8857b1b76b93b1c7272a4ab690df4bc4200e5b6683c7731f5522dac83",
+            "truncated": false,
+            "outcome": "failed"
+          }
+        ]
+      },
+      "mutation": {
+        "runId": "e088c051-499f-438f-82a3-23a34fabbfe7",
+        "state": "completed",
+        "patchSetSha256": "44833d8894059cc08ce2cd3b82f205d11235901cb6de1c26fa06816ae0e853c2",
+        "diffSha256": "d04dda7fb960bc5a99b3ad5d8e11103694934da5b087732ac2e7b411dccd2cab",
+        "checkpointSha256": "6b443312c68dd1f20dc243d45e78ce3e15f9a2779f1f514b623fbb2535e79cc2",
+        "changedPaths": ["src/main.py", "tests/test_json_output.py"],
+        "checks": [
+          {
+            "checkId": "lantern-json-output",
+            "argv": ["python", "-m", "tests.test_json_output"],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ],
+        "finalFiles": [
+          {
+            "path": "src/main.py",
+            "sha256": "c8b72b0ae29f1c6fa8f43fb9cb0308b298ee6a05a316b278dd0c42bd71362d4a"
+          },
+          {
+            "path": "tests/test_json_output.py",
+            "sha256": "37f3b6fe20a9cd8434e32198b0b1dc365bd52d73559a7cffc8127e7d6ea83edd"
+          }
+        ],
+        "privateWorkspaceMutated": true
+      },
+      "usage": {
+        "toolCalls": 13,
+        "inputTokens": 150,
+        "outputTokens": 80,
+        "estimatedCostUsd": 0,
+        "reservedCostUsd": 0
+      },
+      "sourceCheckoutUnchanged": true,
+      "sourceGitDirectoryUnchanged": true,
+      "durableRunRecovered": true,
+      "scenarioEvidenceSha256": "44e91968b0a01a99229dc304b0d5b34251f1e52e985657cdd007523749793418"
+    },
+    {
+      "caseId": "scaffold-cart-discount",
+      "repositoryId": "buggy",
+      "scenarioEvaluatorId": "scaffold-cart-discount-evaluator",
+      "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+      "taskSha256": "5ada358e6249ba212040762c7612184a9af7a6ff39d53c30ed7dd671f864fa26",
+      "baseCommit": "ff6cfe60bff7f6a03cb621c2ed538c0cf150f270",
+      "treeSha1": "cdac3729f7a21e09cfd213c9b4bb28de33946926",
+      "retrievalDigestSha256": "f5ec8359c70724551318102d1cd3185394a533de1abf9234e9070177520d8004",
+      "repositoryDigestSha256": "b4c49da96f5c4dcd8988fbb885e7b5ae2a821a10350fe96d26a31a1c580bed04",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-scaffold-a-fixture",
+        "adapterVersion": "production-ollama-plan-patchset-v1",
+        "transport": "loopback-http",
+        "instructionDigests": [
+          "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+          "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+        ],
+        "loopbackRequests": 2,
+        "requestDigests": [
+          "c1fa632ad04a24d83eb4986226e186edb95a243b1c69b1fde1da2602504910ea",
+          "70a8dfd94ed65ddfea0f3374af11bace44508488e4fbeb707c787cbc61100afa"
+        ]
+      },
+      "selectedContext": [
+        {
+          "path": "checks/test_cart.py",
+          "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+        },
+        {
+          "path": "README.md",
+          "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+        },
+        {
+          "path": "src/cart.py",
+          "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 0.75,
+        "digestProvenanceCoverage": 1
+      },
+      "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths",
+      "plan": {
+        "firstPassAccepted": true,
+        "operatorSelectedTargets": [
+          "checks/test_cart.py",
+          "checks/test_discount.py",
+          "src/discount.py"
+        ],
+        "approvedTargets": ["checks/test_discount.py", "src/discount.py"],
+        "checkIds": ["cart-discount"],
+        "planSha256": "4a9827eb29e7906db3619eb4eaf17dbdf8b37f64cf16aaeb202b63fe560f7776",
+        "autonomousTargetDiscoveryMeasured": false
+      },
+      "baseline": {
+        "outcome": "failed",
+        "checks": [
+          {
+            "checkId": "cart-discount",
+            "argv": ["python", "-m", "checks.test_discount"],
+            "exitCode": 1,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 60,
+            "stderrSha256": "76cbefed3b53d1ae2cf1bb02e8ac0983b33620f91e2d50d03ac44c3207ca6cfe",
+            "truncated": false,
+            "outcome": "failed"
+          }
+        ]
+      },
+      "mutation": {
+        "runId": "e79be653-1db3-46f5-85eb-5825f2096425",
+        "state": "completed",
+        "patchSetSha256": "edb72d19b9c119ec35c45e4507dd86c0eb41d87d4ff37216d02bafb1d2037356",
+        "diffSha256": "0aa0e1e90f42146b525da0e060fefc085f8e81db23dc9971424544c58f188780",
+        "checkpointSha256": "f0bac432be83e3306340aee66c298c27ad844e6f42b29a87903d041c98cf45d9",
+        "changedPaths": ["checks/test_discount.py", "src/discount.py"],
+        "checks": [
+          {
+            "checkId": "cart-discount",
+            "argv": ["python", "-m", "checks.test_discount"],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ],
+        "finalFiles": [
+          {
+            "path": "checks/test_discount.py",
+            "sha256": "2afad7fac2f35ed51e671333c00f2b57f46f5c68c79addf9c6f5cd2bfc2fcb32"
+          },
+          {
+            "path": "src/discount.py",
+            "sha256": "7a55a1994cef71ae891f6c364dcb0ae0ff52bd302a61925299600fc70c31e56b"
+          }
+        ],
+        "privateWorkspaceMutated": true
+      },
+      "usage": {
+        "toolCalls": 13,
+        "inputTokens": 150,
+        "outputTokens": 80,
+        "estimatedCostUsd": 0,
+        "reservedCostUsd": 0
+      },
+      "sourceCheckoutUnchanged": true,
+      "sourceGitDirectoryUnchanged": true,
+      "durableRunRecovered": true,
+      "scenarioEvidenceSha256": "f22804a5abfd1db4c195bb7328bc64bae13b30bc67a285b20f5e0cc25c7ed37a"
+    },
+    {
+      "caseId": "scaffold-parser-cli",
+      "repositoryId": "failing",
+      "scenarioEvaluatorId": "scaffold-parser-cli-evaluator",
+      "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+      "taskSha256": "5e072062df28e307690786452e53acec3d94b0266c19dcc11a6a7b15f3804d5a",
+      "baseCommit": "58575bbe4db03a0d9ff7e3a4307eea4824ab46e6",
+      "treeSha1": "28406bf9a362da1cebf8a0d6f1986b1611237030",
+      "retrievalDigestSha256": "870d599c5ae48db0e067cee44c9f344679ea917de68d5803a778b2a161d8f9f9",
+      "repositoryDigestSha256": "652ebd9d086e0e991a7793b4eef44147e5400f173bb8aad93fb56cb80e580fa7",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-scaffold-a-fixture",
+        "adapterVersion": "production-ollama-plan-patchset-v1",
+        "transport": "loopback-http",
+        "instructionDigests": [
+          "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+          "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+        ],
+        "loopbackRequests": 2,
+        "requestDigests": [
+          "5f6614c5dfd5aaea4ec6a59a74b07898ad08beca59a69a4786514feaad5bed43",
+          "bbf1dd31688473f17ecc43c7a9f7e4804b2ed5a74e2ed1445f86cd25330e537d"
+        ]
+      },
+      "selectedContext": [
+        {
+          "path": "checks/test_parser.py",
+          "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+        },
+        {
+          "path": "README.md",
+          "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+        },
+        {
+          "path": "src/parser.py",
+          "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 0.75,
+        "digestProvenanceCoverage": 1
+      },
+      "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths",
+      "plan": {
+        "firstPassAccepted": true,
+        "operatorSelectedTargets": ["checks/test_parser.py", "src/cli.py", "tests/test_cli.py"],
+        "approvedTargets": ["src/cli.py", "tests/test_cli.py"],
+        "checkIds": ["parser-cli"],
+        "planSha256": "7c0205c4dfa9c806e30bb8b977c84dcecdfad4db4063e21037cb854be78135c5",
+        "autonomousTargetDiscoveryMeasured": false
+      },
+      "baseline": {
+        "outcome": "failed",
+        "checks": [
+          {
+            "checkId": "parser-cli",
+            "argv": ["python", "-m", "tests.test_cli"],
+            "exitCode": 1,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 132,
+            "stderrSha256": "e055f2fe33018de8a7f302b14cf6a61d35032bf4ccd49370b052bdf18e671427",
+            "truncated": false,
+            "outcome": "failed"
+          }
+        ]
+      },
+      "mutation": {
+        "runId": "e8f61637-a470-4485-b8f6-b48bc9414968",
+        "state": "completed",
+        "patchSetSha256": "05e55a0f90d7a90fee6e2a3ed6ba0d9df9e5701ea794cdf6ed2d47c3494a1439",
+        "diffSha256": "3f9c027640101108918411b1f3c766fa791c5964b1b2ef473cd3bcc7cfeca9e9",
+        "checkpointSha256": "605c61bd3f4de0e4793a24b0880beaee262ccf16daa6b0eb6912d25a2cbb39eb",
+        "changedPaths": ["src/cli.py", "tests/test_cli.py"],
+        "checks": [
+          {
+            "checkId": "parser-cli",
+            "argv": ["python", "-m", "tests.test_cli"],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ],
+        "finalFiles": [
+          {
+            "path": "src/cli.py",
+            "sha256": "552a1a948cb0309df3b7469db1dbcfd32aadf8d649aaca7ffb758d4745093ac4"
+          },
+          {
+            "path": "tests/test_cli.py",
+            "sha256": "f20d58168683cbaa4620f3f3fbbf9911295d28c1562c760c463c4afcb721e6c1"
+          }
+        ],
+        "privateWorkspaceMutated": true
+      },
+      "usage": {
+        "toolCalls": 13,
+        "inputTokens": 150,
+        "outputTokens": 80,
+        "estimatedCostUsd": 0,
+        "reservedCostUsd": 0
+      },
+      "sourceCheckoutUnchanged": true,
+      "sourceGitDirectoryUnchanged": true,
+      "durableRunRecovered": true,
+      "scenarioEvidenceSha256": "f6b7ad8e1d881c6af6d7b5a5aa7457e1c1cb0504aa82a60f9a27a39ba25781ca"
+    },
+    {
+      "caseId": "scaffold-greeting-command",
+      "repositoryId": "basic",
+      "scenarioEvaluatorId": "scaffold-greeting-command-evaluator",
+      "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+      "taskSha256": "3adc6bd07f3a8e5943dc18eb80c07fb1267f597e1875a31dd6f2ae1f9ba7c882",
+      "baseCommit": "e085d78bebaad6e1d8314e97a49f10c2b3452baf",
+      "treeSha1": "82fbaa86cb39bd26094e755c1a8a224fe3fe2e73",
+      "retrievalDigestSha256": "2ecd45a97570a3edbb684e93b28ebc0781615d5adb99592d3a808f54a0daf0a9",
+      "repositoryDigestSha256": "e5548ea2b4684357a4b1d11a0491989f2e2d14569ed133c880f9c79d5d621b80",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-scaffold-a-fixture",
+        "adapterVersion": "production-ollama-plan-patchset-v1",
+        "transport": "loopback-http",
+        "instructionDigests": [
+          "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+          "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+        ],
+        "loopbackRequests": 2,
+        "requestDigests": [
+          "6caf1d5247a8a833afe05775073dcf93061b5ca4639ececc945c73e1c71f8e76",
+          "a1125d42badc2536579c8b68dac844f2dff046dd3a4cf1097844869d8ae6eac0"
+        ]
+      },
+      "selectedContext": [
+        {
+          "path": "AGENTS.md",
+          "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+        },
+        {
+          "path": "src/greeting.txt",
+          "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 0.75,
+        "precision": 1,
+        "digestProvenanceCoverage": 1
+      },
+      "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths",
+      "plan": {
+        "firstPassAccepted": true,
+        "operatorSelectedTargets": [".gitignore", "src/greet.py", "tests/test_greet.py"],
+        "approvedTargets": ["src/greet.py", "tests/test_greet.py"],
+        "checkIds": ["greeting-command"],
+        "planSha256": "d5f85b685a458efe498ad6a339eb8307a809aa3c1f817553d55a52de0e85d895",
+        "autonomousTargetDiscoveryMeasured": false
+      },
+      "baseline": {
+        "outcome": "failed",
+        "checks": [
+          {
+            "checkId": "greeting-command",
+            "argv": ["python", "-m", "tests.test_greet"],
+            "exitCode": 1,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 134,
+            "stderrSha256": "3241bd09e5d8e86f618ed645f0f093254417d5e126e681d5ab015b99545f7426",
+            "truncated": false,
+            "outcome": "failed"
+          }
+        ]
+      },
+      "mutation": {
+        "runId": "80e99e8c-70d3-4c4d-b156-86a917c1124d",
+        "state": "completed",
+        "patchSetSha256": "6a187afd5f8441b88537b9212eb4eed165dcfb0e8d6511921caad4c847373699",
+        "diffSha256": "bf31433078e5fca8047c21d53a7d2df43a474ef77d057b574270310a476f2372",
+        "checkpointSha256": "e0ed795be7b49c0bed240589adcbf1730162face7778bb6bf9d2efeba807fb36",
+        "changedPaths": ["src/greet.py", "tests/test_greet.py"],
+        "checks": [
+          {
+            "checkId": "greeting-command",
+            "argv": ["python", "-m", "tests.test_greet"],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ],
+        "finalFiles": [
+          {
+            "path": "src/greet.py",
+            "sha256": "622f87133e6421d357a9d923c079318f2e4bba2a0b49150547bb1fb72f5acb7b"
+          },
+          {
+            "path": "tests/test_greet.py",
+            "sha256": "cf32e7705a72a41fd480dfe4ec7352f8ccd5ac9d487bf6afb3a60cc71c8b42d6"
+          }
+        ],
+        "privateWorkspaceMutated": true
+      },
+      "usage": {
+        "toolCalls": 13,
+        "inputTokens": 150,
+        "outputTokens": 80,
+        "estimatedCostUsd": 0,
+        "reservedCostUsd": 0
+      },
+      "sourceCheckoutUnchanged": true,
+      "sourceGitDirectoryUnchanged": true,
+      "durableRunRecovered": true,
+      "scenarioEvidenceSha256": "b33c39cc767a47c2a6050e95c3b998123d6fd64400231b399d7b24456765341c"
+    }
+  ],
+  "limitations": [
+    "deterministic-loopback-responses-measure-contract-integration-not-live-model-scaffold-quality",
+    "four-scaffold-cases-do-not-complete-thirty-task-gate2-benchmark",
+    "protected-migration-scaffold-remains-unexecuted-without-gate5-authority",
+    "operator-selected-target-authority-does-not-measure-autonomous-target-discovery",
+    "exact-byte-oracles-measure-these-scenarios-not-general-scaffold-correctness",
+    "macro-recall-can-pass-while-one-case-omits-expected-context",
+    "created-check-files-are-evaluator-fixtures-not-repository-authored-proof",
+    "evidence-digests-prove-self-consistency-not-runner-authenticity",
+    "partial-cohort-accounting-cannot-be-added-as-a-full-suite-result"
+  ],
+  "assessment": "deterministic_scaffold_a_cohort_passed_gate2_incomplete"
+}

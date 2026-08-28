@@ -1,0 +1,680 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "gate2-context-agent-quality",
+  "benchmarkRevision": "gate2-thirty-task-v1",
+  "manifestSha256": "43159d8a174312e7fd720fbb625173601e7c90f6e5983c62c206b69ce99c9558",
+  "cohortClass": "refactor",
+  "evaluatorRevision": "deterministic-production-lifecycle-v1",
+  "generatedAt": "2026-08-28T09:09:29.466Z",
+  "passed": true,
+  "counts": {
+    "manifestCases": 30,
+    "cohortCases": 5,
+    "executedCases": 5,
+    "passedCases": 5,
+    "failedCases": 0,
+    "unexecutedCases": 25
+  },
+  "retrievalAggregate": {
+    "macroRecall": 1,
+    "macroPrecision": 0.8,
+    "digestProvenanceCoverage": 1
+  },
+  "planAggregate": {
+    "firstPassAcceptedCases": 5,
+    "firstPassAcceptanceRate": 1,
+    "autonomousTargetDiscoveryMeasured": false,
+    "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths"
+  },
+  "effects": {
+    "providerCalls": 10,
+    "loopbackProviderRequests": 10,
+    "externalNetworkRequests": 0,
+    "remoteMutations": 0,
+    "sourceCheckoutMutations": 0,
+    "privateWorkspaceMutations": 5,
+    "sandboxCheckExecutions": 10,
+    "icarusRegisteredCheckExecutions": 5,
+    "liveDatabaseConnections": 0,
+    "offlineInMemoryDatabaseChecks": 2,
+    "temporaryGitFixtureSetup": true,
+    "runtimeReopens": 5
+  },
+  "effectEvidence": {
+    "providerCalls": "observed",
+    "loopbackProviderRequests": "observed",
+    "externalNetworkRequests": "design-assertion",
+    "remoteMutations": "design-assertion",
+    "sourceCheckoutMutations": "observed",
+    "privateWorkspaceMutations": "observed",
+    "sandboxCheckExecutions": "observed",
+    "icarusRegisteredCheckExecutions": "observed",
+    "liveDatabaseConnections": "design-assertion",
+    "offlineInMemoryDatabaseChecks": "observed",
+    "temporaryGitFixtureSetup": "observed",
+    "runtimeReopens": "observed"
+  },
+  "observations": [
+    {
+      "caseId": "refactor-name-normalization",
+      "repositoryId": "refactor",
+      "scenarioEvaluatorId": "refactor-name-normalization-evaluator",
+      "repositoryRevisionSha256": "5ce751efcdb138a9a0db315936567d9a6a1a86df45c49df9027b5bab8f605bd1",
+      "taskSha256": "5d77edacac31f30555640b014c2c9c4cea003dd57dc23bf42c3993fed7d52920",
+      "baseCommit": "b53b58fe72f947fc72b529419e43dd13d752de5e",
+      "treeSha1": "6c8640319c49f7bd9261325a6ec2d48b72f742a9",
+      "retrievalDigestSha256": "ff4017de3daec11b9c88bf86bc16fdf46bcd414c6f3f1109f0fb063d51b93f08",
+      "repositoryDigestSha256": "ba49a54f14254b713c66389529baf0bc85c55004e9bdd04ee7a0ed605ca8f4e3",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-refactor-fixture",
+        "adapterVersion": "production-ollama-plan-patchset-v1",
+        "transport": "loopback-http",
+        "instructionDigests": [
+          "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+          "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+        ],
+        "loopbackRequests": 2,
+        "requestDigests": [
+          "6fd04287c1cc534b57cc5f6ccf82bd020d6fb6b14bed0da4bfae723f5ca19b9e",
+          "7e37ce09f2f02d189edce9a40b7f744f9b44bc3ebf58f01e6a339ab677dbc7eb"
+        ]
+      },
+      "selectedContext": [
+        {
+          "path": "checks/test_profile.py",
+          "sha256": "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c"
+        },
+        {
+          "path": "README.md",
+          "sha256": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6"
+        },
+        {
+          "path": "src/format_name.py",
+          "sha256": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f"
+        },
+        {
+          "path": "src/profile.py",
+          "sha256": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 1,
+        "digestProvenanceCoverage": 1
+      },
+      "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths",
+      "plan": {
+        "firstPassAccepted": true,
+        "operatorSelectedTargets": [
+          "src/format_name.py",
+          "src/name_normalization.py",
+          "src/profile.py"
+        ],
+        "approvedTargets": ["src/format_name.py", "src/name_normalization.py", "src/profile.py"],
+        "checkIds": ["profile-contract"],
+        "planSha256": "00055e9b56f185bbf15e749b79a3f47bdad18048e1b7b143bea817659aa8920d",
+        "autonomousTargetDiscoveryMeasured": false
+      },
+      "baseline": {
+        "outcome": "passed",
+        "checks": [
+          {
+            "checkId": "profile-contract",
+            "argv": ["python", "-m", "checks.test_profile"],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ]
+      },
+      "mutation": {
+        "runId": "f89c16db-a933-4e15-9201-b1898d0b57f1",
+        "state": "completed",
+        "patchSetSha256": "7d045e749aa261efad140030a434be545d458f94876a5fc1527c60291d3b7465",
+        "diffSha256": "8ceab067f9b9f46145d3460dc1719666742d85b9a8eb5ebd639d37e3a38135e1",
+        "checkpointSha256": "f5748a588a3d4a8f5a52d965819c5a061710ec4f3b8fe4d80fef74f6a3efd7ec",
+        "changedPaths": ["src/format_name.py", "src/name_normalization.py", "src/profile.py"],
+        "checks": [
+          {
+            "checkId": "profile-contract",
+            "argv": ["python", "-m", "checks.test_profile"],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ],
+        "finalFiles": [
+          {
+            "path": "src/format_name.py",
+            "sha256": "f5c42a284d366ed25b49091699ef506de3ee97011f7c1f8b7892bdefd47832b3"
+          },
+          {
+            "path": "src/name_normalization.py",
+            "sha256": "1e5c593a8580788a388c83901511eae21783da874b904515eb792f38bb4d6f9e"
+          },
+          {
+            "path": "src/profile.py",
+            "sha256": "1eba5c52f07f19a2206d28639940265384b567cb34c8bfd012e950414e6ff996"
+          }
+        ],
+        "privateWorkspaceMutated": true
+      },
+      "usage": {
+        "toolCalls": 13,
+        "inputTokens": 150,
+        "outputTokens": 80,
+        "estimatedCostUsd": 0,
+        "reservedCostUsd": 0
+      },
+      "sourceCheckoutUnchanged": true,
+      "sourceGitDirectoryUnchanged": true,
+      "durableRunRecovered": true,
+      "scenarioEvidenceSha256": "f13cc7ceeb61b3b948e41f04af656fe3c1b944f1abea54adfa46ea623a8eb239"
+    },
+    {
+      "caseId": "refactor-lantern-config-loader",
+      "repositoryId": "unfamiliar",
+      "scenarioEvaluatorId": "refactor-lantern-config-loader-evaluator",
+      "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+      "taskSha256": "b2ffdb36663853bd4f05ac949c2a34b4ca016b070b03189a25a327dcab884189",
+      "baseCommit": "77163633d602f8ebed4b5da44860bd798c9f6529",
+      "treeSha1": "65f958d96cda8563886c14c09f971c0f17c40dff",
+      "retrievalDigestSha256": "b913558d0167964587fb0c200f3eb2c25faee713e280d55a839d133a40f01dc2",
+      "repositoryDigestSha256": "d7217b6c8b811b2a2244e62390bac3326f1c59f7b14d39d73b6ea107d3935b91",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-refactor-fixture",
+        "adapterVersion": "production-ollama-plan-patchset-v1",
+        "transport": "loopback-http",
+        "instructionDigests": [
+          "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+          "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+        ],
+        "loopbackRequests": 2,
+        "requestDigests": [
+          "23c86485b7556ab50505a9c9517bf3d00657fef97b3d96c3d3104d17282d1400",
+          "3a99a82075db0227490a0fe78f760d8ab730ac6bcf200fe80c7a308339a89904"
+        ]
+      },
+      "selectedContext": [
+        {
+          "path": "config/app.json",
+          "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+        },
+        {
+          "path": "README.md",
+          "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+        },
+        {
+          "path": "src/greeting.py",
+          "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+        },
+        {
+          "path": "src/main.py",
+          "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 0.75,
+        "digestProvenanceCoverage": 1
+      },
+      "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths",
+      "plan": {
+        "firstPassAccepted": true,
+        "operatorSelectedTargets": ["config/app.json", "src/config.py", "src/main.py"],
+        "approvedTargets": ["src/config.py", "src/main.py"],
+        "checkIds": ["lantern-output"],
+        "planSha256": "d44a07c87979439f106c9092979f5de8235de0e6d4ff1bdf7c6cca35d73b006e",
+        "autonomousTargetDiscoveryMeasured": false
+      },
+      "baseline": {
+        "outcome": "passed",
+        "checks": [
+          {
+            "checkId": "lantern-output",
+            "argv": [
+              "python",
+              "-c",
+              "import subprocess,sys; r=subprocess.run([sys.executable,'-m','src.main'],capture_output=True,text=True); assert r.returncode == 0 and r.stdout == 'Welcome, traveler.\\n' and r.stderr == ''"
+            ],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ]
+      },
+      "mutation": {
+        "runId": "32f7b763-af59-4984-890a-1e61bbb7d96a",
+        "state": "completed",
+        "patchSetSha256": "fc4534d34e07aa4de22ceec9264d00f7e0b2089805b9fd483670e847b97f9c87",
+        "diffSha256": "93ac8714c31562d4f67d73abfa334a22ce7a19f7f61dbeb74666a2691c762ebb",
+        "checkpointSha256": "7cd047055828ee516e6d9b487dc8369cab9277efaf286dbed3a221615e2e33c7",
+        "changedPaths": ["src/config.py", "src/main.py"],
+        "checks": [
+          {
+            "checkId": "lantern-output",
+            "argv": [
+              "python",
+              "-c",
+              "import subprocess,sys; r=subprocess.run([sys.executable,'-m','src.main'],capture_output=True,text=True); assert r.returncode == 0 and r.stdout == 'Welcome, traveler.\\n' and r.stderr == ''"
+            ],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ],
+        "finalFiles": [
+          {
+            "path": "src/config.py",
+            "sha256": "de0a33bd16ddca58030d967337fb9abc408582c34ff4ccb0cdb792de77a0887e"
+          },
+          {
+            "path": "src/main.py",
+            "sha256": "23c6ddc9899cc455cacb98dec690465c4a08a12106556d006008cee18185721d"
+          }
+        ],
+        "privateWorkspaceMutated": true
+      },
+      "usage": {
+        "toolCalls": 13,
+        "inputTokens": 150,
+        "outputTokens": 80,
+        "estimatedCostUsd": 0,
+        "reservedCostUsd": 0
+      },
+      "sourceCheckoutUnchanged": true,
+      "sourceGitDirectoryUnchanged": true,
+      "durableRunRecovered": true,
+      "scenarioEvidenceSha256": "e8a6e0172c6cd0b44e563862f3b7c5d8ef1c4b8b56bb0b73965598195ec1c569"
+    },
+    {
+      "caseId": "refactor-cart-money-module",
+      "repositoryId": "buggy",
+      "scenarioEvaluatorId": "refactor-cart-money-module-evaluator",
+      "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+      "taskSha256": "22803a5c5a80217547c7058d12e2100640b669b85fafaf2fc5460e916ce40dfd",
+      "baseCommit": "ff6cfe60bff7f6a03cb621c2ed538c0cf150f270",
+      "treeSha1": "cdac3729f7a21e09cfd213c9b4bb28de33946926",
+      "retrievalDigestSha256": "988c6d56676f13ac5b6bc99a42f492306148cb90612ead0ca7abae47eb910bb0",
+      "repositoryDigestSha256": "b4c49da96f5c4dcd8988fbb885e7b5ae2a821a10350fe96d26a31a1c580bed04",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-refactor-fixture",
+        "adapterVersion": "production-ollama-plan-patchset-v1",
+        "transport": "loopback-http",
+        "instructionDigests": [
+          "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+          "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+        ],
+        "loopbackRequests": 2,
+        "requestDigests": [
+          "60791f4b6898c7cf341115ac904180e4d48909badedfea50f5ddaebe2c0026e7",
+          "3c5b212faa557bb4e5015059a45bca7e0bf61a1534358793b951d37513926390"
+        ]
+      },
+      "selectedContext": [
+        {
+          "path": "checks/test_cart.py",
+          "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+        },
+        {
+          "path": "README.md",
+          "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+        },
+        {
+          "path": "src/cart.py",
+          "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 0.75,
+        "digestProvenanceCoverage": 1
+      },
+      "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths",
+      "plan": {
+        "firstPassAccepted": true,
+        "operatorSelectedTargets": ["src/cart.py", "src/money.py"],
+        "approvedTargets": ["src/cart.py", "src/money.py"],
+        "checkIds": ["cart-contract"],
+        "planSha256": "f2742f91cb7849273caf5f7ac6f8a18a8d107c84a5654d0b865f6ce5fdb6e0b5",
+        "autonomousTargetDiscoveryMeasured": false
+      },
+      "baseline": {
+        "outcome": "failed",
+        "checks": [
+          {
+            "checkId": "cart-contract",
+            "argv": ["python", "-m", "checks.test_cart"],
+            "exitCode": 1,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 294,
+            "stderrSha256": "becdf3f257d032d2dd49643f196a7b5b057815edf8dfc67a26a5052692a41c21",
+            "truncated": false,
+            "outcome": "failed"
+          }
+        ]
+      },
+      "mutation": {
+        "runId": "b6f44819-128e-4dec-a478-c3bde4eb639d",
+        "state": "completed",
+        "patchSetSha256": "ad14456d769c6cfb1465a3a42de12fda4836df89a6b178fbb18ba26432153cf1",
+        "diffSha256": "c9a1d94020a38ce36000cf7d81cd30bbfb8269e691fe92bda6b3a519b6db88e9",
+        "checkpointSha256": "2184c6a545c44ef384ed578e06f51374717e49ea055a4d3dea3d3dae610c5b7b",
+        "changedPaths": ["src/cart.py", "src/money.py"],
+        "checks": [
+          {
+            "checkId": "cart-contract",
+            "argv": ["python", "-m", "checks.test_cart"],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ],
+        "finalFiles": [
+          {
+            "path": "src/cart.py",
+            "sha256": "fbe446974f1a366b1eb87f2525aaf9f882b3e487bb3eae21a699d68898804dcb"
+          },
+          {
+            "path": "src/money.py",
+            "sha256": "6f2390dbc81e2c0f7d646a465ef8db9a798a79d436173e5c784550b5a1cacac0"
+          }
+        ],
+        "privateWorkspaceMutated": true
+      },
+      "usage": {
+        "toolCalls": 13,
+        "inputTokens": 150,
+        "outputTokens": 80,
+        "estimatedCostUsd": 0,
+        "reservedCostUsd": 0
+      },
+      "sourceCheckoutUnchanged": true,
+      "sourceGitDirectoryUnchanged": true,
+      "durableRunRecovered": true,
+      "scenarioEvidenceSha256": "e4e24df5170c5cdf428fb0d8e5a159fdb735bde95194f13d63eaf87749eebb3b"
+    },
+    {
+      "caseId": "refactor-parser-token-table",
+      "repositoryId": "failing",
+      "scenarioEvaluatorId": "refactor-parser-token-table-evaluator",
+      "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+      "taskSha256": "8d0cfc0d46c55137207ffdaab0c92e035aa387ea1f76a3d5017d20a823ee5d25",
+      "baseCommit": "58575bbe4db03a0d9ff7e3a4307eea4824ab46e6",
+      "treeSha1": "28406bf9a362da1cebf8a0d6f1986b1611237030",
+      "retrievalDigestSha256": "f3421306787763fa765ce4756ba3b4abbecfa8f19ee6cdde0c002e026b789dfb",
+      "repositoryDigestSha256": "652ebd9d086e0e991a7793b4eef44147e5400f173bb8aad93fb56cb80e580fa7",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-refactor-fixture",
+        "adapterVersion": "production-ollama-plan-patchset-v1",
+        "transport": "loopback-http",
+        "instructionDigests": [
+          "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+          "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+        ],
+        "loopbackRequests": 2,
+        "requestDigests": [
+          "fb2b80ee4488109418ec18bd84c1849b25f80b5a27ac324ec1146fedd2aa8248",
+          "cfd814bca6da9c7ed53786aa96570295de1e40bcf44095afe61d113a7bd78f2a"
+        ]
+      },
+      "selectedContext": [
+        {
+          "path": "checks/test_parser.py",
+          "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+        },
+        {
+          "path": "README.md",
+          "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+        },
+        {
+          "path": "src/parser.py",
+          "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 0.75,
+        "digestProvenanceCoverage": 1
+      },
+      "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths",
+      "plan": {
+        "firstPassAccepted": true,
+        "operatorSelectedTargets": ["src/parser.py"],
+        "approvedTargets": ["src/parser.py"],
+        "checkIds": ["parser-contract"],
+        "planSha256": "a106ecf43f74c87dce731e67f99c8a4f5ca0f78705ecb8c696f9d5ecbc535e92",
+        "autonomousTargetDiscoveryMeasured": false
+      },
+      "baseline": {
+        "outcome": "failed",
+        "checks": [
+          {
+            "checkId": "parser-contract",
+            "argv": ["python", "-m", "checks.test_parser"],
+            "exitCode": 1,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 304,
+            "stderrSha256": "fee16f78bc25f50cca3355439d5807acec8957cd8c6623180add6bcf1c5abd9d",
+            "truncated": false,
+            "outcome": "failed"
+          }
+        ]
+      },
+      "mutation": {
+        "runId": "bd28af21-2f2c-44a3-90e9-6dc4c10961fe",
+        "state": "completed",
+        "patchSetSha256": "dde7e2c67306fc247ec2f9582f5d8b005b575a5ae59c04b5577da5cb71b86ebc",
+        "diffSha256": "01798f1eb945e9c12b7371ff671270bba7dbb2cd2ee1e97ad037db5059a78214",
+        "checkpointSha256": "0cda15d6da3e8f4654a555206565aea921bcb104b50cdd6836c0d29e6d75e4e3",
+        "changedPaths": ["src/parser.py"],
+        "checks": [
+          {
+            "checkId": "parser-contract",
+            "argv": ["python", "-m", "checks.test_parser"],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ],
+        "finalFiles": [
+          {
+            "path": "src/parser.py",
+            "sha256": "f00f8d9fa2b101254c584d4aeaa80bec4ecb176d2ff5fe2e02d1a9525c4552da"
+          }
+        ],
+        "privateWorkspaceMutated": true
+      },
+      "usage": {
+        "toolCalls": 13,
+        "inputTokens": 150,
+        "outputTokens": 80,
+        "estimatedCostUsd": 0,
+        "reservedCostUsd": 0
+      },
+      "sourceCheckoutUnchanged": true,
+      "sourceGitDirectoryUnchanged": true,
+      "durableRunRecovered": true,
+      "scenarioEvidenceSha256": "89db3a07c9e0374332779d0298cecc59b6628141c6e1bc7ae8ed310b68a23184"
+    },
+    {
+      "caseId": "refactor-schema-task-view",
+      "repositoryId": "schema",
+      "scenarioEvaluatorId": "refactor-schema-task-view-evaluator",
+      "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+      "taskSha256": "d5305c2a35958248b3a3b432af7f0f011ece696c3c7a90a2f8429f2b465d2dbd",
+      "baseCommit": "d991951befe36e1b8767a8a33aa46e5a8ccfc3da",
+      "treeSha1": "de5374a7e748ed935b33585d7522a235ac1542fe",
+      "retrievalDigestSha256": "a9903fd2907eebc19d7433bdd3c36dbd56b1dbd72bfcb700b5ac6531b6dc14e4",
+      "repositoryDigestSha256": "90e5da0dcde830d5e22efcfdaeae20ca1fe47ff57f6630f6cd92faa8680fcf87",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-refactor-fixture",
+        "adapterVersion": "production-ollama-plan-patchset-v1",
+        "transport": "loopback-http",
+        "instructionDigests": [
+          "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+          "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+        ],
+        "loopbackRequests": 2,
+        "requestDigests": [
+          "496865580de3b61abbccb83aa035c8fadae803102016d0a967e6056828fa11ca",
+          "bd58ebbb3d6a461edc2a4c411e304693cb5c39a584887fe1aa5763701eb18d28"
+        ]
+      },
+      "selectedContext": [
+        {
+          "path": "checks/schema_contract.sql",
+          "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+        },
+        {
+          "path": "migrations/README.md",
+          "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+        },
+        {
+          "path": "README.md",
+          "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+        },
+        {
+          "path": "schema/current.sql",
+          "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 0.75,
+        "digestProvenanceCoverage": 1
+      },
+      "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths",
+      "plan": {
+        "firstPassAccepted": true,
+        "operatorSelectedTargets": ["checks/schema_contract.sql"],
+        "approvedTargets": ["checks/schema_contract.sql"],
+        "checkIds": ["schema-contract"],
+        "planSha256": "08cc0b3cae1b752045e0a58fe8d6c6e14ac51be73b54f5e4b5b7252d2831d5a8",
+        "autonomousTargetDiscoveryMeasured": false
+      },
+      "baseline": {
+        "outcome": "passed",
+        "checks": [
+          {
+            "checkId": "schema-contract",
+            "argv": [
+              "python",
+              "-c",
+              "import sqlite3,pathlib; db=sqlite3.connect(\":memory:\"); db.executescript(pathlib.Path(\"schema/current.sql\").read_text(encoding=\"utf-8\")); db.executescript(pathlib.Path(\"checks/schema_contract.sql\").read_text(encoding=\"utf-8\")); assert db.execute(\"SELECT type,sql FROM sqlite_master WHERE name='tasks'\").fetchone() == (\"table\", \"CREATE TABLE tasks (\\n  id INTEGER PRIMARY KEY,\\n  title TEXT NOT NULL\\n)\")"
+            ],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ]
+      },
+      "mutation": {
+        "runId": "af147316-eb83-4bed-868c-999ec14a4044",
+        "state": "completed",
+        "patchSetSha256": "413cb97d177c6e20013c0f3cea2fc1ca5a917d4f001cfedf4055355ed5ccae5a",
+        "diffSha256": "9c56711175a2c71f835df04e6fd728028fc680b027493a0852a0fdc830f25b17",
+        "checkpointSha256": "71334291795d9a21c45e3b1312bbf5ce25672db3739e2bf4216238ba14dba32d",
+        "changedPaths": ["checks/schema_contract.sql"],
+        "checks": [
+          {
+            "checkId": "schema-contract",
+            "argv": [
+              "python",
+              "-c",
+              "import sqlite3,pathlib; db=sqlite3.connect(\":memory:\"); db.executescript(pathlib.Path(\"schema/current.sql\").read_text(encoding=\"utf-8\")); db.executescript(pathlib.Path(\"checks/schema_contract.sql\").read_text(encoding=\"utf-8\")); assert db.execute(\"SELECT type,sql FROM sqlite_master WHERE name='tasks'\").fetchone() == (\"table\", \"CREATE TABLE tasks (\\n  id INTEGER PRIMARY KEY,\\n  title TEXT NOT NULL\\n)\")"
+            ],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ],
+        "finalFiles": [
+          {
+            "path": "checks/schema_contract.sql",
+            "sha256": "409ff2d86f1518071f42bb2301bc440ea71fcda632d62bfcfa96c182316bdad3"
+          }
+        ],
+        "privateWorkspaceMutated": true
+      },
+      "usage": {
+        "toolCalls": 13,
+        "inputTokens": 150,
+        "outputTokens": 80,
+        "estimatedCostUsd": 0,
+        "reservedCostUsd": 0
+      },
+      "sourceCheckoutUnchanged": true,
+      "sourceGitDirectoryUnchanged": true,
+      "durableRunRecovered": true,
+      "scenarioEvidenceSha256": "657a8f96450658360928c39a2887c5eaf86524aa287dbeb8d1cbf32b65787904"
+    }
+  ],
+  "limitations": [
+    "deterministic-loopback-responses-measure-contract-integration-not-live-model-refactor-quality",
+    "five-refactor-cases-do-not-complete-thirty-task-gate2-benchmark",
+    "operator-selected-target-authority-does-not-measure-autonomous-target-discovery",
+    "exact-byte-oracles-measure-these-scenarios-not-general-refactor-correctness",
+    "offline-in-memory-schema-checks-do-not-authorize-live-database-application",
+    "evidence-digests-prove-self-consistency-not-runner-authenticity",
+    "partial-cohort-accounting-cannot-be-added-as-a-full-suite-result"
+  ],
+  "assessment": "deterministic_refactor_cohort_passed_gate2_incomplete"
+}

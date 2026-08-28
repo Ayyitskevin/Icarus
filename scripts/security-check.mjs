@@ -188,6 +188,14 @@ const gate2SchemaSuccessorCohortRunnerSource = await readFile(
   "scripts/gate2-schema-successor-cohort.mjs",
   "utf8",
 );
+const gate2V2EvidenceAdoptionContractSource = await readFile(
+  "scripts/gate2-v2-evidence-adoption-contract.mjs",
+  "utf8",
+);
+const gate2V2EvidenceAdoptionRunnerSource = await readFile(
+  "scripts/gate2-v2-evidence-adoption.mjs",
+  "utf8",
+);
 const gate1BenchmarkManifestSource = await readFile(
   "fixtures/evals/gate1/manifest.v1.json",
   "utf8",
@@ -2208,7 +2216,7 @@ const assertions = {
     packageJson.scripts["benchmark:gate1"] ===
       "pnpm build:node && node scripts/gate1-benchmark.mjs" &&
     packageJson.scripts.eval ===
-      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-refactor-cohort.mjs && node scripts/gate2-repair-cohort-a.mjs && node scripts/gate2-repair-cohort-b.mjs && node scripts/gate2-scaffold-cohort-a.mjs && node scripts/gate2-schema-successor-cohort.mjs && node scripts/gate2-benchmark-contract.mjs",
+      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-refactor-cohort.mjs && node scripts/gate2-repair-cohort-a.mjs && node scripts/gate2-repair-cohort-b.mjs && node scripts/gate2-scaffold-cohort-a.mjs && node scripts/gate2-schema-successor-cohort.mjs && node scripts/gate2-v2-evidence-adoption.mjs && node scripts/gate2-benchmark-contract.mjs",
   gate2RetrievalCommandIntegrated:
     packageJson.scripts["benchmark:gate2:retrieval"] ===
       "pnpm build:node && node scripts/gate2-retrieval.mjs" &&
@@ -2554,6 +2562,51 @@ const assertions = {
     !gate2SchemaSuccessorCohortContractSource.includes('path: "migrations/') &&
     !/(?:api\.github\.com|process\.env\.(?:GH|GITHUB|OPENAI|ANTHROPIC)|deploy|force-push)/.test(
       gate2SchemaSuccessorCohortRunnerSource,
+    ),
+  gate2V2EvidenceAdoptionIsClosedReplayOnlyAndIntegrated:
+    packageJson.scripts["benchmark:gate2:adopt-v2"] ===
+      "pnpm build:node && node scripts/gate2-v2-evidence-adoption.mjs" &&
+    packageJson.scripts.eval.includes("&& node scripts/gate2-v2-evidence-adoption.mjs") &&
+    packageJson.scripts.eval.indexOf("gate2-schema-successor-cohort.mjs") <
+      packageJson.scripts.eval.indexOf("gate2-v2-evidence-adoption.mjs") &&
+    gate2V2EvidenceAdoptionContractSource.includes("validateGate2BenchmarkSuccessor(") &&
+    [
+      "parseAndValidateGate2ExplanationCohortResult",
+      "parseAndValidateGate2SecurityReviewCohortResult",
+      "parseAndValidateGate2RefactorCohortResult",
+      "parseAndValidateGate2RepairACohortResult",
+      "parseAndValidateGate2RepairBCohortResult",
+      "parseAndValidateGate2ScaffoldACohortResult",
+      "parseAndValidateGate2SchemaSuccessorCohortResult",
+    ].every((validator) => gate2V2EvidenceAdoptionContractSource.includes(validator)) &&
+    (
+      gate2V2EvidenceAdoptionContractSource.match(/path: "fixtures\/evals\/gate2\/evidence\//g) ??
+      []
+    ).length === 7 &&
+    gate2V2EvidenceAdoptionContractSource.includes(
+      "adoptedUnchangedCases !== 28 || directSuccessorCases !== 2",
+    ) &&
+    gate2V2EvidenceAdoptionContractSource.includes(
+      'sourceMode = "adopted_unchanged_predecessor"',
+    ) &&
+    gate2V2EvidenceAdoptionContractSource.includes('sourceMode = "direct_successor_execution"') &&
+    gate2V2EvidenceAdoptionContractSource.includes(
+      '"adopted-predecessor-evidence-is-replay-validated-not-new-v2-execution"',
+    ) &&
+    gate2V2EvidenceAdoptionContractSource.includes(
+      '"closed-deterministic-v2-case-coverage-does-not-complete-gate2"',
+    ) &&
+    gate2V2EvidenceAdoptionContractSource.includes("allGate2ThresholdsMet: false") &&
+    gate2V2EvidenceAdoptionRunnerSource.includes("readRegularSource(") &&
+    gate2V2EvidenceAdoptionRunnerSource.includes("metadata.nlink === 1") &&
+    gate2V2EvidenceAdoptionRunnerSource.includes("fsync") === false &&
+    gate2V2EvidenceAdoptionRunnerSource.includes("await handle.sync()") &&
+    gate2V2EvidenceAdoptionRunnerSource.includes("await rename(temporaryPath, reportPath)") &&
+    gate2V2EvidenceAdoptionRunnerSource.includes(
+      "parseAndValidateGate2V2EvidenceAdoptionResult(",
+    ) &&
+    !/(?:node:child_process|node:http|node:https|fetch\(|api\.github\.com|process\.env\.|credential|deploy|force-push)/.test(
+      gate2V2EvidenceAdoptionRunnerSource,
     ),
   gate2RetrievalRunnerUsesPinnedLocalReadOnlyEvidence:
     gate2RetrievalRunnerSource.includes('spawnSync(\n    "/usr/bin/git"') &&

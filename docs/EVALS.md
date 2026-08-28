@@ -364,21 +364,39 @@ retains 2 executed, 2 passed, and 28 unexecuted. The dated measurement is
 [`docs/evals/2026-08-28-gate2-schema-successor-cohort.md`](evals/2026-08-28-gate2-schema-successor-cohort.md).
 
 Across the explanation, security-review, refactor, repair-A, repair-B, and
-scaffold-A reports, 28 distinct manifest cases now have deterministic contract-
-integration evidence and 2 cases have not been executed by any partial cohort.
-Each partial report retains its own independent unexecuted count; this union is
-not a synthetic full-suite result or a claim that the full-suite threshold
-passed. Manifest v1's schema repair and scaffold cases request protected
-`migrations/` paths, so the ordinary lifecycle correctly refuses them;
-resolving that input contract requires an explicit benchmark-versioning
-decision, not a policy bypass. Live-model quality, autonomous target discovery,
-the full 30-task threshold, and fixed-model routing-cost comparison remain open.
+scaffold-A reports, 28 distinct manifest-v1 cases have deterministic contract-
+integration evidence. Each partial report retains its independent unexecuted
+count. The two schema-successor observations are evidence against manifest v2;
+those seven source reports cannot be added directly into a synthetic 30/30
+result.
 
-The 28-case manifest-v1 identity union and the two-case manifest-v2 successor
-report are evidence against different immutable revisions. They must not be
-added into a synthetic 30/30 result. A trusted v2 full-suite orchestrator must
-execute or explicitly adopt evidence for all 30 v2 identities under one closed
-result contract before any full-suite threshold claim.
+`pnpm benchmark:gate2:adopt-v2` is the explicit adoption path. The repository
+freezes the seven validated source reports under
+`fixtures/evals/gate2/evidence/`, pins each report's raw SHA-256, and invokes
+every report's owning strict validator. The adoption module then proves the
+exact v1→v2 manifest lineage, requires byte-identical case definitions for all
+28 predecessor observations, accepts direct v2 evidence only for the two named
+successors, and orders one replay receipt per case by the v2 manifest. Every
+case receipt binds the source report, source manifest, repository and task
+revision, scenario-evidence digest, complete target-case digest, retrieval
+metrics, plan applicability, incorrect-edit count, and its own replay digest.
+Missing, duplicated, reordered, replaced, drifted, forged, or unvalidated
+evidence fails closed.
+
+The deterministic aggregate contains 30 replay-validated and 30 successful v2
+case identities: 28 exact predecessor adoptions plus two direct successor
+executions. Macro retrieval recall is `0.9916666666666667`, macro precision is
+`0.8083333333333333`, digest provenance is `1.0`, and incorrect edits are zero.
+The task-count, successful-task, retrieval, provenance, and incorrect-edit
+thresholds are met. First-pass plan acceptance remains incomplete because only
+the 20 mutation cases have applicable plan evidence; live-model quality,
+autonomous target discovery, and fixed-model routing cost/success comparison
+remain unmeasured. The aggregate therefore retains
+`allGate2ThresholdsMet: false` and assessment
+`deterministic_v2_evidence_adoption_passed_gate2_incomplete`. Its ignored atomic
+report is `.local/gate2-v2-evidence-adoption-report.json`; identical immutable
+inputs replay byte-identically. The dated measurement is
+[`docs/evals/2026-08-28-gate2-v2-evidence-adoption.md`](evals/2026-08-28-gate2-v2-evidence-adoption.md).
 
 ## Measures
 

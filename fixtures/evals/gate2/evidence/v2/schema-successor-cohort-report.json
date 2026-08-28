@@ -1,0 +1,328 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "gate2-context-agent-quality",
+  "benchmarkRevision": "gate2-thirty-task-v2-host-policy-compatible",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "cohortClass": "schema_successor",
+  "evaluatorRevision": "deterministic-production-lifecycle-v1",
+  "generatedAt": "2026-08-28T09:09:48.690Z",
+  "passed": true,
+  "counts": {
+    "manifestCases": 30,
+    "cohortCases": 2,
+    "executedCases": 2,
+    "passedCases": 2,
+    "failedCases": 0,
+    "unexecutedCases": 28
+  },
+  "retrievalAggregate": {
+    "macroRecall": 1,
+    "macroPrecision": 0.75,
+    "digestProvenanceCoverage": 1
+  },
+  "planAggregate": {
+    "firstPassAcceptedCases": 2,
+    "firstPassAcceptanceRate": 1,
+    "autonomousTargetDiscoveryMeasured": false,
+    "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths"
+  },
+  "effects": {
+    "providerCalls": 4,
+    "loopbackProviderRequests": 4,
+    "externalNetworkRequests": 0,
+    "remoteMutations": 0,
+    "sourceCheckoutMutations": 0,
+    "privateWorkspaceMutations": 2,
+    "sandboxCheckExecutions": 4,
+    "icarusRegisteredCheckExecutions": 2,
+    "liveDatabaseConnections": 0,
+    "offlineInMemoryDatabaseChecks": 4,
+    "temporaryGitFixtureSetup": true,
+    "runtimeReopens": 2
+  },
+  "effectEvidence": {
+    "providerCalls": "observed",
+    "loopbackProviderRequests": "observed",
+    "externalNetworkRequests": "design-assertion",
+    "remoteMutations": "design-assertion",
+    "sourceCheckoutMutations": "observed",
+    "privateWorkspaceMutations": "observed",
+    "sandboxCheckExecutions": "observed",
+    "icarusRegisteredCheckExecutions": "observed",
+    "liveDatabaseConnections": "design-assertion",
+    "offlineInMemoryDatabaseChecks": "observed",
+    "temporaryGitFixtureSetup": "observed",
+    "runtimeReopens": "observed"
+  },
+  "observations": [
+    {
+      "caseId": "repair-schema-status-snapshot",
+      "repositoryId": "schema",
+      "scenarioEvaluatorId": "repair-schema-status-snapshot-evaluator",
+      "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+      "taskSha256": "5c5a211b88fe21da7b6d2ff968051eb4ef089fd142354b4454d251fc0d867dc7",
+      "baseCommit": "d991951befe36e1b8767a8a33aa46e5a8ccfc3da",
+      "treeSha1": "de5374a7e748ed935b33585d7522a235ac1542fe",
+      "retrievalDigestSha256": "97028055bb33dd705ee27adb0c70ec2f044cd20e7ce25923c8776aab0b23d4e6",
+      "repositoryDigestSha256": "90e5da0dcde830d5e22efcfdaeae20ca1fe47ff57f6630f6cd92faa8680fcf87",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-schema-successor-fixture",
+        "adapterVersion": "production-ollama-plan-patchset-v1",
+        "transport": "loopback-http",
+        "instructionDigests": [
+          "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+          "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+        ],
+        "loopbackRequests": 2,
+        "requestDigests": [
+          "206250c011b6ea33172e71efffa17676f5cd640ec1641875350a700afcaf1650",
+          "23c1dab23ead2e7ed953da4ed4f12afcc556015a9519eecb72510ea964e89298"
+        ]
+      },
+      "selectedContext": [
+        {
+          "path": "checks/schema_contract.sql",
+          "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+        },
+        {
+          "path": "migrations/README.md",
+          "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+        },
+        {
+          "path": "README.md",
+          "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+        },
+        {
+          "path": "schema/current.sql",
+          "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 0.75,
+        "digestProvenanceCoverage": 1
+      },
+      "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths",
+      "plan": {
+        "firstPassAccepted": true,
+        "operatorSelectedTargets": ["checks/schema_contract.sql", "schema/current.sql"],
+        "approvedTargets": ["checks/schema_contract.sql", "schema/current.sql"],
+        "checkIds": ["schema-status-snapshot"],
+        "planSha256": "85bf4cf3f148a3eb4be9c07a141f85d6cd4829b33a4588d86250c72e4deb27b8",
+        "autonomousTargetDiscoveryMeasured": false
+      },
+      "baseline": {
+        "outcome": "failed",
+        "checks": [
+          {
+            "checkId": "schema-status-snapshot",
+            "argv": [
+              "python",
+              "-c",
+              "import sqlite3,pathlib; db=sqlite3.connect(\":memory:\"); db.executescript(pathlib.Path(\"schema/current.sql\").read_text(encoding=\"utf-8\")); db.executescript(pathlib.Path(\"checks/schema_contract.sql\").read_text(encoding=\"utf-8\")); assert db.execute(\"SELECT id,title,status FROM tasks\").fetchall() == []; assert db.execute(\"PRAGMA table_info(tasks)\").fetchall() == [(0, \"id\", \"INTEGER\", 0, None, 1), (1, \"title\", \"TEXT\", 1, None, 0), (2, \"status\", \"TEXT\", 1, \"'pending'\", 0)]"
+            ],
+            "exitCode": 1,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 123,
+            "stderrSha256": "9a75f88303795c9d59f43c21ff736c342ddf7f773a3c08f8a7d616703e787586",
+            "truncated": false,
+            "outcome": "failed"
+          }
+        ]
+      },
+      "mutation": {
+        "runId": "ac163d4d-6ba7-497b-aa9c-13df274c8b0b",
+        "state": "completed",
+        "patchSetSha256": "1ced23ed4e4450657efe84eaa05f2559db83e0e3cf9f4864536fcbe8690cd3c0",
+        "diffSha256": "c7cf30ef83ad81537dc8b8b25707c18cdb5e570044f9f7a8c4c5c8dbfd259dd1",
+        "checkpointSha256": "cfe168c21ed3ccb074e309490a97168f681fc89bcf9c66cfe9fdd5ac33b276b4",
+        "changedPaths": ["checks/schema_contract.sql", "schema/current.sql"],
+        "checks": [
+          {
+            "checkId": "schema-status-snapshot",
+            "argv": [
+              "python",
+              "-c",
+              "import sqlite3,pathlib; db=sqlite3.connect(\":memory:\"); db.executescript(pathlib.Path(\"schema/current.sql\").read_text(encoding=\"utf-8\")); db.executescript(pathlib.Path(\"checks/schema_contract.sql\").read_text(encoding=\"utf-8\")); assert db.execute(\"SELECT id,title,status FROM tasks\").fetchall() == []; assert db.execute(\"PRAGMA table_info(tasks)\").fetchall() == [(0, \"id\", \"INTEGER\", 0, None, 1), (1, \"title\", \"TEXT\", 1, None, 0), (2, \"status\", \"TEXT\", 1, \"'pending'\", 0)]"
+            ],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ],
+        "finalFiles": [
+          {
+            "path": "checks/schema_contract.sql",
+            "sha256": "a49f6144e383b6c91608f29f0c6ea659f54014d69fb76f5df12ff7723a27b1b4"
+          },
+          {
+            "path": "schema/current.sql",
+            "sha256": "fe0651c4c162da2be73d24dfad8a699a1f7cb0301b27bcf82932dec289ea89c9"
+          }
+        ],
+        "privateWorkspaceMutated": true
+      },
+      "usage": {
+        "toolCalls": 13,
+        "inputTokens": 150,
+        "outputTokens": 80,
+        "estimatedCostUsd": 0,
+        "reservedCostUsd": 0
+      },
+      "sourceCheckoutUnchanged": true,
+      "sourceGitDirectoryUnchanged": true,
+      "durableRunRecovered": true,
+      "scenarioEvidenceSha256": "3a6320ef4da08997eafba5bf9324c76ea3c9729597730d80945f95e70491a8e8"
+    },
+    {
+      "caseId": "scaffold-task-priority-contract",
+      "repositoryId": "schema",
+      "scenarioEvaluatorId": "scaffold-task-priority-contract-evaluator",
+      "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+      "taskSha256": "83ad152996cef7b8bad212357a65f59c5376023167785a2a01ea6f59f56a4401",
+      "baseCommit": "d991951befe36e1b8767a8a33aa46e5a8ccfc3da",
+      "treeSha1": "de5374a7e748ed935b33585d7522a235ac1542fe",
+      "retrievalDigestSha256": "84b32d4eb4a158fd2aaad878778f3c59c5239458ea1987999d01e9ed5c73e709",
+      "repositoryDigestSha256": "90e5da0dcde830d5e22efcfdaeae20ca1fe47ff57f6630f6cd92faa8680fcf87",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-schema-successor-fixture",
+        "adapterVersion": "production-ollama-plan-patchset-v1",
+        "transport": "loopback-http",
+        "instructionDigests": [
+          "eecd9bcebee8bbdea74b6d2eee555bc599532c4e5f315e0506d767af155f6a8a",
+          "1b1d68633c2af6fe5b7de4a2ae20327662cd3637d398ac5fe89e4b197ca491e9"
+        ],
+        "loopbackRequests": 2,
+        "requestDigests": [
+          "b64a28273f62dbc06e440b810426a154e37ad4c2b35df3f9cb6dec0900db7ba7",
+          "47dbc1fd4f07eb3f4b8292ccd4f797de6ff0895adc6900e8b075935e381d8932"
+        ]
+      },
+      "selectedContext": [
+        {
+          "path": "checks/schema_contract.sql",
+          "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+        },
+        {
+          "path": "migrations/README.md",
+          "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+        },
+        {
+          "path": "README.md",
+          "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+        },
+        {
+          "path": "schema/current.sql",
+          "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 0.75,
+        "digestProvenanceCoverage": 1
+      },
+      "targetAuthority": "operator_selected_existing_anchor_plus_expected_changed_paths",
+      "plan": {
+        "firstPassAccepted": true,
+        "operatorSelectedTargets": [
+          "checks/schema_contract.sql",
+          "checks/task_priority_contract.sql",
+          "schema/current.sql"
+        ],
+        "approvedTargets": ["checks/task_priority_contract.sql", "schema/current.sql"],
+        "checkIds": ["priority-schema-check"],
+        "planSha256": "22ebde0fbed76ce479410d5c56c23a1208627f21af7af96acde356d9d7b3c6ce",
+        "autonomousTargetDiscoveryMeasured": false
+      },
+      "baseline": {
+        "outcome": "failed",
+        "checks": [
+          {
+            "checkId": "priority-schema-check",
+            "argv": [
+              "python",
+              "-c",
+              "import sqlite3,pathlib; db=sqlite3.connect(\":memory:\"); db.executescript(pathlib.Path(\"schema/current.sql\").read_text(encoding=\"utf-8\")); db.executescript(pathlib.Path(\"checks/task_priority_contract.sql\").read_text(encoding=\"utf-8\")); assert db.execute(\"SELECT id,title,priority FROM tasks\").fetchall() == []; assert db.execute(\"PRAGMA table_info(tasks)\").fetchall() == [(0, \"id\", \"INTEGER\", 0, None, 1), (1, \"title\", \"TEXT\", 1, None, 0), (2, \"priority\", \"INTEGER\", 1, \"0\", 0)]"
+            ],
+            "exitCode": 1,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 573,
+            "stderrSha256": "dae505be70d01f4e3b94d364cff715d5d701264aa2f3315f717627a53e463217",
+            "truncated": false,
+            "outcome": "failed"
+          }
+        ]
+      },
+      "mutation": {
+        "runId": "06605b10-be3d-4938-b481-804e5224595d",
+        "state": "completed",
+        "patchSetSha256": "86745189bfafbc440921d768cf926bf287413e51c3e95c09ad7500c7436d7a1e",
+        "diffSha256": "ad70b1950923197d788684acb40da85f6a21c127462bfba59d568d68e43d607e",
+        "checkpointSha256": "477c46ea28f17918ad9d97574a7df172e0e668dffce693b9b3e5ceaf5d6be536",
+        "changedPaths": ["checks/task_priority_contract.sql", "schema/current.sql"],
+        "checks": [
+          {
+            "checkId": "priority-schema-check",
+            "argv": [
+              "python",
+              "-c",
+              "import sqlite3,pathlib; db=sqlite3.connect(\":memory:\"); db.executescript(pathlib.Path(\"schema/current.sql\").read_text(encoding=\"utf-8\")); db.executescript(pathlib.Path(\"checks/task_priority_contract.sql\").read_text(encoding=\"utf-8\")); assert db.execute(\"SELECT id,title,priority FROM tasks\").fetchall() == []; assert db.execute(\"PRAGMA table_info(tasks)\").fetchall() == [(0, \"id\", \"INTEGER\", 0, None, 1), (1, \"title\", \"TEXT\", 1, None, 0), (2, \"priority\", \"INTEGER\", 1, \"0\", 0)]"
+            ],
+            "exitCode": 0,
+            "signal": null,
+            "stdoutBytes": 0,
+            "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderrBytes": 0,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "truncated": false,
+            "outcome": "passed"
+          }
+        ],
+        "finalFiles": [
+          {
+            "path": "checks/task_priority_contract.sql",
+            "sha256": "a22c5f55d3e1d77e5176c50050c7eedf0fd5a4473057ce1b43029a517ab3fe55"
+          },
+          {
+            "path": "schema/current.sql",
+            "sha256": "5464e1d6b17d725014a47629008eef7ec92840b6b013c8c132cabfb3efbdcfe2"
+          }
+        ],
+        "privateWorkspaceMutated": true
+      },
+      "usage": {
+        "toolCalls": 13,
+        "inputTokens": 150,
+        "outputTokens": 80,
+        "estimatedCostUsd": 0,
+        "reservedCostUsd": 0
+      },
+      "sourceCheckoutUnchanged": true,
+      "sourceGitDirectoryUnchanged": true,
+      "durableRunRecovered": true,
+      "scenarioEvidenceSha256": "7e166b0cd79395377fbc4963beef0221a2e32c6c0103b44d3004dee34122fc9d"
+    }
+  ],
+  "limitations": [
+    "deterministic-loopback-responses-measure-contract-integration-not-live-model-schema-quality",
+    "two-successor-cases-do-not-form-a-thirty-task-full-suite-result",
+    "manifest-v2-evidence-does-not-retroactively-execute-replaced-v1-cases",
+    "offline-in-memory-sqlite-checks-do-not-authorize-live-database-application",
+    "operator-selected-target-authority-does-not-measure-autonomous-target-discovery",
+    "exact-byte-oracles-measure-these-scenarios-not-general-schema-correctness",
+    "evidence-digests-prove-self-consistency-not-runner-authenticity",
+    "partial-cohort-accounting-cannot-be-added-as-a-full-suite-result"
+  ],
+  "assessment": "deterministic_schema_successor_cohort_passed_gate2_incomplete"
+}

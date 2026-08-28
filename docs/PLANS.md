@@ -8,9 +8,11 @@ read-only explanation, five security-review, five refactor, five repair-A, four
 repair-B, and four scaffold-A manifest-v1 cases now execute as separate
 deterministic fixture cohorts. Immutable manifest v2 preserves 28 cases and
 replaces the two protected migration-path tasks; both replacements now execute
-as a separate deterministic successor cohort. Cross-revision evidence is not
-additive, so a full v2 run, live-model quality, and autonomous target discovery
-remain open. The separate
+as a separate deterministic successor cohort. Seven frozen source reports now
+feed a strict adoption/replay contract that produces one closed 30-case v2
+deterministic receipt without rewriting historical evidence. Live-model
+quality, all-task plan acceptance, autonomous target discovery, and fixed-model
+routing comparison remain open. The separate
 supervised active-repository canary remains **HOLD** after the 2026-08-27
 secret-scanner survey; live-state migration, merge, deployment, unattended use,
 effectful/control session continuation, and wider Vulcan authority remain
@@ -22,8 +24,9 @@ checkpoint and must not be read as the current release state.
 Status: the one-case retrieval baseline plus manifest-bound explanation,
 security-review, refactor, repair-A, repair-B, scaffold-A, and schema-successor
 fixtures execute. Manifest v2 resolves the two incompatible task definitions
-without weakening policy, but the full v2 suite, live-model quality, autonomous
-target discovery, and the Gate 2 exit gate remain open.
+without weakening policy, and the explicit adoption path closes deterministic
+v2 case coverage. Live-model quality, all-task plan evidence, autonomous target
+discovery, routed-vs-fixed comparison, and the Gate 2 exit gate remain open.
 
 - [x] Add a reusable deterministic core retriever over one exact committed tree.
 - [x] Exclude linked, hidden, binary, invalid-UTF-8, and secret-shaped content
@@ -87,10 +90,15 @@ target discovery, and the Gate 2 exit gate remain open.
       Execute both v2 replacements through the production lifecycle with two
       reproduced failing baselines, two passing final checks, observed private
       mutation/check/reopen evidence, and 2/28 independent accounting.
-- [ ] Implement the manifest-bound scenario evaluators, execute all 30 tasks,
-      under one manifest-v2 full-suite result, measure live-model plan quality
-      and autonomous target discovery, and compare the same pinned model pool
-      against its fixed single-model baseline.
+- [x] Freeze the seven strict source reports, exact-bind their bytes and owning
+      validators, adopt only the 28 byte-identical predecessor cases, retain the
+      two direct v2 successor executions, and replay one manifest-ordered
+      30-case v2 aggregate receipt. Keep plan and routing thresholds explicitly
+      unmet rather than upgrading partial measurements.
+- [ ] Execute the full v2 task set with live models and operator-independent
+      target discovery, obtain applicable first-pass planning evidence across
+      all 30 tasks, and compare the same pinned routed model pool against its
+      fixed single-model baseline without reducing successful-task count.
 
 The explanation and security-review cohorts add bounded read-only provider
 analysis. The refactor, repair-A, repair-B, and scaffold-A cohorts grant
@@ -102,8 +110,10 @@ live-model quality. Manifest v1's schema repair and scaffold cases name
 protected `migrations/` paths; the production guard correctly refuses them, and
 resolving that mismatch requires a versioned benchmark decision rather than a
 policy bypass or an in-place rewrite of immutable input. Manifest v2 makes that
-versioned decision, but v1's 28-case evidence and v2's two replacement outcomes
-cannot be added across revisions into a synthetic 30/30 run.
+versioned decision. The adoption contract—not arithmetic over headline totals—
+strictly replays the 28 unchanged identities and two direct successor outcomes
+under one v2 receipt. That closes deterministic case coverage while leaving
+live-model, autonomous-planning, and routing evidence open.
 
 ## Headless Vulcan proposal admission
 

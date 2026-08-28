@@ -4,7 +4,8 @@
   browser and landing paths plus credential-gated live 3/3 evidence are
   complete; Gate 2 has measured deterministic explanation, security-review,
   refactor, repair, scaffold, and schema-successor cohorts plus immutable v1/v2
-  30-task contracts whose full v2 runner remains open. Canary,
+  30-task contracts and one closed deterministic v2 adoption/replay receipt.
+  Live-model, autonomous-planning, and routing evidence remain open. Canary,
   live-state migration, merge, deployment, and unattended authority remain
   closed
 - Date: 2026-07-30; progress status updated 2026-08-28
@@ -421,9 +422,16 @@ with offline `schema/` snapshot and `checks/` contract work. Its SHA-256 is
 `0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5`.
 The two-case successor cohort reproduces both failing baselines, passes both
 registered final checks, records recall/provenance `1.0` and precision `0.75`,
-and reopens both completed private runs. This report leaves 28 v2 cases
-unexecuted. The 28-case v1 union and two-case v2 report are not additive across
-revision identity; a closed 30-case v2 run remains required.
+and reopens both completed private runs. Its independent report leaves 28 v2
+cases unexecuted. The seven source reports are not added arithmetically: a
+separate adoption contract freezes and exact-validates their bytes, replays each
+through its owning result validator, proves every adopted v1 case is unchanged
+under v2, and binds 28 adopted plus two direct observations into one v2-ordered
+30-case receipt. That receipt meets the deterministic task-count, success,
+retrieval, provenance, and incorrect-edit thresholds. It leaves the plan
+threshold unmet because plan evidence covers only 20 mutation cases, and it
+does not measure live-model quality, autonomous target discovery, or the paired
+routing comparison; Gate 2 therefore remains incomplete.
 
 ### Gate 3 — VS Code workbench
 

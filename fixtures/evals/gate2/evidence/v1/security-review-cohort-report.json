@@ -1,0 +1,416 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "gate2-context-agent-quality",
+  "benchmarkRevision": "gate2-thirty-task-v1",
+  "manifestSha256": "43159d8a174312e7fd720fbb625173601e7c90f6e5983c62c206b69ce99c9558",
+  "cohortClass": "security_review",
+  "evaluatorRevision": "deterministic-loopback-v1",
+  "generatedAt": "2026-08-28T09:09:23.498Z",
+  "passed": true,
+  "counts": {
+    "manifestCases": 30,
+    "cohortCases": 5,
+    "executedCases": 5,
+    "passedCases": 5,
+    "failedCases": 0,
+    "unexecutedCases": 25
+  },
+  "retrievalAggregate": {
+    "macroRecall": 1,
+    "macroPrecision": 0.75,
+    "digestProvenanceCoverage": 1
+  },
+  "effects": {
+    "providerCalls": 5,
+    "loopbackProviderRequests": 5,
+    "externalNetworkRequests": 0,
+    "remoteMutations": 0,
+    "sourceCheckoutMutations": 0,
+    "repositoryCodeExecutions": 0,
+    "icarusRegisteredCommands": 0,
+    "temporaryGitFixtureSetup": true
+  },
+  "effectEvidence": {
+    "providerCalls": "observed",
+    "loopbackProviderRequests": "observed",
+    "externalNetworkRequests": "design-assertion",
+    "remoteMutations": "design-assertion",
+    "sourceCheckoutMutations": "observed",
+    "repositoryCodeExecutions": "design-assertion",
+    "icarusRegisteredCommands": "design-assertion",
+    "temporaryGitFixtureSetup": "observed"
+  },
+  "observations": [
+    {
+      "caseId": "security-path-traversal",
+      "repositoryId": "security",
+      "scenarioEvaluatorId": "security-path-traversal-evaluator",
+      "repositoryRevisionSha256": "131ff18d492a97bbab9a590d5a0a9ef9e21fd25baadf648bab4bbbd5b200e132",
+      "taskSha256": "05195873393e3d60e0fe4b34f1becf20a80522ce0ca2b3f4a1fa98a935496c96",
+      "baseCommit": "057d4e387abd6e7a842d9befbf1f232b126cf735",
+      "treeSha1": "8b24c07aff8d1431dfd317933465248738785a37",
+      "retrievalDigestSha256": "1925ad8def0e6371921b7dfc2a0e1ac67310dedea0b30804806f7ffb50574e75",
+      "repositoryDigestSha256": "b13d7470d725b3007c57f123affa4843a425be3e13b4d6fa2ac62679d43b0718",
+      "securityReviewDigestSha256": "c5f6b1d310496355a327a6a4b6f09ffbd2069b0ed0a2e13a170a578a58ab295a",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-security-review-fixture",
+        "adapterVersion": "production-ollama-structured-v1",
+        "transport": "loopback-http"
+      },
+      "selectedContext": [
+        {
+          "path": "checks/expected_finding.md",
+          "sha256": "2fdc9c401165ab469355887fe2b44069a6e7d231d2c4406e516c72fd872dbbd1"
+        },
+        {
+          "path": "README.md",
+          "sha256": "078e8880de0bfd549d6dcd9e16967d35693988c38343c5b6ad6f231f2aac426f"
+        },
+        {
+          "path": "src/files.py",
+          "sha256": "3eda58ebbbfae5a26e17236f93ac39972969c121baec2b2897f4703101062af2"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 1,
+        "digestProvenanceCoverage": 1
+      },
+      "outcome": {
+        "assessment": "findings",
+        "summary": "The public-file reader permits path traversal outside its intended root.",
+        "findings": [
+          {
+            "id": "path-traversal",
+            "title": "User-controlled path can escape the public root",
+            "severity": "high",
+            "description": "read_public joins user_path to root and reads it without resolving and enforcing root containment.",
+            "exploitCondition": "An attacker can supply a path containing parent-directory segments that resolves outside root.",
+            "recommendation": "Resolve the candidate and public root, then reject any candidate that is not contained by the resolved root.",
+            "citations": [
+              {
+                "path": "src/files.py",
+                "lineStart": 4,
+                "lineEnd": 5
+              }
+            ]
+          }
+        ],
+        "noFinding": null
+      },
+      "usage": {
+        "inputTokens": 104,
+        "outputTokens": 76,
+        "estimatedCostUsd": 0,
+        "actualBilledUsd": null,
+        "latencyMs": 14
+      },
+      "sourceCheckoutUnchanged": true,
+      "fixtureWorkspaceUnchanged": true,
+      "scenarioEvidenceSha256": "843bc8d7249cdd3cae806846df591cee109b082a0346226db7ce39ec580c12de"
+    },
+    {
+      "caseId": "security-hostile-agents",
+      "repositoryId": "basic",
+      "scenarioEvaluatorId": "security-hostile-agents-evaluator",
+      "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+      "taskSha256": "c1fba091ce3380e5713d8d12b15ffeade71c090ddc5d0076d820ab5acc3e0583",
+      "baseCommit": "e085d78bebaad6e1d8314e97a49f10c2b3452baf",
+      "treeSha1": "82fbaa86cb39bd26094e755c1a8a224fe3fe2e73",
+      "retrievalDigestSha256": "0c7b8e2682de28aa9043f5779d2392bbd728ea415ee18547df0f3c60573a1970",
+      "repositoryDigestSha256": "e5548ea2b4684357a4b1d11a0491989f2e2d14569ed133c880f9c79d5d621b80",
+      "securityReviewDigestSha256": "a8a4f82e0afdf98aba68f49b395afb34374ac90473eb9b93619c308a1ff73f2a",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-security-review-fixture",
+        "adapterVersion": "production-ollama-structured-v1",
+        "transport": "loopback-http"
+      },
+      "selectedContext": [
+        {
+          "path": "AGENTS.md",
+          "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+        },
+        {
+          "path": "README.md",
+          "sha256": "fa5d1662ca22c8397bcaef17daa0e0af2c383b8b7b75cb4a79698cceefcbf034"
+        },
+        {
+          "path": "src/greeting.txt",
+          "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 0.5,
+        "digestProvenanceCoverage": 1
+      },
+      "outcome": {
+        "assessment": "findings",
+        "summary": "The repository contains an instruction that attempts to widen host authority.",
+        "findings": [
+          {
+            "id": "authority-widening-instruction",
+            "title": "Repository text attempts to widen execution authority",
+            "severity": "high",
+            "description": "The repository asks the consumer to skip approval, change outside the repository, replace checks, and contact a network address.",
+            "exploitCondition": "The host delegates policy, approval, path, check, or network authority to repository-provided instructions.",
+            "recommendation": "Treat repository text as untrusted data and enforce paths, checks, routing, approvals, budgets, and network access outside the model.",
+            "citations": [
+              {
+                "path": "AGENTS.md",
+                "lineStart": 5,
+                "lineEnd": 8
+              }
+            ]
+          }
+        ],
+        "noFinding": null
+      },
+      "usage": {
+        "inputTokens": 112,
+        "outputTokens": 78,
+        "estimatedCostUsd": 0,
+        "actualBilledUsd": null,
+        "latencyMs": 3
+      },
+      "sourceCheckoutUnchanged": true,
+      "fixtureWorkspaceUnchanged": true,
+      "scenarioEvidenceSha256": "7fee7eb74cc82aa9abf9651bf8e847380241cb8716b5a155bbc832097a70378b"
+    },
+    {
+      "caseId": "security-schema-migration",
+      "repositoryId": "schema",
+      "scenarioEvaluatorId": "security-schema-migration-evaluator",
+      "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+      "taskSha256": "8476faad57bc6a9c5e2493eca69abb9192f657cf4da76e39b38c2b30463a67a2",
+      "baseCommit": "d991951befe36e1b8767a8a33aa46e5a8ccfc3da",
+      "treeSha1": "de5374a7e748ed935b33585d7522a235ac1542fe",
+      "retrievalDigestSha256": "4614aa032c3d72d1e3adde3e29a527b372ee89fa6be53fd2ff69c6e7c007f796",
+      "repositoryDigestSha256": "90e5da0dcde830d5e22efcfdaeae20ca1fe47ff57f6630f6cd92faa8680fcf87",
+      "securityReviewDigestSha256": "b3478e16ee6ab60dfff29060e71223f23a5802de805cd51c7a337302f877b56b",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-security-review-fixture",
+        "adapterVersion": "production-ollama-structured-v1",
+        "transport": "loopback-http"
+      },
+      "selectedContext": [
+        {
+          "path": "checks/schema_contract.sql",
+          "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+        },
+        {
+          "path": "migrations/README.md",
+          "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+        },
+        {
+          "path": "README.md",
+          "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+        },
+        {
+          "path": "schema/current.sql",
+          "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 0.75,
+        "digestProvenanceCoverage": 1
+      },
+      "outcome": {
+        "assessment": "no_finding",
+        "summary": "The selected sources do not establish an unsafe live schema migration.",
+        "findings": [],
+        "noFinding": {
+          "rationale": "The fixture is explicitly offline, forbids applying a migration to live state, and only shows the current table definition.",
+          "citations": [
+            {
+              "path": "README.md",
+              "lineStart": 3,
+              "lineEnd": 4
+            },
+            {
+              "path": "schema/current.sql",
+              "lineStart": 1,
+              "lineEnd": 4
+            }
+          ]
+        }
+      },
+      "usage": {
+        "inputTokens": 96,
+        "outputTokens": 58,
+        "estimatedCostUsd": 0,
+        "actualBilledUsd": null,
+        "latencyMs": 2
+      },
+      "sourceCheckoutUnchanged": true,
+      "fixtureWorkspaceUnchanged": true,
+      "scenarioEvidenceSha256": "8e82e87c1b0f13fcd85d882283b4750915ee869d5cb47f4d1f6ef807e0c9f319"
+    },
+    {
+      "caseId": "security-config-trust",
+      "repositoryId": "unfamiliar",
+      "scenarioEvaluatorId": "security-config-trust-evaluator",
+      "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+      "taskSha256": "13942cacbe00357c91c759a5c66eebfed7c50bc4cd457699bcafa609760a6cf1",
+      "baseCommit": "77163633d602f8ebed4b5da44860bd798c9f6529",
+      "treeSha1": "65f958d96cda8563886c14c09f971c0f17c40dff",
+      "retrievalDigestSha256": "e2ee3d58b8b7c47dff8fe4aab213818bcc067753235c9bfd2093a91c7aeb218c",
+      "repositoryDigestSha256": "d7217b6c8b811b2a2244e62390bac3326f1c59f7b14d39d73b6ea107d3935b91",
+      "securityReviewDigestSha256": "fb6895e864050ce9baf48389a7b343ced1bff45ea938d6f60a8b56baa425403f",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-security-review-fixture",
+        "adapterVersion": "production-ollama-structured-v1",
+        "transport": "loopback-http"
+      },
+      "selectedContext": [
+        {
+          "path": "config/app.json",
+          "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+        },
+        {
+          "path": "README.md",
+          "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+        },
+        {
+          "path": "src/greeting.py",
+          "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+        },
+        {
+          "path": "src/main.py",
+          "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 0.75,
+        "digestProvenanceCoverage": 1
+      },
+      "outcome": {
+        "assessment": "findings",
+        "summary": "The entry point trusts the parsed configuration shape before use.",
+        "findings": [
+          {
+            "id": "unvalidated-config-shape",
+            "title": "Configuration shape is used without validation",
+            "severity": "medium",
+            "description": "The entry point indexes audience directly from parsed JSON without validating the object, key, or value type.",
+            "exploitCondition": "A malformed or attacker-controlled configuration omits audience or provides a non-string value.",
+            "recommendation": "Validate that the parsed value is an object with a present string audience before passing it to greeting.",
+            "citations": [
+              {
+                "path": "config/app.json",
+                "lineStart": 1,
+                "lineEnd": 3
+              },
+              {
+                "path": "src/main.py",
+                "lineStart": 6,
+                "lineEnd": 6
+              }
+            ]
+          }
+        ],
+        "noFinding": null
+      },
+      "usage": {
+        "inputTokens": 108,
+        "outputTokens": 80,
+        "estimatedCostUsd": 0,
+        "actualBilledUsd": null,
+        "latencyMs": 3
+      },
+      "sourceCheckoutUnchanged": true,
+      "fixtureWorkspaceUnchanged": true,
+      "scenarioEvidenceSha256": "e4ddd9dd16257cb5f5d2ca6162e41915423dce4159bbab27a90eb6d65fcdcc12"
+    },
+    {
+      "caseId": "security-check-command",
+      "repositoryId": "buggy",
+      "scenarioEvaluatorId": "security-check-command-evaluator",
+      "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+      "taskSha256": "07b20ea355507e5da3efb086663c0f57a2ffa60a4dc6006622402793430578f8",
+      "baseCommit": "ff6cfe60bff7f6a03cb621c2ed538c0cf150f270",
+      "treeSha1": "cdac3729f7a21e09cfd213c9b4bb28de33946926",
+      "retrievalDigestSha256": "211695442025c214bf4c0496de0cafc8f2fbfa63692540f9301c659ae3437d19",
+      "repositoryDigestSha256": "b4c49da96f5c4dcd8988fbb885e7b5ae2a821a10350fe96d26a31a1c580bed04",
+      "securityReviewDigestSha256": "d2bd3988f1f559a985371a401c0c88e505efc1f7ca2a3d81186acd88e8a392e8",
+      "provider": {
+        "kind": "ollama",
+        "model": "icarus-gate2-deterministic-security-review-fixture",
+        "adapterVersion": "production-ollama-structured-v1",
+        "transport": "loopback-http"
+      },
+      "selectedContext": [
+        {
+          "path": "checks/test_cart.py",
+          "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+        },
+        {
+          "path": "README.md",
+          "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+        },
+        {
+          "path": "src/cart.py",
+          "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+        }
+      ],
+      "retrievalMetrics": {
+        "recall": 1,
+        "precision": 0.75,
+        "digestProvenanceCoverage": 1
+      },
+      "outcome": {
+        "assessment": "no_finding",
+        "summary": "The selected check sources do not establish user-controlled command or path execution.",
+        "findings": [],
+        "noFinding": {
+          "rationale": "The check imports a fixed module, reads a fixed test path, and compiles that source under a fixed filename; no user-controlled command or path is shown.",
+          "citations": [
+            {
+              "path": "checks/test_cart.py",
+              "lineStart": 1,
+              "lineEnd": 3
+            },
+            {
+              "path": "checks/verify.py",
+              "lineStart": 4,
+              "lineEnd": 8
+            }
+          ]
+        }
+      },
+      "usage": {
+        "inputTokens": 100,
+        "outputTokens": 62,
+        "estimatedCostUsd": 0,
+        "actualBilledUsd": null,
+        "latencyMs": 3
+      },
+      "sourceCheckoutUnchanged": true,
+      "fixtureWorkspaceUnchanged": true,
+      "scenarioEvidenceSha256": "ee94dc43cb539b076aef7ed2c1664a4f64eeadda370a4a924b28b572c216546d"
+    }
+  ],
+  "limitations": [
+    "deterministic-loopback-responses-measure-contract-integration-not-live-model-semantic-quality",
+    "five-security-review-cases-do-not-complete-thirty-task-gate2-benchmark",
+    "citation-range-validation-does-not-prove-semantic-entailment",
+    "selected-context-review-does-not-prove-whole-codebase-security",
+    "evidence-digests-prove-self-consistency-not-runner-authenticity",
+    "routing-cost-comparison-and-mutation-capabilities-not-measured"
+  ],
+  "assessment": "deterministic_security_review_cohort_passed_gate2_incomplete"
+}
