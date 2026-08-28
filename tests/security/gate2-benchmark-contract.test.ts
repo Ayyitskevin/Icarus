@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   GATE2_CASE_IDS,
+  MAX_GATE2_JSON_BYTES,
   parseStrictGate2Json,
   validateGate2BenchmarkManifest,
 } from "../../scripts/gate2-benchmark-contract.mjs";
@@ -142,5 +143,8 @@ describe("Gate 2 benchmark manifest contract", () => {
 
     expect(() => parseStrictGate2Json(duplicate)).toThrow("duplicate JSON object members");
     expect(() => parseStrictGate2Json('{"value": NaN}')).toThrow();
+    expect(() => parseStrictGate2Json(`"${"x".repeat(MAX_GATE2_JSON_BYTES)}"`)).toThrow(
+      "JSON byte limit",
+    );
   });
 });

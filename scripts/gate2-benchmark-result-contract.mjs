@@ -18,20 +18,20 @@ const RESULT_KEYS = Object.freeze([
 const PROFILE_KEYS = Object.freeze([
   "profileId",
   "profileDigestSha256",
-  "provider",
-  "adapterVersion",
+  "baselineModelId",
   "models",
   "pricing",
   "budgets",
 ]);
-const PRICING_KEYS = Object.freeze([
-  "capturedAt",
-  "currency",
+const MODEL_KEYS = Object.freeze([
+  "modelId",
+  "provider",
+  "adapterVersion",
+  "modelVersion",
   "inputUsdPerMillion",
   "outputUsdPerMillion",
-  "sourceLabel",
-  "estimatedOnly",
 ]);
+const PRICING_KEYS = Object.freeze(["capturedAt", "currency", "sourceLabel", "estimatedOnly"]);
 const BUDGET_KEYS = Object.freeze([
   "maxRuntimeSeconds",
   "maxInputTokens",
@@ -42,11 +42,14 @@ const OBSERVATION_KEYS = Object.freeze([
   "caseId",
   "repositoryRevisionSha256",
   "taskSha256",
+  "modelId",
   "retrievedContext",
   "firstPassPlanAccepted",
   "changedPaths",
   "citations",
   "findingIds",
+  "scenarioEvaluatorId",
+  "scenarioEvidenceSha256",
   "scenarioStatus",
   "usage",
 ]);
@@ -82,6 +85,7 @@ const CLASS_COUNT_KEYS = Object.freeze([
 
 export const GATE2_RESULT_LIMITATIONS = Object.freeze([
   "single-run-result-does-not-prove-routing-improvement",
+  "result-self-consistency-does-not-authenticate-runner-or-evaluator-evidence",
 ]);
 
 function fail(message) {
@@ -183,8 +187,7 @@ function median(values) {
 function canonicalProfileDigest(profile) {
   const unsigned = {
     profileId: profile.profileId,
-    provider: profile.provider,
-    adapterVersion: profile.adapterVersion,
+    baselineModelId: profile.baselineModelId,
     models: profile.models,
     pricing: profile.pricing,
     budgets: profile.budgets,
@@ -200,32 +203,50 @@ function validateProfile(value) {
   const profile = assertPlainRecord(value, "executionProfile", PROFILE_KEYS);
   assertSafeToken(profile.profileId, "executionProfile.profileId");
   assertDigest(profile.profileDigestSha256, "executionProfile.profileDigestSha256");
-  assertSafeToken(profile.provider, "executionProfile.provider");
-  assertSafeToken(profile.adapterVersion, "executionProfile.adapterVersion");
-  const models = assertSortedUniqueStrings(
-    profile.models,
-    "executionProfile.models",
-    assertSafeToken,
+  const baselineModelId = assertSafeToken(
+    profile.baselineModelId,
+    "executionProfile.baselineModelId",
   );
-  if (models.length === 0 || models.length > 8)
+  const models = assertArray(profile.models, "executionProfile.models").map((value, index) => {
+    const label = `executionProfile.models[${index}]`;
+    const model = assertPlainRecord(value, label, MODEL_KEYS);
+    const modelId = assertSafeToken(model.modelId, `${label}.modelId`);
+    assertSafeToken(model.provider, `${label}.provider`);
+    assertSafeToken(model.adapterVersion, `${label}.adapterVersion`);
+    assertSafeToken(model.modelVersion, `${label}.modelVersion`);
+    const inputRate = assertFiniteNonnegative(
+      model.inputUsdPerMillion,
+      `${label}.inputUsdPerMillion`,
+    );
+    const outputRate = assertFiniteNonnegative(
+      model.outputUsdPerMillion,
+      `${label}.outputUsdPerMillion`,
+    );
+    if (inputRate === 0 && outputRate === 0) {
+      fail(`${label} must make cost measurable`);
+    }
+    return { modelId };
+  });
+  if (models.length === 0 || models.length > 8) {
     fail("executionProfile.models must contain 1..8 entries");
+  }
+  const modelIds = models.map((model) => model.modelId);
+  const sortedModelIds = [...modelIds].sort((left, right) => left.localeCompare(right));
+  if (
+    new Set(modelIds).size !== modelIds.length ||
+    JSON.stringify(modelIds) !== JSON.stringify(sortedModelIds)
+  ) {
+    fail("executionProfile.models must be sorted by unique modelId");
+  }
+  if (!modelIds.includes(baselineModelId)) {
+    fail("executionProfile.baselineModelId must name a declared model");
+  }
 
   const pricing = assertPlainRecord(profile.pricing, "executionProfile.pricing", PRICING_KEYS);
   if (typeof pricing.capturedAt !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(pricing.capturedAt)) {
     fail("executionProfile.pricing.capturedAt must be an ISO date");
   }
   assertLiteral(pricing.currency, "USD", "executionProfile.pricing.currency");
-  const inputRate = assertFiniteNonnegative(
-    pricing.inputUsdPerMillion,
-    "executionProfile.pricing.inputUsdPerMillion",
-  );
-  const outputRate = assertFiniteNonnegative(
-    pricing.outputUsdPerMillion,
-    "executionProfile.pricing.outputUsdPerMillion",
-  );
-  if (inputRate === 0 && outputRate === 0) {
-    fail("executionProfile pricing must make the cost-reduction gate measurable");
-  }
   assertSafeToken(pricing.sourceLabel, "executionProfile.pricing.sourceLabel");
   assertLiteral(pricing.estimatedOnly, true, "executionProfile.pricing.estimatedOnly");
 
@@ -280,7 +301,7 @@ function validateRetrievedContext(value, benchmarkCase, repository, label) {
   };
 }
 
-function validateUsage(value, profile, label) {
+function validateUsage(value, profile, model, label) {
   const usage = assertPlainRecord(value, label, USAGE_KEYS);
   const inputTokens = assertNonnegativeInteger(usage.inputTokens, `${label}.inputTokens`);
   const outputTokens = assertNonnegativeInteger(usage.outputTokens, `${label}.outputTokens`);
@@ -291,9 +312,7 @@ function validateUsage(value, profile, label) {
   assertLiteral(usage.actualBilledUsd, null, `${label}.actualBilledUsd`);
   const latency = assertNonnegativeInteger(usage.latencyMs, `${label}.latencyMs`);
   const expectedCost = rounded(
-    (inputTokens * profile.pricing.inputUsdPerMillion +
-      outputTokens * profile.pricing.outputUsdPerMillion) /
-      1_000_000,
+    (inputTokens * model.inputUsdPerMillion + outputTokens * model.outputUsdPerMillion) / 1_000_000,
   );
   assertLiteral(estimatedCost, expectedCost, `${label}.estimatedCostUsd`);
   if (inputTokens > profile.budgets.maxInputTokens) fail(`${label} exceeds input-token budget`);
@@ -315,6 +334,9 @@ function validateObservation(value, index, manifest, profile, repositoriesById) 
     `${label}.repositoryRevisionSha256`,
   );
   assertLiteral(observation.taskSha256, benchmarkCase.task.sha256, `${label}.taskSha256`);
+  const modelId = assertSafeToken(observation.modelId, `${label}.modelId`);
+  const model = profile.models.find((candidate) => candidate.modelId === modelId);
+  if (model === undefined) fail(`${label}.modelId must name a declared model`);
   const retrieval = validateRetrievedContext(
     observation.retrievedContext,
     benchmarkCase,
@@ -339,10 +361,16 @@ function validateObservation(value, index, manifest, profile, repositoriesById) 
     `${label}.findingIds`,
     assertSafeToken,
   );
+  assertLiteral(
+    observation.scenarioEvaluatorId,
+    benchmarkCase.expectedOutcome.scenarioEvaluatorId,
+    `${label}.scenarioEvaluatorId`,
+  );
+  assertDigest(observation.scenarioEvidenceSha256, `${label}.scenarioEvidenceSha256`);
   if (!["passed", "failed", "unsupported"].includes(observation.scenarioStatus)) {
     fail(`${label}.scenarioStatus is invalid`);
   }
-  const usage = validateUsage(observation.usage, profile, `${label}.usage`);
+  const usage = validateUsage(observation.usage, profile, model, `${label}.usage`);
 
   const expectedChanged = benchmarkCase.expectedOutcome.expectedChangedPaths;
   const incorrectEdits = changedPaths.filter(
@@ -365,6 +393,7 @@ function validateObservation(value, index, manifest, profile, repositoriesById) 
     success,
     measured: observation.scenarioStatus !== "unsupported",
     benchmarkClass: benchmarkCase.class,
+    modelId,
     recall: retrieval.recall,
     precision: retrieval.precision,
     provenanceCount: retrieval.provenanceCount,
@@ -483,6 +512,12 @@ export function validateGate2BenchmarkResult(value, manifestInput, manifestSha25
   const observations = assertArray(result.observations, "observations", 30).map((entry, index) =>
     validateObservation(entry, index, manifest, profile, repositoriesById),
   );
+  if (
+    result.mode === "baseline" &&
+    observations.some((observation) => observation.modelId !== profile.baselineModelId)
+  ) {
+    fail("baseline observations must all use executionProfile.baselineModelId");
+  }
   validateAggregates(result.aggregates, expectedAggregates(observations, manifest));
   assertLiteral(
     JSON.stringify(result.limitations),
@@ -534,11 +569,16 @@ export function compareGate2BenchmarkResults(
     routed.aggregates.thresholdsPassed &&
     successCountRatio >= manifest.thresholds.minimumRoutedSuccessCountRatio &&
     costReduction >= manifest.thresholds.minimumRoutedCostReduction;
+  const routedModelIds = [
+    ...new Set(routed.observations.map((observation) => observation.modelId)),
+  ].sort((left, right) => left.localeCompare(right));
   return {
     schemaVersion: 1,
     benchmarkId: manifest.benchmarkId,
     manifestSha256,
     executionProfileDigestSha256: baseline.executionProfile.profileDigestSha256,
+    baselineModelId: baseline.executionProfile.baselineModelId,
+    routedModelIds,
     baselineSuccessCount: baseline.aggregates.successCount,
     routedSuccessCount: routed.aggregates.successCount,
     successCountRatio: rounded(successCountRatio),

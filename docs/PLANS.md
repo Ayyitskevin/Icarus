@@ -32,8 +32,13 @@ explanation quality and the Gate 2 exit gate remain open.
       registered-command effects.
 - [x] Add a real read-only explanation run and validate its file-and-line
       citations before changing `explain_codebase` from `unsupported`.
-- [ ] Publish and run Gate 2's required versioned 30-task benchmark, measure
-      first-pass plan acceptance, and compare fixed-model routing cost.
+- [x] Publish Gate 2's closed versioned 30-task manifest and strict result
+      contract with exact fixture/task pins, evaluator-evidence references,
+      selected-model routes, per-model captured rates, and an offline-only
+      `30 validated / 0 executed` assessment.
+- [ ] Implement the manifest-bound scenario evaluators, execute all 30 tasks,
+      measure first-pass plan acceptance, and compare the same pinned model pool
+      against its fixed single-model baseline.
 
 This slice adds one bounded provider-assisted explanation over the retrieval
 receipt. It grants no repository mutation, registered command, canary, landing,

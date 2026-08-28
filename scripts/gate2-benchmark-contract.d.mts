@@ -43,6 +43,7 @@ export interface Gate2BenchmarkManifest {
 }
 
 export const GATE2_CLASS_COUNTS: Readonly<Record<string, number>>;
+export const MAX_GATE2_JSON_BYTES: number;
 export const GATE2_REPOSITORY_IDS: readonly string[];
 export const GATE2_CASE_IDS: readonly string[];
 

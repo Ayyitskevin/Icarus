@@ -1,7 +1,7 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: adversarial tests intentionally mutate untyped JSON contracts.
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Gate2BenchmarkManifest } from "../../scripts/gate2-benchmark-contract.mjs";
-import { loadGate2BenchmarkContract } from "../../scripts/gate2-benchmark-contract.mjs";
+import { loadGate2BenchmarkContract, sha256Raw } from "../../scripts/gate2-benchmark-contract.mjs";
 import {
   compareGate2BenchmarkResults,
   computeGate2BenchmarkAggregates,
@@ -30,14 +30,28 @@ function executionProfile(): Record<string, any> {
   const profile: Record<string, any> = {
     profileId: "gate2-qwen38-fixed",
     profileDigestSha256: "",
-    provider: "ollama",
-    adapterVersion: "ollama-openai-compatible-v1",
-    models: ["qwen3.8:27b"],
+    baselineModelId: "qwen3.8:27b",
+    models: [
+      {
+        modelId: "muse-glimmer:latest",
+        provider: "vulcan",
+        adapterVersion: "openai-compatible-v1",
+        modelVersion: "muse-glimmer-2026-08-24",
+        inputUsdPerMillion: 0.5,
+        outputUsdPerMillion: 1,
+      },
+      {
+        modelId: "qwen3.8:27b",
+        provider: "vulcan",
+        adapterVersion: "openai-compatible-v1",
+        modelVersion: "qwen3.8-27b-2026-08-18",
+        inputUsdPerMillion: 1,
+        outputUsdPerMillion: 2,
+      },
+    ],
     pricing: {
       capturedAt: "2026-08-21",
       currency: "USD",
-      inputUsdPerMillion: 1,
-      outputUsdPerMillion: 2,
       sourceLabel: "operator-captured-estimate-v1",
       estimatedOnly: true,
     },
@@ -54,16 +68,21 @@ function executionProfile(): Record<string, any> {
 
 function observations(
   profile: Record<string, any>,
+  modelId: string,
   inputTokens: number,
   outputTokens: number,
 ): Record<string, any>[] {
   const repositories = new Map(
     manifest.repositories.map((repository: Record<string, any>) => [repository.id, repository]),
   );
+  const selectedModel = profile.models.find(
+    (candidate: Record<string, any>) => candidate.modelId === modelId,
+  ) as Record<string, any> | undefined;
+  if (selectedModel === undefined) throw new Error(`missing model fixture: ${modelId}`);
   const cost = Number(
     (
-      (inputTokens * profile.pricing.inputUsdPerMillion +
-        outputTokens * profile.pricing.outputUsdPerMillion) /
+      (inputTokens * selectedModel.inputUsdPerMillion +
+        outputTokens * selectedModel.outputUsdPerMillion) /
       1_000_000
     ).toFixed(12),
   );
@@ -76,6 +95,7 @@ function observations(
       caseId: benchmarkCase.id,
       repositoryRevisionSha256: repository.revisionSha256,
       taskSha256: benchmarkCase.task.sha256,
+      modelId,
       retrievedContext: benchmarkCase.expectedContextPaths.map((filePath: string) => ({
         path: filePath,
         sha256: files.get(filePath),
@@ -84,6 +104,14 @@ function observations(
       changedPaths: benchmarkCase.expectedOutcome.expectedChangedPaths,
       citations: benchmarkCase.expectedOutcome.expectedCitationPaths,
       findingIds: benchmarkCase.expectedOutcome.expectedFindingIds,
+      scenarioEvaluatorId: benchmarkCase.expectedOutcome.scenarioEvaluatorId,
+      scenarioEvidenceSha256: sha256Raw(
+        JSON.stringify({
+          caseId: benchmarkCase.id,
+          evaluatorId: benchmarkCase.expectedOutcome.scenarioEvaluatorId,
+          status: "passed",
+        }),
+      ),
       scenarioStatus: "passed",
       usage: {
         inputTokens,
@@ -98,7 +126,8 @@ function observations(
 
 function result(mode: "baseline" | "routed", inputTokens: number, outputTokens: number) {
   const profile = executionProfile();
-  const taskObservations = observations(profile, inputTokens, outputTokens);
+  const modelId = mode === "baseline" ? profile.baselineModelId : "muse-glimmer:latest";
+  const taskObservations = observations(profile, modelId, inputTokens, outputTokens);
   return {
     schemaVersion: 1,
     benchmarkId: manifest.benchmarkId,
@@ -208,12 +237,67 @@ describe("Gate 2 benchmark result contract", () => {
     );
   });
 
-  it("passes only an exact paired run with non-inferior success and >=30% lower cost", () => {
+  it("requires manifest-bound evaluator identity and evidence for every observation", () => {
+    const missingEvaluator = result("baseline", 1000, 1000);
+    delete requiredAt(missingEvaluator.observations, 0).scenarioEvaluatorId;
+    const missingEvidence = result("baseline", 1000, 1000);
+    delete requiredAt(missingEvidence.observations, 0).scenarioEvidenceSha256;
+
+    expect(() => validateGate2BenchmarkResult(missingEvaluator, manifest, manifestSha256)).toThrow(
+      "scenarioEvaluatorId",
+    );
+    expect(() => validateGate2BenchmarkResult(missingEvidence, manifest, manifestSha256)).toThrow(
+      "scenarioEvidenceSha256",
+    );
+  });
+
+  it("requires an explicit declared model route for every paired observation", () => {
     const baseline = result("baseline", 1000, 1000);
     const routed = result("routed", 500, 500);
+    delete requiredAt(routed.observations, 0).modelId;
+
+    expect(() => compareGate2BenchmarkResults(baseline, routed, manifest, manifestSha256)).toThrow(
+      "modelId",
+    );
+  });
+
+  it("pins baseline routing and recomputes usage from the selected model price", () => {
+    const mislabeledBaseline = result("routed", 1000, 1000);
+    mislabeledBaseline.mode = "baseline";
+    expect(() =>
+      validateGate2BenchmarkResult(mislabeledBaseline, manifest, manifestSha256),
+    ).toThrow("baseline observations");
+
+    const wrongSelectedModelCost = result("routed", 1000, 1000);
+    requiredAt(wrongSelectedModelCost.observations, 0).usage.estimatedCostUsd = 0.003;
+    expect(() =>
+      validateGate2BenchmarkResult(wrongSelectedModelCost, manifest, manifestSha256),
+    ).toThrow("estimatedCostUsd");
+
+    const undeclaredModel = result("routed", 1000, 1000);
+    requiredAt(undeclaredModel.observations, 0).modelId = "undeclared-model";
+    expect(() => validateGate2BenchmarkResult(undeclaredModel, manifest, manifestSha256)).toThrow(
+      "must name a declared model",
+    );
+  });
+
+  it("rejects a scenario evaluator other than the manifest-bound evaluator", () => {
+    const candidate = result("baseline", 1000, 1000);
+    requiredAt(candidate.observations, 0).scenarioEvaluatorId = "different-evaluator";
+
+    expect(() => validateGate2BenchmarkResult(candidate, manifest, manifestSha256)).toThrow(
+      "scenarioEvaluatorId",
+    );
+  });
+
+  it("passes only an exact paired run with non-inferior success and >=30% lower cost", () => {
+    const baseline = result("baseline", 1000, 1000);
+    const routed = result("routed", 1000, 1000);
     const comparison = compareGate2BenchmarkResults(baseline, routed, manifest, manifestSha256);
 
     expect(comparison).toMatchObject({
+      baselineModelId: "qwen3.8:27b",
+      routedModelIds: ["muse-glimmer:latest"],
       baselineSuccessCount: 30,
       routedSuccessCount: 30,
       successCountRatio: 1,
@@ -226,14 +310,14 @@ describe("Gate 2 benchmark result contract", () => {
   it("fails a weak cost result and rejects a mismatched execution profile", () => {
     const weak = compareGate2BenchmarkResults(
       result("baseline", 1000, 1000),
-      result("routed", 800, 800),
+      result("routed", 1600, 1600),
       manifest,
       manifestSha256,
     );
     expect(weak).toMatchObject({ costReduction: 0.2, passed: false });
 
     const baseline = result("baseline", 1000, 1000);
-    const routed = result("routed", 500, 500);
+    const routed = result("routed", 1000, 1000);
     routed.executionProfile.profileId = "changed";
     routed.executionProfile.profileDigestSha256 = computeGate2ExecutionProfileDigest(
       routed.executionProfile,

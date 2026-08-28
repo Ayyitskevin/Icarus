@@ -17,7 +17,7 @@ The current sequence is:
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
 | 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
-| 2 | Context and agent quality — **one-case retrieval + explanation measured** | pinned unfamiliar-codebase retrieval is recall `1.0` / precision `1.0` against one eligible negative example and one production-adapter explanation has host-validated citations with zero mutation; exit still requires measured security/refactor evals, a versioned 30-task benchmark with retrieval recall ≥0.90 and precision ≥0.60, and first-pass plan acceptance ≥80% |
+| 2 | Context and agent quality — **one-case retrieval + explanation measured; 30-task contract published but unexecuted** | pinned unfamiliar-codebase retrieval is recall `1.0` / precision `1.0` against one eligible negative example and one production-adapter explanation has host-validated citations with zero mutation; the versioned 30-task contract fixes 10 repairs, 5 refactors, 5 explanations, 5 security reviews, and 5 scaffolds, but validates 30 and executes 0; exit still requires measured security/refactor evals, retrieval recall ≥0.90 and precision ≥0.60, and first-pass plan acceptance ≥80% |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
 | C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
@@ -32,9 +32,13 @@ recall `1.0` and precision `1.0` against one eligible negative example, with
 digest and line-match provenance, unchanged source, and zero external effects.
 One real bounded explanation now uses the production Ollama adapter, validates
 three cited claims in the host, binds its receipt to the task/base/retrieval and
-provider, and leaves source content and Git metadata unchanged. This flips only
-the frozen `explain_codebase` catalog case to supported; it is not broad quality
-evidence or the required 30-task exit benchmark. The supervised
+provider, and leaves source content and Git metadata unchanged. The separate
+Gate 2 contract now pins seven fixture repositories, 30 task documents and
+scenario evaluators, an admitted model pool with per-model estimated rates, and
+the exit thresholds. Its offline validator reports 30 contract-valid cases and
+0 executed cases. It neither authenticates future evaluator evidence nor turns
+the frozen `explain_codebase` foothold into broad quality or Gate 2 exit evidence.
+The supervised
 active-repository canary is a separate security rollout lane and remains
 **HOLD** after the 2026-08-27 full-tree
 secret-scanner survey. It does not block offline/read-only Gate 2 measurement,

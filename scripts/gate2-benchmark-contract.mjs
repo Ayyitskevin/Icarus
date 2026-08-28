@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -85,6 +86,7 @@ export const GATE2_CLASS_COUNTS = Object.freeze({
   security_review: 5,
   scaffold: 5,
 });
+export const MAX_GATE2_JSON_BYTES = 4 * 1024 * 1024;
 
 export const GATE2_REPOSITORY_IDS = Object.freeze([
   "basic",
@@ -616,6 +618,9 @@ class StrictJsonScanner {
 
 export function parseStrictGate2Json(source) {
   if (typeof source !== "string") invalidJson();
+  if (Buffer.byteLength(source, "utf8") > MAX_GATE2_JSON_BYTES) {
+    invalidJson("input exceeds the Gate 2 JSON byte limit");
+  }
   new StrictJsonScanner(source).parseDocument();
   try {
     return JSON.parse(source);

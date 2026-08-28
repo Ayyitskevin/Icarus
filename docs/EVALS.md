@@ -325,20 +325,33 @@ The manifest publishes these quality gates before a live runner exists:
 A case succeeds only when its exact scenario evaluator reports `passed`, its
 class-specific changed-path/citation/finding evidence matches the manifest, and
 it has zero incorrect edits. Each case binds a stable
-`<case-id>-evaluator` identifier. This slice defines that vocabulary but does
-not implement or impersonate those evaluators; unavailable execution must be
-reported as `unsupported` and makes a result incomplete.
+`<case-id>-evaluator` identifier. Every observation must repeat that exact
+identifier and carry the digest of its retained evaluator evidence. The digest
+is a reference and self-consistency field, not authentication of the runner or
+proof that the referenced evidence exists. This slice defines that vocabulary
+but does not implement or impersonate those evaluators; unavailable execution
+must be reported as `unsupported` and makes a result incomplete.
 
 The strict result contract recomputes retrieval, provenance, plan, outcome,
 usage, cost, and aggregate values from 30 manifest-bound observations. It
 refuses duplicate or extra fields, stale repository/task identities, invented
 digests, over-budget usage, inferred billing, and caller-supplied aggregate
 tampering. `actualBilledUsd` is always null; cost is an estimate from the
-captured profile price table. One result can pass the published quality
-thresholds but still reports that paired comparison is required. A routing
-claim requires baseline and routed records with the same execution-profile
-digest, model set, repository/task revisions, budgets, and captured prices.
+captured per-model price table. One result can pass the published quality
+thresholds but still reports that paired comparison is required. The common
+execution profile pins one baseline model plus every admitted model's provider,
+adapter version, model version, and captured input/output rates. Every case
+observation names the model that handled it, baseline observations must all use
+the pinned baseline model, and usage cost is recomputed from that selected
+model's rates. A routing claim requires baseline and routed records with the
+same execution-profile digest, model pool, repository/task revisions, budgets,
+and captured prices; the comparison reports both the baseline model and routed
+model set.
 
 This contract makes the benchmark reviewable; it is not benchmark evidence.
+Its strict JSON decoder is byte- and depth-bounded, and its result limitations
+state that structural self-consistency does not authenticate runner or evaluator
+evidence. A trusted future runner must retain the exact evidence bytes named by
+each observation.
 Gate 2 remains open until the scenario evaluators and deterministic retrieval
 runtime execute the fixed suite and satisfy the accepted ADR 0036 exit gate.

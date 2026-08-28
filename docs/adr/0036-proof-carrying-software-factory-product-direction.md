@@ -2,10 +2,11 @@
 
 - Status: Accepted product direction — Gate 0 released; Gate 1's bounded
   browser and landing paths plus credential-gated live 3/3 evidence are
-  complete; Gate 2 has one measured retrieval/explanation foothold. Canary,
+  complete; Gate 2 has one measured retrieval/explanation foothold and a
+  published but unexecuted 30-task contract. Canary,
   live-state migration, merge, deployment, and unattended authority remain
   closed
-- Date: 2026-07-30; progress status updated 2026-08-27
+- Date: 2026-07-30; progress status updated 2026-08-28
 - Supersedes: the current product positioning and roadmap sequencing in
   [`FABLE_ICARUS_VISION.md`](../FABLE_ICARUS_VISION.md) sections 1, 11, and 13.
   Its point-in-time audit,
@@ -350,7 +351,7 @@ zero incorrect edits. Compare the same model versions, captured price table,
 and tasks against a fixed single-provider baseline; routing must lower median
 cost per success by at least 30% without lowering the success count.
 
-Progress checkpoint (2026-08-27): the first closed, deterministic retrieval
+Progress checkpoint (2026-08-28): the first closed, deterministic retrieval
 baseline measures one pinned unfamiliar-codebase fixture at recall `1.0` and
 precision `1.0`, with digest/line provenance, unchanged source and temporary
 worktree, and zero provider, network, repository-mutation, or registered-command
@@ -358,9 +359,13 @@ effects. A separate evaluator now makes one bounded call through the production
 Ollama adapter, host-validates three file-and-line-cited claims, digest-binds the
 explanation to its task/base/retrieval/provider identity, and proves zero source
 or Git-metadata change. This flips the frozen `explain_codebase` case to measured
-but remains a one-case foothold, not broad quality, the required 30-task
-benchmark, or Gate 2 exit evidence; security review and behavior-preserving
-refactor evaluations remain unsupported.
+but remains a one-case foothold, not broad quality or Gate 2 exit evidence. The
+required versioned 30-task manifest and result vocabulary are now published:
+they pin seven repository fixtures, task and evaluator identities, each selected
+model route, the common versioned model pool and per-model estimated rates, and
+all exit thresholds. The offline command validates 30 contract cases and
+executes 0, so it supplies no routing or broad-quality claim; security review
+and behavior-preserving refactor evaluations remain unsupported.
 
 ### Gate 3 — VS Code workbench
 

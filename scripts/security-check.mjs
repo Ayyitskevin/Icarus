@@ -7,11 +7,11 @@ import {
   validateWorkflowAttributes,
 } from "./ci-workflow-policy.mjs";
 import { validateGate1BenchmarkManifest } from "./gate1-benchmark-contract.mjs";
-import { validateGate2RetrievalManifest } from "./gate2-retrieval-contract.mjs";
 import {
   parseStrictGate2Json,
   validateGate2BenchmarkManifest,
 } from "./gate2-benchmark-contract.mjs";
+import { validateGate2RetrievalManifest } from "./gate2-retrieval-contract.mjs";
 
 async function collectSources(directory, include) {
   const sources = [];
@@ -2206,7 +2206,15 @@ const assertions = {
     ) &&
     gate2BenchmarkResultContractSource.includes(
       '"single-run-result-does-not-prove-routing-improvement"',
-    ),
+    ) &&
+    gate2BenchmarkResultContractSource.includes(
+      '"result-self-consistency-does-not-authenticate-runner-or-evaluator-evidence"',
+    ) &&
+    gate2BenchmarkResultContractSource.includes('"baselineModelId"') &&
+    gate2BenchmarkResultContractSource.includes('"scenarioEvaluatorId"') &&
+    gate2BenchmarkResultContractSource.includes('"scenarioEvidenceSha256"') &&
+    gate2BenchmarkResultContractSource.includes("model.inputUsdPerMillion") &&
+    gate2BenchmarkResultContractSource.includes("model.outputUsdPerMillion"),
   gate1BenchmarkManifestClosedAndNonAuthoritative:
     gate1BenchmarkManifestValid &&
     gate1BenchmarkManifest.executionBoundary?.credentialReads === 0 &&
