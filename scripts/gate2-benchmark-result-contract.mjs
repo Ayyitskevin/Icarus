@@ -572,6 +572,9 @@ export function compareGate2BenchmarkResults(
   const routedModelIds = [
     ...new Set(routed.observations.map((observation) => observation.modelId)),
   ].sort((left, right) => left.localeCompare(right));
+  if (!routedModelIds.some((modelId) => modelId !== baseline.executionProfile.baselineModelId)) {
+    fail("routed comparison must use at least one declared non-baseline model");
+  }
   return {
     schemaVersion: 1,
     benchmarkId: manifest.benchmarkId,

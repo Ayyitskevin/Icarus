@@ -346,7 +346,8 @@ the pinned baseline model, and usage cost is recomputed from that selected
 model's rates. A routing claim requires baseline and routed records with the
 same execution-profile digest, model pool, repository/task revisions, budgets,
 and captured prices; the comparison reports both the baseline model and routed
-model set.
+model set and refuses a routing claim unless at least one task used a declared
+non-baseline model.
 
 This contract makes the benchmark reviewable; it is not benchmark evidence.
 Its strict JSON decoder is byte- and depth-bounded, and its result limitations

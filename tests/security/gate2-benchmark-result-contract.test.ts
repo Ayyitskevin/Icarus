@@ -290,6 +290,16 @@ describe("Gate 2 benchmark result contract", () => {
     );
   });
 
+  it("rejects token savings presented as routing when every task still uses the baseline model", () => {
+    const baseline = result("baseline", 1000, 1000);
+    const notActuallyRouted = result("baseline", 500, 500);
+    notActuallyRouted.mode = "routed";
+
+    expect(() =>
+      compareGate2BenchmarkResults(baseline, notActuallyRouted, manifest, manifestSha256),
+    ).toThrow("non-baseline model");
+  });
+
   it("passes only an exact paired run with non-inferior success and >=30% lower cost", () => {
     const baseline = result("baseline", 1000, 1000);
     const routed = result("routed", 1000, 1000);

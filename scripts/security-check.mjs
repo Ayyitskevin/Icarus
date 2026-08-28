@@ -2214,7 +2214,10 @@ const assertions = {
     gate2BenchmarkResultContractSource.includes('"scenarioEvaluatorId"') &&
     gate2BenchmarkResultContractSource.includes('"scenarioEvidenceSha256"') &&
     gate2BenchmarkResultContractSource.includes("model.inputUsdPerMillion") &&
-    gate2BenchmarkResultContractSource.includes("model.outputUsdPerMillion"),
+    gate2BenchmarkResultContractSource.includes("model.outputUsdPerMillion") &&
+    gate2BenchmarkResultContractSource.includes(
+      "routed comparison must use at least one declared non-baseline model",
+    ),
   gate1BenchmarkManifestClosedAndNonAuthoritative:
     gate1BenchmarkManifestValid &&
     gate1BenchmarkManifest.executionBoundary?.credentialReads === 0 &&
