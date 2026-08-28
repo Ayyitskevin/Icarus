@@ -3,8 +3,8 @@
 - Status: Accepted product direction — Gate 0 released; Gate 1's bounded
   browser and landing paths plus credential-gated live 3/3 evidence are
   complete; Gate 2 has measured five-case deterministic explanation,
-  security-review, and refactor cohorts plus a published 30-task contract whose
-  full runner remains open. Canary,
+  security-review, refactor, and repair-A cohorts plus a published 30-task
+  contract whose full runner remains open. Canary,
   live-state migration, merge, deployment, and unattended authority remain
   closed
 - Date: 2026-07-30; progress status updated 2026-08-28
@@ -384,11 +384,20 @@ The required versioned
 they pin seven repository fixtures, task and evaluator identities, each selected
 model route, the common versioned model pool and per-model estimated rates, and
 all exit thresholds. The contract-only command still validates 30 cases and
-executes 0 by design. Each partial cohort executes 5 and leaves 25 unexecuted;
-their union covers 15 distinct cases and leaves 15 repair/scaffold cases
-without execution evidence. None supplies a routing claim, and live-model
-quality, autonomous target discovery, the full-suite threshold, and paired
-routing comparison remain open.
+executes 0 by design. Each partial cohort executes 5 and leaves 25 unexecuted.
+A fourth cohort executes the final five repair cases through the same production
+lifecycle with exact operator-selected paths, final bytes, baseline outcomes,
+sandbox checks, local review, source/Git invariance, and durable reopen. Its
+retrieval recall and provenance are `1.0`, macro precision is `0.80`, and all
+five first plans reach approval; operator selection still means autonomous
+discovery is not measured. The four cohorts' union covers 20 distinct cases and
+leaves 10 repair/scaffold cases without execution evidence. Manifest v1's
+schema repair and scaffold cases request protected `migrations/` paths; current
+production policy correctly refuses them, so resolving that mismatch requires a
+versioned benchmark decision rather than weakened policy or an in-place rewrite
+of immutable input. None supplies a routing claim, and live-model quality,
+autonomous target discovery, the full-suite threshold, and paired routing
+comparison remain open.
 
 ### Gate 3 — VS Code workbench
 

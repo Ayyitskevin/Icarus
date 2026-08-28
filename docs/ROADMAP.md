@@ -17,7 +17,7 @@ The current sequence is:
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
 | 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
-| 2 | Context and agent quality — **five explanation, five security-review, and five refactor cases measured; full 30-task benchmark open** | three deterministic cohorts cover 15 distinct manifest cases through production retrieval/adapters; refactors additionally traverse plan approval, private PatchSet mutation, sandbox checks, review, and durable reopen with exact final bytes; explanation/refactor macro precision is 0.80, security macro precision is 0.75, and all have recall/provenance 1.0; each partial report executes 5 and leaves 25 unexecuted, while their union leaves 15 repair/scaffold cases untouched; refactor first-pass host-contract acceptance is 100% but operator-selected targets do not measure autonomous discovery; exit still requires live-model quality, the full 30-task threshold, autonomous planning evidence, and fixed-model routing comparison |
+| 2 | Context and agent quality — **five explanation, five security-review, five refactor, and five repair-A cases measured; full 30-task benchmark open** | four deterministic cohorts cover 20 distinct manifest cases through production retrieval/adapters; refactor and repair-A additionally traverse plan approval, private PatchSet mutation, sandbox checks, review, and durable reopen with exact final bytes; explanation/refactor/repair-A macro precision is 0.80, security macro precision is 0.75, and all have recall/provenance 1.0; each partial report executes 5 and leaves 25 unexecuted, while their union leaves 10 repair/scaffold cases untouched; mutation-cohort first-pass host-contract acceptance is 100% but operator-selected targets do not measure autonomous discovery; manifest v1's two migration-path cases remain held by protected-path policy; exit still requires live-model quality, the full 30-task threshold, autonomous planning evidence, and fixed-model routing comparison |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
 | C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
@@ -48,10 +48,16 @@ targets are narrowed by an accepted first plan, frozen PatchSets change only
 private workspaces, fixed no-network Docker checks pass, local review completes,
 and the durable run survives reopen. Refactor recall/provenance are `1.0` and
 macro precision is `0.80`; first-pass host-contract acceptance is `1.0`,
-but target discovery is not measured. Together the three cohorts cover 15
-distinct manifest cases and leave 15 unexecuted. This is deterministic
+but target discovery is not measured. A fourth cohort executes the final five
+repair cases through the same production lifecycle with exact selected paths,
+one passing and four failing baseline checks, five passing final checks, source/
+Git invariance, and durable reopen. Repair-A recall/provenance are `1.0` and
+macro precision is `0.80`. Together the four cohorts cover 20 distinct manifest
+cases and leave 10 unexecuted. Manifest v1's schema repair and scaffold cases
+name protected `migrations/` paths and correctly remain held pending an explicit
+benchmark-versioning decision. This is deterministic
 contract-integration evidence, not live-model semantic/security judgment,
-whole-codebase coverage, autonomous planning quality, or general refactor
+whole-codebase coverage, autonomous planning quality, or general mutation
 quality. The separate
 Gate 2 contract now pins seven fixture repositories, 30 task documents and
 scenario evaluators, an admitted model pool with per-model estimated rates, and

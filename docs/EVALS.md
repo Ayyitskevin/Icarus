@@ -304,11 +304,28 @@ database connection zeros are closed-design assertions; the schema evaluator
 runs twice only against in-memory SQLite. The dated measurement is
 [`docs/evals/2026-08-28-gate2-refactor-cohort.md`](evals/2026-08-28-gate2-refactor-cohort.md).
 
-Across the explanation, security-review, and refactor reports, 15 distinct
-manifest cases now have deterministic contract-integration evidence and 15
-repair/scaffold cases have not been executed by any partial cohort. Live-model
-quality, autonomous target discovery, the full 30-task threshold, and fixed-
-model routing-cost comparison remain open.
+`pnpm benchmark:gate2:repair-a` executes the final five manifest `repair`
+cases through that same production mutation lifecycle. The operator selection
+is exactly the expected changed-path set: these cases create no path and need no
+selection anchor. One existing behavioral check passes before its proof is
+strengthened; the other four baselines reproduce their intended failures. All
+five final registered checks pass after exact private-workspace repairs, and all
+five completed runs survive runtime reopen. Retrieval recall and digest
+provenance are `1.0`; precision is `1.0` once and `0.75` four times (macro
+`0.80`). Ten loopback requests, ten sandbox checks, five private mutations,
+five registered final checks, and five reopens are observed. This cohort has no
+database or migration case; its zero external-network, remote-mutation, and
+database effects are closed-design assertions. The dated measurement is
+[`docs/evals/2026-08-28-gate2-repair-cohort-a.md`](evals/2026-08-28-gate2-repair-cohort-a.md).
+
+Across the explanation, security-review, refactor, and repair-A reports, 20
+distinct manifest cases now have deterministic contract-integration evidence
+and 10 repair/scaffold cases have not been executed by any partial cohort.
+Manifest v1's schema repair and scaffold cases request protected `migrations/`
+paths, so the ordinary lifecycle correctly refuses them; resolving that input
+contract requires an explicit benchmark-versioning decision, not a policy
+bypass. Live-model quality, autonomous target discovery, the full 30-task
+threshold, and fixed-model routing-cost comparison remain open.
 
 ## Measures
 
@@ -404,11 +421,12 @@ it has zero incorrect edits. Each case binds a stable
 `<case-id>-evaluator` identifier. Every observation must repeat that exact
 identifier and carry the digest of its retained evaluator evidence. The digest
 is a reference and self-consistency field, not authentication of the runner or
-proof that the referenced evidence exists. The two separate cohorts implement
-only the five explanation and five security-review evaluator IDs. Each narrower
-report explicitly leaves 25 cases unexecuted and never fabricates the full
-result's remaining observations; their union covers 10 distinct cases while the
-full-suite runner remains unavailable and incomplete.
+proof that the referenced evidence exists. Four separate partial cohorts
+implement five explanation, five security-review, five refactor, and five
+repair-A evaluator IDs. Each narrower report explicitly leaves 25 cases
+unexecuted and never fabricates the full result's remaining observations; their
+union covers 20 distinct cases while the full-suite runner remains unavailable
+and incomplete.
 
 The strict result contract recomputes retrieval, provenance, plan, outcome,
 usage, cost, and aggregate values from 30 manifest-bound observations. It
@@ -430,8 +448,8 @@ non-baseline model.
 This contract makes the benchmark reviewable; it is not benchmark evidence.
 Its strict JSON decoder is byte- and depth-bounded, and its result limitations
 state that structural self-consistency does not authenticate runner or evaluator
-evidence. The partial explanation, security-review, and refactor runners retain
-their five outcomes inline; a trusted full runner must retain the exact
-evidence bytes named by every one of its 30 observations.
+evidence. The partial explanation, security-review, refactor, and repair-A
+runners retain their five outcomes inline; a trusted full runner must retain
+the exact evidence bytes named by every one of its 30 observations.
 Gate 2 remains open until the scenario evaluators and deterministic retrieval
 runtime execute the fixed suite and satisfy the accepted ADR 0036 exit gate.

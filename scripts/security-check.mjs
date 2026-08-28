@@ -160,6 +160,11 @@ const gate2RefactorCohortContractSource = await readFile(
   "utf8",
 );
 const gate2RefactorCohortRunnerSource = await readFile("scripts/gate2-refactor-cohort.mjs", "utf8");
+const gate2RepairACohortContractSource = await readFile(
+  "scripts/gate2-repair-cohort-a-contract.mjs",
+  "utf8",
+);
+const gate2RepairACohortRunnerSource = await readFile("scripts/gate2-repair-cohort-a.mjs", "utf8");
 const gate1BenchmarkManifestSource = await readFile(
   "fixtures/evals/gate1/manifest.v1.json",
   "utf8",
@@ -2164,7 +2169,7 @@ const assertions = {
     packageJson.scripts["benchmark:gate1"] ===
       "pnpm build:node && node scripts/gate1-benchmark.mjs" &&
     packageJson.scripts.eval ===
-      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-refactor-cohort.mjs && node scripts/gate2-benchmark-contract.mjs",
+      "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-refactor-cohort.mjs && node scripts/gate2-repair-cohort-a.mjs && node scripts/gate2-benchmark-contract.mjs",
   gate2RetrievalCommandIntegrated:
     packageJson.scripts["benchmark:gate2:retrieval"] ===
       "pnpm build:node && node scripts/gate2-retrieval.mjs" &&
@@ -2312,6 +2317,44 @@ const assertions = {
     ) &&
     !/(?:api\.github\.com|process\.env\.(?:GH|GITHUB|OPENAI|ANTHROPIC)|deploy|force-push)/.test(
       gate2RefactorCohortRunnerSource,
+    ),
+  gate2RepairACohortIsBoundedAndIntegrated:
+    packageJson.scripts["benchmark:gate2:repair-a"] ===
+      "pnpm build:node && node scripts/gate2-repair-cohort-a.mjs" &&
+    packageJson.scripts.eval.includes("&& node scripts/gate2-repair-cohort-a.mjs") &&
+    gate2RepairACohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
+    gate2RepairACohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2RepairACohortRunnerSource.includes("createIcarusRuntime(") &&
+    gate2RepairACohortRunnerSource.includes(".service.planRun(") &&
+    gate2RepairACohortRunnerSource.includes(".service.approvePlan(") &&
+    gate2RepairACohortRunnerSource.includes(".service.review(") &&
+    gate2RepairACohortRunnerSource.includes("new DockerSandboxRunner(") &&
+    gate2RepairACohortRunnerSource.includes("sourceCheckoutUnchanged") &&
+    gate2RepairACohortRunnerSource.includes("sourceGitDirectoryUnchanged") &&
+    gate2RepairACohortRunnerSource.includes("durableRunRecovered") &&
+    gate2RepairACohortRunnerSource.includes("externalNetworkRequests: 0") &&
+    gate2RepairACohortRunnerSource.includes("remoteMutations: 0") &&
+    gate2RepairACohortRunnerSource.includes("liveDatabaseConnections: 0") &&
+    gate2RepairACohortRunnerSource.includes("offlineInMemoryDatabaseChecks: 0") &&
+    gate2RepairACohortRunnerSource.includes(
+      "const sandboxCheckExecutions = observations.reduce(",
+    ) &&
+    gate2RepairACohortRunnerSource.includes('externalNetworkRequests: "design-assertion"') &&
+    gate2RepairACohortRunnerSource.includes('remoteMutations: "design-assertion"') &&
+    gate2RepairACohortRunnerSource.includes('liveDatabaseConnections: "design-assertion"') &&
+    gate2RepairACohortRunnerSource.includes('offlineInMemoryDatabaseChecks: "design-assertion"') &&
+    gate2RepairACohortContractSource.includes(
+      '"five-repair-cases-do-not-complete-thirty-task-gate2-benchmark"',
+    ) &&
+    gate2RepairACohortContractSource.includes(
+      '"this-cohort-executes-no-database-or-migration-case"',
+    ) &&
+    !gate2RepairACohortContractSource.includes('path: "migrations/') &&
+    !gate2RepairACohortContractSource.includes('caseId: "repair-schema-status-column"') &&
+    !gate2RepairACohortRunnerSource.includes('file.op === "create"') &&
+    !gate2RepairACohortContractSource.includes('file.op === "create"') &&
+    !/(?:api\.github\.com|process\.env\.(?:GH|GITHUB|OPENAI|ANTHROPIC)|deploy|force-push)/.test(
+      gate2RepairACohortRunnerSource,
     ),
   gate2RetrievalRunnerUsesPinnedLocalReadOnlyEvidence:
     gate2RetrievalRunnerSource.includes('spawnSync(\n    "/usr/bin/git"') &&
