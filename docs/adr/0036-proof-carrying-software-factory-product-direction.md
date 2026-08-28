@@ -3,7 +3,7 @@
 - Status: Accepted product direction — Gate 0 released; Gate 1's bounded
   browser and landing paths plus credential-gated live 3/3 evidence are
   complete; Gate 2 has measured five-case deterministic explanation,
-  security-review, refactor, and repair-A cohorts plus a published 30-task
+  security-review, refactor, repair-A, and repair-B cohorts plus a published 30-task
   contract whose full runner remains open. Canary,
   live-state migration, merge, deployment, and unattended authority remain
   closed
@@ -385,7 +385,7 @@ they pin seven repository fixtures, task and evaluator identities, each selected
 model route, the common versioned model pool and per-model estimated rates, and
 all exit thresholds. The contract-only command still validates 30 cases and
 executes 0 by design. Each partial cohort executes 5 and leaves 25 unexecuted.
-A fourth cohort executes the final five repair cases through the same production
+A fourth cohort executes five repair cases through the same production
 lifecycle with exact operator-selected paths, final bytes, baseline outcomes,
 sandbox checks, local review, source/Git invariance, and durable reopen. Its
 retrieval recall and provenance are `1.0`, macro precision is `0.80`, and all
@@ -395,7 +395,13 @@ leaves 10 repair/scaffold cases without execution evidence. Manifest v1's
 schema repair and scaffold cases request protected `migrations/` paths; current
 production policy correctly refuses them, so resolving that mismatch requires a
 versioned benchmark decision rather than weakened policy or an in-place rewrite
-of immutable input. None supplies a routing claim, and live-model quality,
+of immutable input. A fifth cohort executes four more modify-only repair cases
+through the same lifecycle: all four failing baselines reproduce, final checks
+pass, source/Git state remains unchanged, and durable runs reopen. Its
+recall/provenance are `1.0` and macro precision is `0.875`. The five partial
+reports cover 24 distinct cases and leave 6 unexecuted, but their union is not a
+synthetic full-suite result or a claim that the 24/30 threshold passed. None
+supplies a routing claim, and live-model quality,
 autonomous target discovery, the full-suite threshold, and paired routing
 comparison remain open.
 

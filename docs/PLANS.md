@@ -4,9 +4,9 @@
 
 Gate 0 is released and Gate 1's credential-gated live 3/3 evidence completed
 2026-08-23. Current product-quality work is ADR 0036 Gate 2. Five frozen
-read-only explanation, five security-review, five refactor, and five repair-A
-cases now execute as separate deterministic fixture cohorts; live-model
-quality, autonomous target discovery, and the remaining repair/scaffold
+read-only explanation, five security-review, five refactor, five repair-A, and
+four repair-B cases now execute as separate deterministic fixture cohorts;
+live-model quality, autonomous target discovery, and six remaining cases
 execution remain open. The separate
 supervised active-repository canary remains **HOLD** after the 2026-08-27
 secret-scanner survey; live-state migration, merge, deployment, unattended use,
@@ -17,8 +17,8 @@ checkpoint and must not be read as the current release state.
 ## Gate 2 deterministic retrieval, analysis, refactor, and repair baseline
 
 Status: the one-case retrieval baseline plus five manifest-bound explanation,
-security-review, refactor, and repair-A fixtures execute; live-model quality,
-the remaining 10 repair/scaffold cases, autonomous target discovery, and the
+security-review, refactor, repair-A, and repair-B fixtures execute; live-model
+quality, the remaining 6 cases, autonomous target discovery, and the
 Gate 2 exit gate remain open.
 
 - [x] Add a reusable deterministic core retriever over one exact committed tree.
@@ -58,18 +58,23 @@ Gate 2 exit gate remain open.
       host-contract acceptance without claiming autonomous target discovery.
       At that checkpoint, the three partial cohorts covered 15 distinct cases,
       with 15 not executed by any cohort.
-- [x] Execute the final five repair cases through the same production lifecycle.
+- [x] Execute five host-policy-compatible repair cases through the same production lifecycle.
       Bind exact operator-selected paths, final bytes, baseline outcomes, and
       effect provenance; reproduce one passing and four failing baselines; and
       recover all five completed runs after reopen. The four partial cohorts
       cover 20 distinct cases, with 10 not executed by any cohort.
+- [x] Execute four additional modify-only repair cases through the same
+      production lifecycle. Reproduce all four intended baseline failures,
+      bind exact final bytes and effect provenance, recover each completed run,
+      and leave the protected schema migration excluded. The five partial
+      cohorts cover 24 distinct cases, with 6 not executed by any cohort.
 - [ ] Implement the manifest-bound scenario evaluators, execute all 30 tasks,
       execute the remaining repair and scaffold cases, measure live-model plan
       quality and autonomous target discovery, and compare the same pinned
       model pool against its fixed single-model baseline.
 
 The explanation and security-review cohorts add bounded read-only provider
-analysis. The refactor and repair-A cohorts grant mutation only inside
+analysis. The refactor, repair-A, and repair-B cohorts grant mutation only inside
 disposable private workspaces and run fixed checks without network; none grants
 source, remote, canary, landing, migration, merge, deployment, live-database,
 or unattended authority. Frozen responses prove contract integration, not
