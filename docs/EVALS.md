@@ -16,10 +16,10 @@ duplicated module behavior, offline schema baseline, source-level security
 issue, and unfamiliar multi-module application. The evaluator validates those
 fixtures without counting unsupported product behavior as a pass.
 
-The Milestone 1 portion of `pnpm eval` validates that manifest and its immutable
-fixture contracts, creates private temporary Git repositories, and exercises
-seven M1 outcomes through production runtime/service code. Provider-backed cases
-use the production
+The schema-v2 catalog portion of `pnpm eval` validates that manifest and its
+immutable fixture contracts, creates private temporary Git repositories, and
+exercises seven M1 outcomes plus one bounded Gate 2 explanation. Provider-backed
+cases use the production
 Ollama adapter over a deterministic loopback HTTP contract; this is not a live
 installed model claim. The executable change runs its registered check through
 the production no-network Docker sandbox and proves source content and Git
@@ -185,12 +185,12 @@ passing evidence, immutable source content and Git metadata, the exact target
 set, durable session boundaries, and bounded operation usage. It measures
 `failed_check_session_repair`, **not** autonomous diagnostic target selection.
 
-Three capabilities remain honestly unsupported: behavior-preserving module
-refactor, read-only security findings, and read-only codebase explanation. ADR
-0036 Gate 2 now governs all three; the manifest retains its integer
-`plannedMilestone` field for schema-v2 compatibility and records `2` for each.
-Unsupported contracts validate their fixtures and capability classification
-but are never converted into passes.
+Two capabilities remain honestly unsupported: behavior-preserving module
+refactor and read-only security findings. ADR 0036 Gate 2 governs both. The
+manifest retains its integer `plannedMilestone` field for schema-v2 compatibility
+and records `2` for them and for the now-supported explanation case. Unsupported
+contracts validate their fixtures and capability classification but are never
+converted into passes.
 
 ## Gate 2 deterministic retrieval baseline
 
@@ -214,11 +214,21 @@ fixture and temporary committed worktree byte-for-byte. The ignored report is
 fixed `0.90` recall and `0.60` precision thresholds and refuses nonzero
 provider, network, repository-mutation, or registered-command effects.
 
-This is a retrieval foothold, not Gate 2 completion. It is one deterministic
-fixture rather than the required versioned 30-task benchmark; it does not call
-a model, produce an explanation, validate source citations, measure first-pass
-plan acceptance, or compare routing cost. The `explain_codebase` class in the
-schema-v2 catalog therefore remains honestly `unsupported`.
+The focused retrieval-only benchmark remains a foothold, not Gate 2 completion:
+it calls no model and produces no explanation. The schema-v2 catalog now runs a
+separate real `explain_codebase` evaluator over the same pinned application. It
+uses the production Ollama adapter against one deterministic loopback response,
+sends only the bounded retrieval sources, validates a closed summary/claims
+schema and every selected-path inclusive line range in the host, binds the task,
+base commit, retrieval digest, provider identity, and explanation into a digest,
+and proves source content and Git metadata unchanged. The frozen explanation
+passes with one provider request, four selected paths, three cited claims, zero
+incorrect edits, and zero repository-mutation or arbitrary-command effects.
+
+This is one deterministic explanation measurement, not broad explanation
+quality or Gate 2 exit evidence. The required versioned 30-task benchmark,
+first-pass plan acceptance measurement, security and refactor evaluators, and
+fixed-model routing-cost comparison remain open.
 
 ## Measures
 
@@ -239,7 +249,7 @@ Each measurement is labeled `measured`, `estimated`, `not_applicable`,
 `unsupported`, or `not_measured`. Actual billed cost is never inferred:
 `actualBilledUsd` remains null and configured-rate results are labeled estimated.
 Context quality is expected-path recall/precision plus digest-provenance validity
-for the deterministic M1 selector, not semantic-retrieval quality. The
+for the deterministic selectors, not broad semantic-retrieval quality. The
 interrupted-run case launches the production CLI, holds a real `provider.edit`
 request after its durable operation start, kills that operating-system process,
 and invokes explicit resume against the persisted state.

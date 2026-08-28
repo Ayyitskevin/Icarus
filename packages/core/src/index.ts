@@ -94,6 +94,17 @@ export {
   changeRoomTerminalReason,
 } from "./change-room.js";
 export {
+  type CodebaseExplanationCitationV1,
+  type CodebaseExplanationClaimV1,
+  type CodebaseExplanationResultV1,
+  CODEBASE_EXPLANATION_SCHEMA,
+  explainCodebaseV1,
+  MAX_CODEBASE_EXPLANATION_CITATIONS,
+  MAX_CODEBASE_EXPLANATION_CLAIMS,
+  MAX_CODEBASE_EXPLANATION_INPUT_BYTES,
+  MAX_CODEBASE_EXPLANATION_TEXT_BYTES,
+} from "./codebase-explanation.js";
+export {
   type ContextPreviewCounts,
   type ContextPreviewEntry,
   createContextPreview,

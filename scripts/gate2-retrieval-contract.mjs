@@ -45,7 +45,7 @@ const EXPECTED_EVIDENCE = [
 const EXPECTED_PATHS = ["README.md", "config/app.json", "src/greeting.py", "src/main.py"];
 export const GATE2_RETRIEVAL_LIMITATIONS = Object.freeze([
   "This one-case deterministic fixture measures lexical retrieval only; it is not the Gate 2 30-task release benchmark.",
-  "The explain_codebase capability remains unsupported until a read-only explanation run produces validated source citations.",
+  "This retrieval-only benchmark does not assess explanation completion; the separate schema-v2 catalog carries that measurement.",
 ]);
 
 function fail(message) {
@@ -131,7 +131,7 @@ export function validateGate2RetrievalManifest(value) {
   if (
     scenario.id !== "explain-codebase-retrieval" ||
     scenario.class !== "explain_codebase" ||
-    scenario.claimBoundary !== "retrieval_measured_explanation_unsupported"
+    scenario.claimBoundary !== "retrieval_measured_explanation_not_assessed"
   ) {
     fail("case identity or claim boundary changed");
   }

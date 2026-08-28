@@ -64,6 +64,6 @@
       "source_checkout_unchanged",
       "zero_external_or_repository_effects"
     ],
-    "claimBoundary": "retrieval_measured_explanation_unsupported"
+    "claimBoundary": "retrieval_measured_explanation_not_assessed"
   }
 }

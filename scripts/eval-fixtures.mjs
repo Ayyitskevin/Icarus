@@ -5,9 +5,12 @@ import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 
+import { explainCodebaseV1, retrieveReadOnlyContextV1 } from "../packages/core/dist/index.js";
 import { IcarusError } from "../packages/core/dist/errors.js";
+import { GitController } from "../packages/core/dist/git.js";
 import { DEFAULT_CEILING, DEFAULT_SANDBOX_LIMITS } from "../packages/core/dist/policy.js";
 import { createProviderConfig } from "../packages/core/dist/provider.js";
+import { createGateway } from "../packages/core/dist/providers.js";
 import { createIcarusRuntime } from "../packages/core/dist/runtime.js";
 import { IcarusStore } from "../packages/core/dist/store.js";
 
@@ -43,7 +46,7 @@ const requiredClasses = new Set([
   "recover_failed_provider",
   "resume_interrupted_run",
 ]);
-const m1Capabilities = new Set([
+const supportedCapabilities = new Set([
   "single_file_exact_replacement",
   // ADR 0023 moved transactional multi-file patch sets inside the boundary.
   "multi_file_edit",
@@ -54,6 +57,8 @@ const m1Capabilities = new Set([
   "unsafe_target_rejection",
   "provider_failure_resume",
   "interrupted_operation_resume",
+  // Gate 2 begins with one deterministic, read-only explanation measurement.
+  "read_only_explanation",
 ]);
 const allowedEvaluators = new Set([
   "production_lifecycle",
@@ -62,6 +67,7 @@ const allowedEvaluators = new Set([
   "service_rejection",
   "provider_recovery",
   "interrupted_resume",
+  "read_only_explanation",
   "unsupported_contract",
 ]);
 const allowedMeasurementStatuses = new Set([
@@ -733,6 +739,37 @@ function multiFileEditResponse(scenario) {
         rationale: "Apply only the approved multi-file fixture change.",
       })),
     },
+  };
+}
+
+function codebaseExplanationResponse() {
+  return {
+    content: {
+      summary:
+        "Lantern reads its audience from configuration and passes it through the greeting module.",
+      claims: [
+        {
+          text: "Execution begins in src/main.py.",
+          citations: [{ path: "src/main.py", lineStart: 1, lineEnd: 6 }],
+        },
+        {
+          text: "The entry point reads audience from config/app.json.",
+          citations: [
+            { path: "config/app.json", lineStart: 1, lineEnd: 3 },
+            { path: "src/main.py", lineStart: 6, lineEnd: 6 },
+          ],
+        },
+        {
+          text: "The greeting module formats the configured audience and main prints the result.",
+          citations: [
+            { path: "src/greeting.py", lineStart: 1, lineEnd: 2 },
+            { path: "src/main.py", lineStart: 4, lineEnd: 6 },
+          ],
+        },
+      ],
+    },
+    inputTokens: 96,
+    outputTokens: 64,
   };
 }
 
@@ -2244,6 +2281,175 @@ async function evaluateInterruptedResume(scenario, contract) {
   });
 }
 
+async function evaluateReadOnlyExplanation(scenario, contract) {
+  return withFixtureEnvironment(scenario, contract, async (environment) => {
+    const startedAt = performance.now();
+    const providerServer = await startOllamaQueue([codebaseExplanationResponse()]);
+    try {
+      const runsRoot = path.join(environment.temporaryRoot, "retrieval-runs");
+      await mkdir(runsRoot, { recursive: true, mode: 0o700 });
+      const git = new GitController(environment.controlHome, runsRoot, "/usr/bin/git");
+      const retrieval = await retrieveReadOnlyContextV1(
+        git,
+        environment.workspace,
+        environment.baseCommit,
+        contract.task,
+        { maxFiles: 4, maxTotalBytes: 4_096, maxScanBytes: 4_096 },
+      );
+      const provider = createProviderConfig({
+        kind: "ollama",
+        model: "icarus-eval-contract-model",
+        baseUrl: providerServer.baseUrl,
+        inputUsdPerMillionTokens: 0,
+        outputUsdPerMillionTokens: 0,
+      });
+      const explanation = await explainCodebaseV1(
+        createGateway(provider, {}),
+        retrieval,
+        contract.task,
+      );
+      assertProviderContract(providerServer, 1);
+
+      const expectedExplanation = codebaseExplanationResponse().content;
+      assertCondition(
+        explanation.summary === expectedExplanation.summary &&
+          JSON.stringify(explanation.claims) === JSON.stringify(expectedExplanation.claims),
+        "Read-only explanation did not satisfy the frozen provenance oracle",
+      );
+      const expectedPaths = [...scenario.representativePaths].sort((left, right) =>
+        left.localeCompare(right),
+      );
+      const selectedPaths = retrieval.entries
+        .map((entry) => entry.path)
+        .sort((left, right) => left.localeCompare(right));
+      assertCondition(
+        JSON.stringify(selectedPaths) === JSON.stringify(expectedPaths),
+        "Read-only explanation did not select the frozen fixture sources",
+      );
+      assertCondition(
+        explanation.baseCommit === environment.baseCommit &&
+          explanation.taskSha256 === contract.taskSha256 &&
+          explanation.retrievalDigestSha256 === retrieval.digestSha256 &&
+          /^[a-f0-9]{64}$/.test(explanation.digestSha256),
+        "Read-only explanation provenance identity is invalid",
+      );
+
+      const sourceAfter = await snapshotTree(environment.workspace);
+      const fingerprintAfter = await repositoryFingerprint(
+        environment.workspace,
+        environment.controlHome,
+      );
+      const sourceEvidence = assertSourceUnchanged(environment, sourceAfter, fingerprintAfter);
+      const measuredEvidence = [
+        evidence("fixture_contract_valid", {
+          repositorySha256: contract.repositorySha256,
+          taskSha256: contract.taskSha256,
+          representativeContract: contract.representativeContract,
+        }),
+        evidence("production_ollama_adapter_http", {
+          requests: providerServer.requests.length,
+          endpoint: providerServer.requests[0]?.url,
+          structuredOutput: typeof providerServer.requests[0]?.body.format === "object",
+        }),
+        evidence("deterministic_retrieval_digest", {
+          baseCommit: retrieval.baseCommit,
+          repositoryDigestSha256: retrieval.repositoryDigestSha256,
+          retrievalDigestSha256: retrieval.digestSha256,
+          selectedPaths,
+        }),
+        evidence("source_citations", { claims: explanation.claims }),
+        evidence("explanation_digest", {
+          schema: explanation.schema,
+          digestSha256: explanation.digestSha256,
+        }),
+        evidence("source_unchanged", sourceEvidence),
+        evidence("zero_repository_or_command_effects", {
+          sourceContentChanges: sourceEvidence.contentChanges,
+          sourceGitMetadataUnchanged: sourceEvidence.metadataUnchanged,
+          mutatingRepositoryOperations: 0,
+          arbitraryCommandExecutions: 0,
+        }),
+      ];
+      assertEvidenceNames(scenario, measuredEvidence);
+      const wallMs = performance.now() - startedAt;
+      const measurements = {
+        taskSuccess: {
+          status: "measured",
+          value: true,
+          observedOutcome: "completed",
+        },
+        testSuccess: notApplicable("Read-only explanation does not execute repository checks"),
+        incorrectEdits: {
+          status: "measured",
+          count: 0,
+          unexpectedWorktreePaths: [],
+          sourceCheckoutChangedPaths: sourceEvidence.contentChanges,
+          targetBytesMatched: null,
+        },
+        contextRetrievalQuality: {
+          status: "measured",
+          selectionMethod: "deterministic_gate2",
+          expectedPaths,
+          selectedPaths,
+          matchedPaths: selectedPaths,
+          recall: 1,
+          precision: 1,
+          provenanceValid: true,
+          retrievalDigestSha256: retrieval.digestSha256,
+        },
+        toolFailures: {
+          status: "measured",
+          failedOperations: 0,
+          interruptedOperations: 0,
+          cancelledOperations: 0,
+          failedChecks: 0,
+          unavailableChecks: 0,
+          total: 0,
+        },
+        runtime: {
+          status: "measured",
+          runCreated: false,
+          activeRuntimeMs: explanation.usage.latencyMs,
+          evaluatorWallMs: wallMs,
+          accounting: "single_read_only_explanation_provider_operation",
+        },
+        tokenUsage: {
+          status: "measured",
+          input: explanation.usage.inputTokens,
+          output: explanation.usage.outputTokens,
+          accounting: "provider_reported_explanation_operation",
+        },
+        apiCost: {
+          status: "estimated",
+          estimatedUsd: explanation.usage.estimatedCostUsd,
+          actualBilledUsd: null,
+          basis: "configured zero-rate deterministic Ollama fixture",
+        },
+        humanApprovalFrequency: notApplicable(
+          "Read-only explanation requires no mutation approval",
+        ),
+        rollbackSuccess: notApplicable("Read-only explanation performs no write to roll back"),
+      };
+      validateMeasurements(measurements, scenario.id);
+      return {
+        id: scenario.id,
+        class: scenario.class,
+        expectedOutcome: scenario.expectedOutcome,
+        observedOutcome: "completed",
+        assessment: "passed",
+        fixture: {
+          repositorySha256: contract.repositorySha256,
+          taskSha256: contract.taskSha256,
+        },
+        evidence: measuredEvidence,
+        measurements,
+      };
+    } finally {
+      await providerServer.close();
+    }
+  });
+}
+
 function evaluateUnsupportedContract(scenario, contract) {
   assertCondition(
     contract.representativeContract !== null,
@@ -2446,15 +2652,15 @@ function validateManifest() {
           Array.isArray(scenario.representativePaths) &&
           scenario.representativePaths.length >= 2 &&
           typeof scenario.unsupportedReason === "string" &&
-          !m1Capabilities.has(scenario.requiredCapability),
-        "Unsupported evaluation lacks an honest M1 capability reason: " + scenario.id,
+          !supportedCapabilities.has(scenario.requiredCapability),
+        "Unsupported evaluation lacks an honest current capability reason: " + scenario.id,
       );
     } else {
       assertCondition(
         scenario.supportStatus === "supported" &&
           scenario.evaluator !== "unsupported_contract" &&
-          m1Capabilities.has(scenario.requiredCapability),
-        "Supported evaluation is not bound to an M1 capability: " + scenario.id,
+          supportedCapabilities.has(scenario.requiredCapability),
+        "Supported evaluation is not bound to an executable capability: " + scenario.id,
       );
     }
   }
@@ -2490,6 +2696,8 @@ for (const scenario of manifest.cases) {
       result = await evaluateProviderRecovery(scenario, contract);
     } else if (scenario.evaluator === "interrupted_resume") {
       result = await evaluateInterruptedResume(scenario, contract);
+    } else if (scenario.evaluator === "read_only_explanation") {
+      result = await evaluateReadOnlyExplanation(scenario, contract);
     } else {
       result = evaluateUnsupportedContract(scenario, contract);
     }
@@ -2533,7 +2741,7 @@ const report = {
   aggregateMeasurements: aggregateMeasurements(results),
   limitations: [
     "Actual billed API cost is unavailable in deterministic offline evaluation; only configured-rate estimates are reported.",
-    "Context quality is the deterministic Milestone 1 expected-path baseline, not semantic retrieval quality.",
+    "Context quality is deterministic expected-path measurement, including one Gate 2 explanation fixture; it is not yet broad semantic retrieval quality.",
   ],
   results,
 };

@@ -174,14 +174,20 @@
       "repository": "repos/unfamiliar",
       "task": "tasks/explain-codebase.md",
       "target": "README.md",
-      "expectedOutcome": "unsupported",
+      "expectedOutcome": "completed",
       "requiredCapability": "read_only_explanation",
       "plannedMilestone": 2,
-      "supportStatus": "unsupported",
-      "evaluator": "unsupported_contract",
-      "requiredEvidence": ["fixture_contract_valid", "capability_outside_m1"],
-      "futureEvidence": ["provenance", "source_citations"],
-      "unsupportedReason": "Read-only explanation runs are planned for ADR 0036 Gate 2",
+      "supportStatus": "supported",
+      "evaluator": "read_only_explanation",
+      "requiredEvidence": [
+        "fixture_contract_valid",
+        "production_ollama_adapter_http",
+        "deterministic_retrieval_digest",
+        "source_citations",
+        "explanation_digest",
+        "source_unchanged",
+        "zero_repository_or_command_effects"
+      ],
       "representativePaths": ["README.md", "config/app.json", "src/main.py", "src/greeting.py"]
     },
     {

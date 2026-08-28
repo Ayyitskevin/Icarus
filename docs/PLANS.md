@@ -3,19 +3,19 @@
 ## Current execution status
 
 Gate 0 is released and Gate 1's credential-gated live 3/3 evidence completed
-2026-08-23. Current product-quality work is ADR 0036 Gate 2, beginning with the
-three honestly unsupported evaluation classes: read-only codebase explanation,
-read-only security findings, and behavior-preserving refactoring. The separate
+2026-08-23. Current product-quality work is ADR 0036 Gate 2. One frozen
+read-only codebase explanation is now measured; read-only security findings and
+behavior-preserving refactoring remain honestly unsupported. The separate
 supervised active-repository canary remains **HOLD** after the 2026-08-27
 secret-scanner survey; live-state migration, merge, deployment, unattended use,
 effectful/control session continuation, and wider Vulcan authority remain
 closed. Older sections below retain the status that was true at their named
 checkpoint and must not be read as the current release state.
 
-## Gate 2 deterministic retrieval baseline
+## Gate 2 deterministic retrieval and explanation baseline
 
-Status: one-case read-only baseline implemented; full explanation capability
-and the Gate 2 exit gate remain open.
+Status: one pinned read-only retrieval and explanation case implemented; broad
+explanation quality and the Gate 2 exit gate remain open.
 
 - [x] Add a reusable deterministic core retriever over one exact committed tree.
 - [x] Exclude linked, hidden, binary, invalid-UTF-8, and secret-shaped content
@@ -30,13 +30,14 @@ and the Gate 2 exit gate remain open.
       negative example at recall `1.0`, precision `1.0`, unchanged source and
       temporary worktree, and zero provider, network, repository-mutation, or
       registered-command effects.
-- [ ] Add a real read-only explanation run and validate its file-and-line
+- [x] Add a real read-only explanation run and validate its file-and-line
       citations before changing `explain_codebase` from `unsupported`.
 - [ ] Publish and run Gate 2's required versioned 30-task benchmark, measure
       first-pass plan acceptance, and compare fixed-model routing cost.
 
-This slice establishes retrieval evidence only. It grants no provider, canary,
-mutation, landing, migration, merge, deployment, or unattended authority.
+This slice adds one bounded provider-assisted explanation over the retrieval
+receipt. It grants no repository mutation, registered command, canary, landing,
+migration, merge, deployment, or unattended authority.
 
 ## Headless Vulcan proposal admission
 

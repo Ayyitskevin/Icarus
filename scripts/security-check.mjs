@@ -135,6 +135,10 @@ const gate1BenchmarkManifestSource = await readFile(
   "utf8",
 );
 const gate2RetrievalCoreSource = await readFile("packages/core/src/context-retrieval.ts", "utf8");
+const gate2ExplanationCoreSource = await readFile(
+  "packages/core/src/codebase-explanation.ts",
+  "utf8",
+);
 const gate2RetrievalRunnerSource = await readFile("scripts/gate2-retrieval.mjs", "utf8");
 const gate2RetrievalManifestSource = await readFile(
   "fixtures/evals/gate2/retrieval-manifest.v1.json",
@@ -2127,7 +2131,7 @@ const assertions = {
     gate2RetrievalManifest.executionBoundary?.repositoryMutations === 0 &&
     gate2RetrievalManifest.executionBoundary?.registeredCommands === 0 &&
     gate2RetrievalManifest.executionBoundary?.measuresExplanationCompletion === false &&
-    gate2RetrievalManifest.case?.claimBoundary === "retrieval_measured_explanation_unsupported",
+    gate2RetrievalManifest.case?.claimBoundary === "retrieval_measured_explanation_not_assessed",
   gate2RetrievalCoreIsBoundedAndSecretFiltered:
     gate2RetrievalCoreSource.includes("MAX_RETRIEVAL_QUERY_TERMS = 128") &&
     gate2RetrievalCoreSource.includes("MAX_RETRIEVAL_TREE_ENTRIES = 2_000") &&
@@ -2137,6 +2141,22 @@ const assertions = {
     gate2RetrievalCoreSource.includes("CONTEXT_RETRIEVAL_SCAN_BUDGET_EXCEEDED") &&
     !/(?:node:child_process|node:http|node:https|ModelGateway|executeToolCall)/.test(
       gate2RetrievalCoreSource,
+    ),
+  gate2ExplanationIsBoundedReadOnlyAndProvenanceChecked:
+    gate2ExplanationCoreSource.includes("MAX_CODEBASE_EXPLANATION_CLAIMS = 16") &&
+    gate2ExplanationCoreSource.includes("MAX_CODEBASE_EXPLANATION_CITATIONS = 8") &&
+    gate2ExplanationCoreSource.includes("MAX_CODEBASE_EXPLANATION_INPUT_BYTES = 1024 * 1024") &&
+    gate2ExplanationCoreSource.includes("MAX_CODEBASE_EXPLANATION_TEXT_BYTES = 8 * 1024") &&
+    gate2ExplanationCoreSource.includes("assertRetrievalIntegrity(retrieval)") &&
+    gate2ExplanationCoreSource.includes("sha256(taskBytes) !== retrieval.querySha256") &&
+    gate2ExplanationCoreSource.includes("source === undefined") &&
+    gate2ExplanationCoreSource.includes("source.lineCount") &&
+    gate2ExplanationCoreSource.includes("containsSecretShapedContent(contentBytes)") &&
+    gate2ExplanationCoreSource.includes("parseStrictJson(generated.text)") &&
+    gate2ExplanationCoreSource.includes("const usage = decodeUsage(generated.usage)") &&
+    (gate2ExplanationCoreSource.match(/gateway\.generateStructured\(/g) ?? []).length === 1 &&
+    !/(?:node:child_process|node:fs|node:http|node:https|executeToolCall|DockerSandboxRunner)/.test(
+      gate2ExplanationCoreSource,
     ),
   gate2RetrievalRunnerUsesPinnedLocalReadOnlyEvidence:
     gate2RetrievalRunnerSource.includes('spawnSync(\n    "/usr/bin/git"') &&
