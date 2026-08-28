@@ -197,10 +197,14 @@ function scoreEntry(
   };
 }
 
-function referenceForms(filePath: string): readonly string[] {
+function referenceForms(
+  filePath: string,
+  candidates: ReadonlyMap<string, ScoredEntry>,
+): readonly string[] {
   const extensionIndex = filePath.lastIndexOf(".");
   const withoutExtension =
     extensionIndex > filePath.lastIndexOf("/") ? filePath.slice(0, extensionIndex) : filePath;
+  if (withoutExtension !== filePath && candidates.has(withoutExtension)) return [filePath];
   return [...new Set([filePath, withoutExtension, withoutExtension.replaceAll("/", ".")])].filter(
     (form) => form.length >= 3,
   );
@@ -211,8 +215,16 @@ function containsBoundedReference(content: string, reference: string): boolean {
   let start = content.indexOf(reference);
   while (start !== -1) {
     const before = start === 0 ? "" : (content[start - 1] ?? "");
-    const after = content[start + reference.length] ?? "";
-    if (!referenceCharacter.test(before) && !referenceCharacter.test(after)) return true;
+    const afterIndex = start + reference.length;
+    const after = content[afterIndex] ?? "";
+    const periodEndsSentence =
+      after === "." && /^(?:$|[\s)\]}'",;:!?])/.test(content[afterIndex + 1] ?? "");
+    if (
+      !referenceCharacter.test(before) &&
+      (!referenceCharacter.test(after) || periodEndsSentence)
+    ) {
+      return true;
+    }
     start = content.indexOf(reference, start + 1);
   }
   return false;
@@ -226,10 +238,8 @@ function referencedEntries(
     .filter(
       (candidate) =>
         candidate.path !== source.path &&
-        referenceForms(candidate.path).some(
-          (form) =>
-            (form === candidate.path || !candidates.has(form)) &&
-            containsBoundedReference(source.content, form),
+        referenceForms(candidate.path, candidates).some((form) =>
+          containsBoundedReference(source.content, form),
         ),
     )
     .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));

@@ -146,7 +146,7 @@ describe("Gate 2 read-only context retrieval", () => {
       [
         "readme",
         Buffer.from(
-          "Name normalization is duplicated across two modules, including src/profile.py and another public module. A behavior-preserving refactor must extract a shared implementation and retain the check.\n",
+          "Name normalization is duplicated across two modules, including src/profile.py and another public module. See also src.profile.py for details. A behavior-preserving refactor must extract a shared implementation and retain the check.\n",
         ),
       ],
       [
@@ -241,5 +241,36 @@ describe("Gate 2 read-only context retrieval", () => {
 
     expect(result.entries.map((entry) => entry.path)).toEqual(["checks/verify.py"]);
     expect(result.queryTerms).toContain("check");
+  });
+
+  it("recognizes a referenced path before sentence punctuation", async () => {
+    const blobs = new Map<string, Buffer>([
+      ["readme", Buffer.from("Architecture overview: implementation lives in src/widget.ts.\n")],
+      ["widget", Buffer.from("export const widget = true;\n")],
+    ]);
+    const git = {
+      listTree: vi.fn(
+        async () =>
+          [
+            { mode: "100644", type: "blob", objectId: "readme", path: "README.md" },
+            { mode: "100644", type: "blob", objectId: "widget", path: "src/widget.ts" },
+          ] satisfies TreeEntry[],
+      ),
+      readBlob: vi.fn(async (_repository: string, objectId: string) => {
+        const value = blobs.get(objectId);
+        if (value === undefined) throw new Error(`unknown object ${objectId}`);
+        return value;
+      }),
+    };
+
+    const result = await retrieveReadOnlyContextV1(
+      git,
+      "/repository",
+      BASE,
+      "Trace the architecture overview.",
+      { maxFiles: 2, maxTotalBytes: 8_192, maxScanBytes: 16_384 },
+    );
+
+    expect(result.entries.map((entry) => entry.path)).toEqual(["README.md", "src/widget.ts"]);
   });
 });
