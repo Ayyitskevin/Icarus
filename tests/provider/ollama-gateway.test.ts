@@ -108,7 +108,10 @@ describe("OllamaGateway HTTP contract", () => {
     );
 
     await expect(gateway.generateStructured(generationRequest)).rejects.toEqual(
-      expect.objectContaining({ code: "PROVIDER_HTTP_ERROR", details: { status: 307 } }),
+      expect.objectContaining({
+        code: "PROVIDER_HTTP_ERROR",
+        details: expect.objectContaining({ status: 307 }),
+      }),
     );
     expect(server.requests.map((request) => request.url)).toEqual(["/api/chat"]);
   });

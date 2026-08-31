@@ -198,6 +198,36 @@ class StrictJsonScanner {
   }
 }
 
+/**
+ * Classify why a payload is not strict JSON, without copying the payload.
+ *
+ * "not strict JSON" is true of a markdown-fenced object, a truncated document, an
+ * empty string, and arbitrary prose alike, so a record carrying only that sentence
+ * cannot tell a formatting habit from a broken model. On 2026-08-28 twelve of twenty
+ * Gate 2 baseline failures were complete valid JSON behind a markdown fence, and the
+ * evidence could not say so. See
+ * docs/diagnoses/2026-08-30-gate2-zero-yield-thinking-displacement.md.
+ *
+ * Returns shape and size only. Provider text may echo prompts or credentials and is
+ * never placed in an error.
+ */
+export function describeNonStrictJson(source: string): {
+  readonly bytes: number;
+  readonly shape: "empty" | "markdown_fenced" | "leading_prose" | "truncated" | "other";
+} {
+  const bytes = Buffer.byteLength(source, "utf8");
+  const trimmed = source.trim();
+  if (trimmed.length === 0) return { bytes, shape: "empty" };
+  if (trimmed.startsWith("```")) return { bytes, shape: "markdown_fenced" };
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return { bytes, shape: "leading_prose" };
+  }
+  // Starts like a document but does not close: the signature of a length stop.
+  const opens = (trimmed.match(/[{[]/g) ?? []).length;
+  const closes = (trimmed.match(/[}\]]/g) ?? []).length;
+  return { bytes, shape: opens > closes ? "truncated" : "other" };
+}
+
 export function parseStrictJson(source: string, maxDepth = DEFAULT_MAX_JSON_DEPTH): unknown {
   if (!Number.isSafeInteger(maxDepth) || maxDepth < 1 || maxDepth > 256) {
     invalidJson("Request body has an invalid JSON nesting limit");

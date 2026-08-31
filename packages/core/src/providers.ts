@@ -1,3 +1,4 @@
+import { sha256 } from "./digest.js";
 import { errorMessage, IcarusError, invariant } from "./errors.js";
 import {
   calculateReportedCost,
@@ -109,24 +110,40 @@ async function fetchJson(
       );
     }
     const body = await readBoundedBody(response);
+    // The body was read, so it exists. Discarding it on failure leaves every failure
+    // with the same status indistinguishable, even when one carried actionable
+    // provider diagnostics. Retain a FINGERPRINT, never the upstream text: a byte
+    // count and a digest identify and compare a failure without copying provider
+    // content -- which may hold prompt echoes or credentials -- into an error.
+    const bodyFingerprint = {
+      bodyBytes: Buffer.byteLength(body, "utf8"),
+      bodySha256: sha256(body),
+    } as const;
     if (!response.ok) {
       throw new IcarusError("PROVIDER_HTTP_ERROR", `Provider returned HTTP ${response.status}`, {
         status: response.status,
+        ...bodyFingerprint,
       });
     }
     const contentType = response.headers.get("content-type") ?? "";
-    invariant(
-      contentType.includes("application/json"),
-      "PROVIDER_PROTOCOL_ERROR",
-      "Provider response is not JSON",
-    );
+    if (!contentType.includes("application/json")) {
+      throw new IcarusError("PROVIDER_PROTOCOL_ERROR", "Provider response is not JSON", {
+        contentType: contentType.split(";", 1)[0] ?? "",
+        ...bodyFingerprint,
+      });
+    }
     try {
       return {
         value: JSON.parse(body) as unknown,
         latencyMs: Math.round(performance.now() - startedAt),
       };
-    } catch {
-      throw new IcarusError("PROVIDER_PROTOCOL_ERROR", "Provider response contains invalid JSON");
+    } catch (error) {
+      // Distinguish WHERE the JSON broke. Two malformed payloads that fail at the same
+      // offset are the same defect; two that fail at different offsets are not.
+      throw new IcarusError("PROVIDER_PROTOCOL_ERROR", "Provider response contains invalid JSON", {
+        ...bodyFingerprint,
+        parseError: sanitizeText(errorMessage(error), knownSecrets),
+      });
     }
   } catch (error) {
     if (controller.signal.aborted) {

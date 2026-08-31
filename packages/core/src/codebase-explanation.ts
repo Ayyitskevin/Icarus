@@ -1,10 +1,10 @@
 import { Buffer } from "node:buffer";
 
-import { parseStrictJson } from "./canonical-json.js";
+import { describeNonStrictJson, parseStrictJson } from "./canonical-json.js";
 import { containsSecretShapedContent } from "./context.js";
 import type { ContextRetrievalResultV1 } from "./context-retrieval.js";
 import { digestJson, sha256 } from "./digest.js";
-import { IcarusError } from "./errors.js";
+import { type ErrorDetails, IcarusError } from "./errors.js";
 import type { ModelGateway } from "./provider.js";
 import type { JsonValue, ProviderUsage } from "./types.js";
 
@@ -77,8 +77,8 @@ const RESPONSE_SCHEMA: JsonValue = {
   additionalProperties: false,
 };
 
-function invalid(message: string): never {
-  throw new IcarusError("INVALID_CODEBASE_EXPLANATION", message);
+function invalid(message: string, details: ErrorDetails = {}): never {
+  throw new IcarusError("INVALID_CODEBASE_EXPLANATION", message, details);
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -338,7 +338,9 @@ export async function explainCodebaseV1(
   try {
     parsed = parseStrictJson(generated.text);
   } catch {
-    invalid("provider explanation is not strict JSON");
+    // Which KIND of not-strict-JSON: a fenced object and a truncated one are
+    // different defects and must not serialize to the same sentence.
+    invalid("provider explanation is not strict JSON", describeNonStrictJson(generated.text));
   }
   const decoded = decodeResponse(parsed, retrieval);
   const usage = decodeUsage(generated.usage);
