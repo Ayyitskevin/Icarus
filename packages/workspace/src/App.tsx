@@ -2099,6 +2099,10 @@ function RunEvidence({
             <dd>{run.usage.outputTokens}</dd>
           </div>
           <div>
+            <dt>Charged, unreported</dt>
+            <dd>{run.usage.upperBoundTokens}</dd>
+          </div>
+          <div>
             <dt>Active runtime</dt>
             <dd>{run.usage.activeRuntimeMs} ms</dd>
           </div>

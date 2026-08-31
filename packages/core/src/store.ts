@@ -33,6 +33,7 @@ import {
   ICARUS_APPROVAL_INDEX_SCHEMA,
   ICARUS_CORE_SCHEMA,
   ICARUS_HEADLESS_CHILD_MIGRATION_SCHEMA,
+  ICARUS_USAGE_BASIS_MIGRATION_SCHEMA,
   ICARUS_PATCH_SET_SCHEMA,
   ICARUS_READABLE_MANIFEST_SCHEMA,
 } from "./core-schema.js";
@@ -702,6 +703,8 @@ type AnnotationSchemaStatus = "not_applicable" | "missing" | "valid";
 
 type HeadlessChildSchemaStatus = "not_applicable" | "missing" | "valid";
 
+type UsageBasisSchemaStatus = "not_applicable" | "missing" | "valid";
+
 /**
  * Read-only shape inspection performed before the writable handle is opened, so
  * a refusal cannot have mutated the database. A database that predates the
@@ -736,6 +739,32 @@ function inspectHeadlessChildSchema(databasePath: string): HeadlessChildSchemaSt
       "Active-run index predates headless child lineage",
     );
     return "valid";
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Read-only shape inspection performed before the writable handle is opened, so
+ * a refusal cannot have mutated the database. A database that predates the
+ * `runs` table is not a migration candidate; a database that has `runs` but
+ * lacks the ADR 0068 upper-bound column requires explicit operator approval.
+ */
+function inspectUsageBasisSchema(databasePath: string): UsageBasisSchemaStatus {
+  if (!existsSync(databasePath)) return "not_applicable";
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const runsTableExists =
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runs'")
+        .get() !== undefined;
+    if (!runsTableExists) return "not_applicable";
+
+    const columns = (database.prepare("PRAGMA table_info('runs')").all() as unknown[]).map(
+      (entry) => text(row(entry, "run column").name, "run column.name"),
+    );
+    return columns.includes("upper_bound_tokens") ? "valid" : "missing";
   } finally {
     database.close();
   }
@@ -1554,6 +1583,7 @@ export class IcarusStore {
       allowReadableManifestMigration?: boolean;
       allowAnnotationMigration?: boolean;
       allowHeadlessChildMigration?: boolean;
+      allowUsageBasisMigration?: boolean;
     } = {},
   ) {
     const parent = path.dirname(databasePath);
@@ -1584,6 +1614,26 @@ export class IcarusStore {
       try {
         migration.pragma(`busy_timeout = ${busyTimeoutMs}`);
         migration.exec(ICARUS_HEADLESS_CHILD_MIGRATION_SCHEMA);
+      } finally {
+        migration.close();
+      }
+    }
+    const usageBasisStatus = inspectUsageBasisSchema(databasePath);
+    if (usageBasisStatus === "missing" && options.allowUsageBasisMigration !== true) {
+      throw new IcarusError(
+        "DATABASE_MIGRATION_REQUIRED",
+        "Usage-basis migration requires a state backup and explicit operator approval",
+      );
+    }
+    // ADR 0068's migration must land before the exact-schema startup check for the
+    // same reason ADR 0059's does: it adds a column to a base object, so a database
+    // recorded before the upper-bound basis can never satisfy the new `runs` shape
+    // until the column exists.
+    if (usageBasisStatus === "missing") {
+      const migration = new Database(databasePath);
+      try {
+        migration.pragma(`busy_timeout = ${busyTimeoutMs}`);
+        migration.exec(ICARUS_USAGE_BASIS_MIGRATION_SCHEMA);
       } finally {
         migration.close();
       }
@@ -5824,14 +5874,16 @@ export class IcarusStore {
       "OPERATION_COST_EXCEEDED",
       "Provider reported a cost above its reserved worst case",
     );
-    const observedInputTokens = finish.inputTokens;
-    const observedOutputTokens = finish.outputTokens;
-    const usageObserved = observedInputTokens !== null && observedOutputTokens !== null;
-    const actualTokens = usageObserved
-      ? observedInputTokens + observedOutputTokens
-      : token.reservedTokens;
+    // A provider may report one counter and hide the other. The reported half is
+    // still reported: it belongs in its own observed column, and only the part of
+    // the conservative charge nobody stated is an upper bound.
+    const observedInputTokens = finish.inputTokens ?? 0;
+    const observedOutputTokens = finish.outputTokens ?? 0;
+    const usageObserved = finish.inputTokens !== null && finish.outputTokens !== null;
+    const reportedTokens = observedInputTokens + observedOutputTokens;
+    const actualTokens = usageObserved ? reportedTokens : token.reservedTokens;
     invariant(
-      actualTokens <= token.reservedTokens,
+      reportedTokens <= token.reservedTokens,
       "OPERATION_TOKENS_EXCEEDED",
       "Provider reported token usage above its reservation",
     );
@@ -5883,11 +5935,12 @@ export class IcarusStore {
       .run(
         token.reservedCostUsd,
         actualCost,
-        // Unreported usage is charged, not observed: it lands in upper_bound_tokens so
-        // the durable record never claims input or output work the provider never stated.
-        usageObserved ? observedInputTokens : 0,
-        usageObserved ? observedOutputTokens : 0,
-        usageObserved ? 0 : actualTokens,
+        // Unreported usage is charged, not observed: the unstated remainder lands in
+        // upper_bound_tokens, so the durable record never claims work the provider
+        // never stated and never discards work it did state.
+        observedInputTokens,
+        observedOutputTokens,
+        actualTokens - reportedTokens,
         finish.activeRuntimeMs,
         now,
         token.runId,

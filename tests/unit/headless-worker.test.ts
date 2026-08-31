@@ -455,8 +455,8 @@ describe("headless worker settlement", () => {
         .split("\n")
         .map((line) => JSON.parse(line));
       expect(stderr).toEqual([]);
-      expect(lines[0]).toMatchObject({ schema: "icarus.headless.history.v1", kind: "run" });
-      expect(lines.at(-1)).toMatchObject({ schema: "icarus.headless.history.v1", kind: "end" });
+      expect(lines[0]).toMatchObject({ schema: "icarus.headless.history.v2", kind: "run" });
+      expect(lines.at(-1)).toMatchObject({ schema: "icarus.headless.history.v2", kind: "end" });
       expect(process.exitCode).toBe(3);
       expect(service.approveHeadlessPlan).toHaveBeenCalledOnce();
       expect(close).toHaveBeenCalledOnce();

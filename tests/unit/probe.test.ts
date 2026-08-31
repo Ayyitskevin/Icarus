@@ -116,17 +116,19 @@ describe("throughput probe", () => {
     // null; elapsed time is not unknown, and fabricating 0 destroys the only signal a
     // probe exists to collect.
     const gateway = new FakeGateway(() => {
-      const until = Date.now() + 25;
-      while (Date.now() < until) {
-        // deliberate wall-clock cost before the failure
-      }
       throw new IcarusError("PROVIDER_TRANSPORT_ERROR", "connection reset");
     });
-    const result = await runProbe(gateway, createProbeRequest({ kind: "throughput" }), RUNTIME);
+    // Stated, not burned: the elapsed clock is injected so the assertion tests the
+    // recording of a long failure rather than the host scheduler's timer resolution.
+    const elapsed = [1_000, 146_500];
+    const result = await runProbe(gateway, createProbeRequest({ kind: "throughput" }), {
+      ...RUNTIME,
+      monotonicNowMs: () => elapsed.shift() ?? 146_500,
+    });
     const attempt = result.attempts[0];
 
     expect(attempt?.ok).toBe(false);
-    expect(attempt?.usage.latencyMs).toBeGreaterThan(0);
+    expect(attempt?.usage.latencyMs).toBe(145_500);
     expect(attempt?.usage.inputTokens).toBeNull();
     expect(attempt?.usage.outputTokens).toBeNull();
     // The code is a stable prefix; the message alone cannot be compared across runs.

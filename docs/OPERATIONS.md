@@ -1400,3 +1400,22 @@ does not match fails closed as `DATABASE_ERROR`. There is no backfill and no
 change to any existing table or index. Back up before upgrades. Any further
 schema change still needs an ADR, migration tests, and explicit operator
 approval before existing state is opened by new code.
+
+The `runs.upper_bound_tokens` column (ADR 0068) follows the same contract. A
+database recorded before it separates observed usage from charged upper bounds
+refuses to open with `DATABASE_MIGRATION_REQUIRED`; back up `icarus.sqlite3`
+with its WAL/SHM companions, then open state once with exactly
+`ICARUS_APPROVE_SCHEMA_MIGRATION=usage-basis-v1`. The migration only appends the
+column with a zero default. It does not backfill: a run charged under the older
+basis keeps that charge inside `input_tokens`, because where those tokens
+actually went was never recorded and cannot be recovered by inference.
+
+A state root old enough to predate both ADR 0059's lineage column and this one
+needs both migrations, in that order, as two separate invocations — one token
+approves exactly one migration. The order is not a preference: SQLite appends an
+added column to the stored table definition, and the exact-schema startup check
+compares that definition against the canonical one, so applying them out of
+order produces a table whose shape is correct but whose recorded definition is
+not. Approving only the first leaves it applied and still refuses to open until
+the second is approved, which is the intended fail-closed behaviour, not a
+partial upgrade to work around.

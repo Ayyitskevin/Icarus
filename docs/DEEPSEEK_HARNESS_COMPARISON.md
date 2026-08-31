@@ -62,7 +62,8 @@ than the feature count.
 ### H0 — trajectory protocol (implemented in this slice)
 
 `icarus run history RUN --format jsonl` emits
-`icarus.headless.history.v1`. The stream contains the public run view,
+`icarus.headless.history.v2` (v1 until ADR 0068 enlarged `RunUsage`, which changed
+the export's canonical bytes). The stream contains the public run view,
 approval records, ordered event records, and an explicit end marker. It is a
 presentation over the existing authoritative snapshot; it grants no authority
 and creates no second session store. The end marker records approval/event

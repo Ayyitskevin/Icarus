@@ -866,6 +866,8 @@ export interface UsageView {
   readonly toolCalls: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
+  /** ADR 0068: charged tokens no provider ever reported. Never observed usage. */
+  readonly upperBoundTokens: number;
   readonly activeRuntimeMs: number;
   readonly estimatedCostUsd: number;
   readonly reservedCostUsd: number;

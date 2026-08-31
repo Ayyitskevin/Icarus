@@ -5002,10 +5002,9 @@ export class IcarusService {
         "PROVIDER_SECRET_DETECTED",
         "Provider output contained secret-shaped material and was discarded",
       );
-      const reportedTokens =
-        usage.inputTokens === null || usage.outputTokens === null
-          ? null
-          : usage.inputTokens + usage.outputTokens;
+      // A partially reported total is still a floor on what the provider charged,
+      // so it is checked against the reservation exactly like a complete one.
+      const reportedTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
       const responseBytes = Buffer.byteLength(responseText, "utf8");
       const finishTiming = this.#operationTiming(operation, startedAt);
       invariant(
@@ -5015,7 +5014,7 @@ export class IcarusService {
       );
       if (
         (usage.outputTokens !== null && usage.outputTokens > request.maxOutputTokens) ||
-        (reportedTokens !== null && reportedTokens > reservedTokens) ||
+        reportedTokens > reservedTokens ||
         (usage.estimatedCostUsd !== null &&
           usage.estimatedCostUsd > reservedCostUsd + Number.EPSILON)
       ) {
