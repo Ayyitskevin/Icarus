@@ -110,6 +110,29 @@ describe("throughput probe", () => {
     expect(result.aggregate.meanOutputTokensPerSecond).toBeCloseTo(50, 5);
   });
 
+  it("reports how long a failed attempt actually took, not zero", async () => {
+    // A provider that burns 145 seconds before failing must not be recorded the same
+    // way as one that refuses instantly. Token counts are genuinely unknown and stay
+    // null; elapsed time is not unknown, and fabricating 0 destroys the only signal a
+    // probe exists to collect.
+    const gateway = new FakeGateway(() => {
+      const until = Date.now() + 25;
+      while (Date.now() < until) {
+        // deliberate wall-clock cost before the failure
+      }
+      throw new IcarusError("PROVIDER_TRANSPORT_ERROR", "connection reset");
+    });
+    const result = await runProbe(gateway, createProbeRequest({ kind: "throughput" }), RUNTIME);
+    const attempt = result.attempts[0];
+
+    expect(attempt?.ok).toBe(false);
+    expect(attempt?.usage.latencyMs).toBeGreaterThan(0);
+    expect(attempt?.usage.inputTokens).toBeNull();
+    expect(attempt?.usage.outputTokens).toBeNull();
+    // The code is a stable prefix; the message alone cannot be compared across runs.
+    expect(attempt?.detail).toContain("PROVIDER_TRANSPORT_ERROR");
+  });
+
   it("refuses to call billed-but-empty output a throughput success", async () => {
     // A thinking model can spend an entire budget on reasoning the gateway discards,
     // returning no usable text while reporting thousands of output tokens. Scoring that

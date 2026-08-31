@@ -2193,8 +2193,17 @@ async function evaluateInterruptedResume(scenario, contract) {
         interruptedPayload.reservedRuntimeMs === interruptedReservation.runtimeMs &&
         completed.usage.estimatedCostUsd >=
           usageAtCrash.estimatedCostUsd + interruptedReservation.costUsd &&
-        completed.usage.inputTokens + completed.usage.outputTokens >=
-          usageAtCrash.inputTokens + usageAtCrash.outputTokens + interruptedReservation.tokens &&
+        // ADR 0068: an unobserved charge lands in upperBoundTokens, not inputTokens.
+        // The invariant is unchanged in substance -- the interrupted operation must
+        // still be charged its complete reservation -- so it sums every charged
+        // quantity rather than only the observed ones.
+        completed.usage.inputTokens +
+          completed.usage.outputTokens +
+          completed.usage.upperBoundTokens >=
+          usageAtCrash.inputTokens +
+            usageAtCrash.outputTokens +
+            usageAtCrash.upperBoundTokens +
+            interruptedReservation.tokens &&
         completed.usage.activeRuntimeMs >=
           usageAtCrash.activeRuntimeMs + interruptedReservation.runtimeMs &&
         completed.usage.reservedCostUsd === 0;
