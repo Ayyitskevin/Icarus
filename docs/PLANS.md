@@ -58,7 +58,7 @@ remain open.
       distinguish observed effects from design assertions; and leave the other
       25 tasks unexecuted.
 - [x] Execute the five security-review cases through a dedicated bounded
-      `reviewCodebaseSecurityV1` seam; require exact finding IDs or explicit
+      `reviewCodebaseSecurityV2` seam; require exact finding IDs or explicit
       source-backed no-finding evidence; recompute macro retrieval metrics;
       preserve source/Git state and zero mutation authority; and retain a strict
       independent partial report. The two cohorts cover 10 distinct cases, with

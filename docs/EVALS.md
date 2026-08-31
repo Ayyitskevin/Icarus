@@ -256,7 +256,7 @@ not live-model explanation quality.
 
 `pnpm benchmark:gate2:security-review` separately executes the manifest's five
 `security_review` cases through the same production retriever and structured
-Ollama adapter. The dedicated `reviewCodebaseSecurityV1` seam accepts only a
+Ollama adapter. The dedicated `reviewCodebaseSecurityV2` seam accepts only a
 bounded retrieval receipt and exact task, makes one bounded provider call, and
 returns either one or more typed findings or an explicit source-backed
 `no_finding` record. The host rejects changed receipts, malformed assessment

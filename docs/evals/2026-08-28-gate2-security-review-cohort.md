@@ -1,5 +1,10 @@
 # Gate 2 deterministic security-review cohort — 2026-08-28
 
+> Names as they stood at the time of this run. The security-review writer and its
+> result type were renamed 2026-08-31 to `reviewCodebaseSecurityV2` /
+> `CodebaseSecurityReviewResultV2` when the artifact moved to
+> `icarus.codebase-security-review.v2`; this record is left as taken.
+
 ## Question
 
 Can Icarus execute the five `security_review` cases pinned in the 30-task Gate
