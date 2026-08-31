@@ -6,7 +6,7 @@ import { IcarusError } from "../../packages/core/src/errors.js";
 import {
   createHeadlessStreamLines,
   HEADLESS_STREAM_SCHEMA,
-  type HeadlessStreamContentLineV1,
+  type HeadlessStreamContentLineV2,
   headlessStreamContentSha256,
 } from "../../packages/core/src/headless-stream.js";
 import type {
@@ -411,7 +411,7 @@ describe("headless receipt stream", () => {
       source: { type: "snapshot" },
     });
     expect(result.contentSha256).toBe(
-      headlessStreamContentSha256(lines.slice(0, -1) as readonly HeadlessStreamContentLineV1[]),
+      headlessStreamContentSha256(lines.slice(0, -1) as readonly HeadlessStreamContentLineV2[]),
     );
     expect(Buffer.concat(lines.map(canonicalJsonLine))).toEqual(
       Buffer.concat(createHeadlessStreamLines(history()).map(canonicalJsonLine)),

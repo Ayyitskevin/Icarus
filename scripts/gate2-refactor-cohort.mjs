@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { retrieveReadOnlyContextV1 } from "../packages/core/dist/index.js";
+import { retrieveReadOnlyContextV3 } from "../packages/core/dist/index.js";
 import { GitController } from "../packages/core/dist/git.js";
 import { DEFAULT_CEILING, DEFAULT_SANDBOX_LIMITS } from "../packages/core/dist/policy.js";
 import { createProviderConfig } from "../packages/core/dist/provider.js";
@@ -446,7 +446,7 @@ async function evaluateCase({
   const retrievalHome = path.join(caseRoot, "retrieval-home");
   const retrievalRuns = path.join(caseRoot, "retrieval-runs");
   await Promise.all([retrievalHome, retrievalRuns].map((entry) => mkdir(entry, { mode: 0o700 })));
-  const retrieval = await retrieveReadOnlyContextV1(
+  const retrieval = await retrieveReadOnlyContextV3(
     new GitController(retrievalHome, retrievalRuns),
     source,
     baseCommit,

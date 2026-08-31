@@ -2,41 +2,58 @@ import { Buffer } from "node:buffer";
 
 import { describeNonStrictJson, parseStrictJson } from "./canonical-json.js";
 import { containsSecretShapedContent } from "./context.js";
-import { GATE2_RETRIEVAL_SCHEMA } from "./context-retrieval.js";
-import type { ContextRetrievalResultV1 } from "./context-retrieval.js";
+import { GATE2_RETRIEVAL_SCHEMA, retrievalOmissionEvidenceProblem } from "./context-retrieval.js";
+import type {
+  ContextRetrievalExclusionCountsV3,
+  ContextRetrievalOmissionV3,
+  ContextRetrievalResultV3,
+} from "./context-retrieval.js";
 import { digestJson, sha256 } from "./digest.js";
 import { type ErrorDetails, IcarusError } from "./errors.js";
 import type { ModelGateway } from "./provider.js";
 import type { JsonValue, ProviderUsage } from "./types.js";
 
-export const CODEBASE_EXPLANATION_SCHEMA = "icarus.codebase-explanation.v1";
+export const CODEBASE_EXPLANATION_SCHEMA = "icarus.codebase-explanation.v2";
 export const MAX_CODEBASE_EXPLANATION_CLAIMS = 16;
 export const MAX_CODEBASE_EXPLANATION_CITATIONS = 8;
 export const MAX_CODEBASE_EXPLANATION_TEXT_BYTES = 8 * 1024;
 export const MAX_CODEBASE_EXPLANATION_INPUT_BYTES = 1024 * 1024;
 
-export interface CodebaseExplanationCitationV1 {
+export interface CodebaseExplanationCitationV2 {
   readonly path: string;
   readonly lineStart: number;
   readonly lineEnd: number;
 }
 
-export interface CodebaseExplanationClaimV1 {
+export interface CodebaseExplanationClaimV2 {
   readonly text: string;
-  readonly citations: readonly CodebaseExplanationCitationV1[];
+  readonly citations: readonly CodebaseExplanationCitationV2[];
 }
 
-export interface CodebaseExplanationResultV1 {
+export interface CodebaseExplanationResultV2 {
   readonly schema: typeof CODEBASE_EXPLANATION_SCHEMA;
   readonly baseCommit: string;
   readonly taskSha256: string;
   readonly retrievalDigestSha256: string;
+  /**
+   * What the retrieval did NOT return. Without this the artifact carries only an
+   * opaque retrieval digest, and a reader of a persisted result cannot tell
+   * "nothing contrary matched" from "contrary files were excluded by a ceiling" --
+   * which is the distinction the whole result rests on.
+   */
+  readonly retrievalCoverage: {
+    readonly matchedFiles: number;
+    readonly selectedFiles: number;
+    readonly omittedMatches: readonly ContextRetrievalOmissionV3[];
+    readonly omittedReferences: readonly ContextRetrievalOmissionV3[];
+    readonly excludedFiles: ContextRetrievalExclusionCountsV3;
+  };
   readonly provider: {
     readonly kind: string;
     readonly model: string;
   };
   readonly summary: string;
-  readonly claims: readonly CodebaseExplanationClaimV1[];
+  readonly claims: readonly CodebaseExplanationClaimV2[];
   readonly usage: ProviderUsage;
   readonly digestSha256: string;
 }
@@ -157,8 +174,8 @@ function numberedContent(content: string): string {
 
 function decodeResponse(
   value: unknown,
-  retrieval: ContextRetrievalResultV1,
-): { summary: string; claims: readonly CodebaseExplanationClaimV1[] } {
+  retrieval: ContextRetrievalResultV3,
+): { summary: string; claims: readonly CodebaseExplanationClaimV2[] } {
   const response = exactRecord(value, ["summary", "claims"], "explanation response");
   const summary = boundedText(response.summary, "explanation summary");
   if (
@@ -230,7 +247,7 @@ function asJsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue;
 }
 
-function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV1): void {
+function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV3): void {
   if (
     retrieval.schema !== GATE2_RETRIEVAL_SCHEMA ||
     !/^[a-f0-9]{40}$|^[a-f0-9]{64}$/.test(retrieval.baseCommit) ||
@@ -246,6 +263,8 @@ function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV1): void {
   ) {
     invalid("retrieval receipt identity or counters are invalid");
   }
+  const omissionProblem = retrievalOmissionEvidenceProblem(retrieval);
+  if (omissionProblem !== null) invalid(omissionProblem);
   const paths = new Set<string>();
   let totalBytes = 0;
   for (const entry of retrieval.entries) {
@@ -292,12 +311,12 @@ function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV1): void {
  * trusted retriever inside the same trust boundary. Citations establish source
  * locations, not semantic entailment between a claim and the cited text.
  */
-export async function explainCodebaseV1(
+export async function explainCodebaseV2(
   gateway: ModelGateway,
-  retrieval: ContextRetrievalResultV1,
+  retrieval: ContextRetrievalResultV3,
   task: string,
   signal?: AbortSignal,
-): Promise<CodebaseExplanationResultV1> {
+): Promise<CodebaseExplanationResultV2> {
   assertRetrievalIntegrity(retrieval);
   const taskBytes = Buffer.from(task, "utf8");
   if (
@@ -350,6 +369,13 @@ export async function explainCodebaseV1(
     baseCommit: retrieval.baseCommit,
     taskSha256: retrieval.querySha256,
     retrievalDigestSha256: retrieval.digestSha256,
+    retrievalCoverage: {
+      matchedFiles: retrieval.matchedFiles,
+      selectedFiles: retrieval.entries.length,
+      omittedMatches: retrieval.omittedMatches,
+      omittedReferences: retrieval.omittedReferences,
+      excludedFiles: retrieval.excludedFiles,
+    },
     provider: { kind: gateway.config.kind, model: gateway.config.model },
     summary: decoded.summary,
     claims: decoded.claims,

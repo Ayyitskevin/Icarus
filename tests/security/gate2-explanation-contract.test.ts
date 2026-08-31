@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { digestJson } from "../../packages/core/src/digest.js";
 import type { TreeEntry } from "../../packages/core/src/git.js";
-import { explainCodebaseV1, retrieveReadOnlyContextV1 } from "../../packages/core/src/index.js";
+import { explainCodebaseV2, retrieveReadOnlyContextV3 } from "../../packages/core/src/index.js";
 import { createProviderConfig, type ModelGateway } from "../../packages/core/src/provider.js";
 import type { JsonValue, ProviderUsage } from "../../packages/core/src/types.js";
 
@@ -29,7 +29,7 @@ async function retrieval(
   const tree: TreeEntry[] = [
     { mode: "100644", type: "blob", objectId: "main", path: "src/main.ts" },
   ];
-  return retrieveReadOnlyContextV1(
+  return retrieveReadOnlyContextV3(
     {
       listTree: vi.fn(async () => tree),
       readBlob: vi.fn(async () => source),
@@ -123,7 +123,7 @@ describe("Gate 2 explanation trust-boundary contract", () => {
     ],
   ])("rejects %s", async (_name, response) => {
     await expect(
-      explainCodebaseV1(gateway(response), await retrieval(), TASK),
+      explainCodebaseV2(gateway(response), await retrieval(), TASK),
     ).rejects.toMatchObject({ code: "INVALID_CODEBASE_EXPLANATION" });
   });
 
@@ -131,7 +131,7 @@ describe("Gate 2 explanation trust-boundary contract", () => {
     const forgedUsage: ProviderUsage = { ...VALID_USAGE, inputTokens: -1 };
 
     await expect(
-      explainCodebaseV1(gateway(VALID_RESPONSE, forgedUsage), await retrieval(), TASK),
+      explainCodebaseV2(gateway(VALID_RESPONSE, forgedUsage), await retrieval(), TASK),
     ).rejects.toMatchObject({ code: "INVALID_CODEBASE_EXPLANATION" });
   });
 
@@ -140,7 +140,7 @@ describe("Gate 2 explanation trust-boundary contract", () => {
     const lineDenseSource = Buffer.from(`main\n${"x\n".repeat(131_072)}`);
 
     await expect(
-      explainCodebaseV1(provider, await retrieval(lineDenseSource), TASK),
+      explainCodebaseV2(provider, await retrieval(lineDenseSource), TASK),
     ).rejects.toMatchObject({ code: "INVALID_CODEBASE_EXPLANATION" });
     expect(provider.generateStructured).not.toHaveBeenCalled();
   });
@@ -169,7 +169,7 @@ describe("Gate 2 explanation trust-boundary contract", () => {
       digestSha256: digestJson(asJsonValue(digestable)),
     };
 
-    const accepted = await explainCodebaseV1(gateway(VALID_RESPONSE), counterfeit, TASK);
+    const accepted = await explainCodebaseV2(gateway(VALID_RESPONSE), counterfeit, TASK);
 
     expect(accepted.baseCommit).toBe(forgedBaseCommit);
   });
@@ -185,7 +185,7 @@ describe("Gate 2 explanation trust-boundary contract", () => {
       ],
     };
 
-    const accepted = await explainCodebaseV1(gateway(falseButCited), await retrieval(), TASK);
+    const accepted = await explainCodebaseV2(gateway(falseButCited), await retrieval(), TASK);
 
     expect(accepted.claims[0]?.text).toBe(falseButCited.claims[0]?.text);
   });

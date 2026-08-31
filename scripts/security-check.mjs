@@ -2271,8 +2271,8 @@ const assertions = {
       "pnpm build:node && node scripts/gate2-explanation-cohort.mjs" &&
     packageJson.scripts.eval.includes("&& node scripts/gate2-explanation-cohort.mjs") &&
     gate2ExplanationCohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
-    gate2ExplanationCohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
-    gate2ExplanationCohortRunnerSource.includes("explainCodebaseV1(") &&
+    gate2ExplanationCohortRunnerSource.includes("retrieveReadOnlyContextV3(") &&
+    gate2ExplanationCohortRunnerSource.includes("explainCodebaseV2(") &&
     gate2ExplanationCohortRunnerSource.includes("sourceCheckoutUnchanged") &&
     gate2ExplanationCohortRunnerSource.includes("fixtureWorkspaceUnchanged") &&
     gate2ExplanationCohortRunnerSource.includes("await unlink(temporaryPath)") &&
@@ -2317,8 +2317,8 @@ const assertions = {
       "pnpm build:node && node scripts/gate2-security-review-cohort.mjs" &&
     packageJson.scripts.eval.includes("&& node scripts/gate2-security-review-cohort.mjs") &&
     gate2SecurityReviewCohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
-    gate2SecurityReviewCohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
-    gate2SecurityReviewCohortRunnerSource.includes("reviewCodebaseSecurityV1(") &&
+    gate2SecurityReviewCohortRunnerSource.includes("retrieveReadOnlyContextV3(") &&
+    gate2SecurityReviewCohortRunnerSource.includes("reviewCodebaseSecurityV2(") &&
     gate2SecurityReviewCohortRunnerSource.includes("sourceCheckoutUnchanged") &&
     gate2SecurityReviewCohortRunnerSource.includes("fixtureWorkspaceUnchanged") &&
     gate2SecurityReviewCohortRunnerSource.includes("await unlink(temporaryPath)") &&
@@ -2348,7 +2348,7 @@ const assertions = {
       "pnpm build:node && node scripts/gate2-refactor-cohort.mjs" &&
     packageJson.scripts.eval.includes("&& node scripts/gate2-refactor-cohort.mjs") &&
     gate2RefactorCohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
-    gate2RefactorCohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2RefactorCohortRunnerSource.includes("retrieveReadOnlyContextV3(") &&
     gate2RefactorCohortRunnerSource.includes("createIcarusRuntime(") &&
     gate2RefactorCohortRunnerSource.includes(".service.planRun(") &&
     gate2RefactorCohortRunnerSource.includes(".service.approvePlan(") &&
@@ -2380,7 +2380,7 @@ const assertions = {
       "pnpm build:node && node scripts/gate2-repair-cohort-a.mjs" &&
     packageJson.scripts.eval.includes("&& node scripts/gate2-repair-cohort-a.mjs") &&
     gate2RepairACohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
-    gate2RepairACohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2RepairACohortRunnerSource.includes("retrieveReadOnlyContextV3(") &&
     gate2RepairACohortRunnerSource.includes("createIcarusRuntime(") &&
     gate2RepairACohortRunnerSource.includes(".service.planRun(") &&
     gate2RepairACohortRunnerSource.includes(".service.approvePlan(") &&
@@ -2418,7 +2418,7 @@ const assertions = {
       "pnpm build:node && node scripts/gate2-repair-cohort-b.mjs" &&
     packageJson.scripts.eval.includes("&& node scripts/gate2-repair-cohort-b.mjs") &&
     gate2RepairBCohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
-    gate2RepairBCohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2RepairBCohortRunnerSource.includes("retrieveReadOnlyContextV3(") &&
     gate2RepairBCohortRunnerSource.includes("createIcarusRuntime(") &&
     gate2RepairBCohortRunnerSource.includes(".service.planRun(") &&
     gate2RepairBCohortRunnerSource.includes(".service.approvePlan(") &&
@@ -2464,7 +2464,7 @@ const assertions = {
       "pnpm build:node && node scripts/gate2-scaffold-cohort-a.mjs" &&
     packageJson.scripts.eval.includes("&& node scripts/gate2-scaffold-cohort-a.mjs") &&
     gate2ScaffoldACohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
-    gate2ScaffoldACohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2ScaffoldACohortRunnerSource.includes("retrieveReadOnlyContextV3(") &&
     gate2ScaffoldACohortRunnerSource.includes("createIcarusRuntime(") &&
     gate2ScaffoldACohortRunnerSource.includes(".service.planRun(") &&
     gate2ScaffoldACohortRunnerSource.includes(".service.approvePlan(") &&
@@ -2524,7 +2524,7 @@ const assertions = {
       'if (unchangedSuccessors.length !== 28) fail("successor must preserve exactly 28 unchanged cases")',
     ) &&
     gate2SchemaSuccessorCohortRunnerSource.includes('server.listen(0, "127.0.0.1"') &&
-    gate2SchemaSuccessorCohortRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2SchemaSuccessorCohortRunnerSource.includes("retrieveReadOnlyContextV3(") &&
     gate2SchemaSuccessorCohortRunnerSource.includes("createIcarusRuntime(") &&
     gate2SchemaSuccessorCohortRunnerSource.includes(".service.planRun(") &&
     gate2SchemaSuccessorCohortRunnerSource.includes(".service.approvePlan(") &&
@@ -2620,7 +2620,7 @@ const assertions = {
     ),
   gate2RetrievalRunnerUsesPinnedLocalReadOnlyEvidence:
     gate2RetrievalRunnerSource.includes('spawnSync(\n    "/usr/bin/git"') &&
-    gate2RetrievalRunnerSource.includes("retrieveReadOnlyContextV1(") &&
+    gate2RetrievalRunnerSource.includes("retrieveReadOnlyContextV3(") &&
     gate2RetrievalRunnerSource.includes("sourceCheckoutUnchanged") &&
     gate2RetrievalRunnerSource.includes("workspaceUnchanged") &&
     gate2RetrievalRunnerSource.includes("providerCalls: 0") &&

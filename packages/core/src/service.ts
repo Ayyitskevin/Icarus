@@ -5019,17 +5019,38 @@ export class IcarusService {
           usage.estimatedCostUsd > reservedCostUsd + Number.EPSILON)
       ) {
         // Refusing a response is not a reason to forget what the provider said it
-        // spent. Counters the store can accept keep their reported values; a token
-        // report that is itself outside the reservation cannot be recorded as
-        // observed without breaking the reservation invariant, so it survives as a
-        // claim in the detail rather than being replaced by the reservation and
-        // read later as though nothing was ever reported.
-        const tokensWithinReservation = reportedTokens <= reservedTokens;
+        // spent. ADR 0068's rule is PER COUNTER: a counter the store can accept
+        // keeps its reported value even when its sibling cannot be accepted. An
+        // earlier version decided this on the SUM and so let one out-of-range
+        // counter erase a well-formed one -- 600 input against a 500 reservation
+        // discarded a perfectly good 7 output. Retained in a fixed order until the
+        // reservation is exhausted, because the store can never be charged past it;
+        // whatever cannot be retained survives as a claim in the detail below,
+        // rather than being replaced by the reservation and read later as though
+        // nothing was ever reported.
+        // Each counter is judged against ITS OWN reservation component, never a
+        // shared pool. reservedTokens is inputBytes + request.maxOutputTokens, so a
+        // counter within its own component can always be retained and the pair can
+        // never exceed the store's combined invariant. An earlier version spent one
+        // pooled reservation input-first, which let an impossible input claim of 250
+        // survive against a 100-token input component while erasing a valid output
+        // count of 100 -- the very erasure this branch exists to prevent, and it
+        // also let an output count above maxOutputTokens survive when the input
+        // happened to be small, even though that excess is what forced the refusal.
+        const retainWithin = (reported: number | null, component: number): number | null =>
+          reported !== null &&
+          Number.isSafeInteger(reported) &&
+          reported >= 0 &&
+          reported <= component
+            ? reported
+            : null;
+        const retainedInputTokens = retainWithin(usage.inputTokens, inputBytes);
+        const retainedOutputTokens = retainWithin(usage.outputTokens, request.maxOutputTokens);
         this.#store.finishOperation(operation, {
           outcome: "failed",
           activeRuntimeMs: finishTiming.chargedRuntimeMs,
-          inputTokens: tokensWithinReservation ? usage.inputTokens : null,
-          outputTokens: tokensWithinReservation ? usage.outputTokens : null,
+          inputTokens: retainedInputTokens,
+          outputTokens: retainedOutputTokens,
           estimatedCostUsd: null,
           detail: {
             code: "PROVIDER_USAGE_EXCEEDED_RESERVATION",

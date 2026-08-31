@@ -2,14 +2,18 @@ import { Buffer } from "node:buffer";
 
 import { describeNonStrictJson, parseStrictJson } from "./canonical-json.js";
 import { containsSecretShapedContent } from "./context.js";
-import { GATE2_RETRIEVAL_SCHEMA } from "./context-retrieval.js";
-import type { ContextRetrievalResultV1 } from "./context-retrieval.js";
+import { GATE2_RETRIEVAL_SCHEMA, retrievalOmissionEvidenceProblem } from "./context-retrieval.js";
+import type {
+  ContextRetrievalExclusionCountsV3,
+  ContextRetrievalOmissionV3,
+  ContextRetrievalResultV3,
+} from "./context-retrieval.js";
 import { digestJson, sha256 } from "./digest.js";
 import { type ErrorDetails, IcarusError } from "./errors.js";
 import type { ModelGateway } from "./provider.js";
 import type { JsonValue, ProviderUsage } from "./types.js";
 
-export const CODEBASE_SECURITY_REVIEW_SCHEMA = "icarus.codebase-security-review.v1";
+export const CODEBASE_SECURITY_REVIEW_SCHEMA = "icarus.codebase-security-review.v2";
 export const MAX_CODEBASE_SECURITY_FINDINGS = 16;
 export const MAX_CODEBASE_SECURITY_CITATIONS = 8;
 export const MAX_CODEBASE_SECURITY_TEXT_BYTES = 8 * 1024;
@@ -18,37 +22,50 @@ export const MAX_CODEBASE_SECURITY_OUTPUT_BYTES = 128 * 1024;
 
 export type CodebaseSecuritySeverityV1 = "low" | "medium" | "high" | "critical";
 
-export interface CodebaseSecurityCitationV1 {
+export interface CodebaseSecurityCitationV2 {
   readonly path: string;
   readonly lineStart: number;
   readonly lineEnd: number;
 }
 
-export interface CodebaseSecurityFindingV1 {
+export interface CodebaseSecurityFindingV2 {
   readonly id: string;
   readonly title: string;
   readonly severity: CodebaseSecuritySeverityV1;
   readonly description: string;
   readonly exploitCondition: string;
   readonly recommendation: string;
-  readonly citations: readonly CodebaseSecurityCitationV1[];
+  readonly citations: readonly CodebaseSecurityCitationV2[];
 }
 
-export interface CodebaseSecurityNoFindingV1 {
+export interface CodebaseSecurityNoFindingV2 {
   readonly rationale: string;
-  readonly citations: readonly CodebaseSecurityCitationV1[];
+  readonly citations: readonly CodebaseSecurityCitationV2[];
 }
 
-export interface CodebaseSecurityReviewResultV1 {
+export interface CodebaseSecurityReviewResultV2 {
   readonly schema: typeof CODEBASE_SECURITY_REVIEW_SCHEMA;
   readonly baseCommit: string;
   readonly taskSha256: string;
   readonly retrievalDigestSha256: string;
+  /**
+   * What the retrieval did NOT return. Without this the artifact carries only an
+   * opaque retrieval digest, and a reader of a persisted result cannot tell
+   * "nothing contrary matched" from "contrary files were excluded by a ceiling" --
+   * which is the distinction the whole result rests on.
+   */
+  readonly retrievalCoverage: {
+    readonly matchedFiles: number;
+    readonly selectedFiles: number;
+    readonly omittedMatches: readonly ContextRetrievalOmissionV3[];
+    readonly omittedReferences: readonly ContextRetrievalOmissionV3[];
+    readonly excludedFiles: ContextRetrievalExclusionCountsV3;
+  };
   readonly provider: { readonly kind: string; readonly model: string };
   readonly assessment: "findings" | "no_finding";
   readonly summary: string;
-  readonly findings: readonly CodebaseSecurityFindingV1[];
-  readonly noFinding: CodebaseSecurityNoFindingV1 | null;
+  readonly findings: readonly CodebaseSecurityFindingV2[];
+  readonly noFinding: CodebaseSecurityNoFindingV2 | null;
   readonly usage: ProviderUsage;
   readonly digestSha256: string;
 }
@@ -204,8 +221,8 @@ function numberedContent(content: string): string {
 function decodeCitations(
   value: unknown,
   label: string,
-  selected: ReadonlyMap<string, ContextRetrievalResultV1["entries"][number]>,
-): readonly CodebaseSecurityCitationV1[] {
+  selected: ReadonlyMap<string, ContextRetrievalResultV3["entries"][number]>,
+): readonly CodebaseSecurityCitationV2[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_CODEBASE_SECURITY_CITATIONS) {
     invalid(`${label} are outside the bounded cardinality`);
   }
@@ -247,12 +264,12 @@ function decodeCitations(
 
 function decodeResponse(
   value: unknown,
-  retrieval: ContextRetrievalResultV1,
+  retrieval: ContextRetrievalResultV3,
 ): {
   assessment: "findings" | "no_finding";
   summary: string;
-  findings: readonly CodebaseSecurityFindingV1[];
-  noFinding: CodebaseSecurityNoFindingV1 | null;
+  findings: readonly CodebaseSecurityFindingV2[];
+  noFinding: CodebaseSecurityNoFindingV2 | null;
 } {
   const response = exactRecord(
     value,
@@ -308,7 +325,7 @@ function decodeResponse(
     };
   });
 
-  let noFinding: CodebaseSecurityNoFindingV1 | null = null;
+  let noFinding: CodebaseSecurityNoFindingV2 | null = null;
   if (response.noFinding !== null) {
     const value = exactRecord(
       response.noFinding,
@@ -333,7 +350,7 @@ function asJsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue;
 }
 
-function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV1): void {
+function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV3): void {
   if (
     retrieval.schema !== GATE2_RETRIEVAL_SCHEMA ||
     !/^[a-f0-9]{40}$|^[a-f0-9]{64}$/.test(retrieval.baseCommit) ||
@@ -349,6 +366,8 @@ function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV1): void {
   ) {
     invalid("retrieval receipt identity or counters are invalid");
   }
+  const omissionProblem = retrievalOmissionEvidenceProblem(retrieval);
+  if (omissionProblem !== null) invalid(omissionProblem);
   const paths = new Set<string>();
   let totalBytes = 0;
   for (const entry of retrieval.entries) {
@@ -390,12 +409,12 @@ function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV1): void {
  * coverage. This seam exposes no command, tool, repository-write, or approval
  * authority.
  */
-export async function reviewCodebaseSecurityV1(
+export async function reviewCodebaseSecurityV2(
   gateway: ModelGateway,
-  retrieval: ContextRetrievalResultV1,
+  retrieval: ContextRetrievalResultV3,
   task: string,
   signal?: AbortSignal,
-): Promise<CodebaseSecurityReviewResultV1> {
+): Promise<CodebaseSecurityReviewResultV2> {
   assertRetrievalIntegrity(retrieval);
   const taskBytes = Buffer.from(task, "utf8");
   if (
@@ -453,6 +472,13 @@ export async function reviewCodebaseSecurityV1(
     baseCommit: retrieval.baseCommit,
     taskSha256: retrieval.querySha256,
     retrievalDigestSha256: retrieval.digestSha256,
+    retrievalCoverage: {
+      matchedFiles: retrieval.matchedFiles,
+      selectedFiles: retrieval.entries.length,
+      omittedMatches: retrieval.omittedMatches,
+      omittedReferences: retrieval.omittedReferences,
+      excludedFiles: retrieval.excludedFiles,
+    },
     provider: { kind: gateway.config.kind, model: gateway.config.model },
     assessment: decoded.assessment,
     summary: decoded.summary,

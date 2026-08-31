@@ -15,7 +15,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 
-import { retrieveReadOnlyContextV1 } from "../packages/core/dist/context-retrieval.js";
+import { retrieveReadOnlyContextV3 } from "../packages/core/dist/context-retrieval.js";
 import { GitController } from "../packages/core/dist/git.js";
 import {
   GATE2_RETRIEVAL_LIMITATIONS,
@@ -223,7 +223,7 @@ try {
   };
 
   const controller = new GitController(controlHome, runsRoot, "/usr/bin/git");
-  const retrieval = await retrieveReadOnlyContextV1(
+  const retrieval = await retrieveReadOnlyContextV3(
     controller,
     workspace,
     baseCommit,

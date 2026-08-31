@@ -94,21 +94,21 @@ export {
   changeRoomTerminalReason,
 } from "./change-room.js";
 export {
-  type CodebaseExplanationCitationV1,
-  type CodebaseExplanationClaimV1,
-  type CodebaseExplanationResultV1,
+  type CodebaseExplanationCitationV2,
+  type CodebaseExplanationClaimV2,
+  type CodebaseExplanationResultV2,
   CODEBASE_EXPLANATION_SCHEMA,
-  explainCodebaseV1,
+  explainCodebaseV2,
   MAX_CODEBASE_EXPLANATION_CITATIONS,
   MAX_CODEBASE_EXPLANATION_CLAIMS,
   MAX_CODEBASE_EXPLANATION_INPUT_BYTES,
   MAX_CODEBASE_EXPLANATION_TEXT_BYTES,
 } from "./codebase-explanation.js";
 export {
-  type CodebaseSecurityCitationV1,
-  type CodebaseSecurityFindingV1,
-  type CodebaseSecurityNoFindingV1,
-  type CodebaseSecurityReviewResultV1,
+  type CodebaseSecurityCitationV2,
+  type CodebaseSecurityFindingV2,
+  type CodebaseSecurityNoFindingV2,
+  type CodebaseSecurityReviewResultV2,
   type CodebaseSecuritySeverityV1,
   CODEBASE_SECURITY_REVIEW_SCHEMA,
   MAX_CODEBASE_SECURITY_CITATIONS,
@@ -116,7 +116,7 @@ export {
   MAX_CODEBASE_SECURITY_INPUT_BYTES,
   MAX_CODEBASE_SECURITY_OUTPUT_BYTES,
   MAX_CODEBASE_SECURITY_TEXT_BYTES,
-  reviewCodebaseSecurityV1,
+  reviewCodebaseSecurityV2,
 } from "./codebase-security-review.js";
 export {
   type ContextPreviewCounts,
@@ -125,10 +125,10 @@ export {
   type ProjectContextPreview,
 } from "./context-preview.js";
 export {
-  type ContextRetrievalBudgetV1,
-  type ContextRetrievalEntryV1,
-  type ContextRetrievalMatchV1,
-  type ContextRetrievalResultV1,
+  type ContextRetrievalBudgetV3,
+  type ContextRetrievalEntryV3,
+  type ContextRetrievalMatchV3,
+  type ContextRetrievalResultV3,
   GATE2_RETRIEVAL_SCHEMA,
   MAX_RETRIEVAL_BYTES,
   MAX_RETRIEVAL_FILES,
@@ -136,7 +136,7 @@ export {
   MAX_RETRIEVAL_QUERY_TERMS,
   MAX_RETRIEVAL_SCAN_BYTES,
   MAX_RETRIEVAL_TREE_ENTRIES,
-  retrieveReadOnlyContextV1,
+  retrieveReadOnlyContextV3,
 } from "./context-retrieval.js";
 export { IcarusError, invariant } from "./errors.js";
 export {
@@ -288,17 +288,17 @@ export {
   reconstructHeadlessEvidenceV1,
 } from "./headless-reconstruction.js";
 export type {
-  HeadlessStreamCheckEntryV1,
-  HeadlessStreamCheckLineV1,
-  HeadlessStreamContentLineV1,
-  HeadlessStreamGrantLineV1,
-  HeadlessStreamInitLineV1,
-  HeadlessStreamLineV1,
-  HeadlessStreamPatchSetLineV1,
-  HeadlessStreamPlanLineV1,
-  HeadlessStreamReceiptLineV1,
-  HeadlessStreamResultLineV1,
-  HeadlessStreamSourceV1,
+  HeadlessStreamCheckEntryV2,
+  HeadlessStreamCheckLineV2,
+  HeadlessStreamContentLineV2,
+  HeadlessStreamGrantLineV2,
+  HeadlessStreamInitLineV2,
+  HeadlessStreamLineV2,
+  HeadlessStreamPatchSetLineV2,
+  HeadlessStreamPlanLineV2,
+  HeadlessStreamReceiptLineV2,
+  HeadlessStreamResultLineV2,
+  HeadlessStreamSourceV2,
 } from "./headless-stream.js";
 export {
   createHeadlessStreamLines,

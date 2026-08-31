@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GitController } from "../packages/core/dist/git.js";
-import { retrieveReadOnlyContextV1 } from "../packages/core/dist/index.js";
+import { retrieveReadOnlyContextV3 } from "../packages/core/dist/index.js";
 import { DEFAULT_CEILING, DEFAULT_SANDBOX_LIMITS } from "../packages/core/dist/policy.js";
 import { DockerSandboxRunner } from "../packages/core/dist/sandbox.js";
 import { loadGate2BenchmarkContract, parseStrictGate2Json } from "./gate2-benchmark-contract.mjs";
@@ -534,7 +534,7 @@ async function evaluateCase({ benchmarkCase, repository, oracle, mode, profile, 
     const retrievalHome = path.join(temporaryRoot, "retrieval-home");
     const retrievalRuns = path.join(temporaryRoot, "retrieval-runs");
     await Promise.all([retrievalHome, retrievalRuns].map((entry) => mkdir(entry, { mode: 0o700 })));
-    const retrieval = await retrieveReadOnlyContextV1(
+    const retrieval = await retrieveReadOnlyContextV3(
       new GitController(retrievalHome, retrievalRuns),
       source,
       baseCommit,

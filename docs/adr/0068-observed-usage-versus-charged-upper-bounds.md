@@ -42,6 +42,13 @@ Add `upper_bound_tokens` to `runs` and `upperBoundTokens` to `RunUsage`.
 - Tokens charged from a reservation that nobody reported — fully unreported usage,
   the unstated remainder of a partial report, and interrupted operations —
   accumulate in `upperBoundTokens`.
+- **A counter is judged against its own reservation component**, never a shared pool.
+  `reservedTokens` is `inputBytes + maxOutputTokens`, so input is checked against
+  `inputBytes` and output against `maxOutputTokens`; a counter within its own component
+  can always be retained, and the pair can never breach the store's combined invariant.
+  Spending one pooled reservation in a fixed order looks equivalent and is not: with
+  components 100 and 200 and a report of 250/100, it retains the impossible input claim
+  and drops the valid output one — the erasure this rule exists to prevent.
 - **Refusing a response does not erase what the provider reported.** When usage
   breaches a reservation the response is refused, but the counters the store can
   accept keep their reported values; only a token report that is itself outside the

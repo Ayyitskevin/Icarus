@@ -19,8 +19,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  reviewCodebaseSecurityV1,
-  retrieveReadOnlyContextV1,
+  reviewCodebaseSecurityV2,
+  retrieveReadOnlyContextV3,
 } from "../packages/core/dist/index.js";
 import { GitController } from "../packages/core/dist/git.js";
 import { createProviderConfig } from "../packages/core/dist/provider.js";
@@ -331,7 +331,7 @@ async function evaluateCase({
 
   const controller = new GitController(controlHome, runsRoot, "/usr/bin/git");
   const task = taskBytes.toString("utf8");
-  const retrieval = await retrieveReadOnlyContextV1(controller, workspace, baseCommit, task, {
+  const retrieval = await retrieveReadOnlyContextV3(controller, workspace, baseCommit, task, {
     maxFiles: MAX_CONTEXT_FILES_PER_CASE,
     maxTotalBytes: 64 * 1024,
     maxScanBytes: 1024 * 1024,
@@ -348,7 +348,7 @@ async function evaluateCase({
     `case ${benchmarkCase.id} did not retrieve every expected path: ${JSON.stringify(retrieval.entries.map(({ path: entryPath, score, matchedTerms }) => ({ path: entryPath, score, matchedTerms })))}`,
   );
 
-  const securityReview = await reviewCodebaseSecurityV1(provider, retrieval, task);
+  const securityReview = await reviewCodebaseSecurityV2(provider, retrieval, task);
   assertCondition(
     JSON.stringify({
       assessment: securityReview.assessment,
