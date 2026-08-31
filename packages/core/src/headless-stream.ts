@@ -20,7 +20,7 @@ import type {
   VerificationEvidence,
 } from "./types.js";
 
-export const HEADLESS_STREAM_SCHEMA = "icarus.headless.stream.v1" as const;
+export const HEADLESS_STREAM_SCHEMA = "icarus.headless.stream.v2" as const;
 
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 

@@ -5018,16 +5018,26 @@ export class IcarusService {
         (usage.estimatedCostUsd !== null &&
           usage.estimatedCostUsd > reservedCostUsd + Number.EPSILON)
       ) {
+        // Refusing a response is not a reason to forget what the provider said it
+        // spent. Counters the store can accept keep their reported values; a token
+        // report that is itself outside the reservation cannot be recorded as
+        // observed without breaking the reservation invariant, so it survives as a
+        // claim in the detail rather than being replaced by the reservation and
+        // read later as though nothing was ever reported.
+        const tokensWithinReservation = reportedTokens <= reservedTokens;
         this.#store.finishOperation(operation, {
           outcome: "failed",
           activeRuntimeMs: finishTiming.chargedRuntimeMs,
-          inputTokens: null,
-          outputTokens: null,
+          inputTokens: tokensWithinReservation ? usage.inputTokens : null,
+          outputTokens: tokensWithinReservation ? usage.outputTokens : null,
           estimatedCostUsd: null,
           detail: {
             code: "PROVIDER_USAGE_EXCEEDED_RESERVATION",
             observedRuntimeMs: finishTiming.observedRuntimeMs,
             chargedRuntimeMs: finishTiming.chargedRuntimeMs,
+            claimedInputTokens: usage.inputTokens,
+            claimedOutputTokens: usage.outputTokens,
+            claimedCostUsd: usage.estimatedCostUsd,
           },
         });
         throw new IcarusError(

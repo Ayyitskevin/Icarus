@@ -5881,7 +5881,7 @@ export class IcarusStore {
     const observedOutputTokens = finish.outputTokens ?? 0;
     const usageObserved = finish.inputTokens !== null && finish.outputTokens !== null;
     const reportedTokens = observedInputTokens + observedOutputTokens;
-    const actualTokens = usageObserved ? reportedTokens : token.reservedTokens;
+    const chargedTokens = usageObserved ? reportedTokens : token.reservedTokens;
     invariant(
       reportedTokens <= token.reservedTokens,
       "OPERATION_TOKENS_EXCEEDED",
@@ -5940,7 +5940,7 @@ export class IcarusStore {
         // never stated and never discards work it did state.
         observedInputTokens,
         observedOutputTokens,
-        actualTokens - reportedTokens,
+        chargedTokens - reportedTokens,
         finish.activeRuntimeMs,
         now,
         token.runId,

@@ -61,7 +61,8 @@ icarus run approve-headless RUN \
 ```
 
 Both JSON arguments are bounded and contain no credentials. The command emits
-the existing checksum-terminated `icarus.headless.history.v1` JSONL trajectory,
+the existing checksum-terminated `icarus.headless.history.v1` JSONL trajectory
+(**superseded 2026-08-31**: now `icarus.headless.history.v2` per ADR 0068),
 including the two worker lifecycle events, and returns:
 
 | Outcome | Exit |

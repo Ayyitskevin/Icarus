@@ -41,6 +41,9 @@ selectively implement the useful runtime features in Icarus, in this order:
 6. optional out-of-process adapters such as a pinned DeepSeek Harness worker.
 
 The first item is implemented as `icarus.headless.history.v1` and exposed by:
+(**superseded 2026-08-31**: ADR 0068 enlarged `RunUsage`, which changed this
+export's canonical bytes, so the emitted schema is now
+`icarus.headless.history.v2`. The command below is unchanged.)
 
 ```text
 icarus run history RUN --format jsonl

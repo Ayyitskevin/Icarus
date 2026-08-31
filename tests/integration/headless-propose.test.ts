@@ -350,7 +350,7 @@ describe("headless propose-only default and digest-bound apply", () => {
     ]);
     expect(streamed.exitCode).toBe(0);
     const streamLines = historyLines(streamed.stdout);
-    expect(streamLines.every((line) => line.schema === "icarus.headless.stream.v1")).toBe(true);
+    expect(streamLines.every((line) => line.schema === "icarus.headless.stream.v2")).toBe(true);
     expect(
       streamLines.filter((line) => line.kind === "grant" && line.approvalKind === "apply"),
     ).toEqual([
