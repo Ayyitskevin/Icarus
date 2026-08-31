@@ -97,3 +97,26 @@ results and their comparison, and binds every case's route, instruction
 policy, raw candidate, evaluator evidence, provider completion, and timeout
 accounting. These unkeyed digests prove internal consistency, not runner
 authenticity or repeatability across seeds.
+
+## Correction note (2026-08-30)
+
+The measurement stands as taken; its interpretation was amended. Full analysis:
+[ADR 0067's amendment](../adr/0067-gate2-target-discovery-profile.md#amendment-2026-08-30-what-the-headline-actually-measures).
+Applying to this document specifically:
+
+- The **5/30 → 16/30** row is overwhelmingly associated with strict-output
+  compliance, not target discovery: all 12 routed-only successes correspond to a
+  baseline parse failure. Three metrics must be kept distinct — task success
+  5/30 → 16/30, first-plan acceptance 8/30 → 23/30, and mutation-target matching
+  10/20 → 13/20 (post-hoc), with the repair class identical in both arms.
+- "The fixed baseline repeated the prior 5/30 result" compares runs under a
+  different instruction policy (v1 records carry no `instructionPolicySha256`)
+  and a different plan schema (`plan.risks` removed at r7). Not a repetition.
+- "scaffold remained 0/5" for the baseline is **censored, not measured**: four of
+  the six baseline cases that stopped at exactly 8192 output tokens with zero
+  retained bytes are scaffold.
+- The 20 baseline failures are three mechanisms, not one: 12 recoverable behind a
+  fence (10 matched, 2 opening-only), 6 zero-yield length stops, 2 nonrecoverable
+  malformed payloads. Fence recovery is a diagnostic and does not re-score the run.
+
+No number in this document changes.

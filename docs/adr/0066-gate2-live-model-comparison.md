@@ -83,3 +83,26 @@ explicitly versioned profile without weakening the manifest thresholds.
 - `pnpm benchmark:gate2:live:publish`
 - `pnpm exec vitest run tests/security/gate2-live-candidate-contract.test.ts tests/security/gate2-live-evidence.test.ts`
 - [Dated measurement](../evals/2026-08-28-gate2-live-model-comparison.md)
+
+## Amendment (2026-08-30): the improvement figure is confounded by format compliance
+
+This ADR's Outcome reports the routed run improving successful cases 5/30 → 9/30.
+That figure carries the same confound identified in
+[ADR 0067's amendment](0067-gate2-target-discovery-profile.md): a large part of
+the baseline's failures were unparseable structured output rather than wrong
+answers, so the delta measures format compliance alongside capability and the
+two cannot be separated from the recorded totals.
+
+This ADR's framing survives the correction better than 0067's, because it already
+declines to read the result as capability: it is accepted here as "an honest
+failed measurement, not as a Gate 2 pass or new execution authority", and it
+already reports scaffold and security review at 0/5 without explaining them away.
+The correction to make explicit is that **baseline scaffold is censored rather
+than measured** — see the amendment in 0067 — so "scaffold measured 0/5" should be
+read as "scaffold produced no usable observation", which is a weaker statement
+than it appears.
+
+The stated next step — "improve autonomous target discovery and minimal exact
+citations, then run a new explicitly versioned profile" — remains correct and
+was carried out as the r7 run in ADR 0067. What neither run controlled for is the
+thinking-token budget documented in 0067's amendment.

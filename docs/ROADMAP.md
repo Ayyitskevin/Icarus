@@ -83,7 +83,16 @@ widening authority. Its leak-free paired run measured fixed `code-fast` at 5/30
 and routed `code` at 16/30, with recall `0.9917`, precision `0.8083`, provenance
 `1.0`, zero incorrect edits, plan acceptance `0.7667`, security review 2/5, and
 scaffold 0/5. All provider requests completed. Both absolute quality thresholds
-still fail, and one repeated baseline remains insufficient stability evidence.
+still fail. Amended 2026-08-30: the 5/30 -> 16/30 figure is overwhelmingly
+associated with strict-output compliance rather than target discovery — all 12
+routed-only successes correspond to a baseline parse failure, and baseline
+emitted parseable output in 10/30 cases against routed's 30/30. On mutation-target
+matching the improvement is 10/20 -> 13/20 with the repair class identical in both
+arms; first-plan acceptance is a third, separate metric at 8/30 -> 23/30.
+The two 5/30 results are also not a repeated measurement — they were produced
+under a different instruction policy and a different plan schema, so their
+agreement is a coincidence of disjoint error mechanisms. Baseline scaffold is
+censored rather than measured. See the amendment in ADR 0067.
 Gate 2 remains open for
 stable success of at least 24/30 and plan acceptance of at least 0.80. The
 separate Gate 2 contract now pins seven fixture repositories, 30 task documents
