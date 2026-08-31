@@ -264,6 +264,7 @@ describe("headless child derivation, envelope, and plan admission", () => {
       toolCalls: 0,
       inputTokens: 0,
       outputTokens: 0,
+      upperBoundTokens: 0,
       activeRuntimeMs: 0,
       estimatedCostUsd: 0,
       reservedCostUsd: 0,

@@ -349,11 +349,24 @@ function assertExactMembers(
   value: Readonly<Record<string, JsonValue>>,
   expectedMembers: readonly string[],
   label: string,
+  optionalMembers: readonly string[] = [],
 ): void {
-  const actual = Object.keys(value).sort();
+  // Optional members exist for durable payloads written before a field was added.
+  // A settlement recorded before charged upper bounds were distinguished from
+  // observed usage carries six members; one recorded after carries seven. Requiring
+  // exactly one shape would make the older evidence unreadable, and rejecting the
+  // newer would make the distinction unrecordable.
+  const optional = new Set(optionalMembers);
+  const actual = Object.keys(value)
+    .filter((member) => !optional.has(member))
+    .sort();
   const expected = [...expectedMembers].sort();
+  const unknown = Object.keys(value).filter(
+    (member) => !optional.has(member) && !expectedMembers.includes(member),
+  );
   invariant(
-    actual.length === expected.length &&
+    unknown.length === 0 &&
+      actual.length === expected.length &&
       actual.every((member, index) => member === expected[index]),
     "INVALID_HEADLESS_WORKER_HISTORY",
     `${label} members are malformed`,
@@ -397,6 +410,7 @@ function decodeUsage(value: JsonValue | undefined): RunRecord["usage"] {
       "toolCalls",
     ],
     "Headless worker settlement usage",
+    ["upperBoundTokens"],
   );
   const {
     toolCalls,

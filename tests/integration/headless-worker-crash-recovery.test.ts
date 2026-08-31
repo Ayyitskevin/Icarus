@@ -287,8 +287,12 @@ describe("headless worker crash-tail recovery", () => {
       crashed.usage.reservedCostUsd - (interruptedPayload?.reservedCostUsd as number),
     );
     expect(recoveredUsage?.toolCalls).toBe(crashed.usage.toolCalls);
-    expect(recoveredUsage?.inputTokens).toBe(
-      crashed.usage.inputTokens + (interruptedPayload?.reservedTokens as number),
+    // ADR 0068: an interrupted operation is still charged its full reservation, but
+    // those tokens were never observed, so they are recorded as a charged upper bound
+    // rather than as input the provider reported.
+    expect(recoveredUsage?.inputTokens).toBe(crashed.usage.inputTokens);
+    expect(recoveredUsage?.upperBoundTokens).toBe(
+      crashed.usage.upperBoundTokens + (interruptedPayload?.reservedTokens as number),
     );
     expect(recoveredUsage?.outputTokens).toBe(crashed.usage.outputTokens);
     expect(recoveredUsage?.activeRuntimeMs).toBe(

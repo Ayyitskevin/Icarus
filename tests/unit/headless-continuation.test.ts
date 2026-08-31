@@ -77,6 +77,7 @@ function run(
       toolCalls: 3,
       inputTokens: 10,
       outputTokens: 5,
+      upperBoundTokens: 0,
       activeRuntimeMs: 20,
       estimatedCostUsd: 0,
       reservedCostUsd: 0,

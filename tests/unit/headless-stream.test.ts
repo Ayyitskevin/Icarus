@@ -120,6 +120,7 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
       toolCalls: 0,
       inputTokens: 10,
       outputTokens: 5,
+      upperBoundTokens: 0,
       activeRuntimeMs: 100,
       estimatedCostUsd: 0,
       reservedCostUsd: 0,
@@ -419,7 +420,7 @@ describe("headless receipt stream", () => {
       createHash("sha256")
         .update(Buffer.concat(lines.map(canonicalJsonLine)))
         .digest("hex"),
-    ).toBe("2742a4bb83924aaa9e05289ea3225eb5b2c6ccd97383ff854abee2a3da5bc11b");
+    ).toBe("5193fd0ea107d506c068140b412f43b6cde21641e4a4e58862a660a506e4907b");
   });
 
   test("binds superseded patch-set digests to their intents in order", () => {
