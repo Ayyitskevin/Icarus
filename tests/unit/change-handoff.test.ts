@@ -1200,7 +1200,7 @@ describe("Change Handoff authoritative reader", () => {
     expect(refusal).toMatchObject({ code: "HANDOFF_SOURCE_INVALID" });
   });
 
-  it("reads pre-0068 state by projecting a missing upper-bound column as zero", () => {
+  it("reads pre-0068 state without referencing the absent upper-bound column", () => {
     const fixture = trackedFixture();
     mutateDatabase(fixture, (database) => {
       database.prepare("ALTER TABLE runs DROP COLUMN upper_bound_tokens").run();
