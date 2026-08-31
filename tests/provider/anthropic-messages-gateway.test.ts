@@ -51,7 +51,10 @@ describe("AnthropicMessagesGateway HTTP contract", () => {
 
   it("forces one schema-bound tool call and returns its input as structured text", async () => {
     server = await startProviderHttpServer((_request, response) => {
+      response.setHeader("request-id", "req_anthropic_123");
       sendProviderJson(response, 200, {
+        id: "msg_anthropic_123",
+        model: "claude-sonnet-4-20260815",
         stop_reason: "tool_use",
         content: [
           { type: "text", text: "ignored prose" },
@@ -80,6 +83,14 @@ describe("AnthropicMessagesGateway HTTP contract", () => {
     expect(JSON.parse(result.text)).toEqual({ summary: "one edit", steps: ["replace"] });
     expect(result.usage).toMatchObject({ inputTokens: 11, outputTokens: 7 });
     expect(result.usage.estimatedCostUsd).toBeCloseTo(0.000_05, 10);
+    expect(result.reportedIdentity).toEqual({
+      model: "claude-sonnet-4-20260815",
+      responseId: "msg_anthropic_123",
+      requestId: "req_anthropic_123",
+      providerId: null,
+      upstreamModel: null,
+      upstreamHost: null,
+    });
     expect(server.requests).toHaveLength(1);
     const captured = server.requests[0];
     expect(captured?.method).toBe("POST");
@@ -101,6 +112,68 @@ describe("AnthropicMessagesGateway HTTP contract", () => {
       ],
       tool_choice: { type: "tool", name: "icarus_plan" },
     });
+  });
+
+  it.each([undefined, null, "", "   "])(
+    "rejects a missing or malformed reported model: %p",
+    async (model) => {
+      server = await startProviderHttpServer((_request, response) => {
+        sendProviderJson(response, 200, {
+          id: "msg_model_check",
+          model,
+          stop_reason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              name: "icarus_plan",
+              input: { summary: "ok", steps: [] },
+            },
+          ],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      });
+      const gateway = new AnthropicMessagesGateway(
+        createProviderConfig({
+          kind: "anthropic",
+          model: "configured-model",
+          baseUrl: server.baseUrl,
+        }),
+        apiKey,
+      );
+
+      await expect(gateway.generateStructured(generationRequest)).rejects.toEqual(
+        expect.objectContaining({ code: "PROVIDER_PROTOCOL_ERROR" }),
+      );
+    },
+  );
+
+  it("rejects a successful response without its required message ID", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, {
+        model: "provider-reported-model",
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            name: "icarus_plan",
+            input: { summary: "ok", steps: [] },
+          },
+        ],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+    });
+    const gateway = new AnthropicMessagesGateway(
+      createProviderConfig({
+        kind: "anthropic",
+        model: "configured-model",
+        baseUrl: server.baseUrl,
+      }),
+      apiKey,
+    );
+
+    await expect(gateway.generateStructured(generationRequest)).rejects.toEqual(
+      expect.objectContaining({ code: "PROVIDER_PROTOCOL_ERROR" }),
+    );
   });
 
   it("rejects a response that stopped at the output ceiling", async () => {

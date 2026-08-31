@@ -4,6 +4,7 @@ import { CODEBASE_EXPLANATION_SCHEMA, explainCodebaseV2 } from "../../packages/c
 import { retrieveReadOnlyContextV3 } from "../../packages/core/src/context-retrieval.js";
 import type { TreeEntry } from "../../packages/core/src/git.js";
 import { createProviderConfig, type ModelGateway } from "../../packages/core/src/provider.js";
+import { syntheticReportedIdentity } from "../support/provider-result.js";
 
 const TASK =
   "Explain Lantern's entry point, configuration flow, and greeting module with file-and-line provenance and no repository changes.";
@@ -87,6 +88,7 @@ function gateway(): ModelGateway {
         ],
       }),
       usage: { inputTokens: 120, outputTokens: 80, estimatedCostUsd: 0, latencyMs: 12 },
+      reportedIdentity: syntheticReportedIdentity("fixture-explainer"),
     })),
   };
 }
@@ -153,6 +155,7 @@ describe("Gate 2 read-only codebase explanation", () => {
         ],
       }),
       usage: { inputTokens: 80, outputTokens: 20, estimatedCostUsd: 0, latencyMs: 5 },
+      reportedIdentity: syntheticReportedIdentity("fixture-explainer"),
     });
 
     await expect(explainCodebaseV2(provider, context, TASK)).rejects.toMatchObject({
@@ -187,6 +190,7 @@ describe("Gate 2 read-only codebase explanation", () => {
           ],
         }),
         usage: { inputTokens: 10, outputTokens: 5, estimatedCostUsd: 0, latencyMs: 1 },
+        reportedIdentity: syntheticReportedIdentity("fixture-explainer"),
       })),
     };
 

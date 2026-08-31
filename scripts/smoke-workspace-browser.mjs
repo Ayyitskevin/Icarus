@@ -526,15 +526,17 @@ async function startProvider() {
     request.on("data", (chunk) => chunks.push(chunk));
     request.on("end", async () => {
       try {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
         requests.push({
           method: request.method,
-          body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+          body,
         });
         const gate = responseGate;
         if (gate !== null) await gate.promise;
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
+            model: body.model,
             message: {
               content: JSON.stringify({
                 summary: PLAN_SUMMARY,
@@ -549,6 +551,8 @@ async function startProvider() {
                 checkIds: ["verify"],
               }),
             },
+            done: true,
+            done_reason: "stop",
             prompt_eval_count: 12,
             eval_count: 8,
           }),

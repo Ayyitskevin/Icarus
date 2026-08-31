@@ -4,6 +4,7 @@ import type { TreeEntry } from "../../packages/core/src/git.js";
 import { explainCodebaseV2, retrieveReadOnlyContextV3 } from "../../packages/core/src/index.js";
 import { createProviderConfig, type ModelGateway } from "../../packages/core/src/provider.js";
 import type { JsonValue, ProviderUsage } from "../../packages/core/src/types.js";
+import { syntheticReportedIdentity } from "../support/provider-result.js";
 
 const TASK = "Explain the main entry point with file-and-line provenance.";
 const BASE = "b".repeat(40);
@@ -55,6 +56,7 @@ function gateway(response: unknown, usage: ProviderUsage = VALID_USAGE): ModelGa
     generateStructured: vi.fn(async () => ({
       text: typeof response === "string" ? response : JSON.stringify(response),
       usage,
+      reportedIdentity: syntheticReportedIdentity("fixture-explainer"),
     })),
   };
 }

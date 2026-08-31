@@ -13,6 +13,8 @@ import type { ProviderConfig, ProviderKind } from "./types.js";
 
 const MAX_PROVIDER_RESPONSE_BYTES = 1024 * 1024;
 
+type RequestIdHeaderName = "request-id" | "x-request-id";
+
 function endpoint(baseUrl: string, suffix: string): URL {
   const normalized = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   return new URL(suffix, normalized);
@@ -37,6 +39,35 @@ function optionalCount(value: unknown): number | null {
     "Provider token count is invalid",
   );
   return value;
+}
+
+function requiredIdentityString(
+  value: unknown,
+  name: string,
+  knownSecrets: readonly string[] = [],
+): string {
+  invariant(
+    typeof value === "string" && value.trim().length > 0,
+    "PROVIDER_PROTOCOL_ERROR",
+    `Provider response has no valid ${name}`,
+  );
+  invariant(
+    !knownSecrets.some((secret) => value.includes(secret)),
+    "PROVIDER_SECRET_DETECTED",
+    "Provider identity contained credential material and was discarded",
+  );
+  return value;
+}
+
+function optionalIdentityString(
+  value: unknown,
+  name: string,
+  knownSecrets: readonly string[] = [],
+): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  return requiredIdentityString(value, name, knownSecrets);
 }
 
 async function readBoundedBody(response: Response): Promise<string> {
@@ -82,7 +113,8 @@ async function fetchJson(
   signal: AbortSignal | undefined,
   knownSecrets: readonly string[],
   fetchImplementation: typeof fetch = globalThis.fetch,
-): Promise<{ value: unknown; latencyMs: number }> {
+  requestIdHeaderName?: RequestIdHeaderName,
+): Promise<{ value: unknown; latencyMs: number; requestId: string | null }> {
   if (signal?.aborted) {
     throw new IcarusError("CANCELLED", "Provider request was cancelled before it started");
   }
@@ -132,11 +164,9 @@ async function fetchJson(
         ...bodyFingerprint,
       });
     }
+    let value: unknown;
     try {
-      return {
-        value: JSON.parse(body) as unknown,
-        latencyMs: Math.round(performance.now() - startedAt),
-      };
+      value = JSON.parse(body) as unknown;
     } catch (error) {
       // Distinguish WHERE the JSON broke. Two malformed payloads that fail at the same
       // offset are the same defect; two that fail at different offsets are not.
@@ -145,6 +175,18 @@ async function fetchJson(
         parseError: sanitizeText(errorMessage(error), knownSecrets),
       });
     }
+    return {
+      value,
+      latencyMs: Math.round(performance.now() - startedAt),
+      requestId:
+        requestIdHeaderName === undefined
+          ? null
+          : optionalIdentityString(
+              response.headers.get(requestIdHeaderName),
+              `${requestIdHeaderName} header`,
+              knownSecrets,
+            ),
+    };
   } catch (error) {
     if (controller.signal.aborted) {
       throw new IcarusError(
@@ -203,6 +245,13 @@ export class OllamaGateway implements ModelGateway {
       [],
     );
     const object = asObject(response.value, "Ollama response");
+    const model = requiredIdentityString(object.model, "reported model");
+    invariant(object.done === true, "PROVIDER_PROTOCOL_ERROR", "Ollama response did not complete");
+    invariant(
+      object.done_reason === "stop",
+      "PROVIDER_PROTOCOL_ERROR",
+      "Ollama response did not stop cleanly",
+    );
     const message = asObject(object.message, "Ollama message");
     invariant(
       typeof message.content === "string",
@@ -218,6 +267,14 @@ export class OllamaGateway implements ModelGateway {
         outputTokens,
         estimatedCostUsd: calculateReportedCost(this.config, inputTokens, outputTokens),
         latencyMs: response.latencyMs,
+      },
+      reportedIdentity: {
+        model,
+        responseId: null,
+        requestId: null,
+        providerId: null,
+        upstreamModel: optionalIdentityString(object.remote_model, "reported upstream model"),
+        upstreamHost: optionalIdentityString(object.remote_host, "reported upstream host"),
       },
     };
   }
@@ -294,6 +351,7 @@ export class OpenAIResponsesGateway implements ModelGateway {
       signal,
       [this.#apiKey],
       this.#fetch,
+      "x-request-id",
     );
     const object = asObject(response.value, "OpenAI response");
     invariant(
@@ -337,6 +395,8 @@ export class OpenAIResponsesGateway implements ModelGateway {
     const usage = asObject(object.usage, "OpenAI usage");
     const inputTokens = optionalCount(usage.input_tokens);
     const outputTokens = optionalCount(usage.output_tokens);
+    const model = requiredIdentityString(object.model, "reported model", [this.#apiKey]);
+    const responseId = requiredIdentityString(object.id, "response id", [this.#apiKey]);
     return {
       text,
       usage: {
@@ -344,6 +404,14 @@ export class OpenAIResponsesGateway implements ModelGateway {
         outputTokens,
         estimatedCostUsd: calculateReportedCost(this.config, inputTokens, outputTokens),
         latencyMs: response.latencyMs,
+      },
+      reportedIdentity: {
+        model,
+        responseId,
+        requestId: response.requestId,
+        providerId: null,
+        upstreamModel: null,
+        upstreamHost: null,
       },
     };
   }
@@ -426,6 +494,7 @@ export class AnthropicMessagesGateway implements ModelGateway {
       signal,
       [this.#apiKey],
       this.#fetch,
+      "request-id",
     );
     const object = asObject(response.value, "Anthropic response");
     invariant(
@@ -471,6 +540,8 @@ export class AnthropicMessagesGateway implements ModelGateway {
     const usage = asObject(object.usage, "Anthropic usage");
     const inputTokens = optionalCount(usage.input_tokens);
     const outputTokens = optionalCount(usage.output_tokens);
+    const model = requiredIdentityString(object.model, "reported model", [this.#apiKey]);
+    const responseId = requiredIdentityString(object.id, "response id", [this.#apiKey]);
     return {
       text,
       usage: {
@@ -478,6 +549,14 @@ export class AnthropicMessagesGateway implements ModelGateway {
         outputTokens,
         estimatedCostUsd: calculateReportedCost(this.config, inputTokens, outputTokens),
         latencyMs: response.latencyMs,
+      },
+      reportedIdentity: {
+        model,
+        responseId,
+        requestId: response.requestId,
+        providerId: null,
+        upstreamModel: null,
+        upstreamHost: null,
       },
     };
   }
@@ -545,6 +624,7 @@ export class VulcanChatCompletionsGateway implements ModelGateway {
       signal,
       [],
       this.#fetch,
+      "x-request-id",
     );
     const object = asObject(response.value, "Vulcan response");
     invariant(
@@ -573,6 +653,12 @@ export class VulcanChatCompletionsGateway implements ModelGateway {
         : asObject(object.usage, "Vulcan usage");
     const inputTokens = usage === null ? null : optionalCount(usage.prompt_tokens);
     const outputTokens = usage === null ? null : optionalCount(usage.completion_tokens);
+    // Vulcan echoes the requested public alias as `model`; matching config proves
+    // nothing about the native upstream. Its asserted `provider` is the only route
+    // identity available here. Native vendor identity needs a Vulcan protocol change.
+    const model = requiredIdentityString(object.model, "reported model alias");
+    const responseId = requiredIdentityString(object.id, "response id");
+    const providerId = requiredIdentityString(object.provider, "provider id");
     return {
       text: message.content,
       usage: {
@@ -580,6 +666,14 @@ export class VulcanChatCompletionsGateway implements ModelGateway {
         outputTokens,
         estimatedCostUsd: calculateReportedCost(this.config, inputTokens, outputTokens),
         latencyMs: response.latencyMs,
+      },
+      reportedIdentity: {
+        model,
+        responseId,
+        requestId: response.requestId,
+        providerId,
+        upstreamModel: null,
+        upstreamHost: null,
       },
     };
   }

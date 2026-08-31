@@ -13,6 +13,7 @@ import type {
 } from "../../packages/core/src/provider.js";
 import { createProviderConfig } from "../../packages/core/src/provider.js";
 import type { ProviderUsage } from "../../packages/core/src/types.js";
+import { syntheticReportedIdentity } from "../support/provider-result.js";
 
 function usage(partial: Partial<ProviderUsage> = {}): ProviderUsage {
   return {
@@ -63,6 +64,7 @@ class FakeGateway implements ModelGateway {
     return {
       text: JSON.stringify({ answer: "ok", start: "0", middle: "0", end: "0" }),
       usage: usage(this.#outputTokens === undefined ? {} : { outputTokens: this.#outputTokens() }),
+      reportedIdentity: syntheticReportedIdentity(this.config.model),
     };
   }
 }

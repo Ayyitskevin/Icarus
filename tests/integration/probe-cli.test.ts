@@ -49,6 +49,7 @@ describe("probe CLI", () => {
   it("runs a structured probe end-to-end against a loopback provider and emits a v1 result row", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, {
+        model: "fake-model",
         message: {
           role: "assistant",
           content: JSON.stringify({
@@ -57,6 +58,8 @@ describe("probe CLI", () => {
             findings: [{ title: "monitoring missed duplicates", confirmed: true }],
           }),
         },
+        done: true,
+        done_reason: "stop",
         prompt_eval_count: 64,
         eval_count: 48,
       });
@@ -94,6 +97,7 @@ describe("probe CLI", () => {
       const body = parseProviderRequestBody(request) as Record<string, unknown>;
       const anchors = anchorsFromMessages(body);
       sendProviderJson(response, 200, {
+        model: body.model,
         message: {
           role: "assistant",
           content: JSON.stringify({
@@ -102,6 +106,8 @@ describe("probe CLI", () => {
             endAnchor: anchors.end,
           }),
         },
+        done: true,
+        done_reason: "stop",
         prompt_eval_count: Math.round(anchors.contentLength / 4),
         eval_count: 24,
       });
@@ -180,7 +186,10 @@ describe("probe CLI", () => {
   it("creates no runtime state, because a probe's entire effect is one provider conversation plus a printed row", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, {
+        model: "fake-model",
         message: { role: "assistant", content: '{"text":"prose"}' },
+        done: true,
+        done_reason: "stop",
         prompt_eval_count: 8,
         eval_count: 8,
       });

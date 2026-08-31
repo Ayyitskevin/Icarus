@@ -22,6 +22,7 @@ import {
   UNIT_RUN_ID,
   UNIT_SANDBOX,
 } from "../support/unit-fixtures.js";
+import { syntheticReportedIdentity } from "../support/provider-result.js";
 
 const TARGET = "src/greeting.txt";
 const BASELINE = "Hello, world!\n";
@@ -209,6 +210,7 @@ describe("run drafts", () => {
               estimatedCostUsd: 0,
               latencyMs: 1,
             },
+            reportedIdentity: syntheticReportedIdentity(config.model),
           };
         },
       };

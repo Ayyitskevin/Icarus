@@ -63,7 +63,10 @@ async function interruptibleProvider(): Promise<{
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
+            model: String(requests.at(-1)?.model ?? "synthetic-ollama-model"),
             message: { content: JSON.stringify(planResponse().content) },
+            done: true,
+            done_reason: "stop",
             prompt_eval_count: 12,
             eval_count: 8,
           }),
