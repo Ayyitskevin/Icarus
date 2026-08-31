@@ -350,12 +350,22 @@ function structuredReplyValid(value: unknown): boolean {
   return true;
 }
 
-const ZERO_USAGE: ProviderUsage = {
-  inputTokens: null,
-  outputTokens: null,
-  estimatedCostUsd: null,
-  latencyMs: 0,
-};
+/**
+ * Usage for an attempt that threw before the provider reported anything.
+ *
+ * Token counts and cost are genuinely unknown and stay null. Elapsed time is NOT:
+ * the attempt occupied real wall-clock time, and recording 0 made a request that
+ * burned 145 seconds before failing indistinguishable from an instant preflight
+ * refusal. A probe exists to measure, so it must not fabricate its own measurement.
+ */
+function unmeasuredUsage(latencyMs: number): ProviderUsage {
+  return {
+    inputTokens: null,
+    outputTokens: null,
+    estimatedCostUsd: null,
+    latencyMs,
+  };
+}
 
 async function runThroughputAttempt(
   gateway: ModelGateway,
@@ -613,6 +623,8 @@ export async function runProbe(
   const attempts: ProbeAttempt[] = [];
   for (let attempt = 1; attempt <= request.repeat; attempt += 1) {
     let result: ProbeAttempt;
+    // Measured OUTSIDE the gateway call so a failure still reports how long it took.
+    const attemptStartedAt = performance.now();
     try {
       if (request.kind === "throughput") {
         result = await runThroughputAttempt(gateway, request, attempt, probeId, signal);
@@ -628,11 +640,15 @@ export async function runProbe(
       ) {
         throw error;
       }
+      const elapsedMs = Math.round(performance.now() - attemptStartedAt);
+      // Keep the error CODE as a stable prefix. Two failures with the same code are
+      // the same class; a free-form message alone cannot be compared across runs.
+      const code = error instanceof IcarusError ? error.code : "UNKNOWN";
       result = {
         attempt,
         ok: false,
-        detail: `provider error: ${errorMessage(error)}`,
-        usage: ZERO_USAGE,
+        detail: `provider error [${code}] after ${elapsedMs}ms: ${errorMessage(error)}`,
+        usage: unmeasuredUsage(elapsedMs),
         outputTokensPerSecond: null,
         consumedInputRatio: null,
         anchorRecall: null,

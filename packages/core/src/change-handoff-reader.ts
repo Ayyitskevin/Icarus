@@ -2634,6 +2634,7 @@ function readOpenDatabase(database: Database.Database, runId: string): ChangeHan
         " AND json_valid(r.verification_json,1)) THEN r.verification_json END AS verification_json, " +
         "CASE WHEN typeof(r.tool_calls)='integer' THEN r.tool_calls END AS tool_calls, " +
         "CASE WHEN typeof(r.input_tokens)='integer' THEN r.input_tokens END AS input_tokens, " +
+        "CASE WHEN typeof(r.upper_bound_tokens)='integer' THEN r.upper_bound_tokens END AS upper_bound_tokens, " +
         "CASE WHEN typeof(r.output_tokens)='integer' THEN r.output_tokens END AS output_tokens, " +
         "CASE WHEN typeof(r.active_runtime_ms)='integer' THEN r.active_runtime_ms END AS active_runtime_ms, " +
         "CASE WHEN typeof(r.estimated_cost_usd) IN ('integer','real') THEN r.estimated_cost_usd END AS estimated_cost_usd, " +
@@ -2689,6 +2690,9 @@ function readOpenDatabase(database: Database.Database, runId: string): ChangeHan
     toolCalls: safeInteger(value.tool_calls),
     inputTokens: safeInteger(value.input_tokens),
     outputTokens: safeInteger(value.output_tokens),
+    // Rows written before ADR 0068 have no such column; 0 is the truthful reading,
+    // since those runs charged reservations into input_tokens.
+    upperBoundTokens: safeInteger(value.upper_bound_tokens ?? 0),
     activeRuntimeMs: safeInteger(value.active_runtime_ms),
     estimatedCostUsd: finiteNumber(value.estimated_cost_usd),
     reservedCostUsd: finiteNumber(value.reserved_cost_usd),
@@ -3196,7 +3200,10 @@ function readOpenDatabase(database: Database.Database, runId: string): ChangeHan
     (started) => started.budgetClass === "ordinary",
   ).length;
   const emergencyOperations = eventRead.operationStarts.length - ordinaryOperations;
-  const totalTokens = runUsage.inputTokens + runUsage.outputTokens;
+  // ADR 0068: this is a CEILING check, so it counts every charged token. Observed
+  // input and output plus charged upper bounds -- omitting the last would let a run
+  // exceed maxTotalTokens using charges the provider never itemised.
+  const totalTokens = runUsage.inputTokens + runUsage.outputTokens + runUsage.upperBoundTokens;
   if (
     eventRead.operationTerminals.length !== operationRows.length - activeOperations ||
     activeOperations > 1 ||

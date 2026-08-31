@@ -139,6 +139,7 @@ export function assertHeadlessChildEnvelopeV1(
     toolCalls: parentUsage.toolCalls,
     inputTokens: parentUsage.inputTokens,
     outputTokens: parentUsage.outputTokens,
+    upperBoundTokens: parentUsage.upperBoundTokens,
     activeRuntimeMs: parentUsage.activeRuntimeMs,
     costUsd: parentUsage.estimatedCostUsd + parentUsage.reservedCostUsd,
   };
@@ -146,6 +147,7 @@ export function assertHeadlessChildEnvelopeV1(
     used.toolCalls += childUsage.toolCalls;
     used.inputTokens += childUsage.inputTokens;
     used.outputTokens += childUsage.outputTokens;
+    used.upperBoundTokens += childUsage.upperBoundTokens;
     used.activeRuntimeMs += childUsage.activeRuntimeMs;
     used.costUsd += childUsage.estimatedCostUsd + childUsage.reservedCostUsd;
   }
@@ -158,9 +160,12 @@ export function assertHeadlessChildEnvelopeV1(
         activeRuntimeMs: "maxActiveRuntimeMs",
       } as const
     )[field];
+    // ADR 0068: a child's envelope is measured against everything the parent has been
+    // CHARGED, not only what a provider itemised. Excluding upper bounds would admit a
+    // child against budget the parent has already spent.
     const consumed =
       field === "inputTokens" || field === "outputTokens"
-        ? used.inputTokens + used.outputTokens
+        ? used.inputTokens + used.outputTokens + used.upperBoundTokens
         : used[field];
     if (spec.budgets[budgetField] > parentBudgets[budgetField] - consumed) {
       denied(`child ${spec.childId} budget ${budgetField} exceeds the parent's remaining envelope`);
