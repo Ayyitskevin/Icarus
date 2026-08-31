@@ -19,6 +19,8 @@
     "smoke:workspace:browser": "pnpm build && node scripts/smoke-workspace-browser.mjs",
     "workflow:setup": "node scripts/setup-actionlint.mjs",
     "workflow:lint": "node scripts/workflow-lint.mjs",
+    "check:node-version": "node scripts/check-node-version.mjs",
+    "precheck": "pnpm check:node-version",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint .",
@@ -44,7 +46,7 @@
     "measure:gate1-executor": "pnpm build:node && node scripts/gate1-live-executor-measurement.mjs",
     "eval": "pnpm build && node scripts/eval-fixtures.mjs && node scripts/gate1-benchmark.mjs && node scripts/gate2-retrieval.mjs && node scripts/gate2-explanation-cohort.mjs && node scripts/gate2-security-review-cohort.mjs && node scripts/gate2-refactor-cohort.mjs && node scripts/gate2-repair-cohort-a.mjs && node scripts/gate2-repair-cohort-b.mjs && node scripts/gate2-scaffold-cohort-a.mjs && node scripts/gate2-schema-successor-cohort.mjs && node scripts/gate2-v2-evidence-adoption.mjs && node scripts/gate2-benchmark-contract.mjs",
     "security": "pnpm build:node && vitest run tests/security && node scripts/security-check.mjs",
-    "check": "pnpm workflow:lint && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm eval && pnpm security && pnpm build"
+    "check": "pnpm workflow:lint && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && ICARUS_REQUIRE_LANDLOCK_TESTS=1 pnpm test:integration && pnpm eval && pnpm security && pnpm build"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4",

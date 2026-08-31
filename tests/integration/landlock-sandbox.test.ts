@@ -33,8 +33,25 @@ afterEach(async () => {
 });
 
 interface HelperHandle {
+  readonly status: "supported";
   readonly helperPath: string;
   readonly abi: number;
+}
+
+interface HelperUnavailable {
+  readonly status: "unavailable";
+  readonly reason: string;
+}
+
+type HelperProbe = HelperHandle | HelperUnavailable;
+
+const REQUIRE_LANDLOCK_TESTS_ENV = "ICARUS_REQUIRE_LANDLOCK_TESTS";
+
+function unavailable(reason: string): HelperUnavailable {
+  if (process.env[REQUIRE_LANDLOCK_TESTS_ENV] === "1") {
+    throw new Error(`The Landlock release gate could not exercise the kernel boundary: ${reason}`);
+  }
+  return { status: "unavailable", reason };
 }
 
 function run(
@@ -64,11 +81,14 @@ function run(
 }
 
 /**
- * Compiles the helper and probes the kernel ABI. Returns null when the host
- * cannot exercise the real path — tests must skip there, never fail.
+ * Compiles the helper and probes the kernel ABI. Returns the concrete reason
+ * when the host cannot exercise the real path so tests can report a real skip
+ * instead of silently returning as though the boundary passed.
  */
-async function compileAndProbe(): Promise<HelperHandle | null> {
-  if (process.platform !== "linux") return null;
+async function compileAndProbe(): Promise<HelperProbe> {
+  if (process.platform !== "linux") {
+    return unavailable(`Landlock is Linux-only; platform is ${process.platform}`);
+  }
   const directory = await mkdtemp(path.join(os.tmpdir(), "icarus-landlock-test-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const helperPath = path.join(directory, "landlock-sandbox");
@@ -82,17 +102,27 @@ async function compileAndProbe(): Promise<HelperHandle | null> {
     helperPath,
     defaultLandlockHelperSourcePath(),
   ]);
-  if (compiled.code !== 0) return null;
+  if (compiled.code !== 0) {
+    return unavailable(
+      `Landlock helper compilation failed with exit ${String(compiled.code)}: ${compiled.stderr.trim()}`,
+    );
+  }
   const probed = await run(helperPath, ["--probe"]);
-  if (probed.code !== 0) return null;
+  if (probed.code !== 0) {
+    return unavailable(
+      `Landlock helper probe failed with exit ${String(probed.code)}: ${probed.stderr.trim()}`,
+    );
+  }
   const abi = Number(probed.stdout.trim());
   const support = detectLandlockSupport({
     platform: process.platform,
     kernelRelease: os.release(),
     abi: Number.isSafeInteger(abi) ? abi : null,
   });
-  if (support.status !== "supported") return null;
-  return { helperPath, abi: support.abi };
+  if (support.status !== "supported") {
+    return unavailable(support.reason);
+  }
+  return { status: "supported", helperPath, abi: support.abi };
 }
 
 async function sandboxed(
@@ -105,9 +135,12 @@ async function sandboxed(
 }
 
 describe("landlock sandbox kernel enforcement", () => {
-  test("workspace rules: writes confined to the rw root, host read-only", async () => {
+  test("workspace rules: writes confined to the rw root, host read-only", async ({ skip }) => {
     const helper = await compileAndProbe();
-    if (helper === null) return; // unsupported host: skip, never fail
+    if (helper.status === "unavailable") {
+      skip(helper.reason);
+      return;
+    }
     const root = await mkdtemp(path.join(os.tmpdir(), "icarus-landlock-ws-"));
     cleanups.push(() => rm(root, { recursive: true, force: true }));
     const stateRoot = path.join(root, "state");
@@ -129,9 +162,12 @@ describe("landlock sandbox kernel enforcement", () => {
     expect(result.stdout).toContain("outside-write-blocked");
   });
 
-  test("read-only rules: paths outside the allowlist are not even readable", async () => {
+  test("read-only rules: paths outside the allowlist are not even readable", async ({ skip }) => {
     const helper = await compileAndProbe();
-    if (helper === null) return;
+    if (helper.status === "unavailable") {
+      skip(helper.reason);
+      return;
+    }
     const root = await mkdtemp(path.join(os.tmpdir(), "icarus-landlock-ro-"));
     cleanups.push(() => rm(root, { recursive: true, force: true }));
     const stateRoot = path.join(root, "state");
@@ -156,9 +192,14 @@ describe("landlock sandbox kernel enforcement", () => {
     expect(result.stdout).toContain("system-write-blocked");
   });
 
-  test("strict rules: meta lifecycle without content writes, WAL store survives", async () => {
+  test("strict rules: meta lifecycle without content writes, WAL store survives", async ({
+    skip,
+  }) => {
     const helper = await compileAndProbe();
-    if (helper === null) return;
+    if (helper.status === "unavailable") {
+      skip(helper.reason);
+      return;
+    }
     const root = await mkdtemp(path.join(os.tmpdir(), "icarus-landlock-strict-"));
     cleanups.push(() => rm(root, { recursive: true, force: true }));
     const stateRoot = path.join(root, "state");
@@ -191,8 +232,15 @@ describe("landlock sandbox kernel enforcement", () => {
       // The sqlite probe loads better-sqlite3 from the repository tree.
       extraReadOnlyPaths: [realpathSync(path.resolve("."))],
     });
+    const metaCreate = await sandboxed(helper, spec, [
+      process.execPath,
+      "--input-type=module",
+      "-e",
+      `import { closeSync, constants, openSync } from "node:fs";` +
+        `closeSync(openSync(${JSON.stringify(path.join(stateRoot, "top-level"))}, constants.O_CREAT | constants.O_RDONLY, 0o600));`,
+    ]);
+    expect(metaCreate.code).toBe(0);
     const script = [
-      `touch '${stateRoot}/top-level' 2> /dev/null && echo meta-mkreg-ok`,
       `echo x > '${stateRoot}/top-level' 2> /dev/null || echo meta-content-blocked`,
       `rm '${stateRoot}/top-level' 2> /dev/null && echo meta-rm-ok`,
       `echo y > '${stateRoot}/runs/${runId}/scratch.txt' 2> /dev/null && echo run-scratch-rw-ok`,
@@ -201,10 +249,10 @@ describe("landlock sandbox kernel enforcement", () => {
     ].join("; ");
     const shell = await sandboxed(helper, spec, ["/bin/sh", "-c", script]);
     expect(shell.code).toBe(0);
-    expect(shell.stdout).toContain("meta-mkreg-ok");
     expect(shell.stdout).toContain("meta-content-blocked");
     expect(shell.stdout).toContain("meta-rm-ok");
     expect(shell.stdout).toContain("run-scratch-rw-ok");
+    expect(shell.stdout).toContain("other-run-mkdir-ok");
     expect(shell.stdout).toContain("other-run-content-blocked");
     // The SQLite WAL lifecycle (create, write, checkpoint, unlink on close)
     // must survive the meta confinement or strict runs cannot persist events.
@@ -251,9 +299,12 @@ describe("landlock sandbox CLI wiring", () => {
 
   test(
     "a full headless run settles review-ready under the strict profile",
-    async () => {
+    async ({ skip }) => {
       const helper = await compileAndProbe();
-      if (helper === null) return;
+      if (helper.status === "unavailable") {
+        skip(helper.reason);
+        return;
+      }
       const fixture = await createFixtureRepository();
       cleanups.push(fixture.cleanup);
       const provider = await startOllamaQueue([
