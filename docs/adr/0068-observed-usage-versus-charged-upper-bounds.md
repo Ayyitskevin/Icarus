@@ -42,6 +42,13 @@ Add `upper_bound_tokens` to `runs` and `upperBoundTokens` to `RunUsage`.
 - Tokens charged from a reservation that nobody reported — fully unreported usage,
   the unstated remainder of a partial report, and interrupted operations —
   accumulate in `upperBoundTokens`.
+- **Refusing a response does not erase what the provider reported.** When usage
+  breaches a reservation the response is refused, but the counters the store can
+  accept keep their reported values; only a token report that is itself outside the
+  reservation cannot be recorded as observed, and it survives as a claim in the
+  settlement detail (`claimedInputTokens`, `claimedOutputTokens`, `claimedCostUsd`)
+  rather than being replaced by the reservation. A call whose cost alone breached
+  would otherwise be recorded as though it had reported no tokens at all.
 - The reported total is checked against the reservation whether or not it is
   complete. A provider reporting 600 input tokens against a 500-token reservation
   is refused even if it hides the output count.
@@ -108,6 +115,10 @@ by the codex seat; the provenance of a decision record has to survive being chec
   export's canonical bytes and its terminal checksum. Leaving the version string at
   v1 while the bytes moved would be an unstated change of exactly the kind this ADR
   closes, so the wire version moves with the wire.
+- **The receipt stream moves to `icarus.headless.stream.v2`** for the same reason:
+  its `result` line carries the enlarged `RunUsage` as a required member, and ADR
+  0061 declares no additive-member tolerance. Its pinned canonical checksum moves
+  with it.
 - The browser workspace shows the charged-but-unreported envelope beside the observed
   counters. Without it an interrupted or unreported run reads as zero measured tokens
   on the one surface an operator actually looks at, while its full envelope was

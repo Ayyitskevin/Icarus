@@ -420,7 +420,7 @@ describe("headless receipt stream", () => {
       createHash("sha256")
         .update(Buffer.concat(lines.map(canonicalJsonLine)))
         .digest("hex"),
-    ).toBe("5193fd0ea107d506c068140b412f43b6cde21641e4a4e58862a660a506e4907b");
+    ).toBe("8366552c72363bc86fa0b56d9facff374477840c7747593c2a903fc06f0805a9");
   });
 
   test("binds superseded patch-set digests to their intents in order", () => {

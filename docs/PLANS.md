@@ -438,7 +438,8 @@ before projection and passes its focused adversarial corpus and refreshed full
 local gate; two independent exact-snapshot reviews returned PASS with no
 remaining blocker, high, or medium finding.
 
-Decision: emit a typed `icarus.headless.stream.v1` NDJSON event stream as a
+Decision: emit a typed `icarus.headless.stream.v1` NDJSON event stream (now `v2`,
+see the superseding note after this slice's checklist) as a
 pure projection of the existing SQLite run history snapshot — the same
 snapshot the H0 export reads. The closed line kinds are `init`, `grant`,
 `plan`, `patchset`, `check`, `receipt`, and a checksum-terminated `result`,
@@ -461,6 +462,12 @@ fails closed with `INVALID_HEADLESS_STREAM`.
       receipts, malformed-history refusals) and CLI integration cases
       (deterministic checksum-terminated stream, receipt-bound
       approve-headless output, unchanged default H0 trajectory).
+
+The three items above record what this slice did, and it did leave H0 alone.
+Superseded 2026-08-31: ADR 0068 enlarged `RunUsage`, which both H0 and the receipt
+stream carry, so those exports are now `icarus.headless.history.v2` and
+`icarus.headless.stream.v2`. The "byte-identical to before" property was true of
+this change and is not a standing guarantee about H0.
 - [x] Replay the strict worker lifecycle and child settlement grammars before
       receipt projection; refuse unknown schemas/outcomes, mismatched exits,
       foreign/noncanonical identities, undeclared children, malformed members/

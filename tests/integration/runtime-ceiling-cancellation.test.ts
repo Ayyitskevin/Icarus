@@ -648,6 +648,87 @@ describe("aggregate runtime ceilings and signal cancellation", () => {
     }
   });
 
+  test("keeps the token counts a refused provider response actually reported", async () => {
+    // ADR 0068: observed counters hold what the provider REPORTED. Refusing a
+    // response is not a reason to forget what it said it spent. Here only the cost
+    // breaches its reservation -- the token report is valid and within budget -- so
+    // rewriting it as 0/0 plus a full-reservation upper bound would discard evidence
+    // that existed and leave the record indistinguishable from a call that reported
+    // nothing. That is the defect class ADR 0068 exists to close, on the refusal path.
+    const ceiling: SunCeiling = {
+      ...DEFAULT_CEILING,
+      maxActiveRuntimeMs: 10_000,
+      commandTimeoutMs: 500,
+      maxOutputTokensPerCall: 200,
+      maxTotalTokens: 5_000,
+    };
+    const overpricedGatewayFactory = (config: ProviderConfig): ModelGateway => ({
+      config,
+      generateStructured() {
+        return Promise.resolve({
+          text: JSON.stringify({
+            summary: "Replace the greeting.",
+            steps: ["Apply one exact replacement.", "Run verification."],
+            risks: ["The preimage may differ."],
+            target: TARGET,
+            targets: [TARGET],
+            iterationCeiling: 0,
+            checkIds: ["verify"],
+          }),
+          usage: {
+            inputTokens: 11,
+            outputTokens: 7,
+            estimatedCostUsd: 9_999,
+            latencyMs: 1,
+          },
+        });
+      },
+    });
+    const fixture = await serviceFixture(ceiling, overpricedGatewayFactory);
+    try {
+      await expect(
+        fixture.service.planRun({
+          projectName: "runtime-test",
+          task: "Replace the greeting.",
+          targets: [TARGET],
+          provider: fixture.provider,
+        }),
+      ).rejects.toEqual(expect.objectContaining({ code: "PROVIDER_USAGE_EXCEEDED_RESERVATION" }));
+
+      const failed = fixture.service.listRuns("runtime-test")[0];
+      const usage = fixture.store.getRun(failed?.id ?? "").usage;
+      expect(usage.inputTokens).toBe(11);
+      expect(usage.outputTokens).toBe(7);
+      expect(usage.upperBoundTokens).toBe(0);
+
+      // The cost claim is the part that breached, so it is not accepted as observed
+      // -- but it is still recorded, because "the provider claimed 9999" is evidence
+      // and the settlement is the only place it survives.
+      const event = fixture.store
+        .listEvents(failed?.id ?? "")
+        .find(
+          (candidate) =>
+            candidate.type === "operation.finished" &&
+            (candidate.payload as Record<string, unknown>).kind === "provider.plan",
+        );
+      expect(event).toEqual(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            outcome: "failed",
+            detail: expect.objectContaining({
+              code: "PROVIDER_USAGE_EXCEEDED_RESERVATION",
+              claimedInputTokens: 11,
+              claimedOutputTokens: 7,
+              claimedCostUsd: 9_999,
+            }),
+          }),
+        }),
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+
   test("cancels a pre-workspace run without reconciling an impossible sandbox", async () => {
     const ceiling: SunCeiling = {
       ...DEFAULT_CEILING,

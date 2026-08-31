@@ -17,7 +17,7 @@ Headless harnesses converge on a typed NDJSON event protocol — Cursor's
 `stream-json` is the reference point — because supervisors, dashboards, and
 downstream agents consume runs as typed events (`init`, `plan`, tool calls,
 `result`), not as raw store dumps. Icarus's H0 export
-(`icarus.headless.history.v1`) already emits the complete run trajectory as
+(`icarus.headless.history.v1`; `v2` since ADR 0068) already emits the complete run trajectory as
 checksum-terminated JSONL, but its lines are an undifferentiated
 run/approval/event envelope: a consumer must re-derive which events carry the
 plan, the patch set, the checks, and the settlement receipt, and nothing
@@ -42,7 +42,8 @@ operator — a stream aimed at automated consumers stays metadata-only.
 
 Add the pure `createHeadlessStreamLines` projection over the authoritative
 run history snapshot (run, approvals, events), emitting the
-`icarus.headless.stream.v1` NDJSON stream. The projection appends no event,
+`icarus.headless.stream.v1` NDJSON stream (see the 2026-08-31 amendment below:
+now `v2`). The projection appends no event,
 creates or settles no operation, and changes no SQLite state; given the same
 snapshot it returns byte-identical canonical JSONL, and malformed history
 fails closed with `INVALID_HEADLESS_STREAM`.
@@ -170,3 +171,25 @@ Rejected because the stream targets automated consumers; metadata
 (identity, outcome, exit code, duration, truncation, diff and checkpoint
 digests) answers what a supervisor needs, while full check bytes remain
 available to the operator through the H0 history export.
+
+## Amendment (2026-08-31): both wires described here have since versioned
+
+This amendment corrects statements that were true when written and are not true
+now. No decision in the sections above is reversed.
+
+- **"`history` remains the default everywhere and is byte-identical to before"**
+  and **"the default headless output, the H0 schema, and every existing consumer
+  are untouched"** described THIS change, which genuinely left H0 alone. ADR 0068
+  later enlarged `RunUsage`, and `publicRun` copies it into every H0 line, so H0's
+  canonical bytes did move. H0 is now `icarus.headless.history.v2`.
+- **The stream is now `icarus.headless.stream.v2`.** Its `result` line carries the
+  same enlarged `RunUsage` as a required member. This ADR declares no additive-member
+  tolerance — it calls H0 "a closed schema" and keeps a separate schema precisely so
+  the stream can "evolve as a protocol", which is what versioning it is. A strict v1
+  consumer would otherwise receive a member it never agreed to, with no version
+  signal to tell it why. The pinned canonical checksum moves with it, from
+  `5193fd0e...` to `8366552c72363bc86fa0b56d9facff374477840c7747593c2a903fc06f0805a9`.
+
+The rejected alternative at the end of this ADR — widening H0 rather than adding a
+separate schema — is unaffected: the two schemas still version independently, which
+is the property that made this amendment two small bumps instead of one entangled one.
