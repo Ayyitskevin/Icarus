@@ -11,7 +11,13 @@ import { IcarusError, invariant } from "./errors.js";
 import type { GitController, TreeEntry } from "./git.js";
 import type { JsonValue } from "./types.js";
 
-export const GATE2_RETRIEVAL_SCHEMA = "icarus.context-retrieval.v1";
+/**
+ * v2 adds omission evidence. A result recorded under v1 carries none, and that
+ * absence means "not recorded" -- never "nothing was omitted". Frozen v1 reports
+ * stay valid because they are bound by their own raw digests, not re-derived
+ * through this contract.
+ */
+export const GATE2_RETRIEVAL_SCHEMA = "icarus.context-retrieval.v2";
 export const MAX_RETRIEVAL_QUERY_BYTES = 16 * 1024;
 export const MAX_RETRIEVAL_QUERY_TERMS = 128;
 export const MAX_RETRIEVAL_TREE_ENTRIES = 2_000;
@@ -28,6 +34,19 @@ export interface ContextRetrievalBudgetV1 {
 export interface ContextRetrievalMatchV1 {
   readonly term: string;
   readonly lines: readonly number[];
+}
+
+/**
+ * A file that matched the operator's query and was ranked, then dropped because
+ * a selection ceiling was already spent. Without this the caller cannot tell a
+ * repository that held no contrary evidence from one whose contrary evidence
+ * ranked below the cap -- and a security review's "no finding" rests on exactly
+ * that distinction.
+ */
+export interface ContextRetrievalOmissionV1 {
+  readonly path: string;
+  readonly bytes: number;
+  readonly reason: "file_ceiling" | "byte_ceiling";
 }
 
 export interface ContextRetrievalEntryV1 {
@@ -51,6 +70,20 @@ export interface ContextRetrievalResultV1 {
   readonly totalBytes: number;
   readonly scannedFiles: number;
   readonly scannedBytes: number;
+  /** Files that matched at least one query term, selected or not. */
+  readonly matchedFiles: number;
+  /** Matched files a ceiling excluded, in rank order. Empty means none were. */
+  readonly omittedMatches: readonly ContextRetrievalOmissionV1[];
+  /**
+   * Files skipped before scoring, so they were never candidates. Counted rather
+   * than named: a path is disclosed here only for files that passed the secret
+   * screen, which these did not.
+   */
+  readonly excludedFiles: {
+    readonly byPolicy: number;
+    readonly nonText: number;
+    readonly secretShaped: number;
+  };
   readonly digestSha256: string;
 }
 
@@ -302,13 +335,16 @@ export async function retrieveReadOnlyContextV1(
   const eligible = new Map<string, ScoredEntry>();
   let scannedFiles = 0;
   let scannedBytes = 0;
+  let excludedByPolicy = 0;
+  let excludedNonText = 0;
+  let excludedSecretShaped = 0;
   for (const entry of tree) {
     signal?.throwIfAborted();
-    if (
-      entry.type !== "blob" ||
-      (entry.mode !== "100644" && entry.mode !== "100755") ||
-      isWorkspaceContextPathExcluded(entry.path)
-    ) {
+    if (entry.type !== "blob" || (entry.mode !== "100644" && entry.mode !== "100755")) {
+      continue;
+    }
+    if (isWorkspaceContextPathExcluded(entry.path)) {
+      excludedByPolicy += 1;
       continue;
     }
     const bytes = await git.readBlob(
@@ -325,7 +361,14 @@ export async function retrieveReadOnlyContextV1(
       "Committed tree exceeds the Gate 2 retrieval scan byte ceiling",
     );
     const content = decodeTextOrNull(bytes);
-    if (content === null || containsSecretShapedContent(bytes)) continue;
+    if (content === null) {
+      excludedNonText += 1;
+      continue;
+    }
+    if (containsSecretShapedContent(bytes)) {
+      excludedSecretShaped += 1;
+      continue;
+    }
     const file = { path: entry.path, bytes: bytes.length, sha256: sha256(bytes) };
     repositoryFiles.push(file);
     const candidate = scoreEntry(entry, content, queryTerms, file);
@@ -341,19 +384,37 @@ export async function retrieveReadOnlyContextV1(
   );
   const entries: ContextRetrievalEntryV1[] = [];
   const selectedPaths = new Set<string>();
+  const omittedPaths = new Set<string>();
+  const omittedMatches: ContextRetrievalOmissionV1[] = [];
   let totalBytes = 0;
+  // A ceiling refusal is evidence, not a non-event: the file matched, it ranked,
+  // and only the budget kept it out. Recorded once per path, in rank order.
+  function omit(candidate: ScoredEntry, reason: ContextRetrievalOmissionV1["reason"]): void {
+    if (selectedPaths.has(candidate.path) || omittedPaths.has(candidate.path)) return;
+    omittedPaths.add(candidate.path);
+    omittedMatches.push({ path: candidate.path, bytes: candidate.bytes, reason });
+  }
   function select(candidate: ScoredEntry): boolean {
     if (selectedPaths.has(candidate.path)) return true;
-    if (entries.length >= budget.maxFiles) return false;
+    if (entries.length >= budget.maxFiles) {
+      omit(candidate, "file_ceiling");
+      return false;
+    }
     const accountedBytes = candidate.bytes + Buffer.byteLength(candidate.path, "utf8");
-    if (totalBytes + accountedBytes > budget.maxTotalBytes) return false;
+    if (totalBytes + accountedBytes > budget.maxTotalBytes) {
+      omit(candidate, "byte_ceiling");
+      return false;
+    }
     entries.push(publicEntry(candidate));
     selectedPaths.add(candidate.path);
     totalBytes += accountedBytes;
     return true;
   }
   for (const candidate of scored) {
-    if (entries.length >= budget.maxFiles) break;
+    if (entries.length >= budget.maxFiles) {
+      omit(candidate, "file_ceiling");
+      continue;
+    }
     if (!select(candidate)) continue;
     // Follow one deterministic reference hop only from files that matched the
     // operator's query. Repository text can influence ordering inside the
@@ -375,6 +436,13 @@ export async function retrieveReadOnlyContextV1(
     totalBytes,
     scannedFiles,
     scannedBytes,
+    matchedFiles: scored.length,
+    omittedMatches,
+    excludedFiles: {
+      byPolicy: excludedByPolicy,
+      nonText: excludedNonText,
+      secretShaped: excludedSecretShaped,
+    },
   } satisfies Omit<ContextRetrievalResultV1, "digestSha256">;
   return { ...unsigned, digestSha256: digestJson(digestableResult(unsigned)) };
 }

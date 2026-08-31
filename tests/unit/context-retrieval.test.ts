@@ -57,6 +57,68 @@ function fixture() {
   };
 }
 
+describe("Gate 2 retrieval omission evidence", () => {
+  // A security review that reports "no finding" is trusted because the retrieval
+  // is supposed to have looked. When a ceiling silently drops a file that matched
+  // and ranked, the artifact cannot distinguish "the repository held nothing
+  // contrary" from "the contrary evidence ranked below the cap" -- and a human
+  // approves on that difference.
+  it("records a matched file the file ceiling excluded, with its reason", async () => {
+    const { git } = fixture();
+    const result = await retrieveReadOnlyContextV1(git, "/repo", BASE, QUERY, {
+      maxFiles: 1,
+      maxTotalBytes: 8_192,
+      maxScanBytes: 16_384,
+    });
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.matchedFiles).toBeGreaterThan(1);
+    expect(result.omittedMatches.length).toBe(result.matchedFiles - result.entries.length);
+    expect(result.omittedMatches.every((omission) => omission.reason === "file_ceiling")).toBe(
+      true,
+    );
+    // The omitted file is named, so a reader can go and look at it.
+    const selected = new Set(result.entries.map((entry) => entry.path));
+    for (const omission of result.omittedMatches) {
+      expect(selected.has(omission.path)).toBe(false);
+      expect(omission.bytes).toBeGreaterThan(0);
+    }
+  });
+
+  it("distinguishes a byte-ceiling exclusion from a file-ceiling one", async () => {
+    const { git } = fixture();
+    const result = await retrieveReadOnlyContextV1(git, "/repo", BASE, QUERY, {
+      maxFiles: MAX_RETRIEVAL_FILES,
+      maxTotalBytes: 160,
+      maxScanBytes: 16_384,
+    });
+
+    expect(result.omittedMatches.length).toBeGreaterThan(0);
+    expect(result.omittedMatches.some((omission) => omission.reason === "byte_ceiling")).toBe(true);
+  });
+
+  it("counts what never became a candidate without naming it", async () => {
+    const { git } = fixture();
+    const result = await retrieveReadOnlyContextV1(git, "/repo", BASE, QUERY, BUDGET);
+
+    // The fixture carries one binary blob and one secret-shaped file. Naming the
+    // secret-shaped path here would disclose a file that failed the secret screen,
+    // so these are counts.
+    expect(result.excludedFiles.nonText).toBe(1);
+    expect(result.excludedFiles.secretShaped).toBe(1);
+    expect(result.excludedFiles.byPolicy).toBeGreaterThan(0);
+    expect(result.omittedMatches.every((omission) => omission.path !== "notes.txt")).toBe(true);
+  });
+
+  it("reports no omissions when every match fit", async () => {
+    const { git } = fixture();
+    const result = await retrieveReadOnlyContextV1(git, "/repo", BASE, QUERY, BUDGET);
+
+    expect(result.omittedMatches).toEqual([]);
+    expect(result.matchedFiles).toBe(result.entries.length);
+  });
+});
+
 describe("Gate 2 read-only context retrieval", () => {
   it("deterministically retrieves the unfamiliar-codebase evidence with line provenance", async () => {
     const firstFixture = fixture();

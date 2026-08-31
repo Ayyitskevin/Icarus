@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 
 import { describeNonStrictJson, parseStrictJson } from "./canonical-json.js";
 import { containsSecretShapedContent } from "./context.js";
+import { GATE2_RETRIEVAL_SCHEMA } from "./context-retrieval.js";
 import type { ContextRetrievalResultV1 } from "./context-retrieval.js";
 import { digestJson, sha256 } from "./digest.js";
 import { type ErrorDetails, IcarusError } from "./errors.js";
@@ -231,7 +232,7 @@ function asJsonValue(value: unknown): JsonValue {
 
 function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV1): void {
   if (
-    retrieval.schema !== "icarus.context-retrieval.v1" ||
+    retrieval.schema !== GATE2_RETRIEVAL_SCHEMA ||
     !/^[a-f0-9]{40}$|^[a-f0-9]{64}$/.test(retrieval.baseCommit) ||
     !/^[a-f0-9]{64}$/.test(retrieval.querySha256) ||
     !/^[a-f0-9]{64}$/.test(retrieval.repositoryDigestSha256) ||
