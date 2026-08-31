@@ -197,7 +197,8 @@ export function assertHeadlessWorkerBudgetAvailable(run: RunRecord, ceiling: Sun
   const exhausted =
     run.usage.toolCalls > ceiling.maxToolCalls ||
     run.usage.activeRuntimeMs > ceiling.maxActiveRuntimeMs ||
-    run.usage.inputTokens + run.usage.outputTokens > ceiling.maxTotalTokens ||
+    run.usage.inputTokens + run.usage.outputTokens + run.usage.upperBoundTokens >
+      ceiling.maxTotalTokens ||
     run.usage.estimatedCostUsd + run.usage.reservedCostUsd > ceiling.maxCostUsd;
   invariant(
     !exhausted,
@@ -405,6 +406,11 @@ function decodeUsage(value: JsonValue | undefined): RunRecord["usage"] {
     estimatedCostUsd,
     reservedCostUsd,
   } = value;
+  // Settlement payloads written before charged upper bounds were distinguished from
+  // observed usage carry no such field. Absent means "none recorded", which is the
+  // truthful reading: those runs charged reservations into inputTokens, and that
+  // history is not retroactively reinterpretable here.
+  const upperBoundTokens = "upperBoundTokens" in value ? value.upperBoundTokens : 0;
   invariant(
     Number.isSafeInteger(toolCalls) &&
       typeof toolCalls === "number" &&
@@ -423,7 +429,10 @@ function decodeUsage(value: JsonValue | undefined): RunRecord["usage"] {
       estimatedCostUsd >= 0 &&
       typeof reservedCostUsd === "number" &&
       Number.isFinite(reservedCostUsd) &&
-      reservedCostUsd >= 0,
+      reservedCostUsd >= 0 &&
+      Number.isSafeInteger(upperBoundTokens) &&
+      typeof upperBoundTokens === "number" &&
+      upperBoundTokens >= 0,
     "INVALID_HEADLESS_WORKER_HISTORY",
     "Headless worker settlement usage is malformed",
   );
@@ -431,6 +440,7 @@ function decodeUsage(value: JsonValue | undefined): RunRecord["usage"] {
     toolCalls,
     inputTokens,
     outputTokens,
+    upperBoundTokens,
     activeRuntimeMs,
     estimatedCostUsd,
     reservedCostUsd,
