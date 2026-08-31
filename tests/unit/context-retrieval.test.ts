@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   MAX_RETRIEVAL_FILES,
   retrievalOmissionEvidenceProblem,
-  retrieveReadOnlyContextV1,
+  retrieveReadOnlyContextV3,
 } from "../../packages/core/src/context-retrieval.js";
 import type { TreeEntry } from "../../packages/core/src/git.js";
 
@@ -66,7 +66,7 @@ describe("Gate 2 retrieval omission evidence", () => {
   // approves on that difference.
   it("records a matched file the file ceiling excluded, with its reason", async () => {
     const { git } = fixture();
-    const result = await retrieveReadOnlyContextV1(git, "/repo", BASE, QUERY, {
+    const result = await retrieveReadOnlyContextV3(git, "/repo", BASE, QUERY, {
       maxFiles: 1,
       maxTotalBytes: 8_192,
       maxScanBytes: 16_384,
@@ -88,7 +88,7 @@ describe("Gate 2 retrieval omission evidence", () => {
 
   it("distinguishes a byte-ceiling exclusion from a file-ceiling one", async () => {
     const { git } = fixture();
-    const result = await retrieveReadOnlyContextV1(git, "/repo", BASE, QUERY, {
+    const result = await retrieveReadOnlyContextV3(git, "/repo", BASE, QUERY, {
       maxFiles: MAX_RETRIEVAL_FILES,
       maxTotalBytes: 160,
       maxScanBytes: 16_384,
@@ -100,7 +100,7 @@ describe("Gate 2 retrieval omission evidence", () => {
 
   it("counts what never became a candidate without naming it", async () => {
     const { git } = fixture();
-    const result = await retrieveReadOnlyContextV1(git, "/repo", BASE, QUERY, BUDGET);
+    const result = await retrieveReadOnlyContextV3(git, "/repo", BASE, QUERY, BUDGET);
 
     // The fixture carries one binary blob and one secret-shaped file. Naming the
     // secret-shaped path here would disclose a file that failed the secret screen,
@@ -119,7 +119,7 @@ describe("Gate 2 retrieval omission evidence", () => {
     // it as an omitted MATCH would make the record assert something the retrieval
     // never observed, and would stop omittedMatches reconciling with matchedFiles.
     const { git } = fixture();
-    const result = await retrieveReadOnlyContextV1(git, "/repo", BASE, QUERY, {
+    const result = await retrieveReadOnlyContextV3(git, "/repo", BASE, QUERY, {
       maxFiles: 2,
       maxTotalBytes: 8_192,
       maxScanBytes: 16_384,
@@ -142,8 +142,9 @@ describe("Gate 2 retrieval omission evidence", () => {
     // otherwise recompute its digest and pass validation while asserting a
     // completeness it never had. The artifact writers must REQUIRE the evidence.
     const { git } = fixture();
-    const valid = await retrieveReadOnlyContextV1(git, "/repo", BASE, QUERY, BUDGET);
+    const valid = await retrieveReadOnlyContextV3(git, "/repo", BASE, QUERY, BUDGET);
     expect(retrievalOmissionEvidenceProblem(valid)).toBeNull();
+    const selectedMatches = valid.entries.filter((entry) => entry.matchedTerms.length > 0).length;
 
     const stripped = { ...valid } as Record<string, unknown>;
     stripped.omittedMatches = undefined;
@@ -151,32 +152,43 @@ describe("Gate 2 retrieval omission evidence", () => {
       /absent or malformed/,
     );
 
-    const contradictory = {
-      ...valid,
-      omittedMatches: [
-        { path: valid.entries[0]?.path ?? "src/main.py", bytes: 1, reason: "file_ceiling" },
-      ],
-    };
-    expect(retrievalOmissionEvidenceProblem(contradictory as unknown as typeof valid)).toMatch(
-      /also selected/,
-    );
+    // Counts that cannot reconcile against the receipt's own entries are an
+    // internally impossible completeness claim, and both writers would otherwise
+    // bind it into a valid artifact digest.
+    expect(
+      retrievalOmissionEvidenceProblem({
+        ...valid,
+        matchedFiles: selectedMatches + 1,
+      } as unknown as typeof valid),
+    ).toMatch(/does not reconcile/);
 
-    const duplicated = {
-      ...valid,
-      matchedFiles: 4,
-      omittedMatches: [
-        { path: "not/returned.py", bytes: 1, reason: "file_ceiling" },
-        { path: "not/returned.py", bytes: 1, reason: "byte_ceiling" },
-      ],
-    };
-    expect(retrievalOmissionEvidenceProblem(duplicated as unknown as typeof valid)).toMatch(
-      /twice/,
-    );
+    const selectedPath = valid.entries[0]?.path ?? "src/main.py";
+    expect(
+      retrievalOmissionEvidenceProblem({
+        ...valid,
+        matchedFiles: selectedMatches + valid.omittedMatches.length + 1,
+        omittedMatches: [
+          ...valid.omittedMatches,
+          { path: selectedPath, bytes: 1, reason: "file_ceiling" as const },
+        ],
+      } as unknown as typeof valid),
+    ).toMatch(/also selected/);
+
+    expect(
+      retrievalOmissionEvidenceProblem({
+        ...valid,
+        matchedFiles: selectedMatches + 2,
+        omittedMatches: [
+          { path: "not/returned.py", bytes: 1, reason: "file_ceiling" as const },
+          { path: "not/returned.py", bytes: 1, reason: "byte_ceiling" as const },
+        ],
+      } as unknown as typeof valid),
+    ).toMatch(/twice/);
   });
 
   it("reports no omissions when every match fit", async () => {
     const { git } = fixture();
-    const result = await retrieveReadOnlyContextV1(git, "/repo", BASE, QUERY, BUDGET);
+    const result = await retrieveReadOnlyContextV3(git, "/repo", BASE, QUERY, BUDGET);
 
     expect(result.omittedMatches).toEqual([]);
     expect(result.matchedFiles).toBe(result.entries.length);
@@ -189,14 +201,14 @@ describe("Gate 2 read-only context retrieval", () => {
     const secondFixture = fixture();
     secondFixture.tree.reverse();
 
-    const first = await retrieveReadOnlyContextV1(
+    const first = await retrieveReadOnlyContextV3(
       firstFixture.git,
       "/repository",
       BASE,
       QUERY,
       BUDGET,
     );
-    const second = await retrieveReadOnlyContextV1(
+    const second = await retrieveReadOnlyContextV3(
       secondFixture.git,
       "/repository",
       BASE,
@@ -229,16 +241,16 @@ describe("Gate 2 read-only context retrieval", () => {
   it("enforces scan, selection, query, and secret boundaries", async () => {
     const { git } = fixture();
     await expect(
-      retrieveReadOnlyContextV1(git, "/repository", BASE, QUERY, {
+      retrieveReadOnlyContextV3(git, "/repository", BASE, QUERY, {
         ...BUDGET,
         maxFiles: MAX_RETRIEVAL_FILES + 1,
       }),
     ).rejects.toMatchObject({ code: "INVALID_CONTEXT_RETRIEVAL" });
     await expect(
-      retrieveReadOnlyContextV1(git, "/repository", BASE, "API_TOKEN=real-secret-value", BUDGET),
+      retrieveReadOnlyContextV3(git, "/repository", BASE, "API_TOKEN=real-secret-value", BUDGET),
     ).rejects.toMatchObject({ code: "INVALID_CONTEXT_RETRIEVAL" });
     await expect(
-      retrieveReadOnlyContextV1(
+      retrieveReadOnlyContextV3(
         git,
         "/repository",
         BASE,
@@ -247,7 +259,7 @@ describe("Gate 2 read-only context retrieval", () => {
       ),
     ).rejects.toMatchObject({ code: "INVALID_CONTEXT_RETRIEVAL" });
     await expect(
-      retrieveReadOnlyContextV1(git, "/repository", BASE, QUERY, {
+      retrieveReadOnlyContextV3(git, "/repository", BASE, QUERY, {
         maxFiles: 4,
         maxTotalBytes: 32,
         maxScanBytes: 33,
@@ -257,7 +269,7 @@ describe("Gate 2 read-only context retrieval", () => {
 
   it("never truncates a selected file to fit the result budget", async () => {
     const { git } = fixture();
-    const result = await retrieveReadOnlyContextV1(git, "/repository", BASE, QUERY, {
+    const result = await retrieveReadOnlyContextV3(git, "/repository", BASE, QUERY, {
       maxFiles: 4,
       maxTotalBytes: 40,
       maxScanBytes: 16_384,
@@ -316,7 +328,7 @@ describe("Gate 2 read-only context retrieval", () => {
       }),
     };
 
-    const result = await retrieveReadOnlyContextV1(
+    const result = await retrieveReadOnlyContextV3(
       git,
       "/repository",
       BASE,
@@ -357,7 +369,7 @@ describe("Gate 2 read-only context retrieval", () => {
       }),
     };
 
-    const result = await retrieveReadOnlyContextV1(
+    const result = await retrieveReadOnlyContextV3(
       git,
       "/repository",
       BASE,
@@ -389,7 +401,7 @@ describe("Gate 2 read-only context retrieval", () => {
       }),
     };
 
-    const result = await retrieveReadOnlyContextV1(
+    const result = await retrieveReadOnlyContextV3(
       git,
       "/repository",
       BASE,

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { CODEBASE_EXPLANATION_SCHEMA, explainCodebaseV1 } from "../../packages/core/src/index.js";
-import { retrieveReadOnlyContextV1 } from "../../packages/core/src/context-retrieval.js";
+import { CODEBASE_EXPLANATION_SCHEMA, explainCodebaseV2 } from "../../packages/core/src/index.js";
+import { retrieveReadOnlyContextV3 } from "../../packages/core/src/context-retrieval.js";
 import type { TreeEntry } from "../../packages/core/src/git.js";
 import { createProviderConfig, type ModelGateway } from "../../packages/core/src/provider.js";
 
@@ -9,7 +9,11 @@ const TASK =
   "Explain Lantern's entry point, configuration flow, and greeting module with file-and-line provenance and no repository changes.";
 const BASE = "a".repeat(40);
 
-async function retrieval() {
+async function retrieval(budget?: {
+  readonly maxFiles: number;
+  readonly maxTotalBytes: number;
+  readonly maxScanBytes: number;
+}) {
   const blobs = new Map<string, Buffer>([
     [
       "readme",
@@ -35,7 +39,7 @@ async function retrieval() {
     { mode: "100644", type: "blob", objectId: "greeting", path: "src/greeting.py" },
     { mode: "100644", type: "blob", objectId: "main", path: "src/main.py" },
   ];
-  return retrieveReadOnlyContextV1(
+  return retrieveReadOnlyContextV3(
     {
       listTree: vi.fn(async () => tree),
       readBlob: vi.fn(async (_repository: string, objectId: string) => {
@@ -47,7 +51,7 @@ async function retrieval() {
     "/repository",
     BASE,
     TASK,
-    { maxFiles: 4, maxTotalBytes: 4_096, maxScanBytes: 4_096 },
+    budget ?? { maxFiles: 4, maxTotalBytes: 4_096, maxScanBytes: 4_096 },
   );
 }
 
@@ -92,7 +96,7 @@ describe("Gate 2 read-only codebase explanation", () => {
     const context = await retrieval();
     const provider = gateway();
 
-    const result = await explainCodebaseV1(provider, context, TASK);
+    const result = await explainCodebaseV2(provider, context, TASK);
 
     expect(result).toMatchObject({
       schema: CODEBASE_EXPLANATION_SCHEMA,
@@ -129,7 +133,7 @@ describe("Gate 2 read-only codebase explanation", () => {
       ),
     };
 
-    await expect(explainCodebaseV1(provider, changed, TASK)).rejects.toMatchObject({
+    await expect(explainCodebaseV2(provider, changed, TASK)).rejects.toMatchObject({
       code: "INVALID_CODEBASE_EXPLANATION",
     });
     expect(provider.generateStructured).not.toHaveBeenCalled();
@@ -151,8 +155,54 @@ describe("Gate 2 read-only codebase explanation", () => {
       usage: { inputTokens: 80, outputTokens: 20, estimatedCostUsd: 0, latencyMs: 5 },
     });
 
-    await expect(explainCodebaseV1(provider, context, TASK)).rejects.toMatchObject({
+    await expect(explainCodebaseV2(provider, context, TASK)).rejects.toMatchObject({
       code: "INVALID_CODEBASE_EXPLANATION",
     });
+  });
+
+  it("projects the retrieval's omission evidence into the artifact a human reads", async () => {
+    // The seam that failed the first time. The artifact carried only an opaque
+    // retrieval digest, so a reader of a persisted result could not tell "nothing
+    // contrary matched" from "contrary files were excluded by a ceiling". Asserted
+    // by exact equality so deleting, zeroing, or swapping a projected member fails.
+    const context = await retrieval({ maxFiles: 2, maxTotalBytes: 4_096, maxScanBytes: 4_096 });
+    expect(context.omittedMatches.length).toBeGreaterThan(0);
+
+    // Cites only a file that survives the tightened budget, so the assertion is
+    // about the coverage projection rather than citation scope.
+    const narrowGateway: ModelGateway = {
+      config: createProviderConfig({
+        kind: "ollama",
+        model: "fixture-explainer",
+        baseUrl: "http://127.0.0.1:11434/",
+      }),
+      generateStructured: vi.fn(async () => ({
+        text: JSON.stringify({
+          summary: "Lantern reads a configured audience.",
+          claims: [
+            {
+              text: "The audience is configured in config/app.json.",
+              citations: [{ path: "config/app.json", lineStart: 1, lineEnd: 3 }],
+            },
+          ],
+        }),
+        usage: { inputTokens: 10, outputTokens: 5, estimatedCostUsd: 0, latencyMs: 1 },
+      })),
+    };
+
+    const result = await explainCodebaseV2(narrowGateway, context, TASK);
+
+    expect(result.retrievalCoverage).toEqual({
+      matchedFiles: context.matchedFiles,
+      selectedFiles: context.entries.length,
+      omittedMatches: context.omittedMatches,
+      omittedReferences: context.omittedReferences,
+      excludedFiles: context.excludedFiles,
+    });
+    // The withheld files are named, not merely counted, so the reader can look.
+    expect(result.retrievalCoverage.omittedMatches[0]?.path).toEqual(expect.any(String));
+    expect(result.retrievalCoverage.matchedFiles).toBeGreaterThan(
+      result.retrievalCoverage.selectedFiles,
+    );
   });
 });

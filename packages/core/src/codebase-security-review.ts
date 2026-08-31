@@ -4,9 +4,9 @@ import { describeNonStrictJson, parseStrictJson } from "./canonical-json.js";
 import { containsSecretShapedContent } from "./context.js";
 import { GATE2_RETRIEVAL_SCHEMA, retrievalOmissionEvidenceProblem } from "./context-retrieval.js";
 import type {
-  ContextRetrievalExclusionCountsV1,
-  ContextRetrievalOmissionV1,
-  ContextRetrievalResultV1,
+  ContextRetrievalExclusionCountsV3,
+  ContextRetrievalOmissionV3,
+  ContextRetrievalResultV3,
 } from "./context-retrieval.js";
 import { digestJson, sha256 } from "./digest.js";
 import { type ErrorDetails, IcarusError } from "./errors.js";
@@ -22,28 +22,28 @@ export const MAX_CODEBASE_SECURITY_OUTPUT_BYTES = 128 * 1024;
 
 export type CodebaseSecuritySeverityV1 = "low" | "medium" | "high" | "critical";
 
-export interface CodebaseSecurityCitationV1 {
+export interface CodebaseSecurityCitationV2 {
   readonly path: string;
   readonly lineStart: number;
   readonly lineEnd: number;
 }
 
-export interface CodebaseSecurityFindingV1 {
+export interface CodebaseSecurityFindingV2 {
   readonly id: string;
   readonly title: string;
   readonly severity: CodebaseSecuritySeverityV1;
   readonly description: string;
   readonly exploitCondition: string;
   readonly recommendation: string;
-  readonly citations: readonly CodebaseSecurityCitationV1[];
+  readonly citations: readonly CodebaseSecurityCitationV2[];
 }
 
-export interface CodebaseSecurityNoFindingV1 {
+export interface CodebaseSecurityNoFindingV2 {
   readonly rationale: string;
-  readonly citations: readonly CodebaseSecurityCitationV1[];
+  readonly citations: readonly CodebaseSecurityCitationV2[];
 }
 
-export interface CodebaseSecurityReviewResultV1 {
+export interface CodebaseSecurityReviewResultV2 {
   readonly schema: typeof CODEBASE_SECURITY_REVIEW_SCHEMA;
   readonly baseCommit: string;
   readonly taskSha256: string;
@@ -57,15 +57,15 @@ export interface CodebaseSecurityReviewResultV1 {
   readonly retrievalCoverage: {
     readonly matchedFiles: number;
     readonly selectedFiles: number;
-    readonly omittedMatches: readonly ContextRetrievalOmissionV1[];
-    readonly omittedReferences: readonly ContextRetrievalOmissionV1[];
-    readonly excludedFiles: ContextRetrievalExclusionCountsV1;
+    readonly omittedMatches: readonly ContextRetrievalOmissionV3[];
+    readonly omittedReferences: readonly ContextRetrievalOmissionV3[];
+    readonly excludedFiles: ContextRetrievalExclusionCountsV3;
   };
   readonly provider: { readonly kind: string; readonly model: string };
   readonly assessment: "findings" | "no_finding";
   readonly summary: string;
-  readonly findings: readonly CodebaseSecurityFindingV1[];
-  readonly noFinding: CodebaseSecurityNoFindingV1 | null;
+  readonly findings: readonly CodebaseSecurityFindingV2[];
+  readonly noFinding: CodebaseSecurityNoFindingV2 | null;
   readonly usage: ProviderUsage;
   readonly digestSha256: string;
 }
@@ -221,8 +221,8 @@ function numberedContent(content: string): string {
 function decodeCitations(
   value: unknown,
   label: string,
-  selected: ReadonlyMap<string, ContextRetrievalResultV1["entries"][number]>,
-): readonly CodebaseSecurityCitationV1[] {
+  selected: ReadonlyMap<string, ContextRetrievalResultV3["entries"][number]>,
+): readonly CodebaseSecurityCitationV2[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_CODEBASE_SECURITY_CITATIONS) {
     invalid(`${label} are outside the bounded cardinality`);
   }
@@ -264,12 +264,12 @@ function decodeCitations(
 
 function decodeResponse(
   value: unknown,
-  retrieval: ContextRetrievalResultV1,
+  retrieval: ContextRetrievalResultV3,
 ): {
   assessment: "findings" | "no_finding";
   summary: string;
-  findings: readonly CodebaseSecurityFindingV1[];
-  noFinding: CodebaseSecurityNoFindingV1 | null;
+  findings: readonly CodebaseSecurityFindingV2[];
+  noFinding: CodebaseSecurityNoFindingV2 | null;
 } {
   const response = exactRecord(
     value,
@@ -325,7 +325,7 @@ function decodeResponse(
     };
   });
 
-  let noFinding: CodebaseSecurityNoFindingV1 | null = null;
+  let noFinding: CodebaseSecurityNoFindingV2 | null = null;
   if (response.noFinding !== null) {
     const value = exactRecord(
       response.noFinding,
@@ -350,7 +350,7 @@ function asJsonValue(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue;
 }
 
-function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV1): void {
+function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV3): void {
   if (
     retrieval.schema !== GATE2_RETRIEVAL_SCHEMA ||
     !/^[a-f0-9]{40}$|^[a-f0-9]{64}$/.test(retrieval.baseCommit) ||
@@ -409,12 +409,12 @@ function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV1): void {
  * coverage. This seam exposes no command, tool, repository-write, or approval
  * authority.
  */
-export async function reviewCodebaseSecurityV1(
+export async function reviewCodebaseSecurityV2(
   gateway: ModelGateway,
-  retrieval: ContextRetrievalResultV1,
+  retrieval: ContextRetrievalResultV3,
   task: string,
   signal?: AbortSignal,
-): Promise<CodebaseSecurityReviewResultV1> {
+): Promise<CodebaseSecurityReviewResultV2> {
   assertRetrievalIntegrity(retrieval);
   const taskBytes = Buffer.from(task, "utf8");
   if (

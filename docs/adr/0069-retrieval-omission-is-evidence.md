@@ -115,6 +115,15 @@ which never matched the query — was filed under `omittedMatches`, making the r
 assert an observation the retrieval never made. Omissions now carry their source:
 `omittedMatches` holds query matches only, `omittedReferences` holds the hop's.
 
+**An omission was classified by whichever traversal reached it first.** `omit()` took the
+call site's source and the de-duplication set froze it, so a query match first encountered
+while following a reference hop was recorded permanently as reference-only. The coverage
+could then say every query match was selected while the only withheld file was incidental
+context — a false statement built from true parts. Classification now follows what the file
+IS (`matchedTerms` non-empty), not how it was reached, and the shared validator requires
+the counts to reconcile exactly against the receipt's own entries rather than merely being
+individually plausible.
+
 **Structurally ineligible entries were invisible.** Symlink blobs and submodule gitlinks
 were skipped before any counter, so `excludedFiles` could read zero while the tree held
 entries the retrieval cannot read. They are counted as `unsupportedEntry`.

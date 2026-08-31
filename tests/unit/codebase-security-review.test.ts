@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   CODEBASE_SECURITY_REVIEW_SCHEMA,
-  reviewCodebaseSecurityV1,
+  reviewCodebaseSecurityV2,
 } from "../../packages/core/src/index.js";
-import { retrieveReadOnlyContextV1 } from "../../packages/core/src/context-retrieval.js";
+import { retrieveReadOnlyContextV3 } from "../../packages/core/src/context-retrieval.js";
 import type { TreeEntry } from "../../packages/core/src/git.js";
 import { createProviderConfig, type ModelGateway } from "../../packages/core/src/provider.js";
 
@@ -12,7 +12,11 @@ const TASK =
   "Review Lantern's configuration loading for source-backed security findings without changing the repository.";
 const BASE = "a".repeat(40);
 
-async function retrieval() {
+async function retrieval(budget?: {
+  readonly maxFiles: number;
+  readonly maxTotalBytes: number;
+  readonly maxScanBytes: number;
+}) {
   const blobs = new Map<string, Buffer>([
     ["config", Buffer.from('{\n  "audience": "traveler"\n}\n')],
     [
@@ -26,7 +30,7 @@ async function retrieval() {
     { mode: "100644", type: "blob", objectId: "config", path: "config/app.json" },
     { mode: "100644", type: "blob", objectId: "main", path: "src/main.py" },
   ];
-  return retrieveReadOnlyContextV1(
+  return retrieveReadOnlyContextV3(
     {
       listTree: vi.fn(async () => tree),
       readBlob: vi.fn(async (_repository: string, objectId: string) => {
@@ -38,7 +42,7 @@ async function retrieval() {
     "/repository",
     BASE,
     TASK,
-    { maxFiles: 2, maxTotalBytes: 4_096, maxScanBytes: 4_096 },
+    budget ?? { maxFiles: 2, maxTotalBytes: 4_096, maxScanBytes: 4_096 },
   );
 }
 
@@ -83,7 +87,7 @@ describe("Gate 2 read-only codebase security review", () => {
     const context = await retrieval();
     const provider = gateway();
 
-    const result = await reviewCodebaseSecurityV1(provider, context, TASK);
+    const result = await reviewCodebaseSecurityV2(provider, context, TASK);
 
     expect(result).toMatchObject({
       schema: CODEBASE_SECURITY_REVIEW_SCHEMA,
@@ -119,7 +123,7 @@ describe("Gate 2 read-only codebase security review", () => {
       },
     });
 
-    const result = await reviewCodebaseSecurityV1(provider, context, TASK);
+    const result = await reviewCodebaseSecurityV2(provider, context, TASK);
 
     expect(result.assessment).toBe("no_finding");
     expect(result.findings).toEqual([]);
@@ -138,7 +142,7 @@ describe("Gate 2 read-only codebase security review", () => {
       ),
     };
 
-    await expect(reviewCodebaseSecurityV1(provider, changed, TASK)).rejects.toMatchObject({
+    await expect(reviewCodebaseSecurityV2(provider, changed, TASK)).rejects.toMatchObject({
       code: "INVALID_CODEBASE_SECURITY_REVIEW",
     });
     expect(provider.generateStructured).not.toHaveBeenCalled();
@@ -149,7 +153,7 @@ describe("Gate 2 read-only codebase security review", () => {
     const provider = gateway();
 
     await expect(
-      reviewCodebaseSecurityV1(provider, context, `${TASK} Also run the repository checks.`),
+      reviewCodebaseSecurityV2(provider, context, `${TASK} Also run the repository checks.`),
     ).rejects.toMatchObject({ code: "INVALID_CODEBASE_SECURITY_REVIEW" });
     expect(provider.generateStructured).not.toHaveBeenCalled();
   });
@@ -182,7 +186,7 @@ describe("Gate 2 read-only codebase security review", () => {
   ])("refuses inconsistent assessment cardinality: %s", async (_label, response) => {
     const context = await retrieval();
 
-    await expect(reviewCodebaseSecurityV1(gateway(response), context, TASK)).rejects.toMatchObject({
+    await expect(reviewCodebaseSecurityV2(gateway(response), context, TASK)).rejects.toMatchObject({
       code: "INVALID_CODEBASE_SECURITY_REVIEW",
     });
   });
@@ -192,7 +196,7 @@ describe("Gate 2 read-only codebase security review", () => {
     const finding = findingResponse().findings[0];
     const provider = gateway({ ...findingResponse(), findings: [finding, finding] });
 
-    await expect(reviewCodebaseSecurityV1(provider, context, TASK)).rejects.toMatchObject({
+    await expect(reviewCodebaseSecurityV2(provider, context, TASK)).rejects.toMatchObject({
       code: "INVALID_CODEBASE_SECURITY_REVIEW",
     });
   });
@@ -208,7 +212,7 @@ describe("Gate 2 read-only codebase security review", () => {
     if (finding === undefined) throw new Error("finding fixture missing");
     finding.citations = [citation];
 
-    await expect(reviewCodebaseSecurityV1(gateway(response), context, TASK)).rejects.toMatchObject({
+    await expect(reviewCodebaseSecurityV2(gateway(response), context, TASK)).rejects.toMatchObject({
       code: "INVALID_CODEBASE_SECURITY_REVIEW",
     });
   });
@@ -222,7 +226,7 @@ describe("Gate 2 read-only codebase security review", () => {
       throw new Error("citation fixture missing");
     finding.citations = [citation, citation];
 
-    await expect(reviewCodebaseSecurityV1(gateway(response), context, TASK)).rejects.toMatchObject({
+    await expect(reviewCodebaseSecurityV2(gateway(response), context, TASK)).rejects.toMatchObject({
       code: "INVALID_CODEBASE_SECURITY_REVIEW",
     });
   });
@@ -238,7 +242,7 @@ describe("Gate 2 read-only codebase security review", () => {
     if (finding === undefined) throw new Error("finding fixture missing");
     response.findings[0] = { ...finding, ...mutation };
 
-    await expect(reviewCodebaseSecurityV1(gateway(response), context, TASK)).rejects.toMatchObject({
+    await expect(reviewCodebaseSecurityV2(gateway(response), context, TASK)).rejects.toMatchObject({
       code: "INVALID_CODEBASE_SECURITY_REVIEW",
     });
   });
@@ -251,7 +255,7 @@ describe("Gate 2 read-only codebase security review", () => {
       usage: { inputTokens: 1, outputTokens: 1, estimatedCostUsd: 0, latencyMs: 1 },
     });
 
-    await expect(reviewCodebaseSecurityV1(provider, context, TASK)).rejects.toMatchObject({
+    await expect(reviewCodebaseSecurityV2(provider, context, TASK)).rejects.toMatchObject({
       code: "INVALID_CODEBASE_SECURITY_REVIEW",
     });
   });
@@ -261,7 +265,7 @@ describe("Gate 2 read-only codebase security review", () => {
     const response = findingResponse();
     response.summary = `Leaked credential sk-${"a".repeat(24)}`;
 
-    await expect(reviewCodebaseSecurityV1(gateway(response), context, TASK)).rejects.toMatchObject({
+    await expect(reviewCodebaseSecurityV2(gateway(response), context, TASK)).rejects.toMatchObject({
       code: "INVALID_CODEBASE_SECURITY_REVIEW",
     });
   });
@@ -274,7 +278,7 @@ describe("Gate 2 read-only codebase security review", () => {
       usage: { inputTokens: 1, outputTokens: 1, estimatedCostUsd: 0, latencyMs: 1 },
     });
 
-    await expect(reviewCodebaseSecurityV1(provider, context, TASK)).rejects.toMatchObject({
+    await expect(reviewCodebaseSecurityV2(provider, context, TASK)).rejects.toMatchObject({
       code: "INVALID_CODEBASE_SECURITY_REVIEW",
     });
   });
@@ -287,8 +291,48 @@ describe("Gate 2 read-only codebase security review", () => {
       usage: { inputTokens: -1, outputTokens: 1, estimatedCostUsd: 0, latencyMs: 1 },
     });
 
-    await expect(reviewCodebaseSecurityV1(provider, context, TASK)).rejects.toMatchObject({
+    await expect(reviewCodebaseSecurityV2(provider, context, TASK)).rejects.toMatchObject({
       code: "INVALID_CODEBASE_SECURITY_REVIEW",
     });
+  });
+
+  it("projects the retrieval's omission evidence into the artifact a human reads", async () => {
+    // The seam that failed the first time. The artifact carried only an opaque
+    // retrieval digest, so a reader of a persisted result could not tell "nothing
+    // contrary matched" from "contrary files were excluded by a ceiling". Asserted
+    // by exact equality so deleting, zeroing, or swapping a projected member fails.
+    const context = await retrieval({ maxFiles: 1, maxTotalBytes: 4_096, maxScanBytes: 4_096 });
+    expect(context.entries).toHaveLength(1);
+    expect(context.omittedMatches.length).toBeGreaterThan(0);
+
+    // A no_finding citing only a file that survives the tightened budget: this is
+    // exactly the artifact whose trustworthiness depends on knowing what was withheld.
+    const selectedPath = context.entries[0]?.path ?? "config/app.json";
+    const result = await reviewCodebaseSecurityV2(
+      gateway({
+        assessment: "no_finding",
+        summary: "No source-backed security finding is established by the selected files.",
+        findings: [],
+        noFinding: {
+          rationale: "The selected fixture shows fixed local paths and no attacker input.",
+          citations: [{ path: selectedPath, lineStart: 1, lineEnd: 3 }],
+        },
+      }),
+      context,
+      TASK,
+    );
+
+    expect(result.retrievalCoverage).toEqual({
+      matchedFiles: context.matchedFiles,
+      selectedFiles: context.entries.length,
+      omittedMatches: context.omittedMatches,
+      omittedReferences: context.omittedReferences,
+      excludedFiles: context.excludedFiles,
+    });
+    // The withheld files are named, not merely counted, so the reader can look.
+    expect(result.retrievalCoverage.omittedMatches[0]?.path).toEqual(expect.any(String));
+    expect(result.retrievalCoverage.matchedFiles).toBeGreaterThan(
+      result.retrievalCoverage.selectedFiles,
+    );
   });
 });

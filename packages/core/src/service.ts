@@ -5028,15 +5028,24 @@ export class IcarusService {
         // whatever cannot be retained survives as a claim in the detail below,
         // rather than being replaced by the reservation and read later as though
         // nothing was ever reported.
-        let retainableTokens = reservedTokens;
-        const retainReported = (reported: number | null): number | null => {
-          if (reported === null || !Number.isSafeInteger(reported) || reported < 0) return null;
-          if (reported > retainableTokens) return null;
-          retainableTokens -= reported;
-          return reported;
-        };
-        const retainedInputTokens = retainReported(usage.inputTokens);
-        const retainedOutputTokens = retainReported(usage.outputTokens);
+        // Each counter is judged against ITS OWN reservation component, never a
+        // shared pool. reservedTokens is inputBytes + request.maxOutputTokens, so a
+        // counter within its own component can always be retained and the pair can
+        // never exceed the store's combined invariant. An earlier version spent one
+        // pooled reservation input-first, which let an impossible input claim of 250
+        // survive against a 100-token input component while erasing a valid output
+        // count of 100 -- the very erasure this branch exists to prevent, and it
+        // also let an output count above maxOutputTokens survive when the input
+        // happened to be small, even though that excess is what forced the refusal.
+        const retainWithin = (reported: number | null, component: number): number | null =>
+          reported !== null &&
+          Number.isSafeInteger(reported) &&
+          reported >= 0 &&
+          reported <= component
+            ? reported
+            : null;
+        const retainedInputTokens = retainWithin(usage.inputTokens, inputBytes);
+        const retainedOutputTokens = retainWithin(usage.outputTokens, request.maxOutputTokens);
         this.#store.finishOperation(operation, {
           outcome: "failed",
           activeRuntimeMs: finishTiming.chargedRuntimeMs,

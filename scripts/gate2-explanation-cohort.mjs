@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { explainCodebaseV1, retrieveReadOnlyContextV1 } from "../packages/core/dist/index.js";
+import { explainCodebaseV2, retrieveReadOnlyContextV3 } from "../packages/core/dist/index.js";
 import { GitController } from "../packages/core/dist/git.js";
 import { createProviderConfig } from "../packages/core/dist/provider.js";
 import { createGateway } from "../packages/core/dist/providers.js";
@@ -326,7 +326,7 @@ async function evaluateCase({
 
   const controller = new GitController(controlHome, runsRoot, "/usr/bin/git");
   const task = taskBytes.toString("utf8");
-  const retrieval = await retrieveReadOnlyContextV1(controller, workspace, baseCommit, task, {
+  const retrieval = await retrieveReadOnlyContextV3(controller, workspace, baseCommit, task, {
     maxFiles: MAX_CONTEXT_FILES_PER_CASE,
     maxTotalBytes: 64 * 1024,
     maxScanBytes: 1024 * 1024,
@@ -343,7 +343,7 @@ async function evaluateCase({
     `case ${benchmarkCase.id} did not retrieve every expected path: ${JSON.stringify(retrieval.entries.map(({ path: entryPath, score, matchedTerms }) => ({ path: entryPath, score, matchedTerms })))}`,
   );
 
-  const explanation = await explainCodebaseV1(provider, retrieval, task);
+  const explanation = await explainCodebaseV2(provider, retrieval, task);
   assertCondition(
     explanation.summary === oracle.response.summary &&
       JSON.stringify(explanation.claims) === JSON.stringify(oracle.response.claims),

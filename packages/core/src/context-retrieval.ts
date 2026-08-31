@@ -12,7 +12,8 @@ import type { GitController, TreeEntry } from "./git.js";
 import type { JsonValue } from "./types.js";
 
 /**
- * v2 adds omission evidence. A result recorded under v1 carries none, and that
+ * v3 adds omission evidence and separates query matches from reference-hop
+ * files. A result recorded under an earlier version carries neither, and that
  * absence means "not recorded" -- never "nothing was omitted". Frozen v1 reports
  * stay valid because they are bound by their own raw digests, not re-derived
  * through this contract.
@@ -25,13 +26,13 @@ export const MAX_RETRIEVAL_FILES = 64;
 export const MAX_RETRIEVAL_BYTES = 512 * 1024;
 export const MAX_RETRIEVAL_SCAN_BYTES = 64 * 1024 * 1024;
 
-export interface ContextRetrievalBudgetV1 {
+export interface ContextRetrievalBudgetV3 {
   readonly maxFiles: number;
   readonly maxTotalBytes: number;
   readonly maxScanBytes: number;
 }
 
-export interface ContextRetrievalMatchV1 {
+export interface ContextRetrievalMatchV3 {
   readonly term: string;
   readonly lines: readonly number[];
 }
@@ -43,7 +44,7 @@ export interface ContextRetrievalMatchV1 {
  * ranked below the cap -- and a security review's "no finding" rests on exactly
  * that distinction.
  */
-export interface ContextRetrievalOmissionV1 {
+export interface ContextRetrievalOmissionV3 {
   readonly path: string;
   readonly bytes: number;
   readonly reason: "file_ceiling" | "byte_ceiling";
@@ -54,31 +55,31 @@ export interface ContextRetrievalOmissionV1 {
  * A symlink blob or a submodule gitlink was withheld from the candidate set,
  * and "zero pre-candidate exclusions" cannot be claimed without saying so.
  */
-export interface ContextRetrievalExclusionCountsV1 {
+export interface ContextRetrievalExclusionCountsV3 {
   readonly byPolicy: number;
   readonly nonText: number;
   readonly secretShaped: number;
   readonly unsupportedEntry: number;
 }
 
-export interface ContextRetrievalEntryV1 {
+export interface ContextRetrievalEntryV3 {
   readonly path: string;
   readonly bytes: number;
   readonly sha256: string;
   readonly score: number;
   readonly matchedTerms: readonly string[];
   readonly lineCount: number;
-  readonly matches: readonly ContextRetrievalMatchV1[];
+  readonly matches: readonly ContextRetrievalMatchV3[];
   readonly content: string;
 }
 
-export interface ContextRetrievalResultV1 {
+export interface ContextRetrievalResultV3 {
   readonly schema: typeof GATE2_RETRIEVAL_SCHEMA;
   readonly baseCommit: string;
   readonly querySha256: string;
   readonly queryTerms: readonly string[];
   readonly repositoryDigestSha256: string;
-  readonly entries: readonly ContextRetrievalEntryV1[];
+  readonly entries: readonly ContextRetrievalEntryV3[];
   readonly totalBytes: number;
   readonly scannedFiles: number;
   readonly scannedBytes: number;
@@ -89,19 +90,19 @@ export interface ContextRetrievalResultV1 {
    * were. A file reached only by the reference hop never matched the query and
    * is never recorded here -- calling it a match would be a false label.
    */
-  readonly omittedMatches: readonly ContextRetrievalOmissionV1[];
+  readonly omittedMatches: readonly ContextRetrievalOmissionV3[];
   /**
    * Reference-hop files a ceiling excluded, in the path order the hop walks.
    * Separate from the matches because the two answer different questions: what
    * the query found, and what following one hop from it would have added.
    */
-  readonly omittedReferences: readonly ContextRetrievalOmissionV1[];
+  readonly omittedReferences: readonly ContextRetrievalOmissionV3[];
   /**
    * Files skipped before scoring, so they were never candidates. Counted rather
    * than named: a path is disclosed here only for files that passed the secret
    * screen, which these did not.
    */
-  readonly excludedFiles: ContextRetrievalExclusionCountsV1;
+  readonly excludedFiles: ContextRetrievalExclusionCountsV3;
   readonly digestSha256: string;
 }
 
@@ -114,9 +115,9 @@ export interface ContextRetrievalResultV1 {
  * completeness claim never existed.
  */
 export function retrievalOmissionEvidenceProblem(
-  retrieval: ContextRetrievalResultV1,
+  retrieval: ContextRetrievalResultV3,
 ): string | null {
-  const counts = retrieval.excludedFiles as ContextRetrievalExclusionCountsV1 | undefined;
+  const counts = retrieval.excludedFiles as ContextRetrievalExclusionCountsV3 | undefined;
   if (
     !Number.isSafeInteger(retrieval.matchedFiles) ||
     retrieval.matchedFiles < 0 ||
@@ -135,8 +136,15 @@ export function retrievalOmissionEvidenceProblem(
   ) {
     return "retrieval omission evidence is absent or malformed";
   }
-  if (retrieval.matchedFiles < retrieval.omittedMatches.length) {
-    return "retrieval omitted more query matches than it found";
+  // The counts must reconcile against the receipt's own entries, not merely be
+  // individually plausible. Without this a receipt claiming two matches while
+  // showing one selected match and no omissions validates, and both writers bind
+  // that internally impossible completeness claim into a trusted artifact digest.
+  const selectedQueryMatches = retrieval.entries.filter(
+    (entry) => entry.matchedTerms.length > 0,
+  ).length;
+  if (retrieval.matchedFiles !== selectedQueryMatches + retrieval.omittedMatches.length) {
+    return "retrieval coverage does not reconcile with its own entries";
   }
   const selected = new Set(retrieval.entries.map((entry) => entry.path));
   const seen = new Set<string>();
@@ -168,7 +176,7 @@ export function retrievalOmissionEvidenceProblem(
 
 type RetrievalGit = Pick<GitController, "listTree" | "readBlob">;
 
-interface ScoredEntry extends ContextRetrievalEntryV1 {
+interface ScoredEntry extends ContextRetrievalEntryV3 {
   readonly pathMatches: number;
 }
 
@@ -247,7 +255,7 @@ function tokenize(value: string): readonly string[] {
   ].sort();
 }
 
-function assertBudget(budget: ContextRetrievalBudgetV1): void {
+function assertBudget(budget: ContextRetrievalBudgetV3): void {
   const fields = [
     ["maxFiles", budget.maxFiles, MAX_RETRIEVAL_FILES],
     ["maxTotalBytes", budget.maxTotalBytes, MAX_RETRIEVAL_BYTES],
@@ -267,9 +275,9 @@ function compareTreeEntries(left: TreeEntry, right: TreeEntry): number {
   return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
 }
 
-function lineMatches(content: string, queryTerms: readonly string[]): ContextRetrievalMatchV1[] {
+function lineMatches(content: string, queryTerms: readonly string[]): ContextRetrievalMatchV3[] {
   const lines = content.split("\n");
-  const matches: ContextRetrievalMatchV1[] = [];
+  const matches: ContextRetrievalMatchV3[] = [];
   for (const term of queryTerms) {
     const matchedLines: number[] = [];
     for (let index = 0; index < lines.length && matchedLines.length < 8; index += 1) {
@@ -357,12 +365,12 @@ function referencedEntries(
     .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
 }
 
-function publicEntry(entry: ScoredEntry): ContextRetrievalEntryV1 {
+function publicEntry(entry: ScoredEntry): ContextRetrievalEntryV3 {
   const { pathMatches: _pathMatches, ...result } = entry;
   return result;
 }
 
-function digestableResult(result: Omit<ContextRetrievalResultV1, "digestSha256">): JsonValue {
+function digestableResult(result: Omit<ContextRetrievalResultV3, "digestSha256">): JsonValue {
   return asJsonValue({
     ...result,
     entries: result.entries.map(({ content: _content, ...entry }) => entry),
@@ -374,14 +382,14 @@ function digestableResult(result: Omit<ContextRetrievalResultV1, "digestSha256">
  * Repository data is never executed. Hidden, linked, binary, invalid-UTF-8, and
  * secret-shaped files cannot enter the result.
  */
-export async function retrieveReadOnlyContextV1(
+export async function retrieveReadOnlyContextV3(
   git: RetrievalGit,
   repositoryPath: string,
   baseCommit: string,
   query: string,
-  budget: ContextRetrievalBudgetV1,
+  budget: ContextRetrievalBudgetV3,
   signal?: AbortSignal,
-): Promise<ContextRetrievalResultV1> {
+): Promise<ContextRetrievalResultV3> {
   assertBudget(budget);
   const queryBytes = Buffer.byteLength(query, "utf8");
   if (
@@ -467,37 +475,37 @@ export async function retrieveReadOnlyContextV1(
       right.pathMatches - left.pathMatches ||
       (left.path < right.path ? -1 : left.path > right.path ? 1 : 0),
   );
-  const entries: ContextRetrievalEntryV1[] = [];
+  const entries: ContextRetrievalEntryV3[] = [];
   const selectedPaths = new Set<string>();
   const omittedPaths = new Set<string>();
-  const omittedMatches: ContextRetrievalOmissionV1[] = [];
-  const omittedReferences: ContextRetrievalOmissionV1[] = [];
+  const omittedMatches: ContextRetrievalOmissionV3[] = [];
+  const omittedReferences: ContextRetrievalOmissionV3[] = [];
   let totalBytes = 0;
   // A ceiling refusal is evidence, not a non-event: the file was found, it
   // ranked, and only the budget kept it out. Recorded once per path. A file
   // reached only by the reference hop goes to its own list -- it never matched
   // the query, and filing it under matches would make the record say something
   // the retrieval never observed.
-  function omit(
-    candidate: ScoredEntry,
-    reason: ContextRetrievalOmissionV1["reason"],
-    source: "query" | "reference",
-  ): void {
+  function omit(candidate: ScoredEntry, reason: ContextRetrievalOmissionV3["reason"]): void {
     if (selectedPaths.has(candidate.path) || omittedPaths.has(candidate.path)) return;
     omittedPaths.add(candidate.path);
     const omission = { path: candidate.path, bytes: candidate.bytes, reason };
-    if (source === "query") omittedMatches.push(omission);
+    // Classify by what the file IS, not by which traversal reached it first. A
+    // query match discovered while following a reference hop is still a query
+    // match; filing it under references would let the coverage claim every query
+    // match was selected while the only withheld file was incidental context.
+    if (candidate.matchedTerms.length > 0) omittedMatches.push(omission);
     else omittedReferences.push(omission);
   }
-  function select(candidate: ScoredEntry, source: "query" | "reference"): boolean {
+  function select(candidate: ScoredEntry): boolean {
     if (selectedPaths.has(candidate.path)) return true;
     if (entries.length >= budget.maxFiles) {
-      omit(candidate, "file_ceiling", source);
+      omit(candidate, "file_ceiling");
       return false;
     }
     const accountedBytes = candidate.bytes + Buffer.byteLength(candidate.path, "utf8");
     if (totalBytes + accountedBytes > budget.maxTotalBytes) {
-      omit(candidate, "byte_ceiling", source);
+      omit(candidate, "byte_ceiling");
       return false;
     }
     entries.push(publicEntry(candidate));
@@ -507,10 +515,10 @@ export async function retrieveReadOnlyContextV1(
   }
   for (const candidate of scored) {
     if (entries.length >= budget.maxFiles) {
-      omit(candidate, "file_ceiling", "query");
+      omit(candidate, "file_ceiling");
       continue;
     }
-    if (!select(candidate, "query")) continue;
+    if (!select(candidate)) continue;
     // Follow one deterministic reference hop only from files that matched the
     // operator's query. Repository text can influence ordering inside the
     // already-approved byte/file ceilings, but cannot widen either ceiling or
@@ -520,10 +528,10 @@ export async function retrieveReadOnlyContextV1(
       // be recorded. Breaking here without omitting is how a discovered file
       // vanished with no trace of ever having been found.
       if (entries.length >= budget.maxFiles) {
-        omit(referenced, "file_ceiling", "reference");
+        omit(referenced, "file_ceiling");
         continue;
       }
-      select(referenced, "reference");
+      select(referenced);
     }
   }
 
@@ -546,6 +554,6 @@ export async function retrieveReadOnlyContextV1(
       secretShaped: excludedSecretShaped,
       unsupportedEntry: excludedUnsupportedEntry,
     },
-  } satisfies Omit<ContextRetrievalResultV1, "digestSha256">;
+  } satisfies Omit<ContextRetrievalResultV3, "digestSha256">;
   return { ...unsigned, digestSha256: digestJson(digestableResult(unsigned)) };
 }

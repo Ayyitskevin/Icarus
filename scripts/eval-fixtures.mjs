@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 
-import { explainCodebaseV1, retrieveReadOnlyContextV1 } from "../packages/core/dist/index.js";
+import { explainCodebaseV2, retrieveReadOnlyContextV3 } from "../packages/core/dist/index.js";
 import { IcarusError } from "../packages/core/dist/errors.js";
 import { GitController } from "../packages/core/dist/git.js";
 import { DEFAULT_CEILING, DEFAULT_SANDBOX_LIMITS } from "../packages/core/dist/policy.js";
@@ -2298,7 +2298,7 @@ async function evaluateReadOnlyExplanation(scenario, contract) {
       const runsRoot = path.join(environment.temporaryRoot, "retrieval-runs");
       await mkdir(runsRoot, { recursive: true, mode: 0o700 });
       const git = new GitController(environment.controlHome, runsRoot, "/usr/bin/git");
-      const retrieval = await retrieveReadOnlyContextV1(
+      const retrieval = await retrieveReadOnlyContextV3(
         git,
         environment.workspace,
         environment.baseCommit,
@@ -2312,7 +2312,7 @@ async function evaluateReadOnlyExplanation(scenario, contract) {
         inputUsdPerMillionTokens: 0,
         outputUsdPerMillionTokens: 0,
       });
-      const explanation = await explainCodebaseV1(
+      const explanation = await explainCodebaseV2(
         createGateway(provider, {}),
         retrieval,
         contract.task,
