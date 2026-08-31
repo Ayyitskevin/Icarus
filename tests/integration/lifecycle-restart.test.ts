@@ -688,7 +688,10 @@ describe("CLI lifecycle across process restarts", () => {
     expect(cancelled.usage.estimatedCostUsd).toBeCloseTo(
       awaitingReview.usage.estimatedCostUsd + 0.1,
     );
-    expect(cancelled.usage.inputTokens).toBe(awaitingReview.usage.inputTokens + 25);
+    // ADR 0068: cancelling charges the reservation, and a charge that was never
+    // observed is an upper bound, not reported input.
+    expect(cancelled.usage.inputTokens).toBe(awaitingReview.usage.inputTokens);
+    expect(cancelled.usage.upperBoundTokens).toBe(awaitingReview.usage.upperBoundTokens + 25);
     expect(cancelled.usage.activeRuntimeMs).toBeGreaterThan(
       awaitingReview.usage.activeRuntimeMs + 100,
     );

@@ -1,6 +1,6 @@
 # ADR 0068: Observed usage and charged upper bounds are different quantities
 
-- Status: **Proposed** — not accepted; opens a contract question this ADR does not settle
+- Status: **Accepted** — the operator resolved the open question on 2026-08-30 in favour of option (2)
 - Date: 2026-08-30
 - Related: [ADR 0059](0059-headless-child-lineage.md) (the migration pattern this follows)
 
@@ -47,29 +47,34 @@ Add `upper_bound_tokens` to `runs` and `upperBoundTokens` to `RunUsage`.
   reservations into `inputTokens`, and that history is not retroactively
   reinterpretable.
 
-## The question this ADR does not settle
+## The question, and how it was resolved
 
-**27 tests across 6 files assert the current attribution**, including
-`store.test.ts`'s "charges worst-case reservations for an operation interrupted
-across reopen", which expects `inputTokens: 50, outputTokens: 0`. A further 10
-construction sites across 9 files must state the new field before the suite compiles.
+27 tests across 6 files failed against this change. The operator resolved the question
+in favour of option (2): **`inputTokens` means input tokens the provider reported**, and
+an assertion expecting a runtime reservation there encoded the defect rather than the
+contract.
 
-Those assertions are not incidental. Each is a place where someone wrote down what
-they believed run usage meant. Rewriting them to make this change pass would be
-editing the contract to fit the patch, in a repository whose evidence discipline is
-the product. They are therefore left failing, deliberately, so the decision is
-visible:
+Examining the failures showed they were **not 27 independent opinions**. Twenty-six
+cascaded from a single schema check: `assertExactMembers` in `headless-worker.ts`
+required settlement usage to carry exactly six members, so a seventh made every
+lifecycle-parsing test fail with one message. That check now accepts
+`upperBoundTokens` as an OPTIONAL member — a settlement written before the
+distinction carries six, one written after carries seven — because requiring one shape
+would make older evidence unreadable and rejecting the newer would make the
+distinction unrecordable.
 
-1. Was `inputTokens` always intended as "tokens charged as input", making the current
-   behavior correct and this ADR wrong?
-2. Or as "input tokens the provider reported", making those 27 assertions encodings of
-   a defect that should be updated alongside this change?
+Two failures were genuine and both were updated deliberately:
 
-The author's view is (2) — a field named `inputTokens` that can hold a runtime
-reservation cannot support any claim built on it — but this is a change to how spend
-is recorded, and the operator decides.
+1. `store.test.ts` — *"charges worst-case reservations for an operation interrupted
+   across reopen"* expected `inputTokens: 50`. It now expects `inputTokens: 0,
+   upperBoundTokens: 50`. The test's NAME remains accurate: the reservation is still
+   charged in full and the ceiling still counts it. Only its attribution changed.
+2. `headless-stream.test.ts` — the receipt stream pins a canonical checksum, which moved
+   because `RunUsage` gained a member. **This change alters digest-bound receipt
+   output.** The pin exists to catch unintended receipt drift; this drift is intended
+   and is recorded here so a future reader does not mistake it for tampering.
 
-## Consequences if accepted
+## Consequences
 
 - `RunUsage` consumers must distinguish the three quantities; the type makes every
   construction site state it rather than defaulting silently.
@@ -84,4 +89,6 @@ is recorded, and the operator decides.
 - `pnpm exec vitest run tests/unit/usage-basis.test.ts` — 2 passed: unreported usage
   charges 500 upper-bound tokens with 0 observed, where it previously wrote 500 into
   `inputTokens`.
-- `pnpm check` — **fails**, by design. See the question above.
+- `pnpm check` — 1533 tests pass across 118 files. On this machine it still fails
+  `tests/integration/landlock-sandbox.test.ts`, which fails identically on a clean tree
+  here and is kernel-dependent; CI on ubuntu-latest is the arbiter.

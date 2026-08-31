@@ -115,6 +115,7 @@ function baseFixture(): {
       toolCalls: 2,
       inputTokens: 100,
       outputTokens: 50,
+      upperBoundTokens: 0,
       activeRuntimeMs: 25,
       estimatedCostUsd: 0,
       reservedCostUsd: 0,

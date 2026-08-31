@@ -432,10 +432,15 @@ describe("SQLite run persistence", () => {
     });
     reopened.recordResumeRequested(UNIT_RUN_ID);
     const interrupted = reopened.markStartedOperationsInterrupted(UNIT_RUN_ID);
+    // ADR 0068: the reservation is still charged in full -- an interrupted operation
+    // is not free, and the ceiling still counts these 50 tokens. What changed is where
+    // they are recorded. They were never observed, so they are no longer reported as
+    // input the provider stated; they are a charged upper bound.
     expect(interrupted.usage).toEqual({
       toolCalls: 1,
-      inputTokens: 50,
+      inputTokens: 0,
       outputTokens: 0,
+      upperBoundTokens: 50,
       activeRuntimeMs: 500,
       estimatedCostUsd: 0.25,
       reservedCostUsd: 0,
