@@ -288,17 +288,17 @@ export {
   reconstructHeadlessEvidenceV1,
 } from "./headless-reconstruction.js";
 export type {
-  HeadlessStreamCheckEntryV1,
-  HeadlessStreamCheckLineV1,
-  HeadlessStreamContentLineV1,
-  HeadlessStreamGrantLineV1,
-  HeadlessStreamInitLineV1,
-  HeadlessStreamLineV1,
-  HeadlessStreamPatchSetLineV1,
-  HeadlessStreamPlanLineV1,
-  HeadlessStreamReceiptLineV1,
-  HeadlessStreamResultLineV1,
-  HeadlessStreamSourceV1,
+  HeadlessStreamCheckEntryV2,
+  HeadlessStreamCheckLineV2,
+  HeadlessStreamContentLineV2,
+  HeadlessStreamGrantLineV2,
+  HeadlessStreamInitLineV2,
+  HeadlessStreamLineV2,
+  HeadlessStreamPatchSetLineV2,
+  HeadlessStreamPlanLineV2,
+  HeadlessStreamReceiptLineV2,
+  HeadlessStreamResultLineV2,
+  HeadlessStreamSourceV2,
 } from "./headless-stream.js";
 export {
   createHeadlessStreamLines,

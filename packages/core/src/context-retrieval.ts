@@ -17,7 +17,7 @@ import type { JsonValue } from "./types.js";
  * stay valid because they are bound by their own raw digests, not re-derived
  * through this contract.
  */
-export const GATE2_RETRIEVAL_SCHEMA = "icarus.context-retrieval.v2";
+export const GATE2_RETRIEVAL_SCHEMA = "icarus.context-retrieval.v3";
 export const MAX_RETRIEVAL_QUERY_BYTES = 16 * 1024;
 export const MAX_RETRIEVAL_QUERY_TERMS = 128;
 export const MAX_RETRIEVAL_TREE_ENTRIES = 2_000;
@@ -49,6 +49,18 @@ export interface ContextRetrievalOmissionV1 {
   readonly reason: "file_ceiling" | "byte_ceiling";
 }
 
+/**
+ * Structurally ineligible tree entries, counted before any content is read.
+ * A symlink blob or a submodule gitlink was withheld from the candidate set,
+ * and "zero pre-candidate exclusions" cannot be claimed without saying so.
+ */
+export interface ContextRetrievalExclusionCountsV1 {
+  readonly byPolicy: number;
+  readonly nonText: number;
+  readonly secretShaped: number;
+  readonly unsupportedEntry: number;
+}
+
 export interface ContextRetrievalEntryV1 {
   readonly path: string;
   readonly bytes: number;
@@ -72,19 +84,86 @@ export interface ContextRetrievalResultV1 {
   readonly scannedBytes: number;
   /** Files that matched at least one query term, selected or not. */
   readonly matchedFiles: number;
-  /** Matched files a ceiling excluded, in rank order. Empty means none were. */
+  /**
+   * Query-matched files a ceiling excluded, in rank order. Empty means none
+   * were. A file reached only by the reference hop never matched the query and
+   * is never recorded here -- calling it a match would be a false label.
+   */
   readonly omittedMatches: readonly ContextRetrievalOmissionV1[];
+  /**
+   * Reference-hop files a ceiling excluded, in the path order the hop walks.
+   * Separate from the matches because the two answer different questions: what
+   * the query found, and what following one hop from it would have added.
+   */
+  readonly omittedReferences: readonly ContextRetrievalOmissionV1[];
   /**
    * Files skipped before scoring, so they were never candidates. Counted rather
    * than named: a path is disclosed here only for files that passed the secret
    * screen, which these did not.
    */
-  readonly excludedFiles: {
-    readonly byPolicy: number;
-    readonly nonText: number;
-    readonly secretShaped: number;
-  };
+  readonly excludedFiles: ContextRetrievalExclusionCountsV1;
   readonly digestSha256: string;
+}
+
+/**
+ * Validates the omission evidence a v3 receipt must carry, returning a reason
+ * when it does not. Exported because both artifact writers have to REQUIRE this
+ * evidence rather than recompute a digest over whatever members happen to be
+ * present: absent members serialize away, so a v2-shaped object relabelled v3
+ * would otherwise validate and mint a trusted-looking artifact whose
+ * completeness claim never existed.
+ */
+export function retrievalOmissionEvidenceProblem(
+  retrieval: ContextRetrievalResultV1,
+): string | null {
+  const counts = retrieval.excludedFiles as ContextRetrievalExclusionCountsV1 | undefined;
+  if (
+    !Number.isSafeInteger(retrieval.matchedFiles) ||
+    retrieval.matchedFiles < 0 ||
+    !Array.isArray(retrieval.omittedMatches) ||
+    !Array.isArray(retrieval.omittedReferences) ||
+    counts === undefined ||
+    typeof counts !== "object" ||
+    !Number.isSafeInteger(counts.byPolicy) ||
+    counts.byPolicy < 0 ||
+    !Number.isSafeInteger(counts.nonText) ||
+    counts.nonText < 0 ||
+    !Number.isSafeInteger(counts.secretShaped) ||
+    counts.secretShaped < 0 ||
+    !Number.isSafeInteger(counts.unsupportedEntry) ||
+    counts.unsupportedEntry < 0
+  ) {
+    return "retrieval omission evidence is absent or malformed";
+  }
+  if (retrieval.matchedFiles < retrieval.omittedMatches.length) {
+    return "retrieval omitted more query matches than it found";
+  }
+  const selected = new Set(retrieval.entries.map((entry) => entry.path));
+  const seen = new Set<string>();
+  for (const omission of [...retrieval.omittedMatches, ...retrieval.omittedReferences]) {
+    if (
+      typeof omission !== "object" ||
+      omission === null ||
+      typeof omission.path !== "string" ||
+      omission.path.length < 1 ||
+      omission.path.startsWith("/") ||
+      omission.path.includes("\\") ||
+      omission.path.split("/").some((part: string) => part === "" || part === "." || part === "..")
+    ) {
+      return "retrieval omission path is invalid";
+    }
+    if (!Number.isSafeInteger(omission.bytes) || omission.bytes < 0) {
+      return "retrieval omission size is invalid";
+    }
+    if (omission.reason !== "file_ceiling" && omission.reason !== "byte_ceiling") {
+      return "retrieval omission reason is unsupported";
+    }
+    // A path cannot be both returned and withheld, and cannot be withheld twice.
+    if (selected.has(omission.path)) return "retrieval omitted a path it also selected";
+    if (seen.has(omission.path)) return "retrieval recorded one omission twice";
+    seen.add(omission.path);
+  }
+  return null;
 }
 
 type RetrievalGit = Pick<GitController, "listTree" | "readBlob">;
@@ -338,9 +417,15 @@ export async function retrieveReadOnlyContextV1(
   let excludedByPolicy = 0;
   let excludedNonText = 0;
   let excludedSecretShaped = 0;
+  let excludedUnsupportedEntry = 0;
   for (const entry of tree) {
     signal?.throwIfAborted();
+    if (entry.type === "tree") continue;
     if (entry.type !== "blob" || (entry.mode !== "100644" && entry.mode !== "100755")) {
+      // A symlink blob or a submodule gitlink was found and withheld. Counting it
+      // is what lets a reader distinguish "the tree held nothing else" from
+      // "the tree held things this retrieval cannot read".
+      excludedUnsupportedEntry += 1;
       continue;
     }
     if (isWorkspaceContextPathExcluded(entry.path)) {
@@ -386,23 +471,33 @@ export async function retrieveReadOnlyContextV1(
   const selectedPaths = new Set<string>();
   const omittedPaths = new Set<string>();
   const omittedMatches: ContextRetrievalOmissionV1[] = [];
+  const omittedReferences: ContextRetrievalOmissionV1[] = [];
   let totalBytes = 0;
-  // A ceiling refusal is evidence, not a non-event: the file matched, it ranked,
-  // and only the budget kept it out. Recorded once per path, in rank order.
-  function omit(candidate: ScoredEntry, reason: ContextRetrievalOmissionV1["reason"]): void {
+  // A ceiling refusal is evidence, not a non-event: the file was found, it
+  // ranked, and only the budget kept it out. Recorded once per path. A file
+  // reached only by the reference hop goes to its own list -- it never matched
+  // the query, and filing it under matches would make the record say something
+  // the retrieval never observed.
+  function omit(
+    candidate: ScoredEntry,
+    reason: ContextRetrievalOmissionV1["reason"],
+    source: "query" | "reference",
+  ): void {
     if (selectedPaths.has(candidate.path) || omittedPaths.has(candidate.path)) return;
     omittedPaths.add(candidate.path);
-    omittedMatches.push({ path: candidate.path, bytes: candidate.bytes, reason });
+    const omission = { path: candidate.path, bytes: candidate.bytes, reason };
+    if (source === "query") omittedMatches.push(omission);
+    else omittedReferences.push(omission);
   }
-  function select(candidate: ScoredEntry): boolean {
+  function select(candidate: ScoredEntry, source: "query" | "reference"): boolean {
     if (selectedPaths.has(candidate.path)) return true;
     if (entries.length >= budget.maxFiles) {
-      omit(candidate, "file_ceiling");
+      omit(candidate, "file_ceiling", source);
       return false;
     }
     const accountedBytes = candidate.bytes + Buffer.byteLength(candidate.path, "utf8");
     if (totalBytes + accountedBytes > budget.maxTotalBytes) {
-      omit(candidate, "byte_ceiling");
+      omit(candidate, "byte_ceiling", source);
       return false;
     }
     entries.push(publicEntry(candidate));
@@ -412,17 +507,23 @@ export async function retrieveReadOnlyContextV1(
   }
   for (const candidate of scored) {
     if (entries.length >= budget.maxFiles) {
-      omit(candidate, "file_ceiling");
+      omit(candidate, "file_ceiling", "query");
       continue;
     }
-    if (!select(candidate)) continue;
+    if (!select(candidate, "query")) continue;
     // Follow one deterministic reference hop only from files that matched the
     // operator's query. Repository text can influence ordering inside the
     // already-approved byte/file ceilings, but cannot widen either ceiling or
     // make linked, generated, binary, invalid, or secret-shaped files eligible.
     for (const referenced of referencedEntries(candidate, eligible)) {
-      if (entries.length >= budget.maxFiles) break;
-      select(referenced);
+      // The ceiling stops the hop, but a file it already discovered still has to
+      // be recorded. Breaking here without omitting is how a discovered file
+      // vanished with no trace of ever having been found.
+      if (entries.length >= budget.maxFiles) {
+        omit(referenced, "file_ceiling", "reference");
+        continue;
+      }
+      select(referenced, "reference");
     }
   }
 
@@ -438,10 +539,12 @@ export async function retrieveReadOnlyContextV1(
     scannedBytes,
     matchedFiles: scored.length,
     omittedMatches,
+    omittedReferences,
     excludedFiles: {
       byPolicy: excludedByPolicy,
       nonText: excludedNonText,
       secretShaped: excludedSecretShaped,
+      unsupportedEntry: excludedUnsupportedEntry,
     },
   } satisfies Omit<ContextRetrievalResultV1, "digestSha256">;
   return { ...unsigned, digestSha256: digestJson(digestableResult(unsigned)) };

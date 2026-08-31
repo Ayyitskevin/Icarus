@@ -729,6 +729,64 @@ describe("aggregate runtime ceilings and signal cancellation", () => {
     }
   });
 
+  test("keeps an in-range counter when its sibling is out of range", async () => {
+    // ADR 0068's rule is per counter. Deciding on the SUM let one out-of-range
+    // counter erase a well-formed one: a provider reporting a wild input count and
+    // a perfectly good output count had BOTH rewritten to zero, and the durable
+    // record then said it reported nothing at all.
+    const ceiling: SunCeiling = {
+      ...DEFAULT_CEILING,
+      maxActiveRuntimeMs: 10_000,
+      commandTimeoutMs: 500,
+      maxOutputTokensPerCall: 200,
+      maxTotalTokens: 5_000,
+    };
+    const lopsidedGatewayFactory = (config: ProviderConfig): ModelGateway => ({
+      config,
+      generateStructured() {
+        return Promise.resolve({
+          text: JSON.stringify({
+            summary: "Replace the greeting.",
+            steps: ["Apply one exact replacement.", "Run verification."],
+            risks: ["The preimage may differ."],
+            target: TARGET,
+            targets: [TARGET],
+            iterationCeiling: 0,
+            checkIds: ["verify"],
+          }),
+          usage: {
+            inputTokens: 9_999_999,
+            outputTokens: 7,
+            estimatedCostUsd: 0,
+            latencyMs: 1,
+          },
+        });
+      },
+    });
+    const fixture = await serviceFixture(ceiling, lopsidedGatewayFactory);
+    try {
+      await expect(
+        fixture.service.planRun({
+          projectName: "runtime-test",
+          task: "Replace the greeting.",
+          targets: [TARGET],
+          provider: fixture.provider,
+        }),
+      ).rejects.toEqual(expect.objectContaining({ code: "PROVIDER_USAGE_EXCEEDED_RESERVATION" }));
+
+      const failed = fixture.service.listRuns("runtime-test")[0];
+      const usage = fixture.store.getRun(failed?.id ?? "").usage;
+      // The out-of-range input cannot be recorded as observed without exceeding the
+      // charge, so it stays a claim in the detail -- but the output the provider
+      // actually stated survives in its own counter.
+      expect(usage.outputTokens).toBe(7);
+      expect(usage.inputTokens).toBe(0);
+      expect(usage.upperBoundTokens).toBeGreaterThan(0);
+    } finally {
+      fixture.close();
+    }
+  });
+
   test("cancels a pre-workspace run without reconciling an impossible sandbox", async () => {
     const ceiling: SunCeiling = {
       ...DEFAULT_CEILING,

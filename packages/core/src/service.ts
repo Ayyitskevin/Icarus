@@ -5019,17 +5019,29 @@ export class IcarusService {
           usage.estimatedCostUsd > reservedCostUsd + Number.EPSILON)
       ) {
         // Refusing a response is not a reason to forget what the provider said it
-        // spent. Counters the store can accept keep their reported values; a token
-        // report that is itself outside the reservation cannot be recorded as
-        // observed without breaking the reservation invariant, so it survives as a
-        // claim in the detail rather than being replaced by the reservation and
-        // read later as though nothing was ever reported.
-        const tokensWithinReservation = reportedTokens <= reservedTokens;
+        // spent. ADR 0068's rule is PER COUNTER: a counter the store can accept
+        // keeps its reported value even when its sibling cannot be accepted. An
+        // earlier version decided this on the SUM and so let one out-of-range
+        // counter erase a well-formed one -- 600 input against a 500 reservation
+        // discarded a perfectly good 7 output. Retained in a fixed order until the
+        // reservation is exhausted, because the store can never be charged past it;
+        // whatever cannot be retained survives as a claim in the detail below,
+        // rather than being replaced by the reservation and read later as though
+        // nothing was ever reported.
+        let retainableTokens = reservedTokens;
+        const retainReported = (reported: number | null): number | null => {
+          if (reported === null || !Number.isSafeInteger(reported) || reported < 0) return null;
+          if (reported > retainableTokens) return null;
+          retainableTokens -= reported;
+          return reported;
+        };
+        const retainedInputTokens = retainReported(usage.inputTokens);
+        const retainedOutputTokens = retainReported(usage.outputTokens);
         this.#store.finishOperation(operation, {
           outcome: "failed",
           activeRuntimeMs: finishTiming.chargedRuntimeMs,
-          inputTokens: tokensWithinReservation ? usage.inputTokens : null,
-          outputTokens: tokensWithinReservation ? usage.outputTokens : null,
+          inputTokens: retainedInputTokens,
+          outputTokens: retainedOutputTokens,
           estimatedCostUsd: null,
           detail: {
             code: "PROVIDER_USAGE_EXCEEDED_RESERVATION",

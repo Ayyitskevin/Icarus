@@ -2,14 +2,18 @@ import { Buffer } from "node:buffer";
 
 import { describeNonStrictJson, parseStrictJson } from "./canonical-json.js";
 import { containsSecretShapedContent } from "./context.js";
-import { GATE2_RETRIEVAL_SCHEMA } from "./context-retrieval.js";
-import type { ContextRetrievalResultV1 } from "./context-retrieval.js";
+import { GATE2_RETRIEVAL_SCHEMA, retrievalOmissionEvidenceProblem } from "./context-retrieval.js";
+import type {
+  ContextRetrievalExclusionCountsV1,
+  ContextRetrievalOmissionV1,
+  ContextRetrievalResultV1,
+} from "./context-retrieval.js";
 import { digestJson, sha256 } from "./digest.js";
 import { type ErrorDetails, IcarusError } from "./errors.js";
 import type { ModelGateway } from "./provider.js";
 import type { JsonValue, ProviderUsage } from "./types.js";
 
-export const CODEBASE_SECURITY_REVIEW_SCHEMA = "icarus.codebase-security-review.v1";
+export const CODEBASE_SECURITY_REVIEW_SCHEMA = "icarus.codebase-security-review.v2";
 export const MAX_CODEBASE_SECURITY_FINDINGS = 16;
 export const MAX_CODEBASE_SECURITY_CITATIONS = 8;
 export const MAX_CODEBASE_SECURITY_TEXT_BYTES = 8 * 1024;
@@ -44,6 +48,19 @@ export interface CodebaseSecurityReviewResultV1 {
   readonly baseCommit: string;
   readonly taskSha256: string;
   readonly retrievalDigestSha256: string;
+  /**
+   * What the retrieval did NOT return. Without this the artifact carries only an
+   * opaque retrieval digest, and a reader of a persisted result cannot tell
+   * "nothing contrary matched" from "contrary files were excluded by a ceiling" --
+   * which is the distinction the whole result rests on.
+   */
+  readonly retrievalCoverage: {
+    readonly matchedFiles: number;
+    readonly selectedFiles: number;
+    readonly omittedMatches: readonly ContextRetrievalOmissionV1[];
+    readonly omittedReferences: readonly ContextRetrievalOmissionV1[];
+    readonly excludedFiles: ContextRetrievalExclusionCountsV1;
+  };
   readonly provider: { readonly kind: string; readonly model: string };
   readonly assessment: "findings" | "no_finding";
   readonly summary: string;
@@ -349,6 +366,8 @@ function assertRetrievalIntegrity(retrieval: ContextRetrievalResultV1): void {
   ) {
     invalid("retrieval receipt identity or counters are invalid");
   }
+  const omissionProblem = retrievalOmissionEvidenceProblem(retrieval);
+  if (omissionProblem !== null) invalid(omissionProblem);
   const paths = new Set<string>();
   let totalBytes = 0;
   for (const entry of retrieval.entries) {
@@ -453,6 +472,13 @@ export async function reviewCodebaseSecurityV1(
     baseCommit: retrieval.baseCommit,
     taskSha256: retrieval.querySha256,
     retrievalDigestSha256: retrieval.digestSha256,
+    retrievalCoverage: {
+      matchedFiles: retrieval.matchedFiles,
+      selectedFiles: retrieval.entries.length,
+      omittedMatches: retrieval.omittedMatches,
+      omittedReferences: retrieval.omittedReferences,
+      excludedFiles: retrieval.excludedFiles,
+    },
     provider: { kind: gateway.config.kind, model: gateway.config.model },
     assessment: decoded.assessment,
     summary: decoded.summary,

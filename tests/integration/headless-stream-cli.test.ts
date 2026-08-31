@@ -3,7 +3,7 @@ import { sha256 } from "../../packages/core/src/digest.js";
 import {
   HEADLESS_HISTORY_SCHEMA,
   HEADLESS_STREAM_SCHEMA,
-  type HeadlessStreamContentLineV1,
+  type HeadlessStreamContentLineV2,
   headlessStreamContentSha256,
 } from "../../packages/core/src/index.js";
 import { DEFAULT_CEILING } from "../../packages/core/src/policy.js";
@@ -181,7 +181,7 @@ describe("headless stream CLI", () => {
     expect(result).toMatchObject({ kind: "result", finalState: "awaiting_approval" });
     expect(result?.contentSha256).toBe(
       headlessStreamContentSha256(
-        lines.slice(0, -1) as unknown as readonly HeadlessStreamContentLineV1[],
+        lines.slice(0, -1) as unknown as readonly HeadlessStreamContentLineV2[],
       ),
     );
 
@@ -282,7 +282,7 @@ describe("headless stream CLI", () => {
     });
     expect(result?.contentSha256).toBe(
       headlessStreamContentSha256(
-        lines.slice(0, -1) as unknown as readonly HeadlessStreamContentLineV1[],
+        lines.slice(0, -1) as unknown as readonly HeadlessStreamContentLineV2[],
       ),
     );
 

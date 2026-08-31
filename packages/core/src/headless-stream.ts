@@ -29,7 +29,7 @@ const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
  * line cites its source so a consumer can resolve any projected event back to
  * the exact durable event sequence or approval digest it was derived from.
  */
-export type HeadlessStreamSourceV1 =
+export type HeadlessStreamSourceV2 =
   | { readonly type: "event"; readonly sequence: number; readonly eventType: string }
   | {
       readonly type: "approval";
@@ -38,16 +38,16 @@ export type HeadlessStreamSourceV1 =
     }
   | { readonly type: "snapshot" };
 
-interface HeadlessStreamLineBaseV1 {
+interface HeadlessStreamLineBaseV2 {
   readonly schema: typeof HEADLESS_STREAM_SCHEMA;
   /** 1-based ordinal inside this stream; not the durable event sequence. */
   readonly sequence: number;
   readonly runId: string;
   readonly createdAt: string;
-  readonly source: HeadlessStreamSourceV1;
+  readonly source: HeadlessStreamSourceV2;
 }
 
-export interface HeadlessStreamInitLineV1 extends HeadlessStreamLineBaseV1 {
+export interface HeadlessStreamInitLineV2 extends HeadlessStreamLineBaseV2 {
   readonly kind: "init";
   readonly phase: "run_created" | "worker_started";
   readonly baseCommit: string | null;
@@ -58,7 +58,7 @@ export interface HeadlessStreamInitLineV1 extends HeadlessStreamLineBaseV1 {
   readonly toolIds: readonly string[];
 }
 
-export interface HeadlessStreamPlanLineV1 extends HeadlessStreamLineBaseV1 {
+export interface HeadlessStreamPlanLineV2 extends HeadlessStreamLineBaseV2 {
   readonly kind: "plan";
   readonly planSha256: string;
   readonly targets: readonly string[];
@@ -67,7 +67,7 @@ export interface HeadlessStreamPlanLineV1 extends HeadlessStreamLineBaseV1 {
   readonly iterationCeiling: number;
 }
 
-export interface HeadlessStreamGrantLineV1 extends HeadlessStreamLineBaseV1 {
+export interface HeadlessStreamGrantLineV2 extends HeadlessStreamLineBaseV2 {
   readonly kind: "grant";
   readonly approvalKind: ApprovalRecord["kind"];
   readonly digest: string;
@@ -75,7 +75,7 @@ export interface HeadlessStreamGrantLineV1 extends HeadlessStreamLineBaseV1 {
   readonly decision: ApprovalRecord["decision"];
 }
 
-export interface HeadlessStreamPatchSetLineV1 extends HeadlessStreamLineBaseV1 {
+export interface HeadlessStreamPatchSetLineV2 extends HeadlessStreamLineBaseV2 {
   readonly kind: "patchset";
   readonly action: "intent_recorded" | "superseded" | "materialized";
   readonly patchSetSha256: string | null;
@@ -84,7 +84,7 @@ export interface HeadlessStreamPatchSetLineV1 extends HeadlessStreamLineBaseV1 {
   readonly approvedSha256: string | null;
 }
 
-export interface HeadlessStreamCheckEntryV1 {
+export interface HeadlessStreamCheckEntryV2 {
   readonly checkId: string;
   readonly outcome: "passed" | "failed" | "unavailable" | "cancelled";
   readonly exitCode: number | null;
@@ -93,15 +93,15 @@ export interface HeadlessStreamCheckEntryV1 {
   readonly truncated: boolean;
 }
 
-export interface HeadlessStreamCheckLineV1 extends HeadlessStreamLineBaseV1 {
+export interface HeadlessStreamCheckLineV2 extends HeadlessStreamLineBaseV2 {
   readonly kind: "check";
   readonly outcome: VerificationEvidence["outcome"];
   readonly diffSha256: string;
   readonly checkpointSha256: string;
-  readonly checks: readonly HeadlessStreamCheckEntryV1[];
+  readonly checks: readonly HeadlessStreamCheckEntryV2[];
 }
 
-export interface HeadlessStreamReceiptLineV1 extends HeadlessStreamLineBaseV1 {
+export interface HeadlessStreamReceiptLineV2 extends HeadlessStreamLineBaseV2 {
   readonly kind: "receipt";
   readonly receiptKind: "worker" | "child";
   readonly settlementSchema: string;
@@ -111,7 +111,7 @@ export interface HeadlessStreamReceiptLineV1 extends HeadlessStreamLineBaseV1 {
   readonly childRunId: string | null;
 }
 
-export interface HeadlessStreamResultLineV1 extends HeadlessStreamLineBaseV1 {
+export interface HeadlessStreamResultLineV2 extends HeadlessStreamLineBaseV2 {
   readonly kind: "result";
   readonly finalState: RunState;
   readonly verificationOutcome: "passed" | "failed" | "unavailable" | null;
@@ -129,17 +129,17 @@ export interface HeadlessStreamResultLineV1 extends HeadlessStreamLineBaseV1 {
   readonly contentSha256: string;
 }
 
-export type HeadlessStreamContentLineV1 =
-  | HeadlessStreamInitLineV1
-  | HeadlessStreamPlanLineV1
-  | HeadlessStreamGrantLineV1
-  | HeadlessStreamPatchSetLineV1
-  | HeadlessStreamCheckLineV1
-  | HeadlessStreamReceiptLineV1;
+export type HeadlessStreamContentLineV2 =
+  | HeadlessStreamInitLineV2
+  | HeadlessStreamPlanLineV2
+  | HeadlessStreamGrantLineV2
+  | HeadlessStreamPatchSetLineV2
+  | HeadlessStreamCheckLineV2
+  | HeadlessStreamReceiptLineV2;
 
-export type HeadlessStreamLineV1 = HeadlessStreamContentLineV1 | HeadlessStreamResultLineV1;
+export type HeadlessStreamLineV2 = HeadlessStreamContentLineV2 | HeadlessStreamResultLineV2;
 
-export function headlessStreamContentSha256(lines: readonly HeadlessStreamContentLineV1[]): string {
+export function headlessStreamContentSha256(lines: readonly HeadlessStreamContentLineV2[]): string {
   const digest = createHash("sha256");
   for (const line of lines) digest.update(canonicalJsonLine(line));
   return digest.digest("hex");
@@ -205,7 +205,7 @@ function checkEntries(payload: Readonly<Record<string, JsonValue>>): {
   readonly outcome: VerificationEvidence["outcome"];
   readonly diffSha256: string;
   readonly checkpointSha256: string;
-  readonly checks: readonly HeadlessStreamCheckEntryV1[];
+  readonly checks: readonly HeadlessStreamCheckEntryV2[];
 } {
   const verification = payload.verification;
   invariant(
@@ -221,7 +221,7 @@ function checkEntries(payload: Readonly<Record<string, JsonValue>>): {
   );
   const checks = verification.checks;
   invariant(Array.isArray(checks), "INVALID_HEADLESS_STREAM", "Check payload checks are malformed");
-  const entries = checks.map((entry): HeadlessStreamCheckEntryV1 => {
+  const entries = checks.map((entry): HeadlessStreamCheckEntryV2 => {
     invariant(
       typeof entry === "object" && entry !== null && !Array.isArray(entry),
       "INVALID_HEADLESS_STREAM",
@@ -425,7 +425,7 @@ function assertValidChildLifecycle(runId: string, events: readonly EventRecord[]
  * sequence or approval digest it was derived from. Given the same snapshot
  * the output is byte-identical under canonical JSONL encoding.
  */
-export function createHeadlessStreamLines(history: RunHistory): readonly HeadlessStreamLineV1[] {
+export function createHeadlessStreamLines(history: RunHistory): readonly HeadlessStreamLineV2[] {
   const { run, approvals, events } = history;
   const runId = run.id;
   for (const approval of approvals) {
@@ -462,8 +462,8 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
 
   const baseCommit = run.baseCommit.length > 0 ? run.baseCommit : null;
   const contextSha256 = run.contextSha256.length > 0 ? run.contextSha256 : null;
-  const content: HeadlessStreamContentLineV1[] = [];
-  const push = <T extends HeadlessStreamContentLineV1>(line: Omit<T, "schema" | "sequence">): T => {
+  const content: HeadlessStreamContentLineV2[] = [];
+  const push = <T extends HeadlessStreamContentLineV2>(line: Omit<T, "schema" | "sequence">): T => {
     const stored = {
       schema: HEADLESS_STREAM_SCHEMA,
       sequence: content.length + 1,
@@ -474,7 +474,7 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
   };
 
   const created = runCreated[0];
-  push<HeadlessStreamInitLineV1>({
+  push<HeadlessStreamInitLineV2>({
     runId,
     kind: "init",
     phase: "run_created",
@@ -492,7 +492,7 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
   // history envelope; each grant cites its approval digest and timestamp so a
   // consumer can place it in exact time order when it needs to.
   for (const approval of approvals) {
-    push<HeadlessStreamGrantLineV1>({
+    push<HeadlessStreamGrantLineV2>({
       runId,
       kind: "grant",
       createdAt: approval.createdAt,
@@ -522,13 +522,13 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
       "INVALID_HEADLESS_STREAM",
       "Headless stream patch-set supersession lacks its intent",
     );
-    content[index] = { ...(line as HeadlessStreamPatchSetLineV1), patchSetSha256: digest };
+    content[index] = { ...(line as HeadlessStreamPatchSetLineV2), patchSetSha256: digest };
   };
 
-  let lastWorkerSettlement: HeadlessStreamReceiptLineV1 | null = null;
+  let lastWorkerSettlement: HeadlessStreamReceiptLineV2 | null = null;
 
   for (const event of events) {
-    const source: HeadlessStreamSourceV1 = {
+    const source: HeadlessStreamSourceV2 = {
       type: "event",
       sequence: event.sequence,
       eventType: event.type,
@@ -544,7 +544,7 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
         "INVALID_HEADLESS_STREAM",
         "Worker start payload is malformed",
       );
-      push<HeadlessStreamInitLineV1>({
+      push<HeadlessStreamInitLineV2>({
         runId,
         kind: "init",
         phase: "worker_started",
@@ -565,7 +565,7 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
         "INVALID_HEADLESS_STREAM",
         "Headless stream plan event lacks its persisted plan",
       );
-      push<HeadlessStreamPlanLineV1>({
+      push<HeadlessStreamPlanLineV2>({
         runId,
         kind: "plan",
         createdAt: event.createdAt,
@@ -580,7 +580,7 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
     }
     if (event.type === "patch_set.intent_recorded") {
       const payload = eventPayload(event, "Patch-set intent");
-      push<HeadlessStreamPatchSetLineV1>({
+      push<HeadlessStreamPatchSetLineV2>({
         runId,
         kind: "patchset",
         action: "intent_recorded",
@@ -597,7 +597,7 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
     if (event.type === "patch_set.superseded") {
       const payload = eventPayload(event, "Patch-set supersession");
       const digest = payloadDigest(payload, "digest", "Patch-set supersession");
-      push<HeadlessStreamPatchSetLineV1>({
+      push<HeadlessStreamPatchSetLineV2>({
         runId,
         kind: "patchset",
         action: "superseded",
@@ -626,7 +626,7 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
         "INVALID_HEADLESS_STREAM",
         "Patch-set materialization target is malformed",
       );
-      push<HeadlessStreamPatchSetLineV1>({
+      push<HeadlessStreamPatchSetLineV2>({
         runId,
         kind: "patchset",
         action: "materialized",
@@ -642,7 +642,7 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
     if (event.type === "verification.completed") {
       const payload = eventPayload(event, "Check");
       const verification = checkEntries(payload);
-      push<HeadlessStreamCheckLineV1>({
+      push<HeadlessStreamCheckLineV2>({
         runId,
         kind: "check",
         createdAt: event.createdAt,
@@ -657,7 +657,7 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
     if (event.type === "headless.worker.settled" || event.type === "headless.child.settled") {
       const child = event.type === "headless.child.settled";
       const receipt = receiptFields(eventPayload(event, "Settlement"), child, runId);
-      const line = push<HeadlessStreamReceiptLineV1>({
+      const line = push<HeadlessStreamReceiptLineV2>({
         runId,
         kind: "receipt",
         receiptKind: child ? "child" : "worker",
@@ -696,7 +696,7 @@ export function createHeadlessStreamLines(history: RunHistory): readonly Headles
           bindingDigestSha256: lastWorkerSettlement.bindingDigestSha256,
         }
       : null;
-  const result: HeadlessStreamResultLineV1 = {
+  const result: HeadlessStreamResultLineV2 = {
     schema: HEADLESS_STREAM_SCHEMA,
     sequence: content.length + 1,
     runId,

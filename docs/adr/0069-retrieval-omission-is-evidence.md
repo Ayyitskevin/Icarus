@@ -80,3 +80,52 @@ completeness the retrieval never had.
 - Mutation probe: deleting the `omittedMatches.push(...)` line fails
   *"records a matched file the file ceiling excluded, with its reason"* and
   *"distinguishes a byte-ceiling exclusion from a file-ceiling one"*, and nothing else.
+
+## Amendment (2026-08-31): the evidence did not reach the reader
+
+The first implementation of this ADR did not achieve what the ADR claims. An
+independent audit by the codex seat found four defects in it, all real.
+
+**The omission evidence stopped at the artifact boundary.** `omittedMatches` lived only
+on the in-memory retrieval result. Both artifact writers emit `retrievalDigestSha256`
+and nothing else, so a human reading a persisted `no_finding` still could not tell
+"nothing contrary matched" from "contrary files were excluded by a ceiling" — the exact
+distinction the Context section says the whole result rests on.
+
+The Consequences section above even *records* that the artifacts embed only a digest,
+and offers it as reassurance that frozen evidence is unaffected. That observation was
+correct and its reading was backwards: the same fact is why the fix never reached the
+person the fix exists for. Both artifacts now carry a `retrievalCoverage` member —
+matched count, selected count, both omission lists, and the exclusion counts — and both
+move to `icarus.codebase-explanation.v2` and `icarus.codebase-security-review.v2`,
+because a digest over an enlarged artifact is a different artifact.
+
+**A relabelled receipt validated.** The artifact seams checked the schema string and the
+old counters, then recomputed a digest over whatever members happened to be present.
+Absent members serialize away, so a receipt carrying the new label without the new
+evidence recomputed its digest and passed. `retrievalOmissionEvidenceProblem` is now
+exported from the retrieval module and called by both writers; it requires the members,
+validates every omission path, size, and reason, and refuses a path that is both
+selected and omitted, or omitted twice.
+
+**The reference hop lost files and mislabelled others.** Its `maxFiles` break returned
+without recording anything, so a file the hop had already discovered vanished with no
+trace of having been found. In the other direction, a file reached only by the hop —
+which never matched the query — was filed under `omittedMatches`, making the record
+assert an observation the retrieval never made. Omissions now carry their source:
+`omittedMatches` holds query matches only, `omittedReferences` holds the hop's.
+
+**Structurally ineligible entries were invisible.** Symlink blobs and submodule gitlinks
+were skipped before any counter, so `excludedFiles` could read zero while the tree held
+entries the retrieval cannot read. They are counted as `unsupportedEntry`.
+
+The retrieval schema moves to `icarus.context-retrieval.v3`. v2 was not merely smaller
+than v3 — it was wrong, because it labelled reference-hop files as query matches and
+silently dropped others. A v2 receipt's omission list cannot be read as a v3 one.
+
+## Method note
+
+This ADR shipped claiming to close a defect it did not close, and the review that caught
+it completed after the merge. The pattern is worth recording: the author had every fact
+needed to see the gap, wrote one of them down, and drew the comfortable conclusion from
+it. An independent reader with the same file open drew the other one.

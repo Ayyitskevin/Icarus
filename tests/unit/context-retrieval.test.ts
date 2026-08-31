@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   MAX_RETRIEVAL_FILES,
+  retrievalOmissionEvidenceProblem,
   retrieveReadOnlyContextV1,
 } from "../../packages/core/src/context-retrieval.js";
 import type { TreeEntry } from "../../packages/core/src/git.js";
@@ -107,7 +108,70 @@ describe("Gate 2 retrieval omission evidence", () => {
     expect(result.excludedFiles.nonText).toBe(1);
     expect(result.excludedFiles.secretShaped).toBe(1);
     expect(result.excludedFiles.byPolicy).toBeGreaterThan(0);
+    // The fixture also tracks a symlink (mode 120000). It was found and withheld,
+    // so "nothing else was excluded" cannot be claimed unless it is counted.
+    expect(result.excludedFiles.unsupportedEntry).toBe(1);
     expect(result.omittedMatches.every((omission) => omission.path !== "notes.txt")).toBe(true);
+  });
+
+  it("never files a reference-hop file under query matches", async () => {
+    // A file reached only by following a reference never matched the query. Listing
+    // it as an omitted MATCH would make the record assert something the retrieval
+    // never observed, and would stop omittedMatches reconciling with matchedFiles.
+    const { git } = fixture();
+    const result = await retrieveReadOnlyContextV1(git, "/repo", BASE, QUERY, {
+      maxFiles: 2,
+      maxTotalBytes: 8_192,
+      maxScanBytes: 16_384,
+    });
+
+    expect(result.omittedMatches.length).toBeLessThanOrEqual(result.matchedFiles);
+    const matchedPaths = new Set(result.omittedMatches.map((omission) => omission.path));
+    for (const reference of result.omittedReferences) {
+      expect(matchedPaths.has(reference.path)).toBe(false);
+    }
+    // Every recorded omission is a real exclusion, never something also returned.
+    const selected = new Set(result.entries.map((entry) => entry.path));
+    for (const omission of [...result.omittedMatches, ...result.omittedReferences]) {
+      expect(selected.has(omission.path)).toBe(false);
+    }
+  });
+
+  it("refuses a receipt that carries the version label without the evidence", async () => {
+    // Absent members serialize away, so a receipt relabelled to the new schema can
+    // otherwise recompute its digest and pass validation while asserting a
+    // completeness it never had. The artifact writers must REQUIRE the evidence.
+    const { git } = fixture();
+    const valid = await retrieveReadOnlyContextV1(git, "/repo", BASE, QUERY, BUDGET);
+    expect(retrievalOmissionEvidenceProblem(valid)).toBeNull();
+
+    const stripped = { ...valid } as Record<string, unknown>;
+    stripped.omittedMatches = undefined;
+    expect(retrievalOmissionEvidenceProblem(stripped as unknown as typeof valid)).toMatch(
+      /absent or malformed/,
+    );
+
+    const contradictory = {
+      ...valid,
+      omittedMatches: [
+        { path: valid.entries[0]?.path ?? "src/main.py", bytes: 1, reason: "file_ceiling" },
+      ],
+    };
+    expect(retrievalOmissionEvidenceProblem(contradictory as unknown as typeof valid)).toMatch(
+      /also selected/,
+    );
+
+    const duplicated = {
+      ...valid,
+      matchedFiles: 4,
+      omittedMatches: [
+        { path: "not/returned.py", bytes: 1, reason: "file_ceiling" },
+        { path: "not/returned.py", bytes: 1, reason: "byte_ceiling" },
+      ],
+    };
+    expect(retrievalOmissionEvidenceProblem(duplicated as unknown as typeof valid)).toMatch(
+      /twice/,
+    );
   });
 
   it("reports no omissions when every match fit", async () => {
