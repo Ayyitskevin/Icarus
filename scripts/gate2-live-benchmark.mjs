@@ -248,6 +248,32 @@ async function preflight(profile, nativeFetch) {
   };
 }
 
+/**
+ * Attach the objective facts that distinguish "the model produced nothing" from
+ * "the model produced something we did not keep".
+ *
+ * A bare contract message on an empty candidate reads as model silence.
+ * `scaffold-cart-discount` recorded exactly that after billing 8192 output tokens
+ * over 145 seconds, because the gateway of the day discarded the model's reasoning
+ * before the harness ever saw it. Absence and loss must not serialize identically.
+ * See docs/diagnoses/2026-08-30-gate2-zero-yield-thinking-displacement.md.
+ *
+ * Non-empty candidates keep the parser's message verbatim: this adds context only
+ * where the record would otherwise be unreadable.
+ */
+export function describeGate2CandidateFailure(reason, generated) {
+  if (generated.text.length !== 0) return reason;
+  const reasoning =
+    generated.thinkingChars === null || generated.thinkingChars === undefined
+      ? "not measured"
+      : `${generated.thinkingChars} characters`;
+  return (
+    `${reason} (provider returned 0 content characters in ` +
+    `${generated.usage.outputTokens} output tokens, ` +
+    `finishReason=${generated.finishReason}, reasoning=${reasoning})`
+  );
+}
+
 async function callVulcanCandidate(
   modelId,
   benchmarkCase,
@@ -291,8 +317,12 @@ async function callVulcanCandidate(
             }),
           },
         ],
-        // Vulcan 1.0.0 accepts temperature/max_tokens and rejects unknown request fields.
-        // Source: https://github.com/Ayyitskevin/Vulcan/blob/1f43755cb9b8a7657d6492bf2054ff23ebbe6c67/src/vulcan/schemas.py#L45-L54
+        // Vulcan accepts temperature/max_tokens and rejects unknown request fields.
+        // Source: https://github.com/Ayyitskevin/Vulcan/blob/c6223a6/src/vulcan/schemas.py
+        // As of Vulcan c6223a6 the request also accepts a tri-state `think`, and the
+        // response may carry `message.thinking`. This benchmark deliberately does NOT
+        // send `think`: suppressing reasoning would change what the profile measures and
+        // needs its own accepted ADR. It does now RECORD what reasoning cost, below.
         temperature: generation.temperature,
         max_tokens: generation.maxTokens,
         stream: false,
@@ -303,6 +333,7 @@ async function callVulcanCandidate(
     if (error?.name !== "TimeoutError" && error?.name !== "AbortError") throw error;
     return {
       text: "",
+      thinkingChars: 0,
       finishReason: "timeout",
       providerFailure: "request_timeout",
       usageBasis: "declared_budget_upper_bound",
@@ -331,8 +362,22 @@ async function callVulcanCandidate(
       outputTokens >= 0,
     "Vulcan candidate response omitted bounded usage",
   );
+  // A missing or non-string `content` is a protocol violation, not an empty answer.
+  // Coercing both to "" made a malformed response indistinguishable from a model that
+  // genuinely returned nothing, and that ambiguity is exactly what made the 2026-08-28
+  // zero-yield cases unreadable. See docs/diagnoses/2026-08-30-gate2-zero-yield-thinking-displacement.md
+  assertCondition(
+    typeof choice.message?.content === "string",
+    "Vulcan candidate response omitted a string message.content",
+  );
+  // Reasoning text is billed in completion tokens. Retain only its size: enough to tell
+  // "the model produced nothing" from "the model reasoned and returned nothing", without
+  // copying model reasoning into published evidence.
+  const thinkingChars =
+    typeof choice.message?.thinking === "string" ? choice.message.thinking.length : 0;
   return {
-    text: typeof choice.message?.content === "string" ? choice.message.content : "",
+    text: choice.message.content,
+    thinkingChars,
     finishReason: typeof choice.finish_reason === "string" ? choice.finish_reason : "unknown",
     providerFailure: null,
     usageBasis: "provider_reported",
@@ -513,6 +558,8 @@ async function evaluateCase({ benchmarkCase, repository, oracle, mode, profile, 
           )
         : {
             text: priorRecord.rawCandidate,
+            // Replayed from a record written before reasoning size was measured.
+            thinkingChars: null,
             finishReason: priorRecord.finishReason ?? "legacy-stop",
             providerFailure: priorRecord.providerFailure ?? null,
             usageBasis: priorRecord.usageBasis ?? "provider_reported",
@@ -538,7 +585,10 @@ async function evaluateCase({ benchmarkCase, repository, oracle, mode, profile, 
         expectedKind: benchmarkCase.expectedOutcome.kind,
       });
     } catch (error) {
-      candidateError = error instanceof Error ? error.message : String(error);
+      candidateError = describeGate2CandidateFailure(
+        error instanceof Error ? error.message : String(error),
+        generated,
+      );
     }
     const firstPassPlanAccepted =
       candidate !== null && assessGate2FirstPassPlan(candidate, benchmarkCase, checkIds);
@@ -836,9 +886,13 @@ async function main() {
   }
 }
 
-await main().catch((error) => {
-  process.stderr.write(
-    `Gate 2 live benchmark failed: ${error instanceof Error ? error.message : String(error)}\n`,
-  );
-  process.exitCode = 1;
-});
+// Run only as a CLI. Importing this module for its exported helpers must not execute
+// a benchmark run -- the same guard scripts/gate2-live-evidence-publish.mjs uses.
+if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === scriptPath) {
+  await main().catch((error) => {
+    process.stderr.write(
+      `Gate 2 live benchmark failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    process.exitCode = 1;
+  });
+}

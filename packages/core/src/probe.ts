@@ -378,13 +378,22 @@ async function runThroughputAttempt(
     signal,
   );
   const rate = tokensPerSecond(result.usage);
+  // Billed tokens are not delivered output. A thinking model can spend an entire
+  // budget on reasoning the gateway discards, returning zero usable text while
+  // reporting thousands of output tokens; scoring that as a throughput success
+  // measures what the provider CHARGED FOR, not what it PRODUCED. Exactly this
+  // confusion made eight Gate 2 observations unreadable -- see
+  // docs/diagnoses/2026-08-30-gate2-zero-yield-thinking-displacement.md.
+  const producedText = result.text.trim().length > 0;
   return {
     attempt,
-    ok: result.usage.outputTokens !== null && result.usage.outputTokens > 0,
+    ok: result.usage.outputTokens !== null && result.usage.outputTokens > 0 && producedText,
     detail:
       result.usage.outputTokens === null
         ? "no output token count reported by provider"
-        : `generated ${result.usage.outputTokens} tokens`,
+        : producedText
+          ? `generated ${result.usage.outputTokens} tokens`
+          : `billed ${result.usage.outputTokens} output tokens but returned no usable text`,
     usage: result.usage,
     outputTokensPerSecond: rate,
     consumedInputRatio: null,
@@ -512,7 +521,12 @@ function aggregate(
   attempts: readonly ProbeAttempt[],
 ): ProbeAggregate {
   const okCount = attempts.filter((entry) => entry.ok).length;
+  // Rates come from SUCCESSFUL attempts only. An attempt that failed still carries a
+  // tokens-per-second figure, and including it reports the speed at which the provider
+  // produced something unusable as though it were throughput. A published throughput
+  // number must describe delivered output or it describes nothing.
   const rates = attempts
+    .filter((entry) => entry.ok)
     .map((entry) => entry.outputTokensPerSecond)
     .filter((value): value is number => value !== null);
   const ratios = attempts

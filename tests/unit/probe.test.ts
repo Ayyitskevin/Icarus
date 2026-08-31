@@ -110,6 +110,45 @@ describe("throughput probe", () => {
     expect(result.aggregate.meanOutputTokensPerSecond).toBeCloseTo(50, 5);
   });
 
+  it("refuses to call billed-but-empty output a throughput success", async () => {
+    // A thinking model can spend an entire budget on reasoning the gateway discards,
+    // returning no usable text while reporting thousands of output tokens. Scoring that
+    // as success measures what the provider CHARGED FOR, not what it PRODUCED -- the
+    // same confusion that made eight Gate 2 observations unreadable on 2026-08-28.
+    const gateway = new FakeGateway(() => ({
+      text: "",
+      usage: usage({ inputTokens: 20, outputTokens: 8_192, latencyMs: 145_543 }),
+    }));
+    const result = await runProbe(gateway, createProbeRequest({ kind: "throughput" }), RUNTIME);
+    expect(result.attempts[0]?.ok).toBe(false);
+    expect(result.attempts[0]?.detail).toContain("no usable text");
+    expect(result.attempts[0]?.detail).toContain("8192");
+  });
+
+  it("excludes failed attempts from the published mean rate", async () => {
+    // A failed attempt still carries a tokens-per-second figure. Averaging it in reports
+    // the speed of producing something unusable as throughput.
+    let call = 0;
+    const gateway = new FakeGateway(() => {
+      call += 1;
+      return call === 1
+        ? {
+            text: '{"text":"prose"}',
+            usage: usage({ inputTokens: 20, outputTokens: 100, latencyMs: 2_000 }),
+          }
+        : { text: "", usage: usage({ inputTokens: 20, outputTokens: 1_000, latencyMs: 1_000 }) };
+    });
+    const result = await runProbe(
+      gateway,
+      createProbeRequest({ kind: "throughput", repeat: 2 }),
+      RUNTIME,
+    );
+    expect(result.attempts.map((entry) => entry.ok)).toStrictEqual([true, false]);
+    // Only the successful 50 t/s attempt counts; the failed 1000 t/s attempt must not
+    // drag the published mean upward.
+    expect(result.aggregate.meanOutputTokensPerSecond).toBeCloseTo(50, 5);
+  });
+
   it("refuses to fabricate a rate when the provider hides token counts", async () => {
     const gateway = new FakeGateway(() => ({
       text: '{"text":"prose"}',
