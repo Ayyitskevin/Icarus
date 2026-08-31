@@ -3,10 +3,12 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { cliExitCodeForError, runCliMain } from "../../packages/cli/src/main.js";
 import type { HeadlessExecutionBindingV1 } from "../../packages/core/src/headless-binding.js";
 import {
+  assertHeadlessWorkerBudgetAvailable,
   createHeadlessWorkerSettlementV1,
   createInterruptedHeadlessWorkerSettlementV1,
   inspectHeadlessWorkerLifecycleV1,
 } from "../../packages/core/src/headless-worker.js";
+import { DEFAULT_CEILING } from "../../packages/core/src/policy.js";
 import { createProviderConfig } from "../../packages/core/src/provider.js";
 import type { EventRecord, RunRecord } from "../../packages/core/src/types.js";
 import type { IcarusRuntime } from "../../packages/core/src/runtime.js";
@@ -83,6 +85,33 @@ function run(
 function event(sequence: number, type: string, payload: EventRecord["payload"] = {}): EventRecord {
   return { sequence, runId: RUN_ID, type, payload, createdAt: "2026-08-21T12:00:00.000Z" };
 }
+
+describe("headless worker budget admission", () => {
+  test("refuses an upper-bound-only token charge beyond the selected profile", () => {
+    const candidate = run("running", null);
+    const charged = {
+      ...candidate,
+      usage: {
+        ...candidate.usage,
+        toolCalls: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        upperBoundTokens: 2,
+        activeRuntimeMs: 0,
+      },
+    };
+
+    // ADR 0068: a charge the provider did not itemise has still spent the
+    // profile's token envelope. Omitting upperBoundTokens would admit this run.
+    expect(() =>
+      assertHeadlessWorkerBudgetAvailable(charged, {
+        ...DEFAULT_CEILING,
+        maxOutputTokensPerCall: 1,
+        maxTotalTokens: 1,
+      }),
+    ).toThrow(/already exceeds the selected headless profile ceiling/);
+  });
+});
 
 describe("headless worker settlement", () => {
   test("recognizes one open worker without treating its start as resume authority", () => {

@@ -1179,6 +1179,38 @@ describe("Change Handoff authoritative reader", () => {
     expect(sourceFamilyFingerprint(fixture.databasePath)).toEqual(before);
   });
 
+  it("rejects an upper-bound-only token charge beyond the project ceiling", () => {
+    const fixture = trackedFixture({
+      ...UNIT_CEILING,
+      maxOutputTokensPerCall: 1,
+      maxTotalTokens: 1,
+    });
+    mutateDatabase(fixture, (database) => {
+      database.prepare("UPDATE runs SET upper_bound_tokens = 2 WHERE id = ?").run(fixture.runId);
+    });
+
+    // ADR 0068: the handoff validates every charged token before presenting
+    // evidence. Observed counters are zero, so this binds the upper-bound summand.
+    let refusal: unknown;
+    try {
+      readChangeHandoffSource(fixture.databasePath, fixture.runId);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toMatchObject({ code: "HANDOFF_SOURCE_INVALID" });
+  });
+
+  it("reads pre-0068 state by projecting a missing upper-bound column as zero", () => {
+    const fixture = trackedFixture();
+    mutateDatabase(fixture, (database) => {
+      database.prepare("ALTER TABLE runs DROP COLUMN upper_bound_tokens").run();
+    });
+
+    // The file-only reader never migrates. Its fixed zero projection must avoid
+    // both a reference to an absent column and invented historical usage.
+    expect(readChangeHandoffSource(fixture.databasePath, fixture.runId).state).toBe("preparing");
+  });
+
   it("accepts prior-admitted review action evidence without exporting it", () => {
     const fixture = trackedFixture();
     prepareChangeRoomRun(fixture.store);

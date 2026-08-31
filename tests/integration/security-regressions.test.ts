@@ -98,6 +98,95 @@ function credentialVariants(secret: string): readonly Buffer[] {
 }
 
 describe("release security regressions", () => {
+  test("migrates pre-0059 state through the two documented CLI tokens in order", async () => {
+    const fixture = await createFixtureRepository();
+    try {
+      expect(
+        (
+          await runCli(fixture.stateRoot, [
+            "repo",
+            "add",
+            "--name",
+            "fixture",
+            "--path",
+            fixture.repository,
+          ])
+        ).exitCode,
+      ).toBe(0);
+      const databasePath = path.join(fixture.stateRoot, "icarus.sqlite3");
+      const legacy = new Database(databasePath);
+      legacy.exec(`
+        DROP INDEX one_active_run_per_project;
+        CREATE UNIQUE INDEX one_active_run_per_project
+        ON runs(project_id)
+        WHERE state NOT IN ('completed', 'failed', 'cancelled', 'rolled_back');
+        ALTER TABLE runs DROP COLUMN headless_parent_run_id;
+        ALTER TABLE runs DROP COLUMN upper_bound_tokens;
+      `);
+      legacy.close();
+
+      const first = await runCli(fixture.stateRoot, ["run", "list"], {
+        ICARUS_APPROVE_SCHEMA_MIGRATION: "headless-children-v1",
+      });
+      expect(first.exitCode).toBe(1);
+      expect(first.stderr).toContain("DATABASE_MIGRATION_REQUIRED");
+      expect(first.stderr).toContain("Usage-basis migration");
+
+      // The first approved migration lands even though opening remains fail-closed
+      // on the next unapproved migration. One token never approves both changes.
+      const afterFirst = new Database(databasePath);
+      expect(
+        afterFirst
+          .prepare(
+            "SELECT COUNT(*) AS count FROM pragma_table_info('runs') WHERE name = 'headless_parent_run_id'",
+          )
+          .get(),
+      ).toEqual({ count: 1 });
+      expect(
+        afterFirst
+          .prepare(
+            "SELECT COUNT(*) AS count FROM pragma_table_info('runs') WHERE name = 'upper_bound_tokens'",
+          )
+          .get(),
+      ).toEqual({ count: 0 });
+      afterFirst.close();
+
+      const stillRefused = await runCli(fixture.stateRoot, ["run", "list"], {
+        ICARUS_APPROVE_SCHEMA_MIGRATION: undefined,
+      });
+      expect(stillRefused.exitCode).toBe(1);
+      expect(stillRefused.stderr).toContain("DATABASE_MIGRATION_REQUIRED");
+
+      const second = await runCli(fixture.stateRoot, ["run", "list"], {
+        ICARUS_APPROVE_SCHEMA_MIGRATION: "usage-basis-v1",
+      });
+      expect(second.exitCode).toBe(0);
+
+      const migrated = new Database(databasePath);
+      expect(
+        migrated
+          .prepare(
+            `SELECT group_concat(name, ',') AS names
+             FROM (
+               SELECT name
+               FROM pragma_table_info('runs')
+               WHERE name IN ('headless_parent_run_id', 'upper_bound_tokens')
+               ORDER BY cid
+             )`,
+          )
+          .get(),
+      ).toEqual({ names: "headless_parent_run_id,upper_bound_tokens" });
+      migrated.close();
+
+      const ordinaryOpen = await runCli(fixture.stateRoot, ["run", "list"], {
+        ICARUS_APPROVE_SCHEMA_MIGRATION: undefined,
+      });
+      expect(ordinaryOpen.exitCode).toBe(0);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   test("requires the exact one-shot CLI approval before migrating legacy approval state", async () => {
     const fixture = await createFixtureRepository();
     try {
