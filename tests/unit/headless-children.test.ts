@@ -287,6 +287,32 @@ describe("headless child derivation, envelope, and plan admission", () => {
         [],
       ),
     ).toThrow(/remaining envelope/);
+    // ADR 0068: a parent charged for tokens no provider itemised has still spent
+    // them. If only the observed counters were summed, this child would be admitted
+    // against budget the parent already consumed -- and nothing else in this suite
+    // would notice the summand going missing.
+    expect(() =>
+      assertHeadlessChildEnvelopeV1(
+        {
+          ...spec,
+          budgets: { ...spec.budgets, maxTotalTokens: UNIT_CEILING.maxTotalTokens },
+        },
+        profile.budgets,
+        usage({ upperBoundTokens: 1 }),
+        [],
+      ),
+    ).toThrow(/remaining envelope/);
+    expect(() =>
+      assertHeadlessChildEnvelopeV1(
+        {
+          ...spec,
+          budgets: { ...spec.budgets, maxTotalTokens: UNIT_CEILING.maxTotalTokens },
+        },
+        profile.budgets,
+        usage(),
+        [usage({ upperBoundTokens: 1 })],
+      ),
+    ).toThrow(/remaining envelope/);
     expect(() =>
       assertHeadlessChildEnvelopeV1(
         {
@@ -412,6 +438,11 @@ describe("headless child lineage schema migration", () => {
       )
       .run();
     database.prepare("ALTER TABLE runs DROP COLUMN headless_parent_run_id").run();
+    // ADR 0068's column is appended after this one, so a database old enough to
+    // predate lineage predates the usage basis too. Dropping only one would
+    // synthesize a shape no real state root ever had, and the exact-DDL check
+    // would then be asserting against a fiction.
+    database.prepare("ALTER TABLE runs DROP COLUMN upper_bound_tokens").run();
     database.close();
     void project;
 
@@ -432,6 +463,7 @@ describe("headless child lineage schema migration", () => {
       now: () => "2026-07-19T12:00:00.000Z",
       id: makeUnitIdGenerator(),
       allowHeadlessChildMigration: true,
+      allowUsageBasisMigration: true,
     });
     migrated.close();
   });

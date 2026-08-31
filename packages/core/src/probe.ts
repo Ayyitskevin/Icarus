@@ -124,6 +124,12 @@ export interface ProbeProviderDescriptor {
 export interface ProbeRuntime {
   readonly now?: () => Date;
   readonly createId?: () => string;
+  /**
+   * Monotonic elapsed-time source for attempt latency. Injectable because a
+   * deterministic test must be able to state how long an attempt took instead
+   * of burning real wall-clock to produce a number the scheduler decides.
+   */
+  readonly monotonicNowMs?: () => number;
 }
 
 export function isUnsupportedProbeKind(kind: string): kind is UnsupportedProbeKind {
@@ -613,6 +619,7 @@ export async function runProbe(
 ): Promise<ProbeResultV1> {
   const now = runtime.now ?? (() => new Date());
   const createId = runtime.createId ?? randomUUID;
+  const monotonicNowMs = runtime.monotonicNowMs ?? (() => performance.now());
   if (isUnsupportedProbeKind(request.kind)) {
     // Programmatic callers that already hold a gateway still get the same row
     // from the same builder the CLI uses pre-construction.
@@ -624,7 +631,7 @@ export async function runProbe(
   for (let attempt = 1; attempt <= request.repeat; attempt += 1) {
     let result: ProbeAttempt;
     // Measured OUTSIDE the gateway call so a failure still reports how long it took.
-    const attemptStartedAt = performance.now();
+    const attemptStartedAt = monotonicNowMs();
     try {
       if (request.kind === "throughput") {
         result = await runThroughputAttempt(gateway, request, attempt, probeId, signal);
@@ -640,7 +647,7 @@ export async function runProbe(
       ) {
         throw error;
       }
-      const elapsedMs = Math.round(performance.now() - attemptStartedAt);
+      const elapsedMs = Math.round(monotonicNowMs() - attemptStartedAt);
       // Keep the error CODE as a stable prefix. Two failures with the same code are
       // the same class; a free-form message alone cannot be compared across runs.
       const code = error instanceof IcarusError ? error.code : "UNKNOWN";

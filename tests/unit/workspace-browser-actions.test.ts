@@ -271,6 +271,7 @@ function executionRun(receipt: BrowserActionReceiptView = settledReceipt()): Run
       toolCalls: 0,
       inputTokens: 0,
       outputTokens: 0,
+      upperBoundTokens: 0,
       activeRuntimeMs: 0,
       estimatedCostUsd: 0,
       reservedCostUsd: 0,

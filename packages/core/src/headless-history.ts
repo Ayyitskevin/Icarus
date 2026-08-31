@@ -4,7 +4,7 @@ import { canonicalJsonLine } from "./canonical-json.js";
 import { invariant } from "./errors.js";
 import type { ApprovalRecord, EventRecord, JsonValue } from "./types.js";
 
-export const HEADLESS_HISTORY_SCHEMA = "icarus.headless.history.v1" as const;
+export const HEADLESS_HISTORY_SCHEMA = "icarus.headless.history.v2" as const;
 
 export interface HeadlessHistoryRunLine {
   readonly schema: typeof HEADLESS_HISTORY_SCHEMA;

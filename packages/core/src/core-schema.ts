@@ -46,7 +46,6 @@ CREATE TABLE IF NOT EXISTS runs (
   tool_calls INTEGER NOT NULL DEFAULT 0,
   input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
-  upper_bound_tokens INTEGER NOT NULL DEFAULT 0,
   active_runtime_ms INTEGER NOT NULL DEFAULT 0,
   estimated_cost_usd REAL NOT NULL DEFAULT 0,
   reserved_cost_usd REAL NOT NULL DEFAULT 0,
@@ -55,7 +54,7 @@ CREATE TABLE IF NOT EXISTS runs (
   version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
-, headless_parent_run_id TEXT);
+, headless_parent_run_id TEXT, upper_bound_tokens INTEGER NOT NULL DEFAULT 0);
 -- ADR 0059: the single-active-run invariant binds root runs only; a run
 -- linked to a headless parent is sequenced by the parent's worker lease.
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_project

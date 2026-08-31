@@ -2595,6 +2595,20 @@ function readOpenDatabase(database: Database.Database, runId: string): ChangeHan
     sourceInvalid("Icarus database is missing required handoff evidence tables");
   }
 
+  // A database recorded before ADR 0068 has no upper-bound column at all. This
+  // reader is read-only and must never migrate, so it projects zero rather than
+  // failing to prepare: under the pre-0068 basis that database's unobserved
+  // charges are already inside input_tokens, and zero is the honest answer for a
+  // column it never had.
+  const runsColumns = new Set(
+    (database.prepare("PRAGMA table_info('runs')").all() as unknown[]).map((entry) =>
+      text(row(entry).name, 64),
+    ),
+  );
+  const upperBoundProjection = runsColumns.has("upper_bound_tokens")
+    ? "CASE WHEN typeof(r.upper_bound_tokens)='integer' THEN r.upper_bound_tokens END AS upper_bound_tokens, "
+    : "0 AS upper_bound_tokens, ";
+
   const raw = database
     .prepare(
       "SELECT " +
@@ -2634,7 +2648,7 @@ function readOpenDatabase(database: Database.Database, runId: string): ChangeHan
         " AND json_valid(r.verification_json,1)) THEN r.verification_json END AS verification_json, " +
         "CASE WHEN typeof(r.tool_calls)='integer' THEN r.tool_calls END AS tool_calls, " +
         "CASE WHEN typeof(r.input_tokens)='integer' THEN r.input_tokens END AS input_tokens, " +
-        "CASE WHEN typeof(r.upper_bound_tokens)='integer' THEN r.upper_bound_tokens END AS upper_bound_tokens, " +
+        upperBoundProjection +
         "CASE WHEN typeof(r.output_tokens)='integer' THEN r.output_tokens END AS output_tokens, " +
         "CASE WHEN typeof(r.active_runtime_ms)='integer' THEN r.active_runtime_ms END AS active_runtime_ms, " +
         "CASE WHEN typeof(r.estimated_cost_usd) IN ('integer','real') THEN r.estimated_cost_usd END AS estimated_cost_usd, " +

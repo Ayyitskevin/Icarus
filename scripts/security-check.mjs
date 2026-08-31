@@ -1350,7 +1350,7 @@ const assertions = {
     cliSource.includes('approval === "readable-manifest-v3"') &&
     // One token approves one migration; the tokens are not combinable.
     cliSource.includes(
-      "approvalIndex: false,\n    patchSet: false,\n    readableManifest: false,\n    annotation: false,\n    headlessChildren: false,\n    gate1: null,",
+      "approvalIndex: false,\n    patchSet: false,\n    readableManifest: false,\n    annotation: false,\n    headlessChildren: false,\n    usageBasis: false,\n    gate1: null,",
     ),
   annotationMigrationHumanGated:
     coreSchemaSource.includes("export const ICARUS_ANNOTATION_SCHEMA") &&
@@ -1372,6 +1372,16 @@ const assertions = {
     storeSource.includes("#headlessChildParentRunId(runId)") &&
     cliSource.includes('approval === "headless-children-v1"') &&
     cliSource.includes("allowHeadlessChildMigration: migrationApproval.headlessChildren"),
+  usageBasisMigrationHumanGated:
+    coreSchemaSource.includes("export const ICARUS_USAGE_BASIS_MIGRATION_SCHEMA") &&
+    coreSchemaSource.includes("ALTER TABLE runs ADD COLUMN upper_bound_tokens") &&
+    storeSource.includes("function inspectUsageBasisSchema(") &&
+    storeSource.includes(
+      'usageBasisStatus === "missing" && options.allowUsageBasisMigration !== true',
+    ) &&
+    storeSource.includes('"DATABASE_MIGRATION_REQUIRED"') &&
+    cliSource.includes('approval === "usage-basis-v1"') &&
+    cliSource.includes("allowUsageBasisMigration: migrationApproval.usageBasis"),
   persistedReadableManifestIsDigestVerified:
     storeSource.includes("readableManifest(runId: string): ReadableManifest | null") &&
     storeSource.includes("readableManifestDigest(manifest) ===") &&
