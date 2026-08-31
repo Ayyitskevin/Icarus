@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS runs (
   tool_calls INTEGER NOT NULL DEFAULT 0,
   input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
+  upper_bound_tokens INTEGER NOT NULL DEFAULT 0,
   active_runtime_ms INTEGER NOT NULL DEFAULT 0,
   estimated_cost_usd REAL NOT NULL DEFAULT 0,
   reserved_cost_usd REAL NOT NULL DEFAULT 0,
@@ -154,6 +155,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_project
 ON runs(project_id)
 WHERE state NOT IN ('completed', 'failed', 'cancelled', 'rolled_back')
   AND headless_parent_run_id IS NULL;
+`;
+
+/**
+ * Separates charged upper bounds from observed usage.
+ *
+ * Before this column, an operation whose provider reported no token counts charged
+ * its whole reservation to `input_tokens` and recorded `output_tokens` as 0. The
+ * durable RunUsage then looked provider-reported when it was only a conservative
+ * upper bound, and output work was misfiled as input. Budget enforcement was
+ * correct; the record of WHY was not. Existing databases apply this exactly once
+ * behind an explicit operator migration token; fresh databases get the shape from
+ * the core DDL.
+ */
+export const ICARUS_USAGE_BASIS_MIGRATION_SCHEMA = `
+ALTER TABLE runs ADD COLUMN upper_bound_tokens INTEGER NOT NULL DEFAULT 0;
 `;
 
 /** ADR 0041's append-only operator review annotations. */

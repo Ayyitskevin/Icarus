@@ -341,8 +341,17 @@ export interface VerificationEvidence {
 
 export interface RunUsage {
   readonly toolCalls: number;
+  /** Observed input tokens. Never inflated by a reservation the provider did not report. */
   readonly inputTokens: number;
+  /** Observed output tokens. Never inflated by a reservation the provider did not report. */
   readonly outputTokens: number;
+  /**
+   * Tokens charged against the ceiling from a RESERVATION because the provider
+   * reported no counts, or because an operation was interrupted before it did.
+   * These were billed conservatively and are real for budget purposes, but they
+   * were never observed and must not be read as input or output work.
+   */
+  readonly upperBoundTokens: number;
   readonly activeRuntimeMs: number;
   readonly estimatedCostUsd: number;
   readonly reservedCostUsd: number;

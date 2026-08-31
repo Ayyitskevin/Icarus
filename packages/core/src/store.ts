@@ -2757,6 +2757,7 @@ export class IcarusStore {
         toolCalls: numberValue(value.tool_calls, "run.tool_calls"),
         inputTokens: numberValue(value.input_tokens, "run.input_tokens"),
         outputTokens: numberValue(value.output_tokens, "run.output_tokens"),
+        upperBoundTokens: numberValue(value.upper_bound_tokens, "run.upper_bound_tokens"),
         activeRuntimeMs: numberValue(value.active_runtime_ms, "run.active_runtime_ms"),
         estimatedCostUsd: numberValue(value.estimated_cost_usd, "run.estimated_cost_usd"),
         reservedCostUsd: numberValue(value.reserved_cost_usd, "run.reserved_cost_usd"),
@@ -5304,7 +5305,11 @@ export class IcarusStore {
           "Active-runtime reservation would exceed the ceiling",
         );
         invariant(
-          run.usage.inputTokens + run.usage.outputTokens + reservedTokens <= ceiling.maxTotalTokens,
+          run.usage.inputTokens +
+            run.usage.outputTokens +
+            run.usage.upperBoundTokens +
+            reservedTokens <=
+            ceiling.maxTotalTokens,
           "TOKEN_BUDGET_EXCEEDED",
           "Token ceiling would be exceeded",
         );
@@ -5819,10 +5824,12 @@ export class IcarusStore {
       "OPERATION_COST_EXCEEDED",
       "Provider reported a cost above its reserved worst case",
     );
-    const actualTokens =
-      finish.inputTokens === null || finish.outputTokens === null
-        ? token.reservedTokens
-        : finish.inputTokens + finish.outputTokens;
+    const observedInputTokens = finish.inputTokens;
+    const observedOutputTokens = finish.outputTokens;
+    const usageObserved = observedInputTokens !== null && observedOutputTokens !== null;
+    const actualTokens = usageObserved
+      ? observedInputTokens + observedOutputTokens
+      : token.reservedTokens;
     invariant(
       actualTokens <= token.reservedTokens,
       "OPERATION_TOKENS_EXCEEDED",
@@ -5869,16 +5876,18 @@ export class IcarusStore {
       .prepare(
         `UPDATE runs SET reserved_cost_usd = MAX(0, reserved_cost_usd - ?),
          estimated_cost_usd = estimated_cost_usd + ?, input_tokens = input_tokens + ?,
-         output_tokens = output_tokens + ?, active_runtime_ms = active_runtime_ms + ?,
+         output_tokens = output_tokens + ?, upper_bound_tokens = upper_bound_tokens + ?,
+         active_runtime_ms = active_runtime_ms + ?,
          updated_at = ? WHERE id = ?`,
       )
       .run(
         token.reservedCostUsd,
         actualCost,
-        finish.inputTokens === null || finish.outputTokens === null
-          ? actualTokens
-          : finish.inputTokens,
-        finish.inputTokens === null || finish.outputTokens === null ? 0 : finish.outputTokens,
+        // Unreported usage is charged, not observed: it lands in upper_bound_tokens so
+        // the durable record never claims input or output work the provider never stated.
+        usageObserved ? observedInputTokens : 0,
+        usageObserved ? observedOutputTokens : 0,
+        usageObserved ? 0 : actualTokens,
         finish.activeRuntimeMs,
         now,
         token.runId,
@@ -5942,7 +5951,8 @@ export class IcarusStore {
         );
         this.#database
           .prepare(
-            `UPDATE runs SET input_tokens = input_tokens + ?,
+            // An interrupted operation was charged its reservation, never observed.
+            `UPDATE runs SET upper_bound_tokens = upper_bound_tokens + ?,
              active_runtime_ms = active_runtime_ms + ?, updated_at = ? WHERE id = ?`,
           )
           .run(reservedTokens, reservedRuntimeMs, now, runId);
