@@ -64,7 +64,11 @@ const VULCAN_CONFIG_PATH = "/home/kevin-lee/deploy/vulcan-data/vulcan.toml";
 const PYTHON_IMAGE =
   "python:3.12-slim@sha256:c3d81d25b3154142b0b42eb1e61300024426268edeb5b5a26dd7ddf64d9daf28";
 const MAX_CONTEXT_FILES = 8;
-const LIVE_EVIDENCE_RECORD_REVISION = 4;
+// 5 adds reasoningChars and the retrieval coverage. Revision 4 computed both and
+// serialized neither, so a reader of a v4 record cannot distinguish "measured zero"
+// from "never recorded" -- and the first Gate 2 run to carry ADR 0069's evidence
+// reported omission counts that were absence, not measurement.
+const LIVE_EVIDENCE_RECORD_REVISION = 5;
 const MODEL_PINS = Object.freeze({
   code: {
     providerModel: "qwen3.8:27b",
@@ -690,10 +694,19 @@ async function evaluateCase({ benchmarkCase, repository, oracle, mode, profile, 
       usageBasis: generated.usageBasis,
       reassessedFromEvidenceSha256:
         priorRecord === null ? null : sha256(`${JSON.stringify(priorRecord, null, 2)}\n`),
+      // Recorded, not merely computed. A digest commits to the retrieval result but
+      // is not its preimage: without these members a later reader sees no omissions
+      // because none were written, which is indistinguishable from none occurring.
+      reasoningChars: generated.thinkingChars,
       retrieval: {
         baseCommit,
         digestSha256: retrieval.digestSha256,
         repositoryDigestSha256: retrieval.repositoryDigestSha256,
+        matchedFiles: retrieval.matchedFiles,
+        selectedFiles: retrieval.entries.length,
+        omittedMatches: retrieval.omittedMatches,
+        omittedReferences: retrieval.omittedReferences,
+        excludedFiles: retrieval.excludedFiles,
       },
       rawCandidate: generated.text,
       candidate,
@@ -705,9 +718,17 @@ async function evaluateCase({ benchmarkCase, repository, oracle, mode, profile, 
       const priorRevision = Number.isSafeInteger(existingRecord.evidenceRecordRevision)
         ? existingRecord.evidenceRecordRevision
         : 0;
+      // Keyed by the instruction policy that produced the prior record as well as its
+      // revision. Keying on the revision alone meant a second run under a DIFFERENT
+      // policy found the existing backup and overwrote the record it should have
+      // preserved, so evidence could disappear while an accepted ADR still cited it.
+      const priorPolicy =
+        typeof existingRecord.instructionPolicySha256 === "string"
+          ? existingRecord.instructionPolicySha256.slice(0, 12)
+          : "unknown-policy";
       const backupPath = path.join(
         path.dirname(caseEvidencePath),
-        `${benchmarkCase.id}.evidence-record-v${priorRevision}.json`,
+        `${benchmarkCase.id}.evidence-record-v${priorRevision}-${priorPolicy}.json`,
       );
       const backupExists = await lstat(backupPath).catch((error) => {
         if (hasCode(error, "ENOENT")) return null;

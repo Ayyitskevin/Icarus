@@ -210,6 +210,11 @@ const gate2SecurityReviewCoreSource = await readFile(
   "utf8",
 );
 const gate2RetrievalRunnerSource = await readFile("scripts/gate2-retrieval.mjs", "utf8");
+const gate2LiveBenchmarkSource = await readFile("scripts/gate2-live-benchmark.mjs", "utf8");
+const gate2InstructionPolicySource = await readFile(
+  "scripts/gate2-live-instruction-policy.mjs",
+  "utf8",
+);
 const gate2RetrievalManifestSource = await readFile(
   "fixtures/evals/gate2/retrieval-manifest.v1.json",
   "utf8",
@@ -2618,6 +2623,21 @@ const assertions = {
     !/(?:node:child_process|node:http|node:https|fetch\(|api\.github\.com|process\.env\.|credential|deploy|force-push)/.test(
       gate2V2EvidenceAdoptionRunnerSource,
     ),
+  gate2SuppressesReasoningAndRecordsWhatItObserved:
+    // ADR 0070 claims a run cannot quietly measure the other mode and that removing
+    // the setting fails this suite. Binding only the policy VALUE did not make that
+    // true: deleting the call-site line left the policy digest and its unit test
+    // green while the provider default was sent. Both halves are asserted here --
+    // the value and its transmission.
+    gate2InstructionPolicySource.includes("think: false") &&
+    gate2LiveBenchmarkSource.includes("think: generation.think") &&
+    // ADR 0069's evidence and the reasoning size must be RECORDED, not merely
+    // computed. Revision 4 computed both and serialized neither, so a reader could
+    // not tell a measured zero from a value nobody wrote down.
+    gate2LiveBenchmarkSource.includes("reasoningChars: generated.thinkingChars") &&
+    gate2LiveBenchmarkSource.includes("omittedMatches: retrieval.omittedMatches") &&
+    gate2LiveBenchmarkSource.includes("omittedReferences: retrieval.omittedReferences") &&
+    gate2LiveBenchmarkSource.includes("excludedFiles: retrieval.excludedFiles"),
   gate2RetrievalRunnerUsesPinnedLocalReadOnlyEvidence:
     gate2RetrievalRunnerSource.includes('spawnSync(\n    "/usr/bin/git"') &&
     gate2RetrievalRunnerSource.includes("retrieveReadOnlyContextV3(") &&

@@ -1,4 +1,4 @@
-export const GATE2_LIVE_INSTRUCTION_POLICY_REVISION: 8;
+export const GATE2_LIVE_INSTRUCTION_POLICY_REVISION: 9;
 export const GATE2_LIVE_INSTRUCTION_POLICY: Readonly<Record<string, unknown>>;
 export const GATE2_LIVE_INSTRUCTION_POLICY_SHA256: string;
 export function buildGate2LiveInstructions(
