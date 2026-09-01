@@ -1,0 +1,78 @@
+# ADR 0070: Gate 2 measures content generation, with reasoning suppressed
+
+- Status: **Accepted** — the operator authorised the rerun and this setting on 2026-08-31
+- Date: 2026-08-31
+- Related: [ADR 0066](0066-gate2-live-model-comparison.md), [ADR 0067](0067-gate2-target-discovery-profile.md),
+  [the zero-yield diagnosis](../diagnoses/2026-08-30-gate2-zero-yield-thinking-displacement.md)
+
+## Context
+
+Gate 2's profile pins `maxTokens: 8192` and the instruction policy presents it as the
+budget for a model's answer. Under Vulcan's Ollama path a reasoning model spends that
+same budget on reasoning the gateway then discards, with no observable split. The
+diagnosis of the eight zero-yield cases measured the consequence: `rawCandidate: ''`
+returned after the full budget was billed, recorded as though the model had produced
+nothing, when in fact it had produced reasoning nobody kept.
+
+So `maxTokens` was pinned as a content budget and behaved as a combined one. Every
+observation taken under it — including the 5/30 and 16/30 in ADR 0067 — was measured
+against a budget whose meaning was not the one the profile stated.
+
+Vulcan `c6223a6` (deployed on mickey, verified 2026-08-31) adds a tri-state `think` on
+the request path and surfaces `thinking` on responses, so the split is now controllable
+and observable. The benchmark had deliberately not used it, with a comment saying that
+doing so "would change what the profile measures and needs its own accepted ADR". This
+is that ADR.
+
+## Decision
+
+Gate 2 sends `think: false`, bound into the instruction policy at revision 9.
+
+- **`maxTokens` becomes a content budget in fact, not only in description.** The
+  threshold this gate is judged against — 24/30 success, 0.80 first-plan acceptance —
+  is a claim about producing correct answers. Measuring it against a budget a model may
+  spend entirely on discarded reasoning does not test that claim; it tests how much
+  reasoning the model happens to emit.
+- **It is digest-bound in the instruction policy**, not passed at the call site, so no
+  run can quietly measure the other thing. The policy SHA moves with it, and every
+  result records which policy produced it.
+- **The reasoning-cost recording stays.** It reads zero while `think` is false, which is
+  itself the evidence that the setting took effect.
+
+## What this measures, and what it does not
+
+This measures **content generation under a stated budget**. It does not measure how much
+reasoning these models would emit, whether reasoning improves their answers, or what the
+scores would be with reasoning enabled. Those are separate questions and this run cannot
+answer them.
+
+In particular: **results are not comparable to ADR 0066's or ADR 0067's numbers as a
+before-and-after.** Those were taken under a combined budget. A change in score between
+them and this run may reflect the budget's meaning changing rather than any change in
+capability, and must not be read as improvement or regression. This run establishes a new
+baseline under a stated budget; the earlier figures remain valid records of what was
+measured then.
+
+## Expect more honest failures, not fewer failures
+
+Two changes landing alongside this one make previously silent failures loud:
+
+- The Ollama adapter now requires `done_reason === "stop"`, so a response truncated at
+  the ceiling is a `PROVIDER_PROTOCOL_ERROR` instead of being scored as an answer, per
+  ADR 0066's existing rule that a length stop fails even when the remaining text parses.
+- Retrieval now records what a ceiling excluded ([ADR 0069](0069-retrieval-omission-is-evidence.md)),
+  so a case whose context was silently truncated is visible rather than inferred.
+
+A lower headline number than ADR 0067's would therefore be consistent with a better
+instrument rather than a worse system, and must be read that way unless the evidence
+says otherwise.
+
+## Verification
+
+- Vulcan on mickey at `c6223a6`; `think: false` accepted and returns clean content with
+  no `thinking` member (probed 2026-08-31 against `code`).
+- Both admitted models resolve to the exact digests the profile pins: `code` to
+  `qwen3.8:27b` (`22130167c4c2`, 27.3B Q4_K_M) and `code-fast` to `ornith-1.5:35b`
+  (`9f3b89b25219`, 35.5B Q4_K_M).
+- The setting is asserted in `tests/security/gate2-live-instruction-policy.test.ts`, so
+  removing it fails the security suite rather than silently changing the measurement.

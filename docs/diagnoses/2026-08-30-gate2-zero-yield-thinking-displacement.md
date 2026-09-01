@@ -97,10 +97,11 @@ something adjacent to the real conditions.
 
 Vulcan `c6223a6` adds a tri-state `think` on the request path and surfaces
 `thinking` on the response path, so a rerun can both suppress the reasoning and,
-when it is left on, observe what it consumed. That change is **on Vulcan's `main`
-and not deployed**: mickey's `~/deploy/vulcan` still runs `a5ffd95`. Until it is
-deployed, the instrument that would close this diagnosis is not in the path the
-benchmark uses.
+when it is left on, observe what it consumed. **Superseded 2026-08-31: it is deployed.** mickey's `~/deploy/vulcan` runs
+`c6223a6`, and `think: false` was probed against the live gateway returning clean
+content with no `thinking` member. [ADR 0070](../adr/0070-gate2-rerun-with-reasoning-suppressed.md)
+accepts sending it, so the instrument this diagnosis said was missing is now in the
+path the benchmark uses.
 
 ## Verification
 

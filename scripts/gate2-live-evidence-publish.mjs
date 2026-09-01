@@ -14,7 +14,6 @@ import {
   GATE2_LIVE_CANDIDATE_CONTRACT_REVISION,
   isGate2ProviderOutputComplete,
 } from "./gate2-live-candidate-contract.mjs";
-import { GATE2_LIVE_INSTRUCTION_POLICY_SHA256 } from "./gate2-live-instruction-policy.mjs";
 import {
   GATE2_LIVE_ROUTING_POLICY,
   GATE2_LIVE_ROUTING_POLICY_SHA256,
@@ -52,7 +51,12 @@ const LIVE_EVIDENCE_CONFIGS = Object.freeze({
     localDirectory: ".local/gate2-live-v2",
     candidateContractRevision: GATE2_LIVE_CANDIDATE_CONTRACT_REVISION,
     evidenceRecordRevision: 4,
-    instructionPolicySha256: GATE2_LIVE_INSTRUCTION_POLICY_SHA256,
+    // Pinned by VALUE, not by reference to the live constant. This set was published
+    // under instruction-policy revision 8; binding its validation to whatever the
+    // policy says today meant a published record stayed valid only while the code was
+    // unchanged, which is not a binding at all. ADR 0070's revision 9 is what exposed
+    // it: bumping the policy invalidated evidence the policy had never touched.
+    instructionPolicySha256: "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     routingPolicy: GATE2_LIVE_ROUTING_POLICY,
     routingPolicySha256: GATE2_LIVE_ROUTING_POLICY_SHA256,
   }),
