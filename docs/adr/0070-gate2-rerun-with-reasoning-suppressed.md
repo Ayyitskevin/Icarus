@@ -76,3 +76,58 @@ says otherwise.
   (`9f3b89b25219`, 35.5B Q4_K_M).
 - The setting is asserted in `tests/security/gate2-live-instruction-policy.test.ts`, so
   removing it fails the security suite rather than silently changing the measurement.
+
+## Outcome (2026-09-01)
+
+Full record: [evaluation](../evals/2026-08-31-gate2-reasoning-suppressed.md).
+
+| | baseline `code-fast` | routed `code` |
+| --- | --- | --- |
+| success | 2/30 | 12/30 |
+| first-plan acceptance | 0.0667 | 0.60 |
+
+Both exit thresholds still fail. The figures reproduced exactly across two full
+executions of the 30-case set.
+
+**The setting works and is now provable.** `reasoningChars: 0` is measured on all 60
+cases, 60/60 finished with `stop`, 60/60 usage is provider-reported, and empty candidates
+fell from 8 to 1.
+
+An earlier attempt to record this outcome reported those validity figures from fields the
+runner computed but **never serialized** — absence read as measurement, which is the
+defect class this campaign exists to close, committed in the validation of the run meant
+to demonstrate it was closed. Evidence record revision 5 serializes both the reasoning
+size and the retrieval coverage, and every figure here comes from a recorded value in a
+run where all 60 cases carry `reassessedFromEvidenceSha256: null`.
+
+This ADR also claimed that removing the setting would fail the security suite. It would
+not have: the policy value was bound, its transmission was not, and deleting the request
+field left every check green. Both halves are asserted now.
+
+**The decision stands; one sentence of its rationale did not.** The argument that
+measuring answer quality against a budget a model may spend on discarded reasoning does
+not test the claim the threshold makes holds regardless of the result. But the Context
+leaned on the diagnosis's *displacement* framing, which implied that freeing the budget
+would let content through and scores would rise. Scores under the honest budget are lower
+than those recorded under the combined one: the models stopped returning expensive empty
+answers and started returning cheap wrong ones.
+
+That refutes pure displacement. It does **not** establish that reasoning improves these
+models' answers. The two figure sets were taken under different budget contracts, so they
+are not a controlled comparison, and no reasoning-enabled arm was run under the
+now-observable protocol. The supportable statement is that the result is *consistent
+with* reasoning contributing and *inconsistent with* displacement alone. Identifying the
+cause requires a paired arm this run deliberately did not attempt.
+
+**One anomaly survives, now quantified rather than hidden.**
+`scaffold-lantern-json-output` returned 0 content characters in 112 provider-reported
+output tokens, clean stop, zero reasoning. Those tokens are neither content nor
+reasoning; the instrument cannot say where they went. What changed is that it is bounded
+and visible instead of looking like model silence.
+
+**What the omission evidence rules out is narrower than it first appears.** No query
+match was excluded by a file or byte ceiling in any of the 60 cases. That is not "the
+failures are not context starvation": the field says nothing about files that never
+matched lexically, reference-hop candidates, or exclusions before candidacy, and macro
+recall is `0.9917` rather than `1.0`. So `refactor` 0/5 and `scaffold` 0/5 are not
+explained by selection-ceiling truncation, and remain otherwise open.
