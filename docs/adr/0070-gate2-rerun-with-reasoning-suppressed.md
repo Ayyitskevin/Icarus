@@ -76,3 +76,38 @@ says otherwise.
   (`9f3b89b25219`, 35.5B Q4_K_M).
 - The setting is asserted in `tests/security/gate2-live-instruction-policy.test.ts`, so
   removing it fails the security suite rather than silently changing the measurement.
+
+## Outcome (2026-08-31, same day)
+
+The run completed in 12 minutes across both arms. Full record:
+[evaluation](../evals/2026-08-31-gate2-reasoning-suppressed.md).
+
+| | baseline `code-fast` | routed `code` |
+| --- | --- | --- |
+| success | 2/30 | 12/30 |
+| first-plan acceptance | 0.0667 | 0.60 |
+
+Both exit thresholds still fail. The three validity properties this ADR depends on all
+held: zero thinking characters across 60 executions, 60/60 `finishReason: "stop"`, and
+60/60 `usageBasis: "provider_reported"`. Empty candidates fell from 8 to 1.
+
+**The decision was correct and its stated rationale was incomplete.** This ADR argued
+that measuring answer quality against a budget a model may spend on discarded reasoning
+does not test the claim the threshold makes. That still holds, and the run proves the
+setting works. But the Context section leaned on the diagnosis's *displacement* framing,
+which implied that freeing the budget would let content through and scores would rise.
+
+Scores fell — baseline 5/30 → 2/30, routed 16/30 → 12/30. The models stopped returning
+expensive empty answers and started returning cheap wrong ones. **The reasoning was doing
+work, not merely occupying space.** Recorded here rather than quietly left in the
+evaluation, because this ADR's reasoning is what a future reader will cite.
+
+This changes nothing about the setting: a budget that means what it says is the
+precondition for any interpretable measurement, whether the resulting number is flattering
+or not. It does change the next question, which is no longer "does suppressing reasoning
+recover the lost content" but **"does reasoning enabled, with the split now observable,
+beat both"** — a measurement this run deliberately does not attempt.
+
+One thing the run newly rules out: with ADR 0069's omission evidence in the artifacts,
+**no case in either arm had a query match withheld by a retrieval ceiling.** The failures
+are not context starvation. That was unanswerable before today.
