@@ -156,3 +156,11 @@ having called no provider at all.
 `docs/evals/artifacts/gate2-reasoning-suppressed-20260901/` with a per-file SHA-256
 manifest, so every figure recomputes from version control rather than from mutable
 node-local state. A stale token total survived one review because it did not.
+
+The first manifest was itself wrong: generated before `pnpm format` reflowed the JSON, it
+mis-stated 30 of 64 digests, so the integrity layer added to make stale figures
+mechanically catchable was not verifiable on the committed tree. Regenerated after
+formatting and verified against the committed bytes. Note what did NOT catch it: no
+executable consumer reads this directory, so a 357-assertion security gate stayed green
+over a false manifest. Wiring it into the publication validator and its secret screen is
+open work, not a claim this ADR can make.

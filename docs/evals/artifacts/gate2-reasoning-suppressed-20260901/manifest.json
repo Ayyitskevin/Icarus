@@ -95,9 +95,9 @@
       "sha256": "c92ce2ef170025298bf8018f16b6e78ef0ac6ba4c0a9b8ec147b1a6715de7b2c"
     },
     {
-      "bytes": 6452,
+      "bytes": 6372,
       "path": "baseline/repair-public-path-containment.json",
-      "sha256": "00e5e44214df9a24474154e665f1c0fb6690bf4bb8274b00e4c9df7771bc7e83"
+      "sha256": "8baa7fa86113bfd548b9232d1186e403bbe8a62f3be4922cea7aad4fd2671d92"
     },
     {
       "bytes": 4652,
@@ -125,9 +125,9 @@
       "sha256": "5a446b0b8b5fb488445dee018b119aa07e1eef326d772419a5855cdca86c3b7d"
     },
     {
-      "bytes": 5947,
+      "bytes": 5907,
       "path": "baseline/scaffold-task-priority-contract.json",
-      "sha256": "c39e4093e06119ea9ae910c9a79b3e8fcd4e53e6a2cef0a6728bb77fbf34a7d4"
+      "sha256": "ffb23477643fc52991b9152530fc8726ec943fd871e055ed09f1833eddaaa5fd"
     },
     {
       "bytes": 4318,
@@ -145,9 +145,9 @@
       "sha256": "d5d12d63ae9120faaf450bdabcae89fa543dd07f6e208a45d2816274d7068329"
     },
     {
-      "bytes": 4900,
+      "bytes": 4808,
       "path": "baseline/security-path-traversal.json",
-      "sha256": "bbe5e9a8ec51a7b368f31950ffa94d99d662b38a0da5579b5b91c827ad4971a3"
+      "sha256": "002b6f7480dde097a5f851fdbfc45f1ba213ebf9f452b875b3b4a34dd775fd46"
     },
     {
       "bytes": 4618,
@@ -155,14 +155,14 @@
       "sha256": "680b78be6f48aefb7f045537b39b1649db02ce7d82c82d004a630927bc761d1f"
     },
     {
-      "bytes": 43122,
+      "bytes": 43074,
       "path": "baseline-result.json",
-      "sha256": "5e5cb4969c57b1c7695ccafbabe256fa8e8c78d1a6b9dae9172ab845af09fca1"
+      "sha256": "bd9da52069ba725c1342affedd15bb7dc9cf2d10d08b7bb7acca4a01edcbf157"
     },
     {
-      "bytes": 632,
+      "bytes": 624,
       "path": "comparison.json",
-      "sha256": "440ffaec7b0f7b4201edbb009f9ac4c4bc722deb177a8aeae45f601bf422c7fd"
+      "sha256": "dae647e70f4553b8f3121400cce34fa7eb27178c8bfaf5c7ca38b078d28b7448"
     },
     {
       "bytes": 1354,
@@ -170,24 +170,24 @@
       "sha256": "b480a6d021c06c841a713f5f145932163967d035e3a784750e86f08d58c87728"
     },
     {
-      "bytes": 5526,
+      "bytes": 5422,
       "path": "routed/explain-basic-guardrails.json",
-      "sha256": "d280ef0981c6c2e29f73181c58a7e02a7662c0f82464388aa64b1c59abe90b96"
+      "sha256": "91932ad11087d246ef7a0f939302fea90f28c40aaae949ae151a70e758a05ed9"
     },
     {
-      "bytes": 4881,
+      "bytes": 4751,
       "path": "routed/explain-lantern-flow.json",
-      "sha256": "375f58c707f5771e04b10dda4a2c1d04f2ef90971689bb508f802af8ebd9ebc9"
+      "sha256": "b3dd077f869de421736411cdb7a46de74bbd0e07ca76f145788e83639b7120c4"
     },
     {
-      "bytes": 5453,
+      "bytes": 5349,
       "path": "routed/explain-parser-failure.json",
-      "sha256": "33a1019eaf6f68d8cba8b8ed4cacfe34f7460fa28a0de7c9689ba9dc91984ef6"
+      "sha256": "21c804b40e6d7bc9c2e153ab644fad948d61e98b5e07242a46e337cb0adb134e"
     },
     {
-      "bytes": 5602,
+      "bytes": 5502,
       "path": "routed/explain-refactor-duplication.json",
-      "sha256": "6452f3d7f6ab03fe988ba147e2a15dd5adc4a255db70de2e74013153ac960880"
+      "sha256": "467cd13e1192b1cdcf0970094049a300b6d490b9e85bfae83d4ccd20d03e6e99"
     },
     {
       "bytes": 5824,
@@ -195,19 +195,19 @@
       "sha256": "25f271090c39525ba3cc3486f01be15b5039a4acba078514d830e2cb8c772684"
     },
     {
-      "bytes": 4999,
+      "bytes": 4943,
       "path": "routed/refactor-cart-money-module.json",
-      "sha256": "b9a98747c96f7568a71042f37f6f6f691521460db2b0fd5f1c9f1ee05910fa5b"
+      "sha256": "d43ad294dc6718d7da20222f5c398e249ca1dbfa4edb8d0cffa0ad24ae42fcb7"
     },
     {
-      "bytes": 5328,
+      "bytes": 5258,
       "path": "routed/refactor-lantern-config-loader.json",
-      "sha256": "d5f96a303064c067fc6a9892a2efdb0932b0435eb78dca427114a1dd55f0b264"
+      "sha256": "9a05b66b336e61998deb780a17beed992aee5dd9e188d48a5b1a3c643087fb3b"
     },
     {
-      "bytes": 5450,
+      "bytes": 5410,
       "path": "routed/refactor-name-normalization.json",
-      "sha256": "b08bbfad0e831a53729288a225b2dd11a471992303c58a562bedcce15681e3e9"
+      "sha256": "2dae217124bbc97b268db3602f005a85ee4b169cdd7f0e3752a94a53928d3bbb"
     },
     {
       "bytes": 4257,
@@ -215,64 +215,64 @@
       "sha256": "a268b87e35dc1b5c37f1f9f92ccc03f678511d2b97237f94b5d44e0c0a2a35dd"
     },
     {
-      "bytes": 4923,
+      "bytes": 4891,
       "path": "routed/refactor-schema-task-view.json",
-      "sha256": "72eb4752b09187d19e8270c9097acc5da557183144a7b0db3e5bfc79e962e06f"
+      "sha256": "73b5df482900cb2cf2f3e4abf1d1c7783a1a7890180b4d46608c1a15410f859f"
     },
     {
-      "bytes": 4848,
+      "bytes": 4738,
       "path": "routed/repair-basic-greeting.json",
-      "sha256": "9ea4b8eabe837f9729f0097b1af3fe43c291037b8cb4e8790ca20131a0db3cce"
+      "sha256": "75ca4277b4ff70c08c712a9fa490257c737463de38226b90706b500b7ae1f7d0"
     },
     {
-      "bytes": 4893,
+      "bytes": 4783,
       "path": "routed/repair-basic-newline.json",
-      "sha256": "01bf3c052be61eadf01738f506cfbda735a86fa9bc877119e9009d6a38083f43"
+      "sha256": "4dfe5591becdb91e86b640ff26481967ae2039207070cc4fb63cb161f9798ea3"
     },
     {
-      "bytes": 4966,
+      "bytes": 4910,
       "path": "routed/repair-cart-empty-list.json",
-      "sha256": "96fa9702dacf493cf12b9453620bae6c471d3ce0f40333d8e5deacfa139b210d"
+      "sha256": "c1280dd4b93459bde1fab0a70939437c8c030371dc392d14cc958835679211f6"
     },
     {
-      "bytes": 5091,
+      "bytes": 4981,
       "path": "routed/repair-cart-off-by-one.json",
-      "sha256": "dcf8f10d8be53def6e83d93bc4d622ab8dad29ffb9b17fa6fcaae21bd09789c0"
+      "sha256": "8fe548bbe845d1fd2d2b886b786583af65d269aa1e91b59170f39a983b1b1730"
     },
     {
-      "bytes": 5826,
+      "bytes": 5746,
       "path": "routed/repair-lantern-empty-audience.json",
-      "sha256": "108e23d82520409aeb8b6427466d6d6669ebf13a5a5b1ad780b06ff0c40a3bde"
+      "sha256": "a46e5df50613b08ace09424945ee68e5966385e652b689723563beabb431741f"
     },
     {
-      "bytes": 7515,
+      "bytes": 7429,
       "path": "routed/repair-lantern-missing-config.json",
-      "sha256": "198d43cb718801049ec1ded84e000a9a62668554a7c11d70d17854aee131fd01"
+      "sha256": "18880dd70bfaaebf166cf4948d58d56b0f953b0fbc127296f3dd4801671a7d0d"
     },
     {
-      "bytes": 4909,
+      "bytes": 4877,
       "path": "routed/repair-name-whitespace.json",
-      "sha256": "29fcdbe520b2ff8274c792b263512041a0f24f3e791ec4fbe9383bd55a3a5d4a"
+      "sha256": "175c1930f9788df23198959151c659c1533da648b8851b03eb3bc1ee0d89fe33"
     },
     {
-      "bytes": 5641,
+      "bytes": 5537,
       "path": "routed/repair-parser-false.json",
-      "sha256": "e188f7c9c3dd8dcd50e078b401cd187a5820babb37fade18a0efed18b5405096"
+      "sha256": "aacc9d32f2161e8834790295e7056262cb70e0f05806c48b2462380df319dbf0"
     },
     {
-      "bytes": 6109,
+      "bytes": 6029,
       "path": "routed/repair-public-path-containment.json",
-      "sha256": "0e8e2c02edc9b3daef6dce36015d6858fb1d65655bf2afb05d2b39fb8fcc9c55"
+      "sha256": "0ebb83fee7b2a0909790dfa60511a14cade6088ba9550382332c66c75c88e49d"
     },
     {
-      "bytes": 6526,
+      "bytes": 6432,
       "path": "routed/repair-schema-status-snapshot.json",
-      "sha256": "6a03de8919c5a6670ede22f66778a5df4914c86790daff6aace12865c25aadb8"
+      "sha256": "9c678678899d87626b90fd7430e8ee3a4318a4051a856662daf00bbdcfb188d6"
     },
     {
-      "bytes": 7846,
+      "bytes": 7776,
       "path": "routed/scaffold-cart-discount.json",
-      "sha256": "e24fa2be785b9354b11d38ce52f4c9cbd6375e7da8a101d25a58b5f83c635d8c"
+      "sha256": "628fcced4889415adb69c4684c9803799eb58856988517eeb97859224c27428a"
     },
     {
       "bytes": 16329,
@@ -290,29 +290,29 @@
       "sha256": "42ce47ec8d970899418dbef0c8f890a544fdd4a8df56d5bb9933013d08231644"
     },
     {
-      "bytes": 5623,
+      "bytes": 5583,
       "path": "routed/scaffold-task-priority-contract.json",
-      "sha256": "a4bc4a093d9b2b1ee7819616035dc4d209a5e7badeecdce7e2bdf6769ac31795"
+      "sha256": "2cf4e7c67f31e817977c7a889176c1a6623b7aea61ba6691e8b5f1555d8baaf6"
     },
     {
-      "bytes": 5375,
+      "bytes": 5271,
       "path": "routed/security-check-command.json",
-      "sha256": "d2650949d044ab742a4cfc60181ccbb28b4c0a9ff00299144a6d7dc8d5aa2524"
+      "sha256": "9fb9d8b99152a569ac6bcb69d0ab973cf6301be5e8d9a484c5b9f574a87656a0"
     },
     {
-      "bytes": 5359,
+      "bytes": 5255,
       "path": "routed/security-config-trust.json",
-      "sha256": "5ae04b4debe61573ca0fedb0af0e0ec37f9ec80fe174827eb874328eb472f09b"
+      "sha256": "9e79cde0d5ad01a3760aa13e18615572da67e48bb3c0caf7b099fcb68ac6e7e0"
     },
     {
-      "bytes": 4978,
+      "bytes": 4886,
       "path": "routed/security-hostile-agents.json",
-      "sha256": "ca843719536f1e2762ec14eea9731f7f47977a2ffa0439fe5d50e6f6acb913f4"
+      "sha256": "552b7a7275a5ee2b9893814ef90901bc266078db17920aecfe3d8627c725c02b"
     },
     {
-      "bytes": 4346,
+      "bytes": 4254,
       "path": "routed/security-path-traversal.json",
-      "sha256": "3dea8f4d3aa6580510393e09d6303728d030350a17b357f0a42c54158803945a"
+      "sha256": "b40f4f96eeefa33f0e3a7746e80bd6b7cbff19fb2e5cd3619ee6f10b498e83ee"
     },
     {
       "bytes": 5543,
@@ -320,13 +320,13 @@
       "sha256": "8e6c778f389efab99621a6ed120971d182fc0eaf1cc25d417433778bb4d3df15"
     },
     {
-      "bytes": 44229,
+      "bytes": 43821,
       "path": "routed-result.json",
-      "sha256": "6b2bf7f732d8f2e20f6dc4a7dae54018659930c421c688eebab072b3b83a3e15"
+      "sha256": "028a4da04ce8f7a98ff71069bdb904d77da3ad1af4d2ea22822ded9c0a7dd4db"
     }
   ],
   "instructionPolicyRevision": 9,
   "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
-  "note": "Frozen so the evaluation's figures can be recomputed from the repository. The live directory on mickey is mutable node-local state and a figure copied from an earlier run survived review against it once already.",
+  "note": "Frozen so the evaluation's figures recompute from the repository rather than from mutable node-local state. Hashes are taken AFTER formatting has settled: an earlier manifest was generated before `pnpm format` reflowed these files, so 30 of 64 entries were wrong and the integrity layer asserted something untrue. The manifest excludes itself, since a file cannot contain its own digest.",
   "schema": "icarus.gate2-frozen-evidence.v1"
 }

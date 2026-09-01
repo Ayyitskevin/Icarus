@@ -139,7 +139,11 @@ cover remains open.
 
 - Evidence: frozen in this repository at
   `docs/evals/artifacts/gate2-reasoning-suppressed-20260901/`, with a `manifest.json`
-  giving a SHA-256 per file. Every figure above recomputes from that set. It was captured
+  giving a SHA-256 per file, taken after formatting settled and verified against the
+  committed bytes. Every figure above recomputes from that set. The first manifest was
+  generated before `pnpm format` reflowed those files and had 30 of 64 entries wrong —
+  an integrity layer that asserted something untrue, caught by an independent
+  recomputation rather than by the gate, which does not read this directory. It was captured
   from `.local/gate2-live-v2/03399661…/` on mickey, execution-profile digest
   `03399661…`, manifest `0eca6348…`, all 60 records carrying
   `reassessedFromEvidenceSha256: null`.
