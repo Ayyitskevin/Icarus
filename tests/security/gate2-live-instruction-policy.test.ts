@@ -12,6 +12,9 @@ describe("Gate 2 live instruction policy", () => {
     expect(GATE2_LIVE_INSTRUCTION_POLICY.generation).toEqual({
       temperature: 0,
       maxTokens: 8192,
+      // ADR 0070: digest-bound, so a rerun cannot silently restore the combined
+      // reasoning-plus-content budget the recorded thresholds were never measured under.
+      think: false,
     });
     expect(buildGate2LiveInstructions("scaffold", "mutation")).toBe(
       buildGate2LiveInstructions("scaffold", "mutation"),

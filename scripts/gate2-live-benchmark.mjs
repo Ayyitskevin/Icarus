@@ -319,12 +319,16 @@ async function callVulcanCandidate(
         ],
         // Vulcan accepts temperature/max_tokens and rejects unknown request fields.
         // Source: https://github.com/Ayyitskevin/Vulcan/blob/c6223a6/src/vulcan/schemas.py
-        // As of Vulcan c6223a6 the request also accepts a tri-state `think`, and the
-        // response may carry `message.thinking`. This benchmark deliberately does NOT
-        // send `think`: suppressing reasoning would change what the profile measures and
-        // needs its own accepted ADR. It does now RECORD what reasoning cost, below.
+        // As of Vulcan c6223a6 the request accepts a tri-state `think`, and the
+        // response may carry `message.thinking`. ADR 0070 accepts sending it: with
+        // reasoning suppressed, max_tokens is a content budget rather than a combined
+        // budget with an unobservable split, which is the precondition for this
+        // benchmark's thresholds meaning anything. The value is digest-bound in the
+        // instruction policy, so a run cannot quietly measure the other thing. The
+        // reasoning-cost recording below stays, and reads zero while think is false.
         temperature: generation.temperature,
         max_tokens: generation.maxTokens,
+        think: generation.think,
         stream: false,
         seat: "icarus",
       }),
