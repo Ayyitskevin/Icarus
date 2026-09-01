@@ -36,21 +36,33 @@ Retrieval was identical across arms: macro recall `0.9917`, macro precision `0.8
 digest provenance coverage `1.0`, incorrect edits `0`. **Both Gate 2 exit thresholds
 still fail**: 24/30 success and 0.80 first-plan acceptance remain open.
 
-These figures reproduced exactly across two full executions of the 30-case set, so they
-are not a single lucky pass. Temperature is 0; that is determinism of this pipeline, not
-evidence about model variance under sampling.
+The headline aggregates above repeated across two full executions of the 30-case set, so
+they are not a single lucky pass. **The pipeline output did not reproduce exactly**: one
+routed case (`scaffold-greeting-command`) produced a different candidate and a different
+token count between runs, 3,690 and 3,082, while success and plan aggregates were
+unchanged. Aggregate stability is not byte determinism, and an earlier version of this
+record claimed the stronger thing.
 
 ## What the recorded evidence supports
 
-- **`reasoningChars: 0` on all 60 cases, measured and serialized.** `think: false`
-  reached every path. Nothing silently dropped the field, and no case spent budget on
-  reasoning.
+- **`reasoningChars: 0` on all 60 cases** — read precisely, **zero surfaced thinking
+  characters under a request that sent `think: false`**. That is not the same as "no case
+  spent budget on reasoning". Vulcan omits the `thinking` member entirely when reasoning
+  is suppressed, and the decode that produced this frozen set mapped a missing member to
+  `0`, so the zero is synthesized from absence. The runner now records `null` for an
+  absent or malformed member and pairs it with the requested mode, so a future set can
+  state the stronger claim; **this set cannot**, and the figure is reported for what it
+  is. The 112-token empty case below is why the distinction matters.
 - **60/60 `finishReason: "stop"`** and **60/60 `usageBasis: "provider_reported"`.** No
   truncation, no timeouts, no protocol failures, and every token count is observed
   rather than a charged upper bound.
-- **Empty candidates fell from 8 to 1.** The routed arm generated 9,998 output tokens
-  across 30 cases — fewer than the 8,192 a single zero-yield case burned on 2026-08-30
-  to return an empty string.
+- **Empty candidates fell from 8 to 1.** The routed arm generated **9,390** output tokens
+  across 30 cases and the baseline arm 7,807, both recomputable from the frozen artifact
+  set. For scale, a single zero-yield case burned 8,192 tokens on 2026-08-30 to return an
+  empty string. An earlier version of this record cited 9,998 here — a figure copied from
+  the previous execution into a document whose premise is that every number comes from
+  the fresh one. It survived review once; freezing the evidence is what makes that class
+  of error mechanically checkable.
 
 ## The one remaining anomaly, now quantified
 
@@ -70,17 +82,21 @@ was made honest. It remains open.
 with first-plan acceptance 0.60 and fixed `code-fast` reaches 2/30, on this manifest,
 this profile, one seed.
 
-**Refutes.** The expectation that displacement *alone* explained the zero-yield cases and
-that freeing the budget would therefore raise scores. It did not: scores under the honest
-budget are lower than the figures recorded under the combined budget.
+**Observes.** Scores under the honest budget are lower than the figures recorded under
+the combined budget, and empty candidates fell from 8 to 1.
 
-**Does not establish.** That reasoning improves these models' answers. That is the
-obvious reading of the numbers and this run cannot support it. The earlier figures were
-taken under a different budget contract, so the two are not a controlled comparison, and
-no reasoning-enabled arm was run under the now-observable protocol. The honest statement
-is that these results are *consistent with* reasoning contributing to answer quality and
-*inconsistent with* pure displacement — identifying the cause requires a paired arm this
-run deliberately did not attempt.
+**Does not establish, in either direction.** An earlier version of this record said the
+result "refutes pure displacement" and was "consistent with reasoning contributing". Both
+overreach, and the first is wrong on its own terms: displacement was proposed as the
+mechanism for *empty content*, and empties falling from 8 to 1 is exactly what that
+mechanism predicts. That the newly surfaced answers are frequently wrong says nothing
+about why the earlier ones were empty.
+
+With no paired reasoning-enabled arm under the observable protocol, and with the two
+figure sets taken under different budget contracts, this run identifies no cause. Whether
+reasoning improves these models' answers, and whether displacement fully explained the
+zero-yield cases, both remain open. The next measurement is the paired arm, not more
+argument about these numbers.
 
 **Not a before-and-after.** ADR 0066's and ADR 0067's numbers remain valid records of
 what was measured then, under a budget whose meaning differed. A lower number here is not
@@ -112,11 +128,20 @@ cover remains open.
 - Cost figures apply the profile's captured price table to observed tokens;
   `actualBilledUsd` is null throughout.
 - The 112-token empty case is unexplained.
+- `reasoningChars` in this frozen set cannot distinguish a measured zero from an unreported
+  one; only later sets can.
+- Re-invoking the runner over records from an older evidence revision takes the
+  reassessment path and makes no provider calls. That is expected behaviour, not a fault,
+  but it means a "re-run" must be checked for `reassessedFromEvidenceSha256: null` before
+  its numbers are treated as fresh.
 
 ## Verification
 
-- Evidence: `.local/gate2-live-v2/03399661…/` on mickey, execution-profile digest
-  `03399661…`, manifest `0eca6348…`, all 60 records with
+- Evidence: frozen in this repository at
+  `docs/evals/artifacts/gate2-reasoning-suppressed-20260901/`, with a `manifest.json`
+  giving a SHA-256 per file. Every figure above recomputes from that set. It was captured
+  from `.local/gate2-live-v2/03399661…/` on mickey, execution-profile digest
+  `03399661…`, manifest `0eca6348…`, all 60 records carrying
   `reassessedFromEvidenceSha256: null`.
 - Instruction policy revision 9, SHA `e6fb3111…`, recorded in every case record.
 - Commit `f0df1a2`, Node 22.23.2, Vulcan `c6223a6`, models `qwen3.8:27b`

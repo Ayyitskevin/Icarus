@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "repair-basic-greeting",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-01T03:24:41.064Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "698075f5ca0747820e498bb1b3e65c4a5c772577",
+    "digestSha256": "33fc57c22d5528df2962c803bcf4be1e4999e8b5cc427c95cb4c6a09764a9dcd",
+    "repositoryDigestSha256": "eea916c04927c9236ad5f517ccbdf4ac4e8127eced8bb778697e7cfd7475382f",
+    "matchedFiles": 3,
+    "selectedFiles": 3,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/verify.py\",\"src/greeting.txt\"],\"plan\":{\"mutationTargets\":[\"src/greeting.txt\"],\"requestedCheckIds\":[\"basic-greeting\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/greeting.txt\",\"content\":\"Hello, Icarus!\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Updated the one-line greeting in src/greeting.txt to exactly \\\"Hello, Icarus!\\\" to match the registered verification check. The verify.py rule and registered check ID were left unchanged.\"}}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-basic-greeting",
+    "evaluatorId": "repair-basic-greeting-evaluator",
+    "candidateSha256": "6d3cea8121e3f1b02b860e4f339ba6fbbd75b3987ec8c5abc39515822f10c4f2",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-basic-greeting",
+    "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+    "taskSha256": "5724fe7e67cd1049a0c6e51f02023bc48dcc16cc7ac918b682287951acdb4e59",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+      },
+      {
+        "path": "src/greeting.txt",
+        "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-basic-greeting-evaluator",
+    "scenarioEvidenceSha256": "877e471f86d79ca5962828a5589f5bd42cb6fb4626085fd9b0e0ad4e147dc443",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 676,
+      "outputTokens": 121,
+      "estimatedCostUsd": 0.000797,
+      "actualBilledUsd": null,
+      "latencyMs": 2604
+    }
+  }
+}

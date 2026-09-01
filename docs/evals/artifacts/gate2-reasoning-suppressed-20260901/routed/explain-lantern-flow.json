@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "explain-lantern-flow",
+  "modelId": "code",
+  "generatedAt": "2026-09-01T03:30:03.678Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "d4cb891c3bf3ec7ffe141669bfab3f917c2faee9b957e733ef31a813d1d890b2",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"README.md\",\n    \"config/app.json\",\n    \"src/greeting.py\",\n    \"src/main.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [],\n    \"requestedCheckIds\": []\n  },\n  \"answer\": {\n    \"kind\": \"read_only\",\n    \"files\": [],\n    \"citations\": [\n      \"README.md\",\n      \"config/app.json\",\n      \"src/greeting.py\",\n      \"src/main.py\"\n    ],\n    \"findingIds\": [],\n    \"summary\": \"Execution begins in src/main.py, which reads config/app.json, extracts the 'audience' field, passes it to src/greeting.py's greeting function, and prints the returned string to stdout.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+    "plan": {
+      "mutationTargets": [],
+      "requestedCheckIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+      "findingIds": [],
+      "summary": "Execution begins in src/main.py, which reads config/app.json, extracts the 'audience' field, passes it to src/greeting.py's greeting function, and prints the returned string to stdout."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "explain-lantern-flow",
+    "evaluatorId": "explain-lantern-flow-evaluator",
+    "candidateSha256": "7b84a23aed79ebcacc114e2b7b03fddb8dc550bfc63802ec896e4e592124bdf6",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "explain-lantern-flow",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "0ef3a4df7ececa629cbe750e8e4cb23afc69d9bfe58c331f78f0cd82b2a7bae0",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+    "findingIds": [],
+    "scenarioEvaluatorId": "explain-lantern-flow-evaluator",
+    "scenarioEvidenceSha256": "3cb7b9a7e9ef2eefaaac788946f0ab973f4429dc7658f65732bbc34bc5bc07df",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 764,
+      "outputTokens": 191,
+      "estimatedCostUsd": 0.0007491975,
+      "actualBilledUsd": null,
+      "latencyMs": 10863
+    }
+  }
+}

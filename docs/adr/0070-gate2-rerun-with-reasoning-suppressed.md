@@ -86,12 +86,17 @@ Full record: [evaluation](../evals/2026-08-31-gate2-reasoning-suppressed.md).
 | success | 2/30 | 12/30 |
 | first-plan acceptance | 0.0667 | 0.60 |
 
-Both exit thresholds still fail. The figures reproduced exactly across two full
-executions of the 30-case set.
+Both exit thresholds still fail. The headline aggregates repeated across two full
+executions; the pipeline output did not reproduce exactly, as one routed case produced a
+different candidate and token count between runs.
 
-**The setting works and is now provable.** `reasoningChars: 0` is measured on all 60
-cases, 60/60 finished with `stop`, 60/60 usage is provider-reported, and empty candidates
-fell from 8 to 1.
+**The setting reaches the provider, and that is now bound behaviourally.** 60/60 finished
+with `stop`, 60/60 usage is provider-reported, and empty candidates fell from 8 to 1.
+`reasoningChars` reads 0 on all 60, which means **zero surfaced thinking characters under
+a request that sent `think: false`** — not "no reasoning was consumed". Vulcan omits the
+member when reasoning is suppressed and the decode that produced this set mapped absence
+to `0`. The runner now records `null` for an absent member and pairs it with the requested
+mode; this frozen set predates that and cannot support the stronger reading.
 
 An earlier attempt to record this outcome reported those validity figures from fields the
 runner computed but **never serialized** — absence read as measurement, which is the
@@ -102,7 +107,10 @@ run where all 60 cases carry `reassessedFromEvidenceSha256: null`.
 
 This ADR also claimed that removing the setting would fail the security suite. It would
 not have: the policy value was bound, its transmission was not, and deleting the request
-field left every check green. Both halves are asserted now.
+field left every check green. A static source check replaced that claim and did not earn
+it either — `.includes` passes on a string in a comment. The request body is now built by
+an exported function and asserted by a test on the transmitted object, probed by deleting
+the field.
 
 **The decision stands; one sentence of its rationale did not.** The argument that
 measuring answer quality against a budget a model may spend on discarded reasoning does
@@ -112,12 +120,16 @@ would let content through and scores would rise. Scores under the honest budget 
 than those recorded under the combined one: the models stopped returning expensive empty
 answers and started returning cheap wrong ones.
 
-That refutes pure displacement. It does **not** establish that reasoning improves these
-models' answers. The two figure sets were taken under different budget contracts, so they
-are not a controlled comparison, and no reasoning-enabled arm was run under the
-now-observable protocol. The supportable statement is that the result is *consistent
-with* reasoning contributing and *inconsistent with* displacement alone. Identifying the
-cause requires a paired arm this run deliberately did not attempt.
+An earlier version of this section said that refutes pure displacement and is consistent
+with reasoning contributing. Both overreach, and the first is wrong on its own terms:
+displacement was proposed as the mechanism for *empty content*, and empties fell from 8
+to 1 — exactly what that mechanism predicts. That the surfaced answers are frequently
+wrong says nothing about why the earlier ones were empty.
+
+This run therefore identifies no cause. Whether reasoning improves these models' answers,
+and whether displacement fully explained the zero-yield cases, both remain open, and the
+next measurement is the paired reasoning-enabled arm rather than further argument about
+these numbers.
 
 **One anomaly survives, now quantified rather than hidden.**
 `scaffold-lantern-json-output` returned 0 content characters in 112 provider-reported
@@ -131,3 +143,16 @@ failures are not context starvation": the field says nothing about files that ne
 matched lexically, reference-hop candidates, or exclusions before candidacy, and macro
 recall is `0.9917` rather than `1.0`. So `refactor` 0/5 and `scaffold` 0/5 are not
 explained by selection-ceiling truncation, and remain otherwise open.
+
+**Operational consequence worth stating.** Raising the evidence record revision makes an
+invocation over older records take the pre-existing reassessment path: it re-scores stored
+candidates and makes no provider calls. That is expected, not a fault, and
+`reassessedFromEvidenceSha256` makes it visible — but a "re-run" must be checked for that
+member being null before its numbers are treated as fresh. One re-run during this work
+reported success in six seconds with every new field present and identical aggregates,
+having called no provider at all.
+
+**Evidence location.** The revision-5 set is frozen in the repository at
+`docs/evals/artifacts/gate2-reasoning-suppressed-20260901/` with a per-file SHA-256
+manifest, so every figure recomputes from version control rather than from mutable
+node-local state. A stale token total survived one review because it did not.

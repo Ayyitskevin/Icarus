@@ -23,6 +23,8 @@ effectful/control session continuation, and wider Vulcan authority remain
 closed. Older sections below retain the status that was true at their named
 checkpoint and must not be read as the current release state.
 
+Superseded as the current measurement 2026-09-01: instruction-policy revision 9 binds `think: false`, making the token budget a content budget rather than a combined reasoning-plus-content budget with an unobservable split. On that budget fixed `code-fast` measured 2/30 and routed `code` measured 12/30 with first-plan acceptance 0.60, both thresholds still failing, with evidence frozen at `evals/artifacts/gate2-reasoning-suppressed-20260901/`. The revision-8 figures above remain valid records of what was measured then; the two are not a controlled comparison.
+
 ## Gate 2 deterministic retrieval, analysis, refactor, repair, and scaffold baseline
 
 Status: the one-case retrieval baseline plus manifest-bound explanation,

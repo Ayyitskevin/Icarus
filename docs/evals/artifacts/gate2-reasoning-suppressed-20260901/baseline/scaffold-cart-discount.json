@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "scaffold-cart-discount",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-01T03:26:55.464Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "2d010282b415aa4f58947ed5dc3003b62593deee6fcaee1d6709937aeb9b57cc",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"src/cart.py\",\n    \"checks/test_cart.py\",\n    \"checks/verify.py\",\n    \"README.md\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/cart.py\",\n      \"checks/test_cart.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"cart-discount\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/cart.py\",\n        \"content\": \"def subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the cart subtotal in cents.\\\"\\\"\\\"\\n    return sum(cents)\\n\\n\\ndef discount(cents: list[int], amount: int) -> int:\\n    \\\"\\\"\\\"Return the cart total after applying an integer-cents discount.\\n\\n    The discount is clamped to the subtotal so the total never goes negative.\\n    \\\"\\\"\\\"\\n    total = sum(cents)\\n    return max(total - amount, 0)\\n\"\n      },\n      {\n        \"path\": \"checks/test_cart.py\",\n        \"content\": \"from src.cart import subtotal, discount\\n\\nassert subtotal([100, 200]) == 300\\nassert discount([100, 200], 50) == 250\\nassert discount([100, 200], 300) == 0\\nassert discount([100, 200], 0) == 300\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Added an integer-cents discount helper in src/cart.py that clamps the discount to the subtotal so the total never goes negative, and added regression assertions in checks/test_cart.py. The existing subtotal API was left unchanged.\"\n  }\n}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-cart-discount",
+    "evaluatorId": "scaffold-cart-discount-evaluator",
+    "candidateSha256": "80fd2b65ab4b880b9684d95a5c2cf03835b110dc63ce98f06dc0184c40c0cd9b",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-cart-discount",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "5ada358e6249ba212040762c7612184a9af7a6ff39d53c30ed7dd671f864fa26",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-cart-discount-evaluator",
+    "scenarioEvidenceSha256": "6370d2190ef60c64b274c555720c8853fcdd30990c96685dabbf88f7f69d8715",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 974,
+      "outputTokens": 448,
+      "estimatedCostUsd": 0.001422,
+      "actualBilledUsd": null,
+      "latencyMs": 8852
+    }
+  }
+}

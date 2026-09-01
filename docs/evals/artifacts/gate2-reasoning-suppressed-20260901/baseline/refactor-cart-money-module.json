@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "refactor-cart-money-module",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-01T03:25:36.945Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "814c652f8576b76845be50397e5516508a9393657550c3ba85fbd0c9dcd882e1",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"checks/test_cart.py\",\n    \"src/cart.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/cart.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"cart-contract\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/cart.py\",\n        \"content\": \"def subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the cart subtotal in cents.\\\"\\\"\\\"\\n    return _subtotal(cents)\\n\\n\\ndef _subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the sum of item prices in cents.\\\"\\\"\\\"\\n    return sum(cents)\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Extracted the subtotal arithmetic into a private `_subtotal` helper while keeping `subtotal` as the public API that delegates to it. The public function's behavior and its tests are preserved.\"\n  }\n}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "refactor-cart-money-module",
+    "evaluatorId": "refactor-cart-money-module-evaluator",
+    "candidateSha256": "bd0444c6ea0eae36dcbb8ae01597e932f1963b1e5141abd51d99bafc4f96c223",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "refactor-cart-money-module",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "22803a5c5a80217547c7058d12e2100640b669b85fafaf2fc5460e916ce40dfd",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "refactor-cart-money-module-evaluator",
+    "scenarioEvidenceSha256": "aae2fe673f27f5bd70071106e52b6e0a1f1631000a520ddbc848ee128bb3cc73",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 802,
+      "outputTokens": 266,
+      "estimatedCostUsd": 0.001068,
+      "actualBilledUsd": null,
+      "latencyMs": 5969
+    }
+  }
+}

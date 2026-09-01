@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "explain-schema-contract",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-01T03:26:03.686Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "ef0d0ebbc5b42e5bb30129357f84a3b4bd7ea961",
+    "digestSha256": "f42ed3cb6a3bf040520e5e366bb3e9b90f620b230f8b8506336f0eab879d2114",
+    "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"checks/schema_contract.sql\",\n    \"migrations/README.md\",\n    \"README.md\",\n    \"schema/current.sql\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [],\n    \"requestedCheckIds\": []\n  },\n  \"answer\": {\n    \"kind\": \"read_only\",\n    \"files\": [],\n    \"citations\": [\n      \"checks/schema_contract.sql\",\n      \"migrations/README.md\",\n      \"README.md\",\n      \"schema/current.sql\"\n    ],\n    \"findingIds\": [],\n    \"summary\": \"The tasks table (schema/current.sql) has a fixed two-column shape: `id INTEGER PRIMARY KEY` and `title TEXT NOT NULL`. The offline contract query (checks/schema_contract.sql) asserts the table remains readable by running `SELECT id, title FROM tasks LIMIT 0;` — a zero-row read that validates the schema contract without mutating state. The documentation frames this as an offline fixture: README.md states evaluation must never apply a migration to live state, and migrations/README.md reserves numbered migrations for after explicit schema approval. Together these define the contract: the tasks schema is read-only and frozen, and the contract check verifies readability without applying changes.\"\n  }\n}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "explain-schema-contract",
+    "evaluatorId": "explain-schema-contract-evaluator",
+    "candidateSha256": "f08626ec052a237af1e8e6d0ea276311786f8f91b1f55cda807394fcf34eec2f",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "explain-schema-contract",
+    "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+    "taskSha256": "d85e5ab2982ecd2d229ddbbfaca21a86d99dfe94f1c754d51ae6c42d231be85b",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/schema_contract.sql",
+        "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+      },
+      {
+        "path": "migrations/README.md",
+        "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+      },
+      {
+        "path": "README.md",
+        "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+      },
+      {
+        "path": "schema/current.sql",
+        "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "explain-schema-contract-evaluator",
+    "scenarioEvidenceSha256": "80de9e11d4b6e0293c02a04b1aa44622c44c549802ed46f619913a313d68a3eb",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 744,
+      "outputTokens": 292,
+      "estimatedCostUsd": 0.001036,
+      "actualBilledUsd": null,
+      "latencyMs": 5861
+    }
+  }
+}

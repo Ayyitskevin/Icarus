@@ -68,7 +68,57 @@ const MAX_CONTEXT_FILES = 8;
 // serialized neither, so a reader of a v4 record cannot distinguish "measured zero"
 // from "never recorded" -- and the first Gate 2 run to carry ADR 0069's evidence
 // reported omission counts that were absence, not measurement.
+/**
+ * The exact request body sent to Vulcan. Extracted and exported so a test can assert
+ * what is TRANSMITTED, not merely that a source file contains a string. A static
+ * `.includes` check on this file passes while the fragment sits in a comment or a dead
+ * object; it cannot show that the policy's `think` value reaches the wire.
+ *
+ * Vulcan accepts temperature/max_tokens/think and rejects unknown request fields.
+ * Source: https://github.com/Ayyitskevin/Vulcan/blob/c6223a6/src/vulcan/schemas.py
+ */
+export function buildGate2ChatRequestBody({ modelId, instructions, input, generation }) {
+  return {
+    model: modelId,
+    messages: [
+      { role: "system", content: instructions },
+      { role: "user", content: input },
+    ],
+    temperature: generation.temperature,
+    max_tokens: generation.maxTokens,
+    think: generation.think,
+    stream: false,
+    seat: "icarus",
+  };
+}
+
 const LIVE_EVIDENCE_RECORD_REVISION = 5;
+
+/**
+ * The closed shape a revision-5 record must have before it may be reused as current
+ * evidence. `reasoningChars` is deliberately allowed to be null -- absence is a real
+ * reading -- but the MEMBER must be present, because a record that never carried it
+ * cannot be distinguished later from one that reported nothing.
+ */
+function hasCurrentEvidenceShape(record) {
+  if (record === null || typeof record !== "object") return false;
+  if (!("reasoningChars" in record)) return false;
+  if (!(record.reasoningChars === null || Number.isSafeInteger(record.reasoningChars))) {
+    return false;
+  }
+  if (!("requestedThink" in record)) return false;
+  const retrieval = record.retrieval;
+  if (retrieval === null || typeof retrieval !== "object") return false;
+  if (!Number.isSafeInteger(retrieval.matchedFiles)) return false;
+  if (!Number.isSafeInteger(retrieval.selectedFiles)) return false;
+  if (!Array.isArray(retrieval.omittedMatches)) return false;
+  if (!Array.isArray(retrieval.omittedReferences)) return false;
+  const excluded = retrieval.excludedFiles;
+  if (excluded === null || typeof excluded !== "object") return false;
+  return ["byPolicy", "nonText", "secretShaped", "unsupportedEntry"].every((key) =>
+    Number.isSafeInteger(excluded[key]),
+  );
+}
 const MODEL_PINS = Object.freeze({
   code: {
     providerModel: "qwen3.8:27b",
@@ -304,44 +354,27 @@ async function callVulcanCandidate(
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json" },
       signal: AbortSignal.timeout(timeoutMs),
-      body: JSON.stringify({
-        model: modelId,
-        messages: [
-          {
-            role: "system",
-            content: requestInstructions,
-          },
-          {
-            role: "user",
-            content: buildGate2LiveCandidateInput({
-              task,
-              repositoryPaths,
-              registeredCheckIds: checkIds,
-              sources: retrieval.entries,
-            }),
-          },
-        ],
-        // Vulcan accepts temperature/max_tokens and rejects unknown request fields.
-        // Source: https://github.com/Ayyitskevin/Vulcan/blob/c6223a6/src/vulcan/schemas.py
-        // As of Vulcan c6223a6 the request accepts a tri-state `think`, and the
-        // response may carry `message.thinking`. ADR 0070 accepts sending it: with
-        // reasoning suppressed, max_tokens is a content budget rather than a combined
-        // budget with an unobservable split, which is the precondition for this
-        // benchmark's thresholds meaning anything. The value is digest-bound in the
-        // instruction policy, so a run cannot quietly measure the other thing. The
-        // reasoning-cost recording below stays, and reads zero while think is false.
-        temperature: generation.temperature,
-        max_tokens: generation.maxTokens,
-        think: generation.think,
-        stream: false,
-        seat: "icarus",
-      }),
+      body: JSON.stringify(
+        buildGate2ChatRequestBody({
+          modelId,
+          instructions: requestInstructions,
+          input: buildGate2LiveCandidateInput({
+            task,
+            repositoryPaths,
+            registeredCheckIds: checkIds,
+            sources: retrieval.entries,
+          }),
+          generation,
+        }),
+      ),
     });
   } catch (error) {
     if (error?.name !== "TimeoutError" && error?.name !== "AbortError") throw error;
     return {
       text: "",
-      thinkingChars: 0,
+      // A timed-out request surfaced no response at all, so nothing about reasoning
+      // was reported. Zero would claim otherwise.
+      thinkingChars: null,
       finishReason: "timeout",
       providerFailure: "request_timeout",
       usageBasis: "declared_budget_upper_bound",
@@ -381,8 +414,14 @@ async function callVulcanCandidate(
   // Reasoning text is billed in completion tokens. Retain only its size: enough to tell
   // "the model produced nothing" from "the model reasoned and returned nothing", without
   // copying model reasoning into published evidence.
+  // NULL when the provider surfaced no thinking member at all, or surfaced a malformed
+  // one. Vulcan omits the member entirely when a request sends think:false, so mapping
+  // absence to 0 would state "the model reasoned for zero characters" on evidence that
+  // only says "no reasoning was reported" -- the same absence-as-measurement this
+  // benchmark exists to stop. A number here means the provider surfaced that many
+  // characters; null means it surfaced none, which is not the same claim.
   const thinkingChars =
-    typeof choice.message?.thinking === "string" ? choice.message.thinking.length : 0;
+    typeof choice.message?.thinking === "string" ? choice.message.thinking.length : null;
   return {
     text: choice.message.content,
     thinkingChars,
@@ -507,6 +546,10 @@ async function evaluateCase({ benchmarkCase, repository, oracle, mode, profile, 
     if (
       parsed.candidateContractRevision === GATE2_LIVE_CANDIDATE_CONTRACT_REVISION &&
       parsed.evidenceRecordRevision === LIVE_EVIDENCE_RECORD_REVISION &&
+      // A revision number is a label, not a shape. Without this a v4-shaped record
+      // relabelled 5 is reused as current evidence and the aggregate silently rests on
+      // members that were never written.
+      hasCurrentEvidenceShape(parsed) &&
       parsed.instructionPolicySha256 === GATE2_LIVE_INSTRUCTION_POLICY_SHA256 &&
       parsed.routingPolicySha256 === GATE2_LIVE_ROUTING_POLICY_SHA256 &&
       parsed.evaluatorEvidence?.instructionPolicySha256 === GATE2_LIVE_INSTRUCTION_POLICY_SHA256 &&
@@ -697,7 +740,11 @@ async function evaluateCase({ benchmarkCase, repository, oracle, mode, profile, 
       // Recorded, not merely computed. A digest commits to the retrieval result but
       // is not its preimage: without these members a later reader sees no omissions
       // because none were written, which is indistinguishable from none occurring.
+      // Paired deliberately: reasoningChars alone cannot distinguish "suppressed and
+      // therefore absent" from "not reported for some other reason". The requested mode
+      // is what makes a null reading interpretable.
       reasoningChars: generated.thinkingChars,
+      requestedThink: GATE2_LIVE_INSTRUCTION_POLICY.generation.think,
       retrieval: {
         baseCommit,
         digestSha256: retrieval.digestSha256,
@@ -715,26 +762,33 @@ async function evaluateCase({ benchmarkCase, repository, oracle, mode, profile, 
       observation,
     };
     if (existingRecord !== null) {
-      const priorRevision = Number.isSafeInteger(existingRecord.evidenceRecordRevision)
-        ? existingRecord.evidenceRecordRevision
-        : 0;
-      // Keyed by the instruction policy that produced the prior record as well as its
-      // revision. Keying on the revision alone meant a second run under a DIFFERENT
-      // policy found the existing backup and overwrote the record it should have
-      // preserved, so evidence could disappear while an accepted ADR still cited it.
-      const priorPolicy =
-        typeof existingRecord.instructionPolicySha256 === "string"
-          ? existingRecord.instructionPolicySha256.slice(0, 12)
-          : "unknown-policy";
+      // Keyed by the digest of the ENTIRE prior record. A revision-plus-policy-prefix key
+      // still collided: a routing, candidate-contract, or evaluator change under the same
+      // instruction policy produced a different record with the same filename, and a
+      // malformed policy identity collapsed every such record onto one shared name. The
+      // full digest cannot collide without the records being identical, in which case
+      // nothing is lost by skipping.
+      const priorDigest = sha256(`${JSON.stringify(existingRecord, null, 2)}\n`);
       const backupPath = path.join(
         path.dirname(caseEvidencePath),
-        `${benchmarkCase.id}.evidence-record-v${priorRevision}-${priorPolicy}.json`,
+        `${benchmarkCase.id}.evidence-record-${priorDigest.slice(0, 32)}.json`,
       );
       const backupExists = await lstat(backupPath).catch((error) => {
         if (hasCode(error, "ENOENT")) return null;
         throw error;
       });
-      if (backupExists === null) await atomicWriteJson(backupPath, existingRecord);
+      if (backupExists === null) {
+        await atomicWriteJson(backupPath, existingRecord);
+      } else {
+        // The name is the record's own digest, so an existing file must be byte-equal.
+        // Anything else means two different records claim one identity, and silently
+        // skipping would destroy one of them.
+        const existingBackup = await readRegularFile(backupPath, "prior evidence backup");
+        assertCondition(
+          sha256(existingBackup) === sha256(`${JSON.stringify(existingRecord, null, 2)}\n`),
+          `existing evidence backup for ${benchmarkCase.id} differs from the record it names`,
+        );
+      }
     }
     await atomicWriteJson(caseEvidencePath, record);
     return record;

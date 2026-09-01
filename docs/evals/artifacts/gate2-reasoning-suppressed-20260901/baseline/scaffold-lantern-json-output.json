@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "scaffold-lantern-json-output",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-01T03:26:46.571Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "09b5838268a4e796982003f830b9fccd38bb78410a1793282bad82bec472245e",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff",
+    "matchedFiles": 3,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"config/app.json\",\n    \"README.md\",\n    \"src/greeting.py\",\n    \"src/main.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/main.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"lantern-json-output\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/main.py\",\n        \"content\": \"import argparse\\nimport json\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\n\\ndef main() -> None:\\n    parser = argparse.ArgumentParser(description=\\\"Lantern greeting\\\")\\n    parser.add_argument(\\n        \\\"--format\\\",\\n        choices=[\\\"text\\\", \\\"json\\\"],\\n        default=\\\"text\\\",\\n        help=\\\"output format (default: text)\\\",\\n    )\\n    args = parser.parse_args()\\n\\n    audience = json.loads(Path(\\\"config/app.json\\\").read_text())[\\\"audience\\\"]\\n\\n    if args.format == \\\"json\\\":\\n        print(json.dumps({\\\"message\\\": greeting(audience)}))\\n    else:\\n        print(greeting(audience))\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    main()\\n\"\n      },\n      {\n        \"path\": \"tests/test_lantern_json_output.py\",\n        \"content\": \"import json\\nimport subprocess\\nimport sys\\nfrom pathlib import Path\\n\\n\\ndef run(*args: str) -> subprocess.CompletedProcess:\\n    return subprocess.run(\\n        [sys.executable, \\\"src/main.py\\\", *args],\\n        capture_output=True,\\n        text=True,\\n        check=True,\\n    )\\n\\n\\ndef test_default_text_mode() -> None:\\n    result = run()\\n    assert result.stdout.strip() == \\\"Welcome, traveler.\\\"\\n\\n\\ndef test_json_output_mode() -> None:\\n    result = run(\\\"--format\\\", \\\"json\\\")\\n    payload = json.loads(result.stdout)\\n    assert payload == {\\\"message\\\": \\\"Welcome, traveler.\\\"}\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Added a dependency-free JSON output mode to src/main.py behind a --format flag while keeping text as the default, and added a new offline test artifact covering both modes under the registered check lantern-json-output.\"\n  }\n}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-lantern-json-output",
+    "evaluatorId": "scaffold-lantern-json-output-evaluator",
+    "candidateSha256": "dd8586a70c34c0eddf6c7f195c27a58e87c5fa137ac35b10bf9a723600d47342",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-lantern-json-output",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "2580a2eb9e31e3953d7ac4ac00ac25be1c25142b6ebad8d2129cf8d16fbf4301",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-lantern-json-output-evaluator",
+    "scenarioEvidenceSha256": "ac5f85c023280079c7b9a43318e3b374f577f8e85fce18c573cb534bcf17e1af",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 887,
+      "outputTokens": 570,
+      "estimatedCostUsd": 0.001457,
+      "actualBilledUsd": null,
+      "latencyMs": 11122
+    }
+  }
+}

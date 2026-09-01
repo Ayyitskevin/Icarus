@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "profileSha256": "a4299f61fca52508591b996474d4abb1c80d5d38c813b6e691ec753e24ee1d25",
+  "checkedAt": "2026-09-01T03:27:20.098Z",
+  "vulcanHealthSha256": "5fd516e629ea9e3803a5c047048ba3a3972b5673da770fbd750b0782a559c262",
+  "vulcanModelsSha256": "4b08bc29518ba2a76a93f54c5f0e4930da506063c5f5f17102dd9f0e1299321d",
+  "vulcanConfigSha256": "e364f80be55b9ca93a0d287cb07d5b7648c9753b30bca3b5fe083d78a1eab946",
+  "ollamaTagsSha256": "2c2e010205ddb2f99e0b67c9582fa865d25a2ef7d21bd2be9d3f053d8f2f3f60",
+  "provider": {
+    "id": "local-ollama",
+    "type": "ollama",
+    "baseUrl": "http://127.0.0.1:11434"
+  },
+  "models": [
+    {
+      "modelId": "code",
+      "providerModel": "qwen3.8:27b",
+      "digest": "22130167c4c20e20c7b71454612966ca8e8171e9b3cc8ab6ce8aa6cbfec79643"
+    },
+    {
+      "modelId": "code-fast",
+      "providerModel": "ornith-1.5:35b",
+      "digest": "9f3b89b2521908dd2e6f7a11fa368e62c8f89e1075f22604e4d1a76dd1240fcc"
+    }
+  ]
+}

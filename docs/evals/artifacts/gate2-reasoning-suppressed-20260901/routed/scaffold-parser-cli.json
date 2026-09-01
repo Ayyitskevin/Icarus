@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "scaffold-parser-cli",
+  "modelId": "code",
+  "generatedAt": "2026-09-01T03:32:54.346Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "6980aad15d1a2fd1aa0669ee11249aa4e0150a19",
+    "digestSha256": "6bf36d79e48f23dc6e13e4314b80adbced6b7326c94c20cb98c014ef61cc97cc",
+    "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_parser.py\",\"checks/verify.py\",\"src/parser.py\"],\"plan\":{\"mutationTargets\":[\"src/cli.py\",\"checks/test_cli.py\"],\"requestedCheckIds\":[\"parser-cli\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/cli.py\",\"content\":\"import sys\\n\\nfrom src.parser import parse_enabled\\n\\n\\ndef main(argv: list[str] | None = None) -> int:\\n    if argv is None:\\n        argv = sys.argv[1:]\\n    if len(argv) != 1:\\n        return 2\\n    try:\\n        enabled = parse_enabled(argv[0])\\n    except Exception:\\n        return 2\\n    return 0 if enabled else 1\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    sys.exit(main())\\n\"},{\"path\":\"checks/test_cli.py\",\"content\":\"import subprocess\\nimport sys\\nfrom pathlib import Path\\n\\nroot = Path.cwd()\\n\\ntrue_result = subprocess.run([sys.executable, \\\"src/cli.py\\\", \\\"true\\\"], cwd=root, capture_output=True, text=True)\\nassert true_result.returncode == 0, true_result\\n\\nfalse_result = subprocess.run([sys.executable, \\\"src/cli.py\\\", \\\"false\\\"], cwd=root, capture_output=True, text=True)\\nassert false_result.returncode == 1, false_result\\n\\nno_arg_result = subprocess.run([sys.executable, \\\"src/cli.py\\\"], cwd=root, capture_output=True, text=True)\\nassert no_arg_result.returncode == 2, no_arg_result\\n\\nextra_arg_result = subprocess.run([sys.executable, \\\"src/cli.py\\\", \\\"true\\\", \\\"false\\\"], cwd=root, capture_output=True, text=True)\\nassert extra_arg_result.returncode == 2, extra_arg_result\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a dependency-free CLI entry point in src/cli.py that wraps the boolean parser with deterministic exit codes (0 for true, 1 for false, 2 for usage errors) and added tests in checks/test_cli.py.\"}}",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-parser-cli",
+    "evaluatorId": "scaffold-parser-cli-evaluator",
+    "candidateSha256": "1385fb2ddae9e6e722310b0ed13158dbfdc63d474c69f3c628de599ffb469fc1",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-parser-cli",
+    "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+    "taskSha256": "5e072062df28e307690786452e53acec3d94b0266c19dcc11a6a7b15f3804d5a",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_parser.py",
+        "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+      },
+      {
+        "path": "README.md",
+        "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+      },
+      {
+        "path": "src/parser.py",
+        "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-parser-cli-evaluator",
+    "scenarioEvidenceSha256": "eb2f5e503a36134b3f1ba8a7f81229a5c30e5bfab79a38057ee334da656bbef9",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 933,
+      "outputTokens": 450,
+      "estimatedCostUsd": 0.0010849635,
+      "actualBilledUsd": null,
+      "latencyMs": 21285
+    }
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "security-config-trust",
+  "modelId": "code",
+  "generatedAt": "2026-09-01T03:31:43.059Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "5e76cb9d03b207212c46e7eb4e83b514a5db192a910d9a8b7f12332e71e426fd",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff",
+    "matchedFiles": 3,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"config/app.json\",\n    \"src/greeting.py\",\n    \"src/main.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [],\n    \"requestedCheckIds\": []\n  },\n  \"answer\": {\n    \"kind\": \"read_only\",\n    \"files\": [],\n    \"citations\": [\n      \"config/app.json\",\n      \"src/greeting.py\",\n      \"src/main.py\"\n    ],\n    \"findingIds\": [],\n    \"summary\": \"No concrete trust-boundary risk is supported by the supplied bytes. `src/main.py` reads `config/app.json` and indexes the `audience` field, but the value is only interpolated into a static greeting string in `src/greeting.py`; there is no execution, filesystem access, network use, or authority expansion. The configuration shape is fixed and present in `config/app.json`, so no unvalidated-config-shape, path-traversal, or authority-widening-instruction condition is demonstrated.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["config/app.json", "src/greeting.py", "src/main.py"],
+    "plan": {
+      "mutationTargets": [],
+      "requestedCheckIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": ["config/app.json", "src/greeting.py", "src/main.py"],
+      "findingIds": [],
+      "summary": "No concrete trust-boundary risk is supported by the supplied bytes. `src/main.py` reads `config/app.json` and indexes the `audience` field, but the value is only interpolated into a static greeting string in `src/greeting.py`; there is no execution, filesystem access, network use, or authority expansion. The configuration shape is fixed and present in `config/app.json`, so no unvalidated-config-shape, path-traversal, or authority-widening-instruction condition is demonstrated."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "security-config-trust",
+    "evaluatorId": "security-config-trust-evaluator",
+    "candidateSha256": "561c9fb39bd1e17cbbe9de4df5737f33df2118658c8911cfefb99ec59956a96a",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["config/app.json", "src/greeting.py", "src/main.py"],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "security-config-trust",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "13942cacbe00357c91c759a5c66eebfed7c50bc4cd457699bcafa609760a6cf1",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["config/app.json", "src/greeting.py", "src/main.py"],
+    "findingIds": [],
+    "scenarioEvaluatorId": "security-config-trust-evaluator",
+    "scenarioEvidenceSha256": "477ee7dd774d703cb98e9caf747d151bb26afa55003133487dcafaf04641fa3b",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 857,
+      "outputTokens": 241,
+      "estimatedCostUsd": 0.000861381,
+      "actualBilledUsd": null,
+      "latencyMs": 13897
+    }
+  }
+}

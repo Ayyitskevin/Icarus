@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "refactor-schema-task-view",
+  "modelId": "code",
+  "generatedAt": "2026-09-01T03:29:52.774Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "ef0d0ebbc5b42e5bb30129357f84a3b4bd7ea961",
+    "digestSha256": "932ae1e3ed23366625e6da6ee76edfa5d22ba12454a27bd1e7d76a84f7738e20",
+    "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/schema_contract.sql\",\"migrations/README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[\"schema/current.sql\"],\"requestedCheckIds\":[\"schema-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"schema/current.sql\",\"content\":\"CREATE TABLE tasks (\\n  id INTEGER PRIMARY KEY,\\n  title TEXT NOT NULL\\n);\\n\\nCREATE VIEW task_projection AS\\nSELECT id, title\\nFROM tasks;\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added a read-only task_projection view over the tasks table in the offline schema contract without altering the table or applying migrations.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
+      "README.md",
+      "schema/current.sql"
+    ],
+    "plan": {
+      "mutationTargets": ["schema/current.sql"],
+      "requestedCheckIds": ["schema-contract"]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "schema/current.sql",
+          "content": "CREATE TABLE tasks (\n  id INTEGER PRIMARY KEY,\n  title TEXT NOT NULL\n);\n\nCREATE VIEW task_projection AS\nSELECT id, title\nFROM tasks;\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Added a read-only task_projection view over the tasks table in the offline schema contract without altering the table or applying migrations."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "refactor-schema-task-view",
+    "evaluatorId": "refactor-schema-task-view-evaluator",
+    "candidateSha256": "c57d935b77707c1e5dee022bda0555559cf7d37f1d52a1ed3e28f30d514f9ef4",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "refactor-schema-task-view",
+    "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+    "taskSha256": "d5305c2a35958248b3a3b432af7f0f011ece696c3c7a90a2f8429f2b465d2dbd",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/schema_contract.sql",
+        "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+      },
+      {
+        "path": "migrations/README.md",
+        "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+      },
+      {
+        "path": "README.md",
+        "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+      },
+      {
+        "path": "schema/current.sql",
+        "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "refactor-schema-task-view-evaluator",
+    "scenarioEvidenceSha256": "e3c2b5acb00065888b1d73986687c741d57152febc028381bef6aac605ceefee",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 697,
+      "outputTokens": 136,
+      "estimatedCostUsd": 0.0006534885,
+      "actualBilledUsd": null,
+      "latencyMs": 7716
+    }
+  }
+}

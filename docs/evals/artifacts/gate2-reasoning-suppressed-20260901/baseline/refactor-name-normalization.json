@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "refactor-name-normalization",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-01T03:25:26.906Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "3c3bb16f72a899265802e94c5c6d5abb537bfc03",
+    "digestSha256": "c8dad6f05149714b4da8e077c96ebabfd08469395bdcf791d838272fbea53611",
+    "repositoryDigestSha256": "ba8451fe227e973c5c9e255880235e00488f9c204bbe8cd5fbca73e3c8d2f47f",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"src/format_name.py\",\"src/profile.py\"],\"plan\":{\"mutationTargets\":[\"src/format_name.py\",\"src/profile.py\"],\"requestedCheckIds\":[\"profile-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/format_name.py\",\"content\":\"def _normalize(value: str) -> str:\\n    return \\\" \\\".join(value.strip().split()).title()\\n\\n\\ndef format_name(value: str) -> str:\\n    return _normalize(value)\\n\"},{\"path\":\"src/profile.py\",\"content\":\"from src.format_name import _normalize\\n\\n\\ndef display_name(value: str) -> str:\\n    return _normalize(value)\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Extracted the duplicated name normalization logic into a shared _normalize helper in src/format_name.py. Both format_name and display_name now delegate to it, preserving the observed behavior verified by the check.\"}}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "refactor-name-normalization",
+    "evaluatorId": "refactor-name-normalization-evaluator",
+    "candidateSha256": "f14c46935778ede0f1b09d323c5a3448678a58b240f4c121aa5f2049ddd78775",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "refactor-name-normalization",
+    "repositoryRevisionSha256": "5ce751efcdb138a9a0db315936567d9a6a1a86df45c49df9027b5bab8f605bd1",
+    "taskSha256": "5d77edacac31f30555640b014c2c9c4cea003dd57dc23bf42c3993fed7d52920",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_profile.py",
+        "sha256": "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c"
+      },
+      {
+        "path": "README.md",
+        "sha256": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6"
+      },
+      {
+        "path": "src/format_name.py",
+        "sha256": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f"
+      },
+      {
+        "path": "src/profile.py",
+        "sha256": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "refactor-name-normalization-evaluator",
+    "scenarioEvidenceSha256": "b3740d207caa2e2d395605c5ad9e923f5af129cbf86162c5e7da0bcc70e960cc",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 735,
+      "outputTokens": 202,
+      "estimatedCostUsd": 0.000937,
+      "actualBilledUsd": null,
+      "latencyMs": 4158
+    }
+  }
+}

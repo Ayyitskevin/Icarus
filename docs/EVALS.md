@@ -423,8 +423,16 @@ usage, provider-completion, and finish evidence. Truncated output is a failed
 observation; a request timeout is retained as a failed case with declared-budget
 upper-bound accounting, while other transport failures abort the run.
 
-The current leak-free run measured fixed `code-fast` at 5/30 with first-plan
-acceptance `0.2667`, and routed `code` at 16/30 with acceptance `0.7667`.
+The leak-free run under instruction-policy revision 8 measured fixed `code-fast` at 5/30
+with first-plan acceptance `0.2667`, and routed `code` at 16/30 with acceptance `0.7667`.
+Superseded as the current measurement 2026-09-01: under revision 9, which binds
+`think: false` so `maxTokens` is a content budget rather than a combined
+reasoning-plus-content budget, fixed `code-fast` measured 2/30 with acceptance `0.0667`
+and routed `code` measured 12/30 with acceptance `0.60`
+([evaluation](evals/2026-08-31-gate2-reasoning-suppressed.md), evidence frozen at
+`evals/artifacts/gate2-reasoning-suppressed-20260901/`). The two sets were taken under
+different budget contracts and are not a controlled comparison; the revision-8 figures
+remain valid records of what was measured then.
 Routed class success was repair 7/10, refactor 4/5, explanation 3/5, security
 review 2/5, and scaffold 0/5. Both retained macro recall `0.9917`, precision
 `0.8083`, provenance `1.0`, and zero incorrect edits. The routed run improved
