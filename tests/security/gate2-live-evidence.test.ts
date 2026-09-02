@@ -753,6 +753,73 @@ describe("Gate 2 published live evidence", () => {
     });
   });
 
+  it("treats an absent reasoning-size claim as no claim, and a present one as binding", () => {
+    // The freezer derives `everyRecordReasoningChars` from the records and omits it when
+    // they disagree -- the ordinary case for a reasoning-enabled arm. Requiring the member
+    // regardless compared every record against `undefined` and refused exactly the sets it
+    // was omitted from. An absent member must bind nothing; a present one must bind all.
+    // Shaped like the frozen set's records: `requestedThink` is ABSENT, which is what its
+    // contract declares.
+    const record = (reasoningChars: number | null) => ({
+      reasoningChars,
+      generatedAt: "2026-09-01T03:31:00.000Z",
+    });
+    const shared = { requestedThinkMemberPresent: false, writtenOn: "2026-09-01" };
+    const claims = { recordContract: { ...shared, everyRecordReasoningChars: 0 } };
+    const noClaim = { recordContract: { ...shared } };
+
+    expect(recordContractBound(record(0), claims)).toBe(true);
+    expect(recordContractBound(record(41), claims)).toBe(false);
+    expect(recordContractBound(record(null), claims)).toBe(false);
+
+    // Records that disagree on reasoning size are all accepted when nothing was claimed.
+    for (const reasoningChars of [0, 41, 8192, null]) {
+      expect(recordContractBound(record(reasoningChars), noClaim)).toBe(true);
+    }
+
+    // "No claim" is scoped to that one member: every other member still binds, under both
+    // contracts. A record carrying `requestedThink` at all contradicts a contract that says
+    // the member is absent, even when its value is the pinned one.
+    for (const contract of [claims, noClaim]) {
+      expect(recordContractBound({ ...record(0), requestedThink: false }, contract)).toBe(false);
+      expect(
+        recordContractBound({ ...record(0), generatedAt: "2026-08-31T23:59:59.999Z" }, contract),
+      ).toBe(false);
+      expect(recordContractBound({ ...record(0), generatedAt: 20260901 }, contract)).toBe(false);
+      expect(recordContractBound(null, contract)).toBe(false);
+    }
+
+    // A config that declares no contract at all is unchanged: it binds nothing.
+    expect(recordContractBound(record(41), {})).toBe(true);
+  });
+
+  it("still binds every frozen record against the contract its manifest declares", async () => {
+    // The published 2026-09-01 config DOES carry the member, so the relaxation above must
+    // not have loosened the real set: all 60 records are checked against `0`.
+    const verified = await verifyGate2PublishedEvidence(repositoryRoot, "reasoning-suppressed");
+    expect(verified.manifest.recordContract).toMatchObject({ everyRecordReasoningChars: 0 });
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const relative = "baseline/repair-cart-off-by-one.json";
+      const recordPath = path.join(artifactDirectory, relative);
+      const record = JSON.parse(await readFile(recordPath, "utf8"));
+      record.reasoningChars = 41;
+      const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`);
+      await writeFile(recordPath, bytes);
+      const manifestPath = path.join(artifactDirectory, "manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      const entry = manifest.files.find((file: { path: string }) => file.path === relative) as {
+        bytes: number;
+        sha256: string;
+      };
+      entry.bytes = bytes.length;
+      entry.sha256 = createHash("sha256").update(bytes).digest("hex");
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        `published case record is not bound: ${relative}`,
+      );
+    });
+  });
+
   it("requires conservative declared-budget accounting for a retained timeout", () => {
     const profile = {
       budgets: { maxInputTokens: 50_000, maxOutputTokens: 8192, maxRuntimeSeconds: 300 },
