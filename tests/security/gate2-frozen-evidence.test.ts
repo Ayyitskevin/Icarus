@@ -1,4 +1,14 @@
-import { chmod, link, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -7,6 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   computeFrozenEntries,
   deriveRecordContract,
+  freezeLiveEvidence,
   GATE2_FROZEN_EVIDENCE_SCHEMA,
   isFreezerRefusal,
   verifyFrozenEvidence,
@@ -319,17 +330,32 @@ describe("Gate 2 frozen evidence: the root and the second pass", () => {
     );
   });
 
-  it("reports a directory named like a record as a verdict, from the record read", async () => {
-    // This once injected a second-pass EISDIR: the walk recursed into the empty directory
-    // and the record read hit it. The record read now lstat-checks every record before
-    // reading, so the same input is a verdict. Both passes read the same entries, so a
-    // genuine second-pass fault cannot be staged from the filesystem; the boundary of the
-    // second catch is bound by the classifier test below.
+  it("reports a directory named like a record as a verdict, from the walk", async () => {
+    // This fixture has moved twice, each time one layer earlier. It once injected a
+    // second-pass EISDIR: the walk recursed into the empty directory and the record read
+    // hit it. Then the record read lstat-checked every record and it became a verdict
+    // there. Now the walk refuses it first, because an empty directory holds no listed
+    // file (issue #96) -- the same fact, said by the layer that sees the directory rather
+    // than by the one that expected a record.
     const root = await frozenSet();
     await mkdir(path.join(root, "routed", "fault.json"));
     expect(await verifyFrozenEvidence(root)).toEqual([
-      "recordContract: Gate 2 evidence freeze: routed/fault.json is not a regular file",
+      "Gate 2 evidence freeze: routed/fault.json holds no files",
     ]);
+  });
+
+  it("still reports a NON-empty directory named like a record from the record read", async () => {
+    // The empty-directory rule must not swallow the record read's own type check: a
+    // directory holding a file passes the walk's "holds no files" and is refused where a
+    // record was expected.
+    const root = await frozenSet();
+    await mkdir(path.join(root, "routed", "fault.json"));
+    await writeFile(path.join(root, "routed", "fault.json", "inner.json"), "{}\n");
+    expect(await verifyFrozenEvidence(root)).toEqual(
+      expect.arrayContaining([
+        "recordContract: Gate 2 evidence freeze: routed/fault.json is not a regular file",
+      ]),
+    );
   });
 
   it("classifies only deliberate refusals as verdicts", () => {
@@ -435,5 +461,71 @@ describe("Gate 2 frozen evidence: a directory named like the manifest", () => {
     expect(await verifyFrozenEvidence(root)).toEqual([
       "Gate 2 evidence freeze: manifest.json is not a regular file",
     ]);
+  });
+});
+
+describe("Gate 2 frozen evidence: a directory that holds no listed file", () => {
+  it("refuses an empty stray directory, at the root and nested", async () => {
+    // Directories are walked but never listed, so an EMPTY one carried no bytes,
+    // contributed no entry, and nothing objected. "The directory is closed" has to mean it
+    // holds exactly the listed files; a directory holding none of them is not part of the
+    // set, wherever it sits (issue #96).
+    for (const stray of ["an-empty-stray-directory", "routed/empty-nested", "a/b/c"]) {
+      const root = await frozenSet();
+      await mkdir(path.join(root, stray), { recursive: true });
+      const problems = await verifyFrozenEvidence(root);
+      // `a/b/c` is refused at its deepest empty directory, which is the one that holds
+      // nothing; the parents hold it, so they are not the finding.
+      expect(problems).toEqual([`Gate 2 evidence freeze: ${stray} holds no files`]);
+    }
+  });
+
+  it("still accepts the set's own record directories, which do hold files", async () => {
+    expect(await verifyFrozenEvidence(await frozenSet())).toEqual([]);
+  });
+});
+
+describe("Gate 2 freeze: the live directory, before anything is created", () => {
+  it("refuses a symlinked record in the source and creates no destination", async () => {
+    // `cp` copies a symlink as a symlink, so a link in the source becomes a link in the
+    // frozen set -- and every check that would catch it ran after the copy, the formatter
+    // and two reads. The source is walked before `mkdir`, so a refused freeze leaves
+    // nothing behind (issue #93).
+    const live = await liveSet();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "icarus-freeze-outside-"));
+    roots.push(outside);
+    const record = path.join(live, "routed", "case-a.json");
+    await writeFile(path.join(outside, "case-a.json"), await readFile(record));
+    await rm(record);
+    await symlink(path.join(outside, "case-a.json"), record);
+    const destination = path.join(outside, "frozen");
+    await expect(
+      freezeLiveEvidence({
+        from: live,
+        to: destination,
+        commit: "abc1234",
+        policyRevision: 9,
+        evidenceRevision: 6,
+      }),
+    ).rejects.toThrow(/routed\/case-a\.json in the live directory is not a regular file/);
+    expect(await stat(destination).catch(() => null)).toBeNull();
+  });
+
+  it("refuses a hard-linked record in the source", async () => {
+    const live = await liveSet();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "icarus-freeze-outside-"));
+    roots.push(outside);
+    await link(path.join(live, "routed", "case-a.json"), path.join(outside, "alias.json"));
+    const destination = path.join(outside, "frozen");
+    await expect(
+      freezeLiveEvidence({
+        from: live,
+        to: destination,
+        commit: "abc1234",
+        policyRevision: 9,
+        evidenceRevision: 6,
+      }),
+    ).rejects.toThrow(/routed\/case-a\.json in the live directory is hard-linked/);
+    expect(await stat(destination).catch(() => null)).toBeNull();
   });
 });
