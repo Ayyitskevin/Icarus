@@ -60,7 +60,8 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
 - The security test forbids twelve path-shaped fragments (`src/`, `tests/`, `.py`, …) in
   the assembled instructions of all five classes.
 - The same test derives the stem of every expected changed, cited, and context path from
-  `fixtures/evals/gate2/manifest.v2.json`, splits each stem on its separators, and refuses
+  the current registered benchmark manifest (`GATE2_CURRENT_MANIFEST_PATH` in the contract;
+  v2 when this was written, v3 since ADR 0073), splits each stem on its separators, and refuses
   any policy prose in which those letters appear as the concatenation of consecutive
   tokens — so `test_json_output`, `test-json-output`, "test json output", `testJsonOutput`,
   `TestJsonOutput`, and `testjsonoutput` are the same name, and so is any other split. The

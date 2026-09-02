@@ -353,6 +353,20 @@ offline schema semantics but target only `schema/` snapshots and read-only
 database, or widen ordinary PatchSet policy. Manifest v2 SHA-256 is
 `0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5`.
 
+`fixtures/evals/gate2/manifest.v3.json` (2026-09-02, [ADR 0073](adr/0073-gate2-manifest-v3-task-entailed-targets.md))
+supersedes v2 the same way: it binds the exact v2 digest above, preserves 27
+cases byte-for-byte, and replaces three cases whose task text did not entail
+the target set the manifest expected — `refactor-cart-money-module` →
+`refactor-cart-money-extraction`, `scaffold-parser-cli` →
+`scaffold-parser-cli-check`, `scaffold-lantern-json-output` →
+`scaffold-json-output-mode`. The sharpening is in the task documents, never in
+the instruction policy, whose digest is unchanged. Manifest v3 SHA-256 is
+`e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134`; the live
+runner reads v3, and a frozen set's figures resolve its manifest from the digest
+the set's own result files carry, so v2-era sets recompute unchanged. Figures
+under v3 are a new measurement and are never presented as a delta against a
+v2-era figure.
+
 `pnpm benchmark:gate2:schema-successor` executes exactly those two v2 cases
 through production retrieval, plan approval, private PatchSet mutation,
 digest-pinned no-network SQLite checks, local review, and durable runtime reopen.
@@ -539,14 +553,17 @@ The original closed Gate 2 contract is the byte-preserved
 `fixtures/evals/gate2/manifest.v1.json`. Its immutable successor is
 `fixtures/evals/gate2/manifest.v2.json`; the successor exact-binds v1's digest,
 replacement map, 28 unchanged cases, and two reviewed host-policy-compatible
-replacement cases. Both manifests pin
+replacement cases. `fixtures/evals/gate2/manifest.v3.json` exact-binds v2's
+digest, three replacements, and 27 unchanged cases; every schema-2 revision is
+registered in the contract by lineage, and loading any successor walks the chain
+to v1 against committed bytes. All three manifests pin
 30 task documents and seven existing fixture repositories by complete sorted
 file inventory, raw-byte SHA-256, and canonical inventory digest. The task mix
 is fixed at ten repairs, five refactors, five explanations, five security
 reviews, and five scaffolds. Unknown, missing, duplicate, reordered, reclassified,
 unpinned, or byte-drifted input fails validation.
 
-`pnpm benchmark:gate2:contract` strict-parses and validates both revisions and
+`pnpm benchmark:gate2:contract` strict-parses and validates all three registered revisions (v1, v2, v3) and
 their lineage offline. `pnpm eval` includes the same command. A successful
 command reports the latest 30 validated cases, zero executed cases, and
 `contract_validated_gate2_execution_not_run`.

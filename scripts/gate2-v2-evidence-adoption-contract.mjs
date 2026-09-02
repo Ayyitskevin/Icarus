@@ -158,6 +158,7 @@ function normalizeContext(contextInput) {
   const contextKeys = [
     "predecessorManifest",
     "predecessorManifestSha256",
+    "predecessorManifestSource",
     "successorManifest",
     "successorManifestSha256",
     "sourceReports",
@@ -165,11 +166,22 @@ function normalizeContext(contextInput) {
   if (JSON.stringify(Object.keys(contextInput)) !== JSON.stringify(contextKeys)) {
     fail(`context must contain exactly: ${contextKeys.join(", ")}`);
   }
+  // The successor is checked against the predecessor's raw source, never an object beside a
+  // digest; the object the rest of this contract reads must be exactly what that source says.
+  const predecessorSource = contextInput.predecessorManifestSource;
+  if (typeof predecessorSource !== "string") fail("predecessorManifestSource must be a string");
+  if (sha256Raw(predecessorSource) !== contextInput.predecessorManifestSha256) {
+    fail("predecessor manifest source does not match its digest");
+  }
   const predecessorManifest = validateGate2BenchmarkManifest(contextInput.predecessorManifest);
+  if (
+    JSON.stringify(predecessorManifest) !== JSON.stringify(parseStrictGate2Json(predecessorSource))
+  ) {
+    fail("predecessor manifest object diverges from its source");
+  }
   const successorManifest = validateGate2BenchmarkSuccessor(
     contextInput.successorManifest,
-    predecessorManifest,
-    contextInput.predecessorManifestSha256,
+    predecessorSource,
   );
   if (contextInput.predecessorManifestSha256 !== GATE2_V1_MANIFEST_SHA256) {
     fail("predecessor manifest digest is not the frozen v1 digest");

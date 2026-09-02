@@ -61,15 +61,20 @@ export const MAX_GATE2_JSON_BYTES: number;
 export const GATE2_REPOSITORY_IDS: readonly string[];
 export const GATE2_CASE_IDS: readonly string[];
 export const GATE2_V1_MANIFEST_SHA256: string;
+export const GATE2_V2_MANIFEST_SHA256: string;
+export const GATE2_V3_MANIFEST_SHA256: string;
 export const GATE2_CASE_IDS_BY_REVISION: Readonly<Record<string, readonly string[]>>;
+export const GATE2_CURRENT_BENCHMARK_REVISION: string;
+export const GATE2_CURRENT_MANIFEST_PATH: string;
+export const GATE2_MANIFEST_PATHS_BY_SHA256: Readonly<Record<string, string>>;
+export const GATE2_MANIFEST_SHA256_BY_REVISION: Readonly<Record<string, string>>;
 
 export function sha256Raw(value: string | Uint8Array): string;
 export function parseStrictGate2Json(source: string): unknown;
 export function validateGate2BenchmarkManifest(value: unknown): Gate2BenchmarkManifest;
 export function validateGate2BenchmarkSuccessor(
   successor: unknown,
-  predecessor: unknown,
-  predecessorManifestSha256: string,
+  predecessorBytes: string | Uint8Array,
 ): Gate2BenchmarkManifest;
 export function loadGate2BenchmarkContract(
   manifestPath: string | URL,

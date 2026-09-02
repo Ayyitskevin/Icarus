@@ -13,6 +13,7 @@ export interface Gate2V2EvidenceSourceReportInput {
 export interface Gate2V2EvidenceAdoptionContext {
   predecessorManifest: Record<string, any>;
   predecessorManifestSha256: string;
+  predecessorManifestSource: string;
   successorManifest: Record<string, any>;
   successorManifestSha256: string;
   sourceReports: Gate2V2EvidenceSourceReportInput[];

@@ -28,6 +28,7 @@ beforeAll(async () => {
   context = {
     predecessorManifest: parseStrictGate2Json(predecessorSource) as Record<string, any>,
     predecessorManifestSha256: sha256Raw(predecessorSource),
+    predecessorManifestSource: predecessorSource,
     successorManifest: parseStrictGate2Json(successorSource) as Record<string, any>,
     successorManifestSha256: sha256Raw(successorSource),
     sourceReports: GATE2_V2_EVIDENCE_SOURCE_REPORTS.map((specification, index) => ({
