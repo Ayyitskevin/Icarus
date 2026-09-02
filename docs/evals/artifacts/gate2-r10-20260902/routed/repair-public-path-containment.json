@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "repair-public-path-containment",
+  "modelId": "code",
+  "generatedAt": "2026-09-02T21:25:12.794Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "7485f907c0d8627bd67b050b1da5050d5999dcdf",
+    "digestSha256": "85d25276c8d922ed367bb65d9c079deec6337a04abe1e900bcafdbcd06d159ea",
+    "repositoryDigestSha256": "0091120cc1019d8c7e48935b1f0a41bf5925098210cdb4e7b3d2fd60af3c3849",
+    "matchedFiles": 3,
+    "selectedFiles": 3,
+    "selectedQueryMatches": 3,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"README.md\",\n    \"checks/expected_finding.md\",\n    \"src/files.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/files.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"public-path-containment\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/files.py\",\n        \"content\": \"from pathlib import Path\\n\\n\\ndef read_public(root: Path, user_path: str) -> str:\\n    resolved_root = root.resolve()\\n    resolved_path = (resolved_root / user_path).resolve()\\n    if not resolved_path.is_relative_to(resolved_root):\\n        raise ValueError(\\\"Path escapes the public root\\\")\\n    return resolved_path.read_text(encoding=\\\"utf8\\\")\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Resolve the user path against the public root and reject any path that escapes it.\"\n  }\n}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON (markdown_fenced)",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-public-path-containment",
+    "evaluatorId": "repair-public-path-containment-evaluator",
+    "candidateSha256": "45138b903a5175dac9c9ebb47bcdaa0d403ad03afe5ec6beb3f7428a47e6c960",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-public-path-containment",
+    "repositoryRevisionSha256": "131ff18d492a97bbab9a590d5a0a9ef9e21fd25baadf648bab4bbbd5b200e132",
+    "taskSha256": "4f011f95d5801dcc105f431785f874161f565404173cfd94e6ec8f34821eb0e4",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/expected_finding.md",
+        "sha256": "2fdc9c401165ab469355887fe2b44069a6e7d231d2c4406e516c72fd872dbbd1"
+      },
+      {
+        "path": "README.md",
+        "sha256": "078e8880de0bfd549d6dcd9e16967d35693988c38343c5b6ad6f231f2aac426f"
+      },
+      {
+        "path": "src/files.py",
+        "sha256": "3eda58ebbbfae5a26e17236f93ac39972969c121baec2b2897f4703101062af2"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-public-path-containment-evaluator",
+    "scenarioEvidenceSha256": "e13ba74288b99fd2b34db0f4607c0a10b95ffff076a4ffa4f3d147c272235e2c",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 767,
+      "outputTokens": 265,
+      "estimatedCostUsd": 0.000809604,
+      "actualBilledUsd": null,
+      "latencyMs": 12757
+    }
+  }
+}

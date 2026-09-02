@@ -24,6 +24,7 @@ closed. Older sections below retain the status that was true at their named
 checkpoint and must not be read as the current release state.
 
 Superseded as the current measurement 2026-09-01: instruction-policy revision 9 binds `think: false`, making the token budget a content budget rather than a combined reasoning-plus-content budget with an unobservable split. On that budget fixed `code-fast` measured 2/30 and routed `code` measured 12/30 with first-plan acceptance 0.60, both thresholds still failing, with evidence frozen at `evals/artifacts/gate2-reasoning-suppressed-20260901/`. The revision-8 figures above remain valid records of what was measured then; the two are not a controlled comparison.
+Superseded as the current measurement 2026-09-02: instruction-policy revision 10 (ADR 0071) adds class conventions for `refactor` and `repair`, a narrowed check rule, citation minimality, and an output boundary; written under evidence record revision 6 and frozen with the schema-v2 freezer, fixed `code-fast` measured 3/30 and routed `code` measured 17/30 with first-plan acceptance 0.7333, both thresholds still failing and the pair comparison failing on cost reduction, with evidence frozen at `evals/artifacts/gate2-r10-20260902/`. Policy, writer, and freezer all changed, so this is a new measurement, not a before-and-after against 12/30.
 
 ## Gate 2 deterministic retrieval, analysis, refactor, repair, and scaffold baseline
 
@@ -112,8 +113,8 @@ remain open.
       then rerun a new versioned live profile without weakening manifest-v2
       thresholds. The leak-free r7 routed run reached 16/30, including security
       review 2/5 and scaffold 0/5, but did not pass Gate 2.
-- [ ] Raise stable routed quality from 16/30 to at least 24/30 and first-plan
-      acceptance from 0.7667 to at least 0.80 across predeclared repeated runs,
+- [ ] Raise stable routed quality from 17/30 (revision 10, 2026-09-02) to at least 24/30 and first-plan
+      acceptance from 0.7333 to at least 0.80 across predeclared repeated runs,
       without losing retrieval/provenance gates, introducing incorrect edits,
       or widening authority.
 

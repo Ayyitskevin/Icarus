@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "explain-refactor-duplication",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-02T21:23:21.845Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "3c3bb16f72a899265802e94c5c6d5abb537bfc03",
+    "digestSha256": "6dff0b49d91c1ba93394333ec699825224bf5dc355eb71e22e3ae08b713420d5",
+    "repositoryDigestSha256": "ba8451fe227e973c5c9e255880235e00488f9c204bbe8cd5fbca73e3c8d2f47f",
+    "matchedFiles": 2,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 2,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"src/format_name.py\",\"src/profile.py\",\"checks/test_profile.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"src/format_name.py\",\"src/profile.py\",\"checks/test_profile.py\"],\"findingIds\":[],\"summary\":\"Both public functions implement identical normalization: `\\\" \\\".join(value.strip().split()).title()`, collapsing whitespace and title-casing. `src/format_name.py` exposes `format_name` and `src/profile.py` exposes `display_name`; their bodies are byte-identical. `checks/test_profile.py` proves their equivalence by asserting `format_name(s) == display_name(s) == \\\"Ada Lovelace\\\"` for the input `\\\"  ada   lovelace \\\"`, exercising the same duplicated normalization through both paths.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["checks/test_profile.py", "src/format_name.py", "src/profile.py"],
+    "plan": {
+      "mutationTargets": [],
+      "requestedCheckIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": ["checks/test_profile.py", "src/format_name.py", "src/profile.py"],
+      "findingIds": [],
+      "summary": "Both public functions implement identical normalization: `\" \".join(value.strip().split()).title()`, collapsing whitespace and title-casing. `src/format_name.py` exposes `format_name` and `src/profile.py` exposes `display_name`; their bodies are byte-identical. `checks/test_profile.py` proves their equivalence by asserting `format_name(s) == display_name(s) == \"Ada Lovelace\"` for the input `\"  ada   lovelace \"`, exercising the same duplicated normalization through both paths."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "explain-refactor-duplication",
+    "evaluatorId": "explain-refactor-duplication-evaluator",
+    "candidateSha256": "3c15ded29d6ae4a36e2cc40b4fc0a513711ad04524984e0878a7aa567a0a849b",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["checks/test_profile.py", "src/format_name.py", "src/profile.py"],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "explain-refactor-duplication",
+    "repositoryRevisionSha256": "5ce751efcdb138a9a0db315936567d9a6a1a86df45c49df9027b5bab8f605bd1",
+    "taskSha256": "e043d8be826a599e2864548c6d053a7bf2f146ad58aa645340256f8dbc08917d",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_profile.py",
+        "sha256": "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c"
+      },
+      {
+        "path": "README.md",
+        "sha256": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6"
+      },
+      {
+        "path": "src/format_name.py",
+        "sha256": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f"
+      },
+      {
+        "path": "src/profile.py",
+        "sha256": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["checks/test_profile.py", "src/format_name.py", "src/profile.py"],
+    "findingIds": [],
+    "scenarioEvaluatorId": "explain-refactor-duplication-evaluator",
+    "scenarioEvidenceSha256": "a27d3a7517ca1b19cdf481f2ef8c700f9ef7bcd631b3d9ae2ec4570be366dfd4",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 869,
+      "outputTokens": 179,
+      "estimatedCostUsd": 0.001048,
+      "actualBilledUsd": null,
+      "latencyMs": 4124
+    }
+  }
+}
