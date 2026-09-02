@@ -97,7 +97,13 @@ function distinct(values) {
 // frozen root, so it is refused rather than followed -- the second finding of that review.
 async function listFiles(root) {
   const out = [];
+  // Returns how many listed files the directory holds, itself and below. Directories are
+  // walked but never listed, so an EMPTY one used to be accepted by everything: it carries
+  // no bytes, contributes no entry, and nothing objected (issue #96). "Closed" has to mean
+  // the directory holds exactly the listed files, and a directory holding none of them is
+  // not part of the set.
   async function visit(directory, prefix) {
+    let listed = 0;
     for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) =>
       a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
     )) {
@@ -106,7 +112,9 @@ async function listFiles(root) {
         // A directory named like the manifest would be walked as a directory and never
         // type-checked as the manifest, then surface as an EISDIR fault at the read.
         if (relative === MANIFEST) fail(`${relative} is not a regular file`);
-        await visit(path.join(directory, entry.name), relative);
+        const beneath = await visit(path.join(directory, entry.name), relative);
+        if (beneath === 0) fail(`${relative} holds no files`);
+        listed += beneath;
         continue;
       }
       if (!entry.isFile()) fail(`${relative} is not a regular file`);
@@ -116,10 +124,33 @@ async function listFiles(root) {
         fail(`${relative} is hard-linked`);
       }
       if (relative !== MANIFEST) out.push(relative);
+      listed += 1;
     }
+    return listed;
   }
   await visit(root, "");
   return out;
+}
+
+/**
+ * The live directory a freeze is asked to copy, refused before anything is created. `cp`
+ * copies a symlink as a symlink, so a link in the source becomes a link in the frozen set,
+ * and the checks that would catch it all run after the copy, the formatter and two reads
+ * (issue #93). Nothing is created until this passes, so a refused freeze leaves no
+ * destination behind.
+ */
+async function assertLiveDirectoryIsCopyable(root, prefix = "") {
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      await assertLiveDirectoryIsCopyable(path.join(root, entry.name), relative);
+      continue;
+    }
+    if (!entry.isFile()) fail(`${relative} in the live directory is not a regular file`);
+    if ((await lstat(path.join(root, entry.name))).nlink > 1) {
+      fail(`${relative} in the live directory is hard-linked`);
+    }
+  }
 }
 
 /** Digest every file except the manifest, from the bytes on disk right now. */
@@ -262,6 +293,14 @@ export async function verifyFrozenEvidence(root) {
     // Same boundary as the walk above: a refusal is a verdict, a fault is rethrown. The
     // first version of this catch wrapped everything, so an I/O error during the second
     // read was reported as invalid evidence.
+    //
+    // The rethrow is unreachable from here by construction, and that is deliberate rather
+    // than untested: the walk above reads EVERY file to digest it, and the record read
+    // below touches a strict subset, so a read fault surfaces in the first catch and never
+    // this one. What reaches here is a refusal -- a malformed record, records that
+    // disagree, an unknown encoding. The classifier's own unit test is the proof for the
+    // rethrow branch; a fixture that exercises it through `verifyFrozenEvidence` cannot be
+    // written, and a reader who tries will find out the slow way.
     if (!isFreezerRefusal(error)) throw error;
     problems.push(`recordContract: ${error.message}`);
   }
@@ -303,6 +342,8 @@ export async function freezeLiveEvidence({
     fail(`${from} is not a directory`);
   if (await stat(to).catch(() => null))
     fail(`${to} already exists; a frozen set is never overwritten`);
+  // Before `mkdir`, so a refusal leaves nothing behind to clean up or mistake for a set.
+  await assertLiveDirectoryIsCopyable(from);
   await mkdir(to, { recursive: true });
   await cp(from, to, {
     recursive: true,
@@ -310,11 +351,14 @@ export async function freezeLiveEvidence({
     filter: (source) => !path.basename(source).includes(".evidence-record-"),
   });
   formatInPlace(to);
-  // The destination is this function's own creation, but `to` is an operator-supplied path:
-  // a symlinked component means the set is written and then read back through a link. The
-  // freeze reads it from here on, so the check comes first (issue #88). A refusal throws on
-  // this path -- a freeze that cannot trust its destination has nothing to report about.
-  await assertRootIsReal(to);
+  // The closed-tree walk before any read of the destination, as on the verify path. `to` is
+  // an operator-supplied path and the copy preserves whatever the source held, so this is
+  // what says the destination is a real directory, holds only regular unlinked files, and
+  // has no directory wearing the manifest's name. It runs before the preflight is read and
+  // before the record contract is derived, because a preflight read through a link reported
+  // "this is not one run" and blamed the records for bytes that came from outside the set
+  // (issue #93). `assertRootIsReal` is inside it.
+  const files = await computeFrozenEntries(to);
   const preflightBytes = await readFile(path.join(to, PREFLIGHT), "utf8").catch(() => null);
   if (preflightBytes === null)
     fail(`${PREFLIGHT} is missing; a set without its preflight is not one run`);
@@ -333,7 +377,6 @@ export async function freezeLiveEvidence({
     );
   }
   await assertRecordsBoundToPreflight(to, preflight);
-  const files = await computeFrozenEntries(to);
   const manifest = {
     schema: GATE2_FROZEN_EVIDENCE_SCHEMA,
     capturedAt: new Date().toISOString().slice(0, 10),
