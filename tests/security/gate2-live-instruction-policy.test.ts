@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 import { parseStrictGate2Json } from "../../scripts/gate2-benchmark-contract.mjs";
+import { validateGate2LiveCandidate } from "../../scripts/gate2-live-candidate-contract.mjs";
 import {
   assembleGate2LiveInstructions,
   buildGate2LiveCandidateInput,
@@ -12,6 +13,7 @@ import {
   GATE2_LIVE_INSTRUCTION_POLICY,
   GATE2_LIVE_INSTRUCTION_POLICY_SHA256,
   GATE2_LIVE_TEMPLATE_SKELETON,
+  GATE2_LIVE_TEMPLATES,
   snapshotGate2LivePolicy,
 } from "../../scripts/gate2-live-instruction-policy.mjs";
 
@@ -131,8 +133,13 @@ describe("Gate 2 live instruction policy", () => {
         };
       }>;
     };
+    // Default-ignorable code points (zero-width space, joiners, soft hyphen, ...) are
+    // removed before splitting: an eighth review put U+200B inside "money" and the split
+    // saw "mo" and "ney" while the model read "money". The module refuses non-ASCII
+    // outright; this is the second layer.
     const tokensOf = (text: string): string[] =>
       text
+        .replace(/[\p{Cf}\u00ad]/gu, "")
         .toLowerCase()
         .split(/[^a-z0-9]+/)
         .filter((token) => token.length > 0);
@@ -318,28 +325,64 @@ describe("Gate 2 live instruction policy", () => {
     const mutationTemplate = JSON.parse(policy.templates.mutation) as {
       answer: Record<string, unknown>;
     };
-    const nestedKeyTemplate = JSON.stringify({
-      ...mutationTemplate,
-      answer: { ...mutationTemplate.answer, "test-json-output": "text" },
-    });
-    expect(() =>
-      snapshotGate2LivePolicy({
-        ...policy,
-        templates: { ...policy.templates, mutation: nestedKeyTemplate },
-      }),
-    ).toThrow(/templates\.mutation\.answer must have exactly the members/);
+    // The policy's template strings must equal the canonical objects byte for byte; every
+    // earlier template plant -- nested key, wrong literal, empty file list, mutation
+    // authority in the read-only template -- is the same refusal now.
+    for (const [kind, plant] of [
+      [
+        "mutation",
+        { ...mutationTemplate, answer: { ...mutationTemplate.answer, "test-json-output": "text" } },
+      ],
+      ["mutation", { ...mutationTemplate, schemaVersion: 2 }],
+      ["mutation", { ...mutationTemplate, answer: { ...mutationTemplate.answer, files: [] } }],
+      [
+        "readOnly",
+        {
+          ...(JSON.parse(policy.templates.readOnly) as Record<string, unknown>),
+          plan: { mutationTargets: ["path"], requestedCheckIds: [] },
+        },
+      ],
+    ] as const) {
+      expect(() =>
+        snapshotGate2LivePolicy({
+          ...policy,
+          templates: { ...policy.templates, [kind]: JSON.stringify(plant) },
+        }),
+      ).toThrow(new RegExp(`templates\\.${kind} must equal the canonical template byte for byte`));
+    }
+    // A duplicate member, whitespace, or a hidden code point in the string is the same refusal.
     expect(() =>
       snapshotGate2LivePolicy({
         ...policy,
         templates: {
           ...policy.templates,
-          mutation: JSON.stringify({
-            ...mutationTemplate,
-            answer: { ...mutationTemplate.answer, kind: "read_only" },
-          }),
+          mutation: policy.templates.mutation.replace(/^\{/, '{"schemaVersion":1,'),
         },
       }),
-    ).toThrow(/templates\.mutation\.answer\.kind must be mutation/);
+    ).toThrow(/must equal the canonical template byte for byte/);
+    // The canonical templates satisfy the live candidate contract under placeholder
+    // authority, so "Required shape" cannot drift from what the scorer accepts.
+    for (const [kind, expectedKind] of [
+      ["mutation", "mutation"],
+      ["readOnly", "read_only"],
+    ] as const) {
+      expect(() =>
+        validateGate2LiveCandidate(GATE2_LIVE_TEMPLATES[kind], {
+          repositoryPaths: ["path"],
+          retrievedPaths: ["path"],
+          checkIds: ["id"],
+          expectedKind,
+        }),
+      ).not.toThrow();
+    }
+    // Every policy string is printable ASCII, so a zero-width space cannot split a stem.
+    expect(() =>
+      snapshotGate2LivePolicy({
+        ...policy,
+        classRules: { ...policy.classRules, refactor: ["Name the extracted module mo\u200bney."] },
+      }),
+    ).toThrow(/classRules\.refactor\[0\] must be printable ASCII/);
+    expect(tokensOf("mo\u200bney")).toEqual(["money"]);
     for (const badId of ["x-", "x--y", "-x", "X"]) {
       expect(() =>
         snapshotGate2LivePolicy({ ...policy, findingTaxonomy: { [badId]: "d" } }),
@@ -349,13 +392,17 @@ describe("Gate 2 live instruction policy", () => {
       ...mutationTemplate,
       answer: { ...mutationTemplate.answer, summary: "test-json-output" },
     });
-    const withPlantedTemplate = snapshotGate2LivePolicy({
-      ...policy,
-      templates: { ...policy.templates, mutation: plantedTemplate },
-    }) as unknown as typeof policy;
-    expect(templateCollisionsOf(withPlantedTemplate.templates)).toEqual([
+    // The leaf scan on its own catches the value plant (round six) ...
+    expect(templateCollisionsOf({ ...policy.templates, mutation: plantedTemplate })).toEqual([
       'templates.mutation value "test-json-output": "test_json_output" names scaffold-lantern-json-output',
     ]);
+    // ... and the snapshot refuses it before the scan is even reached (round nine).
+    expect(() =>
+      snapshotGate2LivePolicy({
+        ...policy,
+        templates: { ...policy.templates, mutation: plantedTemplate },
+      }),
+    ).toThrow(/templates\.mutation must equal the canonical template byte for byte/);
     expect(identifierCollisions).toEqual([]);
     // Structural: the assembled instructions are exactly the scanned prose plus the
     // builder-owned pieces. If the builder ever adds prose of its own, this fails and the
@@ -446,7 +493,7 @@ describe("Gate 2 live instruction policy", () => {
         ...policy,
         templates: { ...policy.templates, mutation: ["money"] },
       }),
-    ).toThrow(/templates\.mutation must be a string/);
+    ).toThrow(/templates\.mutation must equal the canonical template byte for byte/);
     expect(() =>
       snapshotGate2LivePolicy({ ...policy, classRules: { ...policy.classRules, rogue: ["x"] } }),
     ).toThrow(/classRules\.rogue is not a benchmark class/);

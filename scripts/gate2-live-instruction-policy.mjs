@@ -11,6 +11,55 @@ const FINDING_TAXONOMY = Object.freeze({
     "code consumes configuration fields across a trust boundary without validating their required types or shape",
 });
 
+/**
+ * The two answer templates, as data. The policy's `templates` strings are their exact
+ * serialisation and the shape assertion refuses any other string byte for byte, so the
+ * "Required shape" the model reads is this object and nothing else: no parser sits between
+ * them, so no duplicate member can collapse, no whitespace or hidden code point can vary.
+ * A review planted `schemaVersion: 2`, an empty mutation file list, mutation authority in
+ * the read-only template, and a zero-width space inside "money" in a summary; all four
+ * passed a structural check and reached the model. The test validates these objects with
+ * the live candidate contract under placeholder authority, so they cannot drift from what
+ * the scorer accepts.
+ */
+export const GATE2_LIVE_TEMPLATES = Object.freeze({
+  mutation: {
+    schemaVersion: 1,
+    selectedContextPaths: ["path"],
+    plan: {
+      mutationTargets: ["path"],
+      requestedCheckIds: ["id"],
+    },
+    answer: {
+      kind: "mutation",
+      files: [
+        {
+          path: "path",
+          content: "complete bytes",
+        },
+      ],
+      citations: [],
+      findingIds: [],
+      summary: "text",
+    },
+  },
+  readOnly: {
+    schemaVersion: 1,
+    selectedContextPaths: ["path"],
+    plan: {
+      mutationTargets: [],
+      requestedCheckIds: [],
+    },
+    answer: {
+      kind: "read_only",
+      files: [],
+      citations: ["path"],
+      findingIds: [],
+      summary: "text",
+    },
+  },
+});
+
 const POLICY_SOURCE = Object.freeze({
   schemaVersion: 1,
   revision: GATE2_LIVE_INSTRUCTION_POLICY_REVISION,
@@ -62,10 +111,8 @@ const POLICY_SOURCE = Object.freeze({
     ]),
   }),
   templates: Object.freeze({
-    mutation:
-      '{"schemaVersion":1,"selectedContextPaths":["path"],"plan":{"mutationTargets":["path"],"requestedCheckIds":["id"]},"answer":{"kind":"mutation","files":[{"path":"path","content":"complete bytes"}],"citations":[],"findingIds":[],"summary":"text"}}',
-    readOnly:
-      '{"schemaVersion":1,"selectedContextPaths":["path"],"plan":{"mutationTargets":[],"requestedCheckIds":[]},"answer":{"kind":"read_only","files":[],"citations":["path"],"findingIds":[],"summary":"text"}}',
+    mutation: JSON.stringify(GATE2_LIVE_TEMPLATES.mutation),
+    readOnly: JSON.stringify(GATE2_LIVE_TEMPLATES.readOnly),
   }),
   findingTaxonomy: FINDING_TAXONOMY,
 });
@@ -215,17 +262,15 @@ export function snapshotGate2LivePolicy(source) {
     }
   }
   for (const kind of ["mutation", "readOnly"]) {
-    const template = policy.templates[kind];
-    if (typeof template !== "string") invalidPolicy(`templates.${kind} must be a string`);
-    let parsed;
-    try {
-      parsed = JSON.parse(template);
-    } catch {
-      invalidPolicy(`templates.${kind} must be JSON`);
+    const canonical = GATE2_LIVE_TEMPLATES[kind];
+    assertTemplateShape(canonical, GATE2_LIVE_TEMPLATE_SKELETON, `GATE2_LIVE_TEMPLATES.${kind}`);
+    if (canonical.answer.kind !== TEMPLATE_ANSWER_KIND[kind]) {
+      invalidPolicy(
+        `GATE2_LIVE_TEMPLATES.${kind}.answer.kind must be ${TEMPLATE_ANSWER_KIND[kind]}`,
+      );
     }
-    assertTemplateShape(parsed, GATE2_LIVE_TEMPLATE_SKELETON, `templates.${kind}`);
-    if (parsed.answer.kind !== TEMPLATE_ANSWER_KIND[kind]) {
-      invalidPolicy(`templates.${kind}.answer.kind must be ${TEMPLATE_ANSWER_KIND[kind]}`);
+    if (policy.templates[kind] !== JSON.stringify(canonical)) {
+      invalidPolicy(`templates.${kind} must equal the canonical template byte for byte`);
     }
   }
   if (policy.findingTaxonomy === null || typeof policy.findingTaxonomy !== "object") {
@@ -244,7 +289,31 @@ export function snapshotGate2LivePolicy(source) {
       invalidPolicy(`findingTaxonomy.${id} must not contain the taxonomy delimiters`);
     }
   }
+  assertPrintableAscii(policy, "policy");
   return deepFreeze(policy);
+}
+
+/**
+ * Every string in the policy -- rules, ids, definitions, templates, keys -- is printable
+ * ASCII. A review put a zero-width space inside "money": the scan tokenised "mo" and
+ * "ney" while the model read "money". The policy is English prose and JSON; nothing in it
+ * needs a code point outside 0x20-0x7E, so none is allowed.
+ */
+function assertPrintableAscii(value, where) {
+  if (typeof value === "string") {
+    if (!/^[\x20-\x7e]*$/.test(value)) invalidPolicy(`${where} must be printable ASCII`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) assertPrintableAscii(item, `${where}[${index}]`);
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      assertPrintableAscii(key, `${where}.${key} (key)`);
+      assertPrintableAscii(item, `${where}.${key}`);
+    }
+  }
 }
 
 export const GATE2_LIVE_INSTRUCTION_POLICY = snapshotGate2LivePolicy(POLICY_SOURCE);

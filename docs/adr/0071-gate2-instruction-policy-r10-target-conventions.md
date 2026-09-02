@@ -68,14 +68,22 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   exempt; a finding ID written into a rule is scanned as the words it contains. The only
   unscanned text is what the builder owns structurally — the class/kind line, the JSON
   template's keys, and the taxonomy IDs as identifiers — and the test asserts the assembled
-  instructions contain nothing beyond those pieces. The template's complete key tree is
-  pinned in the module, at every level, to the answer contract's skeleton — a template with
-  a missing, extra, or nested foreign key is refused at load — and its string values are
-  text the model sees, scanned like identifiers against the stems of the cases whose answer
-  kind receives that template. A seventh review changed only `answer.summary` from "text"
-  to "test-json-output" in a valid template, and an eighth planted the same stem as a
-  nested key inside `answer`; every test stayed green both times, and both plants are
-  regression tests now. Three reviews shaped this: the first
+  instructions contain nothing beyond those pieces. The two templates are canonical
+  constants in the module, and the policy's template strings must equal their
+  serialisation byte for byte — no parser sits between them, so no duplicate member,
+  whitespace, hidden code point, changed literal, or foreign key can reach the model
+  through "Required shape"; the constants themselves match the skeleton and satisfy the
+  live candidate contract under placeholder authority, so the shape cannot drift from what
+  the scorer accepts. Their string values are text the model sees, scanned like
+  identifiers against the stems of the cases whose answer kind receives that template.
+  Seven review plants shaped this — a summary value, a nested key, `schemaVersion: 2`, an
+  empty mutation file list, mutation authority in the read-only template, a duplicate
+  member, and a zero-width space inside "money" — and all are regression tests now.
+- Every string the policy carries — rules, identifiers, definitions, templates, keys —
+  is printable ASCII, asserted at load. The policy is English prose and JSON; a code point
+  outside 0x20–0x7E has no honest use in it and one (U+200B) split a stem's tokens while
+  the model read the word whole. The scan also strips default-ignorable code points
+  before tokenising, as a second layer. Three reviews shaped this: the first
   planted "a new module named money" and the old gate stayed green; the second beat the
   first version with "test-json-output" and with the member name `files` used as prose;
   the third beat the second version by writing a finding ID into a rule so that the stem
