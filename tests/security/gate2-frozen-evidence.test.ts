@@ -426,3 +426,14 @@ describe("Gate 2 frozen evidence: no read before the closed-tree verdict", () =>
     );
   });
 });
+
+describe("Gate 2 frozen evidence: a directory named like the manifest", () => {
+  it("is a verdict from the walk, never an EISDIR fault at the read", async () => {
+    const root = await frozenSet();
+    await rm(path.join(root, "manifest.json"));
+    await mkdir(path.join(root, "manifest.json"));
+    expect(await verifyFrozenEvidence(root)).toEqual([
+      "Gate 2 evidence freeze: manifest.json is not a regular file",
+    ]);
+  });
+});
