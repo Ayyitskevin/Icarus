@@ -1,5 +1,15 @@
 import { createHash } from "node:crypto";
-import { cp, link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  cp,
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -13,6 +23,18 @@ import {
 
 const repositoryRoot = decodeURIComponent(new URL("../../", import.meta.url).pathname);
 const FROZEN_ARTIFACT_RELATIVE = "docs/evals/artifacts/gate2-reasoning-suppressed-20260901";
+
+/**
+ * Accepted or refused, whichever way the freezer expresses it. Used only where the exact
+ * message is not this repository's to pin -- everywhere else the string is asserted.
+ */
+async function freezerVerdict(directory: string): Promise<"accepted" | "refused"> {
+  try {
+    return (await verifyFrozenEvidence(directory)).length === 0 ? "accepted" : "refused";
+  } catch {
+    return "refused";
+  }
+}
 
 /** A disposable copy of the frozen set, so a tamper test never writes the real one. */
 async function withFrozenCopy(
@@ -338,6 +360,23 @@ describe("Gate 2 published live evidence", () => {
       ]);
       await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
         `${relative} must be one non-linked regular file`,
+      );
+    });
+
+    // (g) the artifact directory ROOT replaced by a symlink to an intact set beside it:
+    // both refuse. Every per-file check passes here -- the bytes, the digests, the entry
+    // types and the record contract are all those of a real, intact set -- so nothing
+    // below the root can catch it; only resolving the root can. Sol's probe found this
+    // publisher verifying 64 bound files through such a link.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const sibling = path.join(temporary, "intact-set-beside-the-expected-path");
+      await rename(artifactDirectory, sibling);
+      await symlink(sibling, artifactDirectory);
+      // The freezer's verdict is asserted, not its wording: the refusal is fable's to
+      // word, and it may arrive as a problem or as a throw.
+      expect(await freezerVerdict(artifactDirectory)).toBe("refused");
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        "published evidence root must",
       );
     });
 

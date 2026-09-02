@@ -140,6 +140,32 @@ function safeJoin(base, relative) {
   return resolved;
 }
 
+/**
+ * A published set is addressed by a repository-relative path, and every check below reads
+ * bytes THROUGH that path: the manifest, the 60 records, the results, the secret screen,
+ * and the freezer's walk. A link anywhere between the repository root and the directory
+ * means all of them describe a tree outside the repository while the path says otherwise,
+ * and each one individually passes -- an intact set moved to a sibling and reached through
+ * a directory symlink verified as 64 bound files. Resolved here, once, before a byte is
+ * read. The repository root itself is resolved first, so a checkout that legitimately
+ * lives under a link is not refused; nothing below it may be one.
+ */
+async function assertCanonicalSetRoot(repositoryRoot, destination) {
+  const metadata = await lstat(destination).catch(() => null);
+  assertCondition(
+    metadata !== null && metadata.isDirectory() && !metadata.isSymbolicLink(),
+    "published evidence root must be a directory, not a link",
+  );
+  const expected = path.join(
+    await realpath(repositoryRoot),
+    path.relative(repositoryRoot, destination),
+  );
+  assertCondition(
+    (await realpath(destination)) === expected,
+    "published evidence root must not resolve through a link",
+  );
+}
+
 async function regularBytes(filePath, label) {
   const metadata = await lstat(filePath);
   assertCondition(
@@ -373,6 +399,7 @@ export async function verifyGate2PublishedEvidence(
     "docs/evals/artifacts",
     config.artifactDirectory ?? profile.profileId,
   );
+  await assertCanonicalSetRoot(repositoryRoot, destination);
   const validated = await validateEvidenceSet(destination, loaded, profile, config);
   if (config.manifestSchema === undefined) {
     await assertNoUnlistedFile(destination, validated.relativePaths, config);
@@ -406,9 +433,15 @@ export async function verifyGate2PublishedEvidence(
         stableJson(manifest.recordContract) === stableJson(frozenRecordContract(config)),
       "frozen evidence manifest is invalid",
     );
-    // One digest walk in the repository. The freezer owns manifest-versus-bytes, the
-    // closed-directory refusal, and re-deriving the record contract from the records;
-    // duplicating it here is how the two verifiers came to accept different inputs.
+    // One directory-ENUMERATING digest walk, which is not the same as one read pass and
+    // was described as if it were. `validateEvidenceSet` above has already read and hashed
+    // the 64 contract paths for its own binding and its secret screen; the freezer then
+    // re-reads every entry it enumerates. Two passes over the same bytes at two instants:
+    // a file replaced between them shows each pass something different, and neither
+    // notices, because each is internally consistent. What was removed was the second
+    // ENUMERATION of the directory, so the two verifiers can no longer disagree about
+    // which files exist. The freezer owns manifest-versus-bytes, the closed-directory
+    // refusal, and re-deriving the record contract from the records.
     const problems = await verifyFrozenEvidence(destination);
     assertCondition(
       problems.length === 0,
