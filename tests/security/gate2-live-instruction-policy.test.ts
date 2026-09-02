@@ -15,6 +15,7 @@ import {
   GATE2_LIVE_TEMPLATE_SKELETON,
   GATE2_LIVE_TEMPLATES,
   snapshotGate2LivePolicy,
+  validateGate2LiveTemplate,
 } from "../../scripts/gate2-live-instruction-policy.mjs";
 
 describe("Gate 2 live instruction policy", () => {
@@ -130,6 +131,7 @@ describe("Gate 2 live instruction policy", () => {
           kind?: string;
           expectedChangedPaths?: string[];
           expectedCitationPaths?: string[];
+          expectedFindingIds?: string[];
         };
       }>;
     };
@@ -139,7 +141,7 @@ describe("Gate 2 live instruction policy", () => {
     // outright; this is the second layer.
     const tokensOf = (text: string): string[] =>
       text
-        .replace(/[\p{Cf}\u00ad]/gu, "")
+        .replace(/[\p{Cf}\p{Mn}\p{Me}\u00ad]/gu, "")
         .toLowerCase()
         .split(/[^a-z0-9]+/)
         .filter((token) => token.length > 0);
@@ -375,6 +377,76 @@ describe("Gate 2 live instruction policy", () => {
         }),
       ).not.toThrow();
     }
+    // Expected FINDING IDs are answers too: a ninth review put ["path-traversal"] into the
+    // read-only template's findingIds -- contract-valid, byte-equal to its constant, and
+    // the exact scored answer for security-path-traversal. Template values are
+    // placeholders only now (refused in the module), and every prose string a read-only
+    // class sees, plus the read-only template's leaves, is scanned against the read-only
+    // cases' expected finding IDs as token sequences. The taxonomy line lists every ID for
+    // every case and is the contract; a rule naming one is steering.
+    const findingIds: Stems = new Map();
+    for (const benchmarkCase of manifest.cases) {
+      for (const id of benchmarkCase.expectedOutcome?.expectedFindingIds ?? []) {
+        const entry = findingIds.get(id) ?? { parts: tokensOf(id), cases: new Set<string>() };
+        entry.cases.add(benchmarkCase.id);
+        findingIds.set(id, entry);
+      }
+    }
+    expect(findingIds.size).toBeGreaterThan(0);
+    const findingCollisionsOf = (
+      strings: ReadonlyArray<{ where: string; text: string }>,
+    ): string[] => {
+      const found: string[] = [];
+      for (const { where, text } of strings) {
+        const tokens = tokensOf(text);
+        for (const [id, { parts, cases }] of findingIds) {
+          if (containsSequence(tokens, parts)) {
+            found.push(`${where}: finding "${id}" names ${[...cases].sort().join(", ")}`);
+          }
+        }
+      }
+      return found;
+    };
+    const readOnlyProse = prose.filter(
+      ({ where }) =>
+        where === "common" ||
+        where === "readOnly" ||
+        where === "classRules.explanation" ||
+        where === "classRules.security_review",
+    );
+    const readOnlyTemplateLeaves = templateLeaves(GATE2_LIVE_TEMPLATES.readOnly).map((text) => ({
+      where: "templates.readOnly",
+      text,
+    }));
+    expect(findingCollisionsOf([...readOnlyProse, ...readOnlyTemplateLeaves])).toEqual([]);
+    expect(
+      findingCollisionsOf([
+        { where: "classRules.security_review", text: "Report path-traversal when input escapes." },
+      ]),
+    ).toEqual([
+      'classRules.security_review: finding "path-traversal" names security-path-traversal',
+    ]);
+    const readOnlyTemplate = GATE2_LIVE_TEMPLATES.readOnly as { answer: Record<string, unknown> };
+    expect(() =>
+      validateGate2LiveTemplate(
+        {
+          ...readOnlyTemplate,
+          answer: { ...readOnlyTemplate.answer, findingIds: ["path-traversal"] },
+        },
+        "readOnly",
+      ),
+    ).toThrow(/answer\.findingIds\[0\] must be a template placeholder/);
+    // A JSON escape is ASCII in the serialised string and a control character in the value
+    // the model is shown; the constants are checked as decoded objects.
+    expect(() =>
+      validateGate2LiveTemplate(
+        { ...readOnlyTemplate, answer: { ...readOnlyTemplate.answer, summary: "mo\nney" } },
+        "readOnly",
+      ),
+    ).toThrow(/answer\.summary must be printable ASCII/);
+    for (const hidden of ["mo\u200bney", "mo\ufe0fney", "mo\u034fney", "mo\u00adney"]) {
+      expect(tokensOf(hidden)).toEqual(["money"]);
+    }
     // Every policy string is printable ASCII, so a zero-width space cannot split a stem.
     expect(() =>
       snapshotGate2LivePolicy({
@@ -382,7 +454,6 @@ describe("Gate 2 live instruction policy", () => {
         classRules: { ...policy.classRules, refactor: ["Name the extracted module mo\u200bney."] },
       }),
     ).toThrow(/classRules\.refactor\[0\] must be printable ASCII/);
-    expect(tokensOf("mo\u200bney")).toEqual(["money"]);
     for (const badId of ["x-", "x--y", "-x", "X"]) {
       expect(() =>
         snapshotGate2LivePolicy({ ...policy, findingTaxonomy: { [badId]: "d" } }),

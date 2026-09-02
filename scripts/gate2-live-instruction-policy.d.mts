@@ -9,6 +9,8 @@ export const GATE2_LIVE_TEMPLATES: Readonly<{
   mutation: Readonly<Record<string, unknown>>;
   readOnly: Readonly<Record<string, unknown>>;
 }>;
+/** Validates one canonical template object: key tree, answer kind, decoded-leaf ASCII, placeholder-only values. */
+export function validateGate2LiveTemplate(template: unknown, kind: "mutation" | "readOnly"): void;
 /** The exact key tree of an answer template at every level; a template must match it exactly. */
 export const GATE2_LIVE_TEMPLATE_SKELETON: Readonly<Record<string, unknown>>;
 /** Benchmark class → answer kind; bound to the manifest by test. The assembler refuses other pairs. */

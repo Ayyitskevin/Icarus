@@ -162,6 +162,58 @@ export const GATE2_LIVE_TEMPLATE_SKELETON = Object.freeze({
   },
 });
 const TEMPLATE_ANSWER_KIND = Object.freeze({ mutation: "mutation", readOnly: "read_only" });
+/**
+ * The only strings a template may carry as values. A template is a shape, never an
+ * answer: a review put an expected finding ID into the read-only template's findingIds
+ * -- contract-valid, byte-equal to its constant, and the exact scored answer for one
+ * case -- so every leaf is now a placeholder from this closed set.
+ */
+const TEMPLATE_PLACEHOLDERS = new Set([
+  "path",
+  "id",
+  "text",
+  "complete bytes",
+  "mutation",
+  "read_only",
+]);
+
+function assertTemplatePlaceholders(value, where) {
+  if (typeof value === "string") {
+    if (!TEMPLATE_PLACEHOLDERS.has(value)) {
+      invalidPolicy(`${where} must be a template placeholder, not "${value}"`);
+    }
+    return;
+  }
+  if (typeof value === "number") {
+    if (value !== 1) invalidPolicy(`${where} must be 1`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries())
+      assertTemplatePlaceholders(item, `${where}[${index}]`);
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, item] of Object.entries(value))
+      assertTemplatePlaceholders(item, `${where}.${key}`);
+  }
+}
+
+/**
+ * Validates one canonical template object: the exact key tree, the answer kind, printable
+ * ASCII on the decoded leaves (a JSON escape such as "\n" is ASCII in the serialised
+ * string and a control character in the value the model is shown), and placeholder-only
+ * values. Pure and exported so a test can hand it a planted object.
+ */
+export function validateGate2LiveTemplate(template, kind) {
+  const where = `GATE2_LIVE_TEMPLATES.${kind}`;
+  assertTemplateShape(template, GATE2_LIVE_TEMPLATE_SKELETON, where);
+  if (template.answer.kind !== TEMPLATE_ANSWER_KIND[kind]) {
+    invalidPolicy(`${where}.answer.kind must be ${TEMPLATE_ANSWER_KIND[kind]}`);
+  }
+  assertPrintableAscii(template, where);
+  assertTemplatePlaceholders(template, where);
+}
 
 function assertTemplateShape(value, skeleton, where) {
   if (Array.isArray(skeleton)) {
@@ -263,12 +315,7 @@ export function snapshotGate2LivePolicy(source) {
   }
   for (const kind of ["mutation", "readOnly"]) {
     const canonical = GATE2_LIVE_TEMPLATES[kind];
-    assertTemplateShape(canonical, GATE2_LIVE_TEMPLATE_SKELETON, `GATE2_LIVE_TEMPLATES.${kind}`);
-    if (canonical.answer.kind !== TEMPLATE_ANSWER_KIND[kind]) {
-      invalidPolicy(
-        `GATE2_LIVE_TEMPLATES.${kind}.answer.kind must be ${TEMPLATE_ANSWER_KIND[kind]}`,
-      );
-    }
+    validateGate2LiveTemplate(canonical, kind);
     if (policy.templates[kind] !== JSON.stringify(canonical)) {
       invalidPolicy(`templates.${kind} must equal the canonical template byte for byte`);
     }

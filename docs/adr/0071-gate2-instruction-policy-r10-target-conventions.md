@@ -72,18 +72,27 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   constants in the module, and the policy's template strings must equal their
   serialisation byte for byte — no parser sits between them, so no duplicate member,
   whitespace, hidden code point, changed literal, or foreign key can reach the model
-  through "Required shape"; the constants themselves match the skeleton and satisfy the
-  live candidate contract under placeholder authority, so the shape cannot drift from what
-  the scorer accepts. Their string values are text the model sees, scanned like
-  identifiers against the stems of the cases whose answer kind receives that template.
-  Seven review plants shaped this — a summary value, a nested key, `schemaVersion: 2`, an
-  empty mutation file list, mutation authority in the read-only template, a duplicate
-  member, and a zero-width space inside "money" — and all are regression tests now.
+  through "Required shape"; the constants themselves match the skeleton, carry only
+  placeholder values from a closed set (`path`, `id`, `text`, `complete bytes`, and the two
+  answer kinds), are printable ASCII as decoded objects, and satisfy the live candidate
+  contract under placeholder authority, so the shape cannot drift from what the scorer
+  accepts and cannot carry an answer — a template is a shape, never an answer. Their
+  string values are also scanned like identifiers against the stems of the cases whose
+  answer kind receives that template. Nine review plants shaped this — a summary value, a
+  nested key, `schemaVersion: 2`, an empty mutation file list, mutation authority in the
+  read-only template, a duplicate member, a zero-width space inside "money", a line feed
+  hidden as a JSON escape, and an expected finding ID in `findingIds` — and all are
+  regression tests now.
+- Expected **finding IDs** are answers too. Every prose string a read-only class sees and
+  the read-only template's values are scanned against the read-only cases' expected
+  finding IDs as token sequences. The taxonomy line lists every ID for every case and is
+  the contract; a rule naming one is steering, and is refused.
 - Every string the policy carries — rules, identifiers, definitions, templates, keys —
   is printable ASCII, asserted at load. The policy is English prose and JSON; a code point
   outside 0x20–0x7E has no honest use in it and one (U+200B) split a stem's tokens while
-  the model read the word whole. The scan also strips default-ignorable code points
-  before tokenising, as a second layer. Three reviews shaped this: the first
+  the model read the word whole. As a second layer the scan strips format characters
+  (`Cf`), nonspacing and enclosing marks (`Mn`, `Me`), and the soft hyphen before
+  tokenising — exactly those, no broader claim. Three reviews shaped this: the first
   planted "a new module named money" and the old gate stayed green; the second beat the
   first version with "test-json-output" and with the member name `files` used as prose;
   the third beat the second version by writing a finding ID into a rule so that the stem
