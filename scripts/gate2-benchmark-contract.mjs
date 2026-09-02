@@ -1057,6 +1057,7 @@ async function assertRepositoryPath(repositoryRoot, target, label, kind) {
     throw error;
   });
   if (real !== root) fail(`${label}: repository root resolves through a symlink`);
+  if (!(await lstat(root)).isDirectory()) fail(`${label}: repository root is not a directory`);
   const absolute = path.resolve(root, target);
   const relative = path.relative(root, absolute);
   if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`)) {

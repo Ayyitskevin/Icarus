@@ -237,6 +237,15 @@ describe("Gate 2 fixture boundary, repository fixtures", () => {
     ).rejects.toThrow("repository basic: fixtures/evals/repos/basic passes through a symlink");
   });
 
+  it("refuses a regular file offered as the repository root, by contract and not by ENOTDIR", async () => {
+    const root = await fixtureCopy();
+    const rootFile = path.join(root, "root.txt");
+    await writeFile(rootFile, "not a directory\n", "utf8");
+    await expect(
+      loadGate2BenchmarkContract(path.join(rootFile, "manifest.v3.json"), rootFile),
+    ).rejects.toThrow("manifest: repository root is not a directory");
+  });
+
   it("refuses a hard-linked fixture file with the right bytes and the right name", async () => {
     const root = await fixtureCopy();
     const outside = await mkdtemp(path.join(os.tmpdir(), "icarus-gate2-outside-"));

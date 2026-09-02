@@ -4,9 +4,10 @@ import { GATE2_SCAFFOLD_A_ORACLES } from "./gate2-scaffold-cohort-a-contract.mjs
 // Deterministic oracles for the three manifest v3 successor cases. Each is derived from the
 // v2 oracle it replaces -- the same approved bytes, re-keyed to the successor id -- and two
 // re-key their check as well: scaffold-parser-cli-check moves its check beside the fixture's
-// existing checks (checks/test_cli.py, argv to match) instead of a tests/ directory the
-// fixture never had, and scaffold-json-output-mode drops the "lantern" check id. The module
-// each check invokes is unchanged, so the bytes are too.
+// existing checks (checks/test_cli.py, so the invoked module becomes checks.test_cli) instead
+// of a tests/ directory the fixture never had, and scaffold-json-output-mode drops the
+// "lantern" check id while keeping its invoked module. The check file's bytes are unchanged
+// in both: the parser check calls src.cli by module name, which does not move.
 
 function fail(message) {
   throw new Error(`Gate 2 v3 successor oracles: ${message}`);
