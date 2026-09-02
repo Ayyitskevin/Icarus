@@ -141,11 +141,16 @@ export function snapshotGate2LivePolicy(source) {
   if (
     generation === null ||
     typeof generation !== "object" ||
-    typeof generation.temperature !== "number" ||
-    typeof generation.maxTokens !== "number" ||
+    !Number.isFinite(generation.temperature) ||
+    generation.temperature < 0 ||
+    generation.temperature > 2 ||
+    !Number.isSafeInteger(generation.maxTokens) ||
+    generation.maxTokens <= 0 ||
     typeof generation.think !== "boolean"
   ) {
-    invalidPolicy("generation must carry temperature, maxTokens, and think");
+    invalidPolicy(
+      "generation must carry a temperature in [0, 2], a positive integer maxTokens, and think",
+    );
   }
   for (const member of ["common", "mutation", "readOnly"])
     assertStringArray(policy[member], member);
@@ -160,6 +165,11 @@ export function snapshotGate2LivePolicy(source) {
   }
   if (policy.templates === null || typeof policy.templates !== "object") {
     invalidPolicy("templates must be an object");
+  }
+  for (const key of Object.keys(policy.templates)) {
+    if (key !== "mutation" && key !== "readOnly") {
+      invalidPolicy(`templates.${key} is not an answer kind`);
+    }
   }
   for (const kind of ["mutation", "readOnly"]) {
     const template = policy.templates[kind];
@@ -183,8 +193,16 @@ export function snapshotGate2LivePolicy(source) {
     invalidPolicy("findingTaxonomy must be an object");
   }
   for (const [id, definition] of Object.entries(policy.findingTaxonomy)) {
-    if (id === "" || typeof definition !== "string" || definition === "") {
+    // The taxonomy line joins entries with " = " and "; "; an id or definition carrying
+    // those would render as more entries than exist. Ids are kebab-case identifiers.
+    if (!/^[a-z][a-z0-9-]*$/.test(id)) {
+      invalidPolicy(`findingTaxonomy id "${id}" must be a kebab-case identifier`);
+    }
+    if (typeof definition !== "string" || definition === "") {
       invalidPolicy(`findingTaxonomy.${id} must be a non-empty string`);
+    }
+    if (definition.includes(";") || definition.includes(" = ")) {
+      invalidPolicy(`findingTaxonomy.${id} must not contain the taxonomy delimiters`);
     }
   }
   return deepFreeze(policy);
@@ -235,7 +253,10 @@ export function assembleGate2LiveInstructions(policy, benchmarkClass, expectedKi
     `Required shape: ${policy.templates[expectedKind === "mutation" ? "mutation" : "readOnly"]}`,
   ];
   if (expectedKind === "read_only") {
+    // Rendered in sorted id order: the digest canonicalises key order, so the rendering
+    // must too, or two policies with one digest could show the model two orders.
     const taxonomy = Object.entries(policy.findingTaxonomy)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([id, definition]) => `${id} = ${definition}`)
       .join("; ");
     instructions.push(`Finding taxonomy: ${taxonomy}.`);

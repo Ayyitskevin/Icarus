@@ -98,9 +98,18 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   template that coerced to an expected stem; both are regression tests now. Each class is
   bound to one answer kind, matched against the manifest, and the assembler refuses any
   other pair, so the taxonomy line reaches only the read-only classes the scan checks it
-  against. What this does not cover, and says so: a policy module that is itself
-  adversarial code replacing the snapshot — that is held by review of the module, not by
-  this test.
+  against. The taxonomy line is rendered in sorted id order because the digest
+  canonicalises key order — what is hashed is what is assembled, in the same order — and
+  the shape assertion refuses ids that are not kebab-case identifiers, definitions that
+  carry the line's own delimiters, a `generation` outside its ranges, and template keys
+  that are not answer kinds. What this does not cover, and says so: a policy module that is
+  itself adversarial code replacing the snapshot — that is held by review of the module,
+  not by this test.
+
+Revision 10's text was revised during review — "verify" to "confirm", "files" to "paths",
+"file list", and "file set" — before any run carried it, so the number names two texts in
+the history of this branch and one on `main`. The digest a run records is what binds it;
+the number is a label for the conventions, not for the bytes.
 
 Neither mechanism catches a rule that names an answer by paraphrase. That line is held by
 authorship, under one rule a future author has to meet: **a class rule must hold for more

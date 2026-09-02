@@ -160,6 +160,7 @@ describe("Gate 2 live instruction policy", () => {
     expect(stems.get("test_json_output")?.parts).toEqual(["test", "json", "output"]);
     expect(stems.get("config")?.parts).toEqual(["config"]);
     const policy = GATE2_LIVE_INSTRUCTION_POLICY as unknown as {
+      generation: Readonly<{ temperature: number; maxTokens: number; think: boolean }>;
       common: readonly string[];
       mutation: readonly string[];
       readOnly: readonly string[];
@@ -273,6 +274,7 @@ describe("Gate 2 live instruction policy", () => {
         ...(kind === "read_only"
           ? [
               `Finding taxonomy: ${Object.entries(policy.findingTaxonomy)
+                .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
                 .map(([id, definition]) => `${id} = ${definition}`)
                 .join("; ")}.`,
             ]
@@ -346,6 +348,32 @@ describe("Gate 2 live instruction policy", () => {
     expect(() =>
       snapshotGate2LivePolicy({ ...policy, classRules: { ...policy.classRules, rogue: ["x"] } }),
     ).toThrow(/classRules\.rogue is not a benchmark class/);
+    // A second closure review: the digest canonicalises key order but the taxonomy line
+    // rendered in insertion order, so two policies with one digest could show the model
+    // two orders. The rendering is sorted now; a reordered source assembles identically.
+    const reordered = snapshotGate2LivePolicy({
+      ...policy,
+      findingTaxonomy: Object.fromEntries(Object.entries(policy.findingTaxonomy).reverse()),
+    });
+    expect(assembleGate2LiveInstructions(reordered, "security_review", "read_only")).toBe(
+      buildGate2LiveInstructions("security_review", "read_only"),
+    );
+    // Delimiters inside an id or a definition would render as extra taxonomy entries.
+    expect(() =>
+      snapshotGate2LivePolicy({ ...policy, findingTaxonomy: { "a = b; c": "d" } }),
+    ).toThrow(/must be a kebab-case identifier/);
+    expect(() =>
+      snapshotGate2LivePolicy({ ...policy, findingTaxonomy: { x: "y; z = w" } }),
+    ).toThrow(/must not contain the taxonomy delimiters/);
+    expect(() =>
+      snapshotGate2LivePolicy({
+        ...policy,
+        generation: { temperature: -5, maxTokens: -1.5, think: false },
+      }),
+    ).toThrow(/generation must carry/);
+    expect(() =>
+      snapshotGate2LivePolicy({ ...policy, templates: { ...policy.templates, extra: "{}" } }),
+    ).toThrow(/templates\.extra is not an answer kind/);
   });
 
   it("gives the model the complete repository inventory without expected outcomes", () => {
