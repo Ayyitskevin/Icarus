@@ -158,9 +158,16 @@ function safeJoin(base, relative) {
  */
 
 /**
- * The ONE read in this publisher. Every byte it consumes -- the benchmark manifest and its
- * declared predecessor, the execution profile, the artifact manifest, the 60 records, the
- * results -- arrives through here, and nothing is parsed before it has.
+ * The ONE DIRECT read in this publisher. Every byte this module itself reads -- the
+ * benchmark manifest and its declared predecessor, all 30 task files, the execution
+ * profile, the artifact manifest, the 60 records, the results -- arrives through here, and
+ * nothing is parsed before its path has been walked.
+ *
+ * Reads this publisher CAUSES elsewhere are a different thing and are not covered by that
+ * sentence: `loadGate2BenchmarkContract` re-reads the manifest, the predecessor and the
+ * tasks, and reads the seven fixture repository trees, from a module this file does not
+ * own. Those are covered by walking every path that loader will touch before calling it --
+ * the tasks through this helper, the trees entry by entry -- and by review of that module.
  *
  * AGENTS.md: paths are "checked component-by-component for symlinks before reads and
  * writes". `lstat` on the file alone is not that check -- it describes the last component

@@ -2752,19 +2752,28 @@ const assertions = {
     gate2LiveBenchmarkSource.includes("omittedMatches: retrieval.omittedMatches") &&
     gate2LiveBenchmarkSource.includes("omittedReferences: retrieval.omittedReferences") &&
     gate2LiveBenchmarkSource.includes("excludedFiles: retrieval.excludedFiles"),
-  gate2PublishedEvidenceReadSurfaceIsBounded:
-    // What this catches, exactly, after four rounds of it claiming more than it enforced:
-    // a filesystem read added anywhere in this file outside the bodies of the two reading
-    // helpers -- the write helper included, since no read belongs there; an import from
-    // `node:fs` or `node:fs/promises` anywhere in the file that is not the exact allowed
-    // list, aliases and second declarations included; a second read inside a reading
-    // helper; and a read moved before the checks that make it safe.
+  gate2PublishedEvidenceDirectReadSurfaceIsBounded:
+    // This binds DIRECT filesystem reads in `scripts/gate2-live-evidence-publish.mjs` to
+    // the two checked helpers, and nothing wider. It is a source scan of one file, so that
+    // is the most it can see. Exactly: a direct read added anywhere in that file outside
+    // the bodies of the two reading helpers -- the write helper included, since no read
+    // belongs there; an import from `node:fs` or `node:fs/promises` anywhere in the file
+    // that is not the exact allowed list, aliases and second declarations included; a
+    // second read inside a reading helper; and a read moved before the checks that make
+    // it safe.
     //
-    // What it does NOT catch, and is not claimed to: an author of this file acting with
-    // intent -- a reordered check that still reads last, a dynamic `import()`, a raw
-    // binding. That is same-process code authority, held by review, which is the boundary
-    // ADR 0071 already draws for the instruction policy. The gate is here so an ORDINARY
-    // omission fails a check instead of a fourth review; it is not a sandbox.
+    // Reads the publisher CAUSES in other modules are outside it. `loadGate2BenchmarkContract`
+    // reads the benchmark manifest, its predecessor, all 30 tasks and the seven fixture
+    // repository trees from `scripts/gate2-benchmark-contract.mjs`, and a scan of the
+    // publisher's source cannot see them. Those are covered instead by the fixture-tree
+    // pre-validation walk the publisher runs before calling the loader; a change to that
+    // loader is held by review.
+    //
+    // Nor does it catch an author of this file acting with intent -- a reordered check
+    // that still reads last, a dynamic `import()`, a raw binding. That is same-process
+    // code authority, held by review, the boundary ADR 0071 already draws for the
+    // instruction policy. The gate is here so an ORDINARY omission fails a check instead
+    // of a fifth review; it is not a sandbox.
     gate2PublishFilesystemImportIsExact &&
     gate2PublishReadOnlyInsideHelpers &&
     gate2PublishHasNoOtherReadSurface &&
