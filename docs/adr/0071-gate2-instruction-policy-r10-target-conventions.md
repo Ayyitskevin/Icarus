@@ -53,19 +53,107 @@ Instruction-policy revision 10, digest-bound like every revision before it:
    expected in one of those cases and surplus in another, so the convention is minimality,
    not a blanket exclusion of documentation.
 
-Every rule is a **convention**, never an answer. Two mechanisms hold that line, and the
-sentence claims exactly what they enforce:
+Every rule is a **convention**, never an answer. For the prose and the identifiers the
+model sees, two mechanisms hold that line, and this section claims exactly what they
+enforce; for paraphrase and one-case steering, an authoring rule holds it, stated below:
 
 - The security test forbids twelve path-shaped fragments (`src/`, `tests/`, `.py`, …) in
-  the assembled instructions of every class.
+  the assembled instructions of all five classes.
 - The same test derives the stem of every expected changed, cited, and context path from
-  `fixtures/evals/gate2/manifest.v2.json` and refuses any class's instructions that contain
-  one as a word. The answer contract's own member names (`files`, `citations`, …) are
-  exempt, derived from the policy's answer-shape examples, because they are identical for
-  every case and can carry no answer; a hyphenated identifier such as a finding ID counts
-  as one word. Review of this revision planted "a new module named money" and the gate
-  stayed green; this check fails on that plant, and it failed on the first draft of these
-  rules for the word "verify", which is also the stem of `checks/verify.py`.
+  `fixtures/evals/gate2/manifest.v2.json`, splits each stem on its separators, and refuses
+  any policy prose in which those letters appear as the concatenation of consecutive
+  tokens — so `test_json_output`, `test-json-output`, "test json output", `testJsonOutput`,
+  `TestJsonOutput`, and `testjsonoutput` are the same name, and so is any other split. The
+  prose it scans is every instruction string the policy holds: the common, kind, and class
+  rules and the finding-taxonomy definitions. Nothing is cut out of prose and no word is
+  exempt; a finding ID written into a rule is scanned as the words it contains. What the
+  builder owns structurally — the class/kind line, the JSON template, and the taxonomy IDs
+  as identifiers — is scanned too, with its origin tagged, and is exempt only as a whole
+  span (the template; one ID's own tokens, judged class-aware); the test asserts the
+  assembled instructions contain nothing beyond those pieces. The two templates are canonical
+  constants in the module, and the policy's template strings must equal their
+  serialisation byte for byte — no parser sits between them, so no duplicate member,
+  whitespace, hidden code point, changed literal, or foreign key can reach the model
+  through "Required shape"; the constants themselves match the skeleton, carry only
+  placeholder values from a closed set (`path`, `id`, `text`, `complete bytes`, and the two
+  answer kinds), are printable ASCII as decoded objects, and satisfy the live candidate
+  contract under placeholder authority, so the shape cannot drift from what the scorer
+  accepts and cannot carry an answer — a template is a shape, never an answer. Their
+  string values are also scanned like identifiers against the stems of the cases whose
+  answer kind receives that template. Nine review plants shaped this — a summary value, a
+  nested key, `schemaVersion: 2`, an empty mutation file list, mutation authority in the
+  read-only template, a duplicate member, a zero-width space inside "money", a line feed
+  hidden as a JSON escape, and an expected finding ID in `findingIds` — and all are
+  regression tests now.
+- Expected **finding IDs** are answers too. Every prose string a read-only class sees —
+  the common and read-only rules, the read-only class rules, and every taxonomy
+  definition (each against every expected ID except the one it defines) — and the
+  read-only template's values are scanned against the read-only cases' expected finding
+  IDs as token sequences. The taxonomy line lists every ID for every case and is the
+  contract; a rule or a definition naming another case's finding is steering, and is
+  refused. The snapshot takes its canonical templates as a parameter so the test proves
+  the template validator runs on the snapshot path, not only when called directly.
+- The scan also runs over the text **as assembled**, in its final order, per class, with
+  every token tagged by the piece it came from: the assembler joins rules with a space,
+  and one review split `path-traversal` across two adjacent rules; another showed that
+  replacing structure with neutral markers before scanning hides a span across the
+  marker — a taxonomy key `expected` followed by a definition starting "finding" renders
+  the stem `expected_finding` whole. Nothing is substituted. A match is permitted only
+  when its entire span lies inside the template, builder-owned structure the contract
+  exposes on purpose, or — for a finding ID — when it is exactly one taxonomy ID's own
+  tokens. Everything else the model reads is authored or adjacent to authored text, and
+  a span through it is refused.
+- Every string the policy carries — rules, identifiers, definitions, templates, keys —
+  is printable ASCII, asserted at load. The policy is English prose and JSON; a code point
+  outside 0x20–0x7E has no honest use in it and one (U+200B) split a stem's tokens while
+  the model read the word whole. As a second layer the scan strips format characters
+  (`Cf`), nonspacing and enclosing marks (`Mn`, `Me`), and the soft hyphen before
+  tokenising — exactly those, no broader claim. Three reviews shaped this: the first
+  planted "a new module named money" and the old gate stayed green; the second beat the
+  first version with "test-json-output" and with the member name `files` used as prose;
+  the third beat the second version by writing a finding ID into a rule so that the stem
+  inside it was cut out before the scan. All of those fail now. The check also failed this
+  revision's own rules twice: for "verify" (the stem of `checks/verify.py`, reworded to
+  "confirm") and for "files" in three common rules (reworded to "paths", "file list", and
+  "file set").
+- The identifiers the model sees are scanned too, against the stems of exactly the cases
+  whose instructions include them: each finding ID against the read-only cases (the
+  taxonomy line reaches only those), each class name against its own class. A fourth
+  review planted `for-public-containment-cite-only-files` as a taxonomy key with every test
+  green; it fails now on `files`, while `unvalidated-config-shape` passes because no
+  read-only case expects a `config` path. The builder refuses any class outside
+  `GATE2_LIVE_BENCHMARK_CLASSES`, a list the test binds to the manifest's five classes, so
+  the class/kind line can carry only a reviewed name; and it reads class rules as own
+  properties only, after a fifth review planted a rule on the `classRules` prototype that
+  reached the model while the scan, the digest, and the structural check — all own-key
+  walks — stayed unchanged. That plant is now a regression test.
+- The policy the model sees is **plain data by construction**. The module snapshots its
+  source through a JSON round-trip at load — every property access happens during that
+  one serialization pass, and every later consumer reads the snapshot, never the source;
+  Symbol keys, functions, and non-JSON values do not survive — asserts the shape
+  (string arrays; templates that are strings parsing to the required object; string
+  taxonomy definitions; class-rule keys among the benchmark classes) and deep-freezes the
+  result. The digest, the scan, and the assembler all read that one snapshot, so what is
+  hashed is what is assembled. A sixth review planted a getter that returned the recorded
+  rule on its first read and an answer on its second, and a one-element array as a
+  template that coerced to an expected stem; both are regression tests now. Each class is
+  bound to one answer kind, matched against the manifest, and the assembler refuses any
+  other pair, so the taxonomy line reaches only the read-only classes the scan checks it
+  against. The taxonomy line is rendered in sorted id order because the digest
+  canonicalises key order — what is hashed is what is assembled, in the same order — and
+  the shape assertion refuses ids that are not kebab-case identifiers (non-empty lowercase
+  alphanumeric segments joined by single hyphens), definitions that
+  carry the line's own delimiters, a `generation` outside its ranges, and template keys
+  that are not answer kinds. What this does not cover, and says so: code running in the
+  same process with authority over the module or the language's intrinsics — a policy
+  module that replaces the snapshot, or a patched `Array.prototype[Symbol.iterator]` that
+  injects text during assembly — is trusted; that boundary is held by review of the code
+  that runs, not by this test.
+
+Revision 10's text was revised during review — "verify" to "confirm", "files" to "paths",
+"file list", and "file set" — before any run carried it, so the number names two texts in
+the history of this branch and one on `main`. The digest a run records is what binds it;
+the number is a label for the conventions, not for the bytes.
 
 Neither mechanism catches a rule that names an answer by paraphrase. That line is held by
 authorship, under one rule a future author has to meet: **a class rule must hold for more
@@ -103,9 +191,9 @@ re-examine them.
 ## Verification
 
 - `tests/security/gate2-live-instruction-policy.test.ts`: the new class rules attach to their
-  classes and not others, the boundary rule attaches to every class, and the assembled
-  `scaffold` + `refactor` + `repair` + `security_review` instructions contain no path-shaped
-  fragment.
+  classes and not others, the boundary rule attaches to every class, the assembled
+  instructions of all five classes contain no path-shaped fragment, and the stem and
+  identifier scans above hold.
 - The measurement itself: a fresh paired run on mickey under the revision-6 evidence writer,
   frozen into `docs/evals/artifacts/` with a per-file manifest, reviewed before its numbers
   are cited anywhere.

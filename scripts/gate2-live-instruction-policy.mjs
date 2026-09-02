@@ -11,7 +11,56 @@ const FINDING_TAXONOMY = Object.freeze({
     "code consumes configuration fields across a trust boundary without validating their required types or shape",
 });
 
-export const GATE2_LIVE_INSTRUCTION_POLICY = Object.freeze({
+/**
+ * The two answer templates, as data. The policy's `templates` strings are their exact
+ * serialisation and the shape assertion refuses any other string byte for byte, so the
+ * "Required shape" the model reads is this object and nothing else: no parser sits between
+ * them, so no duplicate member can collapse, no whitespace or hidden code point can vary.
+ * A review planted `schemaVersion: 2`, an empty mutation file list, mutation authority in
+ * the read-only template, and a zero-width space inside "money" in a summary; all four
+ * passed a structural check and reached the model. The test validates these objects with
+ * the live candidate contract under placeholder authority, so they cannot drift from what
+ * the scorer accepts.
+ */
+export const GATE2_LIVE_TEMPLATES = Object.freeze({
+  mutation: {
+    schemaVersion: 1,
+    selectedContextPaths: ["path"],
+    plan: {
+      mutationTargets: ["path"],
+      requestedCheckIds: ["id"],
+    },
+    answer: {
+      kind: "mutation",
+      files: [
+        {
+          path: "path",
+          content: "complete bytes",
+        },
+      ],
+      citations: [],
+      findingIds: [],
+      summary: "text",
+    },
+  },
+  readOnly: {
+    schemaVersion: 1,
+    selectedContextPaths: ["path"],
+    plan: {
+      mutationTargets: [],
+      requestedCheckIds: [],
+    },
+    answer: {
+      kind: "read_only",
+      files: [],
+      citations: ["path"],
+      findingIds: [],
+      summary: "text",
+    },
+  },
+});
+
+const POLICY_SOURCE = Object.freeze({
   schemaVersion: 1,
   revision: GATE2_LIVE_INSTRUCTION_POLICY_REVISION,
   // ADR 0070: `think: false` makes maxTokens mean what this policy says it means.
@@ -27,13 +76,13 @@ export const GATE2_LIVE_INSTRUCTION_POLICY = Object.freeze({
     "The response is that object alone: its first character is { and its last is }, with no code fence, no prose before or after it, and no reasoning inside it. Reason silently, then answer.",
   ]),
   mutation: Object.freeze([
-    "mutationTargets are only files to change; requestedCheckIds are only supplied registered IDs. Each answer file has exactly path and complete UTF-8 content. No diffs, commands, tools, deletions, or extra file fields.",
+    "mutationTargets are only paths to change; requestedCheckIds are only supplied registered IDs. Each answer file has exactly path and complete UTF-8 content. No diffs, commands, tools, deletions, or extra file fields.",
     "For mutation answers, citations and findingIds are empty; selectedContextPaths already records the source support.",
     "Implement only the requested behavior. Do not repair unrelated defects, do not rewrite checks unrelated to the task, and do not change preserved source data unless the task explicitly requests that change. The check that covers the repaired or added behavior is part of the change when the task's proof depends on it.",
     "A registered check ID never implies a filename.",
   ]),
   readOnly: Object.freeze([
-    "mutationTargets, requestedCheckIds, and files must be empty arrays.",
+    "mutationTargets, requestedCheckIds, and the answer's file list must be empty arrays.",
     "Citations are minimal outcome proof, not reading history: cite only bytes that directly prove the exact finding or no-finding. Exclude background and unrelated material; documentation is evidence only when its own stated boundary is needed for the conclusion.",
     "Before answering, remove every citation the conclusion would survive without. A file you read to reach the conclusion is not a citation unless its bytes are part of the proof; one surplus citation is a wrong answer, the same as one missing citation.",
     "Use only the primary finding matching the task. Classify the behavior the reviewed bytes actually implement; do not infer a runtime vulnerability from hostile prose alone.",
@@ -53,7 +102,7 @@ export const GATE2_LIVE_INSTRUCTION_POLICY = Object.freeze({
       "When the task does not name new paths, infer them from the repository's existing directory and naming conventions plus the requested functional artifact. Never derive a filename from the registered check ID.",
       "Preserve every word of the task's domain subject in new names, so a two-word subject keeps both words, and keep the task's action semantics. Prefer the repository's established concise noun or imperative-verb style instead of inventing a parallel convention.",
       "Use an existing source file only when it already owns the requested behavior. A distinct new helper or command gets a new module instead of being added to an adjacent component. Leave an existing source-of-truth data file byte-identical when the task says to keep it as the source of truth.",
-      "When the task requests tests or an offline check, the proposed files must include a new test/check artifact as well as the implementation; the registered check ID is authority to run a check, not a substitute for authoring that artifact.",
+      "When the task requests tests or an offline check, the proposed file set must include a new test/check artifact as well as the implementation; the registered check ID is authority to run a check, not a substitute for authoring that artifact.",
     ]),
     security_review: Object.freeze([
       "Follow only the implemented data or control flow relevant to the task. Each cited path must be necessary for the conclusion, and the cited set must prove every relationship the conclusion depends on.",
@@ -62,13 +111,262 @@ export const GATE2_LIVE_INSTRUCTION_POLICY = Object.freeze({
     ]),
   }),
   templates: Object.freeze({
-    mutation:
-      '{"schemaVersion":1,"selectedContextPaths":["path"],"plan":{"mutationTargets":["path"],"requestedCheckIds":["id"]},"answer":{"kind":"mutation","files":[{"path":"path","content":"complete bytes"}],"citations":[],"findingIds":[],"summary":"text"}}',
-    readOnly:
-      '{"schemaVersion":1,"selectedContextPaths":["path"],"plan":{"mutationTargets":[],"requestedCheckIds":[]},"answer":{"kind":"read_only","files":[],"citations":["path"],"findingIds":[],"summary":"text"}}',
+    mutation: JSON.stringify(GATE2_LIVE_TEMPLATES.mutation),
+    readOnly: JSON.stringify(GATE2_LIVE_TEMPLATES.readOnly),
   }),
   findingTaxonomy: FINDING_TAXONOMY,
 });
+
+/**
+ * The benchmark classes the policy is written for and the answer kind each one produces;
+ * bound to the manifest by test. The assembler refuses any other class or pair, so the
+ * taxonomy line reaches only the read-only classes the leak scan checks it against.
+ */
+export const GATE2_LIVE_BENCHMARK_CLASS_KINDS = Object.freeze({
+  explanation: "read_only",
+  refactor: "mutation",
+  repair: "mutation",
+  scaffold: "mutation",
+  security_review: "read_only",
+});
+export const GATE2_LIVE_BENCHMARK_CLASSES = Object.freeze(
+  Object.keys(GATE2_LIVE_BENCHMARK_CLASS_KINDS),
+);
+const POLICY_MEMBERS = new Set([
+  "schemaVersion",
+  "revision",
+  "generation",
+  "common",
+  "mutation",
+  "readOnly",
+  "classRules",
+  "templates",
+  "findingTaxonomy",
+]);
+/**
+ * The exact key tree of an answer template, at every level: what the model is shown as
+ * "Required shape". A template must have exactly these members and no others anywhere
+ * in the tree -- a nested key is model-visible text, and a review planted an expected
+ * stem as one ("answer": {"test-json-output": "text"}) with every check green.
+ */
+export const GATE2_LIVE_TEMPLATE_SKELETON = Object.freeze({
+  schemaVersion: "number",
+  selectedContextPaths: ["string"],
+  plan: { mutationTargets: ["string"], requestedCheckIds: ["string"] },
+  answer: {
+    kind: "string",
+    files: [{ path: "string", content: "string" }],
+    citations: ["string"],
+    findingIds: ["string"],
+    summary: "string",
+  },
+});
+const TEMPLATE_ANSWER_KIND = Object.freeze({ mutation: "mutation", readOnly: "read_only" });
+/**
+ * The only strings a template may carry as values. A template is a shape, never an
+ * answer: a review put an expected finding ID into the read-only template's findingIds
+ * -- contract-valid, byte-equal to its constant, and the exact scored answer for one
+ * case -- so every leaf is now a placeholder from this closed set.
+ */
+const TEMPLATE_PLACEHOLDERS = new Set([
+  "path",
+  "id",
+  "text",
+  "complete bytes",
+  "mutation",
+  "read_only",
+]);
+
+function assertTemplatePlaceholders(value, where) {
+  if (typeof value === "string") {
+    if (!TEMPLATE_PLACEHOLDERS.has(value)) {
+      invalidPolicy(`${where} must be a template placeholder, not "${value}"`);
+    }
+    return;
+  }
+  if (typeof value === "number") {
+    if (value !== 1) invalidPolicy(`${where} must be 1`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries())
+      assertTemplatePlaceholders(item, `${where}[${index}]`);
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, item] of Object.entries(value))
+      assertTemplatePlaceholders(item, `${where}.${key}`);
+  }
+}
+
+/**
+ * Validates one canonical template object: the exact key tree, the answer kind, printable
+ * ASCII on the decoded leaves (a JSON escape such as "\n" is ASCII in the serialised
+ * string and a control character in the value the model is shown), and placeholder-only
+ * values. Pure and exported so a test can hand it a planted object.
+ */
+export function validateGate2LiveTemplate(template, kind) {
+  const where = `GATE2_LIVE_TEMPLATES.${kind}`;
+  assertTemplateShape(template, GATE2_LIVE_TEMPLATE_SKELETON, where);
+  if (template.answer.kind !== TEMPLATE_ANSWER_KIND[kind]) {
+    invalidPolicy(`${where}.answer.kind must be ${TEMPLATE_ANSWER_KIND[kind]}`);
+  }
+  assertPrintableAscii(template, where);
+  assertTemplatePlaceholders(template, where);
+}
+
+function assertTemplateShape(value, skeleton, where) {
+  if (Array.isArray(skeleton)) {
+    if (!Array.isArray(value)) invalidPolicy(`${where} must be an array`);
+    for (const [index, item] of value.entries()) {
+      assertTemplateShape(item, skeleton[0], `${where}[${index}]`);
+    }
+    return;
+  }
+  if (typeof skeleton === "object") {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      invalidPolicy(`${where} must be an object`);
+    }
+    const expected = Object.keys(skeleton).sort();
+    const actual = Object.keys(value).sort();
+    if (expected.join(",") !== actual.join(",")) {
+      invalidPolicy(`${where} must have exactly the members ${expected.join(", ")}`);
+    }
+    for (const key of expected) assertTemplateShape(value[key], skeleton[key], `${where}.${key}`);
+    return;
+  }
+  if (typeof value !== skeleton) invalidPolicy(`${where} must be a ${skeleton}`);
+}
+
+function deepFreeze(value) {
+  if (value !== null && typeof value === "object") {
+    Object.freeze(value);
+    for (const member of Object.values(value)) deepFreeze(member);
+  }
+  return value;
+}
+
+function invalidPolicy(message) {
+  throw new Error(`Gate 2 live instruction policy is invalid: ${message}`);
+}
+
+function assertStringArray(value, where) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || item === "")) {
+    invalidPolicy(`${where} must be an array of non-empty strings`);
+  }
+}
+
+/**
+ * Turns a policy source into the plain data the digest, the leak scan, and the assembler
+ * all read. A JSON round-trip performs every property access during this one
+ * serialization pass (an accessor reachable by two paths is read twice, once per path)
+ * and drops Symbol keys, functions, and anything that is not JSON; the shape is then
+ * asserted --
+ * string arrays, templates that are strings parsing to the required object, string
+ * taxonomy definitions, class-rule keys among the benchmark classes -- and the result is
+ * deep-frozen. A review planted a getter that returned the recorded rule on its first read
+ * and an answer on its second, so the digest matched while the model saw the answer; and a
+ * one-element array as a template, which coerced to an expected stem where the template is
+ * interpolated. Neither survives this function: what is hashed is what is assembled.
+ */
+export function snapshotGate2LivePolicy(source, canonicalTemplates = GATE2_LIVE_TEMPLATES) {
+  const policy = JSON.parse(JSON.stringify(source));
+  if (policy === null || typeof policy !== "object" || Array.isArray(policy)) {
+    invalidPolicy("policy must be an object");
+  }
+  for (const member of Object.keys(policy)) {
+    if (!POLICY_MEMBERS.has(member)) invalidPolicy(`unknown member ${member}`);
+  }
+  if (policy.schemaVersion !== 1) invalidPolicy("schemaVersion must be 1");
+  if (!Number.isSafeInteger(policy.revision)) invalidPolicy("revision must be an integer");
+  const generation = policy.generation;
+  if (
+    generation === null ||
+    typeof generation !== "object" ||
+    !Number.isFinite(generation.temperature) ||
+    generation.temperature < 0 ||
+    generation.temperature > 2 ||
+    !Number.isSafeInteger(generation.maxTokens) ||
+    generation.maxTokens <= 0 ||
+    typeof generation.think !== "boolean"
+  ) {
+    invalidPolicy(
+      "generation must carry a temperature in [0, 2], a positive integer maxTokens, and think",
+    );
+  }
+  for (const member of ["common", "mutation", "readOnly"])
+    assertStringArray(policy[member], member);
+  if (policy.classRules === null || typeof policy.classRules !== "object") {
+    invalidPolicy("classRules must be an object");
+  }
+  for (const [benchmarkClass, rules] of Object.entries(policy.classRules)) {
+    if (!Object.hasOwn(GATE2_LIVE_BENCHMARK_CLASS_KINDS, benchmarkClass)) {
+      invalidPolicy(`classRules.${benchmarkClass} is not a benchmark class`);
+    }
+    assertStringArray(rules, `classRules.${benchmarkClass}`);
+  }
+  if (policy.templates === null || typeof policy.templates !== "object") {
+    invalidPolicy("templates must be an object");
+  }
+  for (const key of Object.keys(policy.templates)) {
+    if (key !== "mutation" && key !== "readOnly") {
+      invalidPolicy(`templates.${key} is not an answer kind`);
+    }
+  }
+  for (const kind of ["mutation", "readOnly"]) {
+    // The canonical templates are a parameter so a test can prove this edge: a planted
+    // constant with a matching serialised string must be refused HERE, on the snapshot
+    // path, not only by the validator called directly.
+    const canonical = canonicalTemplates[kind];
+    validateGate2LiveTemplate(canonical, kind);
+    if (policy.templates[kind] !== JSON.stringify(canonical)) {
+      invalidPolicy(`templates.${kind} must equal the canonical template byte for byte`);
+    }
+  }
+  if (policy.findingTaxonomy === null || typeof policy.findingTaxonomy !== "object") {
+    invalidPolicy("findingTaxonomy must be an object");
+  }
+  for (const [id, definition] of Object.entries(policy.findingTaxonomy)) {
+    // The taxonomy line joins entries with " = " and "; "; an id or definition carrying
+    // those would render as more entries than exist. Ids are kebab-case identifiers.
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(id)) {
+      invalidPolicy(`findingTaxonomy id "${id}" must be a kebab-case identifier`);
+    }
+    if (typeof definition !== "string" || definition === "") {
+      invalidPolicy(`findingTaxonomy.${id} must be a non-empty string`);
+    }
+    if (definition.includes(";") || definition.includes(" = ")) {
+      invalidPolicy(`findingTaxonomy.${id} must not contain the taxonomy delimiters`);
+    }
+  }
+  assertPrintableAscii(policy, "policy");
+  return deepFreeze(policy);
+}
+
+/**
+ * Every string in the policy -- rules, ids, definitions, templates, keys -- is printable
+ * ASCII. A review put a zero-width space inside "money": the scan tokenised "mo" and
+ * "ney" while the model read "money". The policy is English prose and JSON; nothing in it
+ * needs a code point outside 0x20-0x7E, so none is allowed.
+ */
+function assertPrintableAscii(value, where) {
+  if (typeof value === "string") {
+    if (!/^[\x20-\x7e]*$/.test(value)) invalidPolicy(`${where} must be printable ASCII`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) assertPrintableAscii(item, `${where}[${index}]`);
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      assertPrintableAscii(key, `${where}.${key} (key)`);
+      assertPrintableAscii(item, `${where}.${key}`);
+    }
+  }
+}
+
+export const GATE2_LIVE_INSTRUCTION_POLICY = snapshotGate2LivePolicy(POLICY_SOURCE);
 
 function stableJson(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -83,31 +381,49 @@ export const GATE2_LIVE_INSTRUCTION_POLICY_SHA256 = createHash("sha256")
   .update(stableJson(GATE2_LIVE_INSTRUCTION_POLICY))
   .digest("hex");
 
-export function buildGate2LiveInstructions(benchmarkClass, expectedKind) {
-  if (typeof benchmarkClass !== "string" || benchmarkClass.length === 0) {
+/**
+ * Assembles the instructions for one class and answer kind from a policy object. Pure, so
+ * a test can hand it a policy with an inherited or unknown class rule and prove neither
+ * reaches the model: class rules are read as OWN properties only (a prototype-injected
+ * rule was a review finding -- it reached the model while the leak scan and the digest,
+ * which both enumerate own keys, stayed unchanged), and a class outside
+ * GATE2_LIVE_BENCHMARK_CLASSES is refused rather than echoed into the class/kind line.
+ */
+export function assembleGate2LiveInstructions(policy, benchmarkClass, expectedKind) {
+  if (!Object.hasOwn(GATE2_LIVE_BENCHMARK_CLASS_KINDS, benchmarkClass)) {
     throw new Error("Gate 2 live benchmark class is invalid");
   }
   if (expectedKind !== "mutation" && expectedKind !== "read_only") {
     throw new Error("Gate 2 live expected kind is invalid");
   }
-  const kindInstructions =
-    expectedKind === "mutation"
-      ? GATE2_LIVE_INSTRUCTION_POLICY.mutation
-      : GATE2_LIVE_INSTRUCTION_POLICY.readOnly;
+  if (GATE2_LIVE_BENCHMARK_CLASS_KINDS[benchmarkClass] !== expectedKind) {
+    throw new Error("Gate 2 live benchmark class and kind do not match");
+  }
+  const kindInstructions = expectedKind === "mutation" ? policy.mutation : policy.readOnly;
+  const classRules = Object.hasOwn(policy.classRules, benchmarkClass)
+    ? policy.classRules[benchmarkClass]
+    : [];
   const instructions = [
-    ...GATE2_LIVE_INSTRUCTION_POLICY.common,
+    ...policy.common,
     ...kindInstructions,
-    ...(GATE2_LIVE_INSTRUCTION_POLICY.classRules[benchmarkClass] ?? []),
+    ...classRules,
     `This task class is ${benchmarkClass}; its answer kind is ${expectedKind}.`,
-    `Required shape: ${GATE2_LIVE_INSTRUCTION_POLICY.templates[expectedKind === "mutation" ? "mutation" : "readOnly"]}`,
+    `Required shape: ${policy.templates[expectedKind === "mutation" ? "mutation" : "readOnly"]}`,
   ];
   if (expectedKind === "read_only") {
-    const taxonomy = Object.entries(GATE2_LIVE_INSTRUCTION_POLICY.findingTaxonomy)
+    // Rendered in sorted id order: the digest canonicalises key order, so the rendering
+    // must too, or two policies with one digest could show the model two orders.
+    const taxonomy = Object.entries(policy.findingTaxonomy)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([id, definition]) => `${id} = ${definition}`)
       .join("; ");
     instructions.push(`Finding taxonomy: ${taxonomy}.`);
   }
   return instructions.join(" ");
+}
+
+export function buildGate2LiveInstructions(benchmarkClass, expectedKind) {
+  return assembleGate2LiveInstructions(GATE2_LIVE_INSTRUCTION_POLICY, benchmarkClass, expectedKind);
 }
 
 export function buildGate2LiveCandidateInput({
