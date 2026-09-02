@@ -400,6 +400,7 @@ describe("Gate 2 live instruction policy", () => {
       for (const { where, text } of strings) {
         const tokens = tokensOf(text);
         for (const [id, { parts, cases }] of findingIds) {
+          if (where === `findingTaxonomy.${id}`) continue;
           if (containsSequence(tokens, parts)) {
             found.push(`${where}: finding "${id}" names ${[...cases].sort().join(", ")}`);
           }
@@ -407,12 +408,17 @@ describe("Gate 2 live instruction policy", () => {
       }
       return found;
     };
+    // Every string a read-only class sees: the common, read-only, and read-only class rules,
+    // AND every taxonomy definition -- a tenth review appended ", report path-traversal" to
+    // the unvalidated-config-shape definition and every test stayed green. A definition is
+    // scanned against every expected ID except its own key, which it may describe.
     const readOnlyProse = prose.filter(
       ({ where }) =>
         where === "common" ||
         where === "readOnly" ||
         where === "classRules.explanation" ||
-        where === "classRules.security_review",
+        where === "classRules.security_review" ||
+        where.startsWith("findingTaxonomy."),
     );
     const readOnlyTemplateLeaves = templateLeaves(GATE2_LIVE_TEMPLATES.readOnly).map((text) => ({
       where: "templates.readOnly",
@@ -426,6 +432,36 @@ describe("Gate 2 live instruction policy", () => {
     ).toEqual([
       'classRules.security_review: finding "path-traversal" names security-path-traversal',
     ]);
+    expect(
+      findingCollisionsOf([
+        {
+          where: "findingTaxonomy.unvalidated-config-shape",
+          text: `${policy.findingTaxonomy["unvalidated-config-shape"]}, report path-traversal`,
+        },
+      ]),
+    ).toEqual([
+      'findingTaxonomy.unvalidated-config-shape: finding "path-traversal" names security-path-traversal',
+    ]);
+    expect(
+      findingCollisionsOf([
+        { where: "findingTaxonomy.path-traversal", text: "the path-traversal finding, described" },
+      ]),
+    ).toEqual([]);
+    // The constants pass their own validator, and the snapshot path runs it: a planted
+    // canonical template with a matching serialised string is refused by the snapshot.
+    for (const kind of ["mutation", "readOnly"] as const) {
+      expect(() => validateGate2LiveTemplate(GATE2_LIVE_TEMPLATES[kind], kind)).not.toThrow();
+    }
+    const roguePlan = {
+      ...mutationTemplate,
+      answer: { ...mutationTemplate.answer, summary: "rogue" },
+    };
+    expect(() =>
+      snapshotGate2LivePolicy(
+        { ...policy, templates: { ...policy.templates, mutation: JSON.stringify(roguePlan) } },
+        { ...GATE2_LIVE_TEMPLATES, mutation: roguePlan },
+      ),
+    ).toThrow(/answer\.summary must be a template placeholder, not "rogue"/);
     const readOnlyTemplate = GATE2_LIVE_TEMPLATES.readOnly as { answer: Record<string, unknown> };
     expect(() =>
       validateGate2LiveTemplate(

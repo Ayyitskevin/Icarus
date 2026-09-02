@@ -83,56 +83,14 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   read-only template, a duplicate member, a zero-width space inside "money", a line feed
   hidden as a JSON escape, and an expected finding ID in `findingIds` — and all are
   regression tests now.
-- Expected **finding IDs** are answers too. Every prose string a read-only class sees and
-  the read-only template's values are scanned against the read-only cases' expected
-  finding IDs as token sequences. The taxonomy line lists every ID for every case and is
-  the contract; a rule naming one is steering, and is refused.
-- Every string the policy carries — rules, identifiers, definitions, templates, keys —
-  is printable ASCII, asserted at load. The policy is English prose and JSON; a code point
-  outside 0x20–0x7E has no honest use in it and one (U+200B) split a stem's tokens while
-  the model read the word whole. As a second layer the scan strips format characters
-  (`Cf`), nonspacing and enclosing marks (`Mn`, `Me`), and the soft hyphen before
-  tokenising — exactly those, no broader claim. Three reviews shaped this: the first
-  planted "a new module named money" and the old gate stayed green; the second beat the
-  first version with "test-json-output" and with the member name `files` used as prose;
-  the third beat the second version by writing a finding ID into a rule so that the stem
-  inside it was cut out before the scan. All of those fail now. The check also failed this
-  revision's own rules twice: for "verify" (the stem of `checks/verify.py`, reworded to
-  "confirm") and for "files" in three common rules (reworded to "paths", "file list", and
-  "file set").
-- The identifiers the model sees are scanned too, against the stems of exactly the cases
-  whose instructions include them: each finding ID against the read-only cases (the
-  taxonomy line reaches only those), each class name against its own class. A fourth
-  review planted `for-public-containment-cite-only-files` as a taxonomy key with every test
-  green; it fails now on `files`, while `unvalidated-config-shape` passes because no
-  read-only case expects a `config` path. The builder refuses any class outside
-  `GATE2_LIVE_BENCHMARK_CLASSES`, a list the test binds to the manifest's five classes, so
-  the class/kind line can carry only a reviewed name; and it reads class rules as own
-  properties only, after a fifth review planted a rule on the `classRules` prototype that
-  reached the model while the scan, the digest, and the structural check — all own-key
-  walks — stayed unchanged. That plant is now a regression test.
-- The policy the model sees is **plain data by construction**. The module snapshots its
-  source through a JSON round-trip at load — every property access happens during that
-  one serialization pass, and every later consumer reads the snapshot, never the source;
-  Symbol keys, functions, and non-JSON values do not survive — asserts the shape
-  (string arrays; templates that are strings parsing to the required object; string
-  taxonomy definitions; class-rule keys among the benchmark classes) and deep-freezes the
-  result. The digest, the scan, and the assembler all read that one snapshot, so what is
-  hashed is what is assembled. A sixth review planted a getter that returned the recorded
-  rule on its first read and an answer on its second, and a one-element array as a
-  template that coerced to an expected stem; both are regression tests now. Each class is
-  bound to one answer kind, matched against the manifest, and the assembler refuses any
-  other pair, so the taxonomy line reaches only the read-only classes the scan checks it
-  against. The taxonomy line is rendered in sorted id order because the digest
-  canonicalises key order — what is hashed is what is assembled, in the same order — and
-  the shape assertion refuses ids that are not kebab-case identifiers (non-empty lowercase
-  alphanumeric segments joined by single hyphens), definitions that
-  carry the line's own delimiters, a `generation` outside its ranges, and template keys
-  that are not answer kinds. What this does not cover, and says so: code running in the
-  same process with authority over the module or the language's intrinsics — a policy
-  module that replaces the snapshot, or a patched `Array.prototype[Symbol.iterator]` that
-  injects text during assembly — is trusted; that boundary is held by review of the code
-  that runs, not by this test.
+- Expected **finding IDs** are answers too. Every prose string a read-only class sees —
+  the common and read-only rules, the read-only class rules, and every taxonomy
+  definition (each against every expected ID except the one it defines) — and the
+  read-only template's values are scanned against the read-only cases' expected finding
+  IDs as token sequences. The taxonomy line lists every ID for every case and is the
+  contract; a rule or a definition naming another case's finding is steering, and is
+  refused. The snapshot takes its canonical templates as a parameter so the test proves
+  the template validator runs on the snapshot path, not only when called directly.
 
 Revision 10's text was revised during review — "verify" to "confirm", "files" to "paths",
 "file list", and "file set" — before any run carried it, so the number names two texts in
