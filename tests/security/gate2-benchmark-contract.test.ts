@@ -9,6 +9,7 @@ import {
   GATE2_CASE_IDS,
   GATE2_CASE_IDS_BY_REVISION,
   MAX_GATE2_JSON_BYTES,
+  describeNonStrictGate2Json,
   parseStrictGate2Json,
   sha256Raw,
   validateGate2BenchmarkManifest,
@@ -195,6 +196,32 @@ describe("Gate 2 benchmark manifest contract", () => {
     ]) {
       expect(() => validateGate2BenchmarkManifest(attack)).toThrow();
     }
+  });
+
+  it("names the shape of a non-strict document so a frozen record can say why it failed", () => {
+    // The revision-9 evidence recorded four unparseable candidates as "must be strict
+    // JSON" and nothing more; one of them had stopped 728 characters into a
+    // 728-character document, which is a truncated answer, not a malformed one. The
+    // shape must be in the thrown message, in the same closed vocabulary the core
+    // harness uses, and the scanner's specific refusals must stay verbatim.
+    const truncated =
+      '{"schemaVersion":1,"plan":{"mutationTargets":["a"]},"answer":{"files":[{"path":"a"}';
+    expect(describeNonStrictGate2Json(truncated)).toBe("truncated");
+    expect(describeNonStrictGate2Json("```json\n{}\n```")).toBe("markdown_fenced");
+    expect(describeNonStrictGate2Json("I will now produce the JSON.\n{}")).toBe("leading_prose");
+    expect(describeNonStrictGate2Json("   ")).toBe("empty");
+    expect(describeNonStrictGate2Json('{"a": NaN}')).toBe("other");
+    for (const [source, shape] of [
+      [truncated, "truncated"],
+      ["```json\n{}\n```", "markdown_fenced"],
+      ["prose first {}", "leading_prose"],
+      ["", "empty"],
+    ] as const) {
+      expect(() => parseStrictGate2Json(source)).toThrow(`manifest must be strict JSON (${shape})`);
+    }
+    // A specific scanner refusal is not overwritten by the generic shape.
+    expect(() => parseStrictGate2Json('{"k":1,"k":2}')).toThrow("duplicate JSON object members");
+    expect(() => parseStrictGate2Json('{"k":1,"k":2}')).not.toThrow("(other)");
   });
 
   it("strict parsing rejects duplicate JSON members before JSON.parse can collapse them", async () => {

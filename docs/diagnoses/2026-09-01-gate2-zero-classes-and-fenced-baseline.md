@@ -73,9 +73,11 @@ the scaffold miss that has guidance ignored it.
   prompt it relocated it.** ADR 0070 could not have seen this; it needs recording there.
 - `scaffold-lantern-json-output`: 112 output tokens, zero content characters — the open
   anomaly from the evaluation, unchanged.
-- `refactor-parser-token-table`: a JSON error the contract reports only as *"must be strict
-  JSON"*. The harness's CLI path already classifies non-strict shapes; the benchmark contract
-  does not, so the record cannot say what was wrong.
+- `refactor-parser-token-table`: a **truncated** document — `JSON.parse` gives up at
+  position 728 of 728 characters, with `finishReason: stop`. The contract reported only
+  *"must be strict JSON"*, so the record could not say so; the contract now names the shape
+  (`truncated` / `markdown_fenced` / `leading_prose` / `empty` / `other`) in the same
+  vocabulary the core harness uses, and a future record will.
 
 ## What this rules in and out
 

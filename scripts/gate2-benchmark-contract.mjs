@@ -820,16 +820,55 @@ class StrictJsonScanner {
   }
 }
 
+const STRICT_JSON_DEFAULT_MESSAGE = "manifest must be strict JSON";
+
+/**
+ * Names the shape of a document that is not strict JSON, in the same closed vocabulary
+ * `describeNonStrictJson` uses in the core harness, so a benchmark record and a CLI
+ * record describe the same failure the same way. This exists because a frozen Gate 2
+ * record that said only "must be strict JSON" could not tell a reader that the model had
+ * stopped 728 characters into a 728-character document -- a truncated answer, not a
+ * malformed one -- and the diagnosis had to be re-derived by hand.
+ */
+export function describeNonStrictGate2Json(source) {
+  if (typeof source !== "string") return "not_text";
+  const trimmed = source.trim();
+  if (trimmed.length === 0) return "empty";
+  if (/^```/.test(trimmed)) return "markdown_fenced";
+  if (!/^[{[]/.test(trimmed)) return "leading_prose";
+  try {
+    JSON.parse(source);
+    return "other";
+  } catch (error) {
+    const message = String(error?.message ?? "");
+    const position = /position (\d+)/.exec(message);
+    // JSON.parse reports the offset it gave up at. Giving up at the end of the input
+    // means the structure was never closed: the document is truncated, not malformed.
+    if (position !== null && Number(position[1]) >= source.length) return "truncated";
+    return "other";
+  }
+}
+
 export function parseStrictGate2Json(source) {
   if (typeof source !== "string") invalidJson();
   if (Buffer.byteLength(source, "utf8") > MAX_GATE2_JSON_BYTES) {
     invalidJson("input exceeds the Gate 2 JSON byte limit");
   }
-  new StrictJsonScanner(source).parseDocument();
   try {
+    new StrictJsonScanner(source).parseDocument();
     return JSON.parse(source);
-  } catch {
-    invalidJson();
+  } catch (error) {
+    // The scanner's own messages (depth, duplicate keys, byte limits) are specific and
+    // are kept verbatim. Only the generic refusal gains the shape, so a reader of the
+    // recorded error can tell an empty answer from a fenced one from a truncated one.
+    const message = String(error?.message ?? "");
+    if (
+      message.endsWith(STRICT_JSON_DEFAULT_MESSAGE) ||
+      !message.includes("Gate 2 benchmark contract")
+    ) {
+      invalidJson(`${STRICT_JSON_DEFAULT_MESSAGE} (${describeNonStrictGate2Json(source)})`);
+    }
+    throw error;
   }
 }
 
