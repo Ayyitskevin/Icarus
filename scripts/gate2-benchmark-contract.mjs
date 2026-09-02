@@ -1041,14 +1041,16 @@ export function parseStrictGate2Json(source) {
 }
 
 /**
- * Read one repository file through the path boundary: the root is a real directory, the
- * path is inside it, and every component below the root is checked with lstat -- directories
- * that are not symlinks on the way down, an ordinary single-link regular file at the end --
- * before any bytes are read. A review reached the lineage through a byte-identical symlink
- * to a file outside the repository: the digest authenticated the content while the path said
+ * Resolve one path under the repository root through the path boundary: the root is a real
+ * directory, the path is inside it, and every component below the root is checked with
+ * lstat -- directories that are not symlinks on the way down, and at the end an ordinary
+ * single-link regular file (kind "file") or a directory (kind "directory") -- before any
+ * bytes or entries are read. A review reached the lineage through a byte-identical symlink to
+ * a file outside the repository, and then a fixture through a symlinked root and a
+ * hard-linked file: each time the digest authenticated the content while the path said
  * nothing about where it came from.
  */
-async function readRepositoryFile(repositoryRoot, target, label) {
+async function assertRepositoryPath(repositoryRoot, target, label, kind) {
   const root = path.resolve(repositoryRoot);
   const real = await realpath(root).catch((error) => {
     if (error?.code === "ENOENT") fail(`${label}: repository root does not exist`);
@@ -1069,17 +1071,22 @@ async function readRepositoryFile(repositoryRoot, target, label) {
       throw error;
     });
     if (status.isSymbolicLink()) fail(`${label}: ${relative} passes through a symlink`);
-    if (index < components.length - 1) {
-      if (!status.isDirectory()) fail(`${label}: ${relative} passes through a non-directory`);
+    if (index < components.length - 1 || kind === "directory") {
+      if (!status.isDirectory()) fail(`${label}: ${relative} is not a directory`);
     } else {
       if (!status.isFile()) fail(`${label}: ${relative} is not a regular file`);
       if (status.nlink !== 1) fail(`${label}: ${relative} is hard-linked`);
     }
   }
-  return readFile(absolute);
+  return absolute;
 }
 
-async function snapshotFixture(root) {
+async function readRepositoryFile(repositoryRoot, target, label) {
+  return readFile(await assertRepositoryPath(repositoryRoot, target, label, "file"));
+}
+
+async function snapshotFixture(repositoryRoot, fixturePath, label) {
+  const root = await assertRepositoryPath(repositoryRoot, fixturePath, label, "directory");
   const files = [];
   async function visit(directory, prefix = "") {
     const entries = await readdir(directory, { withFileTypes: true });
@@ -1088,9 +1095,14 @@ async function snapshotFixture(root) {
       const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
       if (relative.split("/").includes(".git")) fail("fixture repositories cannot contain .git");
       const absolute = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
+      // A Dirent says what the entry looked like at readdir; lstat says what is there now,
+      // and it is the only call that sees a hard link.
+      const status = await lstat(absolute);
+      if (status.isSymbolicLink()) fail(`fixture contains a special path: ${relative}`);
+      if (status.isDirectory()) {
         await visit(absolute, relative);
-      } else if (entry.isFile()) {
+      } else if (status.isFile()) {
+        if (status.nlink !== 1) fail(`${label}: ${relative} is hard-linked`);
         files.push({ path: relative, sha256: sha256Raw(await readFile(absolute)) });
       } else {
         fail(`fixture contains a special path: ${relative}`);
@@ -1148,7 +1160,11 @@ export async function loadGate2BenchmarkContract(manifestPath, repositoryRoot) {
     );
   }
   for (const repository of manifest.repositories) {
-    const observed = await snapshotFixture(path.resolve(repositoryRoot, repository.fixturePath));
+    const observed = await snapshotFixture(
+      repositoryRoot,
+      repository.fixturePath,
+      `repository ${repository.id}`,
+    );
     if (JSON.stringify(observed) !== JSON.stringify(repository.files)) {
       fail(`repository inventory drifted: ${repository.id}`);
     }

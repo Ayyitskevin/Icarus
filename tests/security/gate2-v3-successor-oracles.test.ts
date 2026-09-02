@@ -74,6 +74,17 @@ describe("Gate 2 manifest v3 successor oracles", () => {
       (entry) => entry.caseId === "scaffold-parser-cli-check",
     );
     expect(parserCli?.check.argv).toEqual(["python", "-m", "checks.test_cli"]);
+    // ADR 0073: the successor's check id must not carry the title word that left its check
+    // name underdetermined. A review reverted the id to lantern-json-output with this suite green.
+    const jsonOutput = GATE2_V3_SUCCESSOR_ORACLES.find(
+      (entry) => entry.caseId === "scaffold-json-output-mode",
+    );
+    expect(jsonOutput?.check).toEqual({
+      id: "json-output-mode",
+      name: "Text and JSON output modes",
+      argv: ["python", "-m", "tests.test_json_output"],
+    });
+    expect(JSON.stringify(GATE2_V3_SUCCESSOR_ORACLES)).not.toContain("lantern");
     expect(parserCli?.approvedFiles.some((file) => file.path === "tests/test_cli.py")).toBe(false);
   });
 

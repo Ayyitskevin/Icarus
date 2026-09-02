@@ -220,3 +220,33 @@ describe("Gate 2 fixture boundary, the read boundary and the registered digest",
     ).rejects.toThrow("passes through a symlink");
   });
 });
+
+describe("Gate 2 fixture boundary, repository fixtures", () => {
+  const manifestV3Relative = "fixtures/evals/gate2/manifest.v3.json";
+
+  it("refuses a symlinked fixture root, even to a byte-identical tree outside the repository", async () => {
+    const root = await fixtureCopy();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "icarus-gate2-outside-"));
+    temporaryRoots.push(outside);
+    const fixture = path.join(root, "fixtures/evals/repos/basic");
+    const moved = path.join(outside, "basic");
+    await rename(fixture, moved);
+    await symlink(moved, fixture);
+    await expect(
+      loadGate2BenchmarkContract(path.join(root, manifestV3Relative), root),
+    ).rejects.toThrow("repository basic: fixtures/evals/repos/basic passes through a symlink");
+  });
+
+  it("refuses a hard-linked fixture file with the right bytes and the right name", async () => {
+    const root = await fixtureCopy();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "icarus-gate2-outside-"));
+    temporaryRoots.push(outside);
+    await link(
+      path.join(root, "fixtures/evals/repos/basic/src/greeting.txt"),
+      path.join(outside, "greeting.txt"),
+    );
+    await expect(
+      loadGate2BenchmarkContract(path.join(root, manifestV3Relative), root),
+    ).rejects.toThrow("repository basic: src/greeting.txt is hard-linked");
+  });
+});
