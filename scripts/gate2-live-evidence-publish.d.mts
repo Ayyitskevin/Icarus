@@ -19,3 +19,12 @@ export function verifyGate2PublishedEvidenceSet(repositoryRoot?: string): Promis
   v2: Awaited<ReturnType<typeof verifyGate2PublishedEvidence>>;
   reasoningSuppressed: Awaited<ReturnType<typeof verifyGate2PublishedEvidence>>;
 }>;
+/**
+ * True when a record's bytes match the record contract its published set declares.
+ * A contract without `everyRecordReasoningChars` makes no claim about reasoning size and
+ * nothing is compared against it; the other members bind either way.
+ */
+export function recordContractBound(
+  record: unknown,
+  config: { recordContract?: Record<string, unknown> },
+): boolean;

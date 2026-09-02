@@ -243,15 +243,20 @@ function routingPolicyBound(record, config) {
  * saying how an absent `thinking` member was encoded is falsifiable rather than prose.
  * Configs without a declared contract are unaffected.
  */
-function recordContractBound(record, config) {
+export function recordContractBound(record, config) {
   const contract = config.recordContract;
   if (contract === undefined) return true;
-  return (
-    "requestedThink" in record === contract.requestedThinkMemberPresent &&
-    record.reasoningChars === contract.everyRecordReasoningChars &&
-    typeof record.generatedAt === "string" &&
-    record.generatedAt.startsWith(`${contract.writtenOn}T`)
-  );
+  if (record === null || typeof record !== "object" || Array.isArray(record)) return false;
+  if ("requestedThink" in record !== contract.requestedThinkMemberPresent) return false;
+  if (typeof record.generatedAt !== "string") return false;
+  if (!record.generatedAt.startsWith(`${contract.writtenOn}T`)) return false;
+  // `everyRecordReasoningChars` is a claim only when every record in the set reported the
+  // same value; the freezer omits the member when they differ, which is the ordinary case
+  // for a reasoning-enabled arm. An absent member is NO CLAIM, so nothing is compared
+  // against it. Requiring it regardless compared every record against `undefined` and
+  // refused the whole set -- precisely the sets the member was omitted from.
+  if (!("everyRecordReasoningChars" in contract)) return true;
+  return record.reasoningChars === contract.everyRecordReasoningChars;
 }
 
 function selectBoundModel(config, mode, benchmarkClass) {
