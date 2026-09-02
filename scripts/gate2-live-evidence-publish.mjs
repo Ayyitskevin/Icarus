@@ -11,14 +11,7 @@ import {
   computeGate2ExecutionProfileDigest,
   validateGate2BenchmarkResult,
 } from "./gate2-benchmark-result-contract.mjs";
-import {
-  GATE2_LIVE_CANDIDATE_CONTRACT_REVISION,
-  isGate2ProviderOutputComplete,
-} from "./gate2-live-candidate-contract.mjs";
-import {
-  GATE2_LIVE_ROUTING_POLICY,
-  GATE2_LIVE_ROUTING_POLICY_SHA256,
-} from "./gate2-live-routing-policy.mjs";
+import { isGate2ProviderOutputComplete } from "./gate2-live-candidate-contract.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(scriptPath), "..");
@@ -49,7 +42,15 @@ const LEGACY_V1_ROUTING_POLICY = Object.freeze({
     overrides: Object.freeze({ security_review: "code-fast" }),
   }),
 });
-const REASONING_SUPPRESSED_ROUTING_POLICY = Object.freeze({
+/**
+ * The routing policy both r7-era published sets recorded, frozen here rather than imported:
+ * every one of the 120 case records under
+ * `docs/evals/artifacts/gate2-local-vulcan-target-discovery-r7-20260828` and
+ * `docs/evals/artifacts/gate2-reasoning-suppressed-20260901`, and both artifact manifests,
+ * carry `routingPolicySha256` `01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a`,
+ * which is this object's digest. Bound by test against those bytes.
+ */
+const PUBLISHED_ROUTING_POLICY_R7 = Object.freeze({
   schemaVersion: 1,
   baseline: Object.freeze({ defaultModelId: "code-fast", overrides: Object.freeze({}) }),
   routed: Object.freeze({ defaultModelId: "code", overrides: Object.freeze({}) }),
@@ -67,7 +68,12 @@ const LIVE_EVIDENCE_CONFIGS = Object.freeze({
   v2: Object.freeze({
     profileFile: "live-profile.v2.json",
     localDirectory: ".local/gate2-live-v2",
-    candidateContractRevision: GATE2_LIVE_CANDIDATE_CONTRACT_REVISION,
+    // Pinned BY VALUE, read from the committed bytes rather than from today's code: all
+    // 60 records under `docs/evals/artifacts/gate2-local-vulcan-target-discovery-r7-20260828`
+    // carry `candidateContractRevision: 5`. A bump to the live constant must not invalidate
+    // evidence the bump never touched -- the fragility this file's own instruction-policy
+    // comment already condemns, one config over (issue #81).
+    candidateContractRevision: 5,
     evidenceRecordRevision: 4,
     // Pinned by VALUE, not by reference to the live constant. This set was published
     // under instruction-policy revision 8; binding its validation to whatever the
@@ -75,8 +81,8 @@ const LIVE_EVIDENCE_CONFIGS = Object.freeze({
     // unchanged, which is not a binding at all. ADR 0070's revision 9 is what exposed
     // it: bumping the policy invalidated evidence the policy had never touched.
     instructionPolicySha256: "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
-    routingPolicy: GATE2_LIVE_ROUTING_POLICY,
-    routingPolicySha256: GATE2_LIVE_ROUTING_POLICY_SHA256,
+    routingPolicy: PUBLISHED_ROUTING_POLICY_R7,
+    routingPolicySha256: sha256(stableJson(PUBLISHED_ROUTING_POLICY_R7)),
   }),
   // ADR 0070's frozen 2026-09-01 set. It shares v2's execution profile, so it cannot be
   // addressed by `profileId`, and it was published by hand with a per-file digest
@@ -94,8 +100,8 @@ const LIVE_EVIDENCE_CONFIGS = Object.freeze({
     candidateContractRevision: 5,
     evidenceRecordRevision: 5,
     instructionPolicySha256: "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
-    routingPolicy: REASONING_SUPPRESSED_ROUTING_POLICY,
-    routingPolicySha256: sha256(stableJson(REASONING_SUPPRESSED_ROUTING_POLICY)),
+    routingPolicy: PUBLISHED_ROUTING_POLICY_R7,
+    routingPolicySha256: sha256(stableJson(PUBLISHED_ROUTING_POLICY_R7)),
     // What the bytes encode, asserted rather than only written down beside them. This
     // set predates `requestedThink` and mapped an ABSENT provider `thinking` member to
     // 0, so a zero here means "no thinking member surfaced under a think:false request"
@@ -109,6 +115,11 @@ const LIVE_EVIDENCE_CONFIGS = Object.freeze({
     }),
   }),
 });
+/**
+ * Exported so a test can assert each published set's pins against its own committed bytes.
+ * Frozen; a caller reads it and never uses it to publish.
+ */
+export const GATE2_PUBLISHED_EVIDENCE_CONFIGS = LIVE_EVIDENCE_CONFIGS;
 const DEFAULT_PROFILE_VERSION = "v2";
 const EXPECTED_LOCAL_PROVIDER = Object.freeze({
   id: "local-ollama",
