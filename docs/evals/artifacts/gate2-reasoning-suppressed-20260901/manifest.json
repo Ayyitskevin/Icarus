@@ -327,6 +327,13 @@
   ],
   "instructionPolicyRevision": 9,
   "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
-  "note": "Frozen so the evaluation's figures recompute from the repository rather than from mutable node-local state. Hashes are taken AFTER formatting has settled: an earlier manifest was generated before `pnpm format` reflowed these files, so 30 of 64 entries were wrong and the integrity layer asserted something untrue. The manifest excludes itself, since a file cannot contain its own digest.",
-  "schema": "icarus.gate2-frozen-evidence.v1"
+  "note": "Frozen so the evaluation's figures recompute from the repository rather than from mutable node-local state. Hashes are taken AFTER formatting has settled: an earlier manifest was generated before `pnpm format` reflowed these files, so 30 of 64 entries were wrong and the integrity layer asserted something untrue. The manifest excludes itself, since a file cannot contain its own digest. Schema v2 adds `recordContract`: this set was written under evidence record revision 5, which had no `requestedThink` member and mapped an ABSENT provider `thinking` member to 0. Every `reasoningChars: 0` here therefore means \"no thinking member surfaced under a request that sent think:false\", never \"a measured zero\". Revision 6 requires `requestedThink` and records that same absence as null, so a zero in a revision-6 record is the opposite reading: a reasoning size the provider actually reported. Read across revisions accordingly. Adding a required member is why the schema string moved: one version over two shapes is the defect this evidence campaign exists to remove.",
+  "recordContract": {
+    "absentThinkingEncodedAs": 0,
+    "everyRecordReasoningChars": 0,
+    "evidenceRecordRevision": 5,
+    "requestedThinkMemberPresent": false,
+    "writtenOn": "2026-09-01"
+  },
+  "schema": "icarus.gate2-frozen-evidence.v2"
 }

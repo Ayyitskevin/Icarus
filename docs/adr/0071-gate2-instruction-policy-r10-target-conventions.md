@@ -53,9 +53,29 @@ Instruction-policy revision 10, digest-bound like every revision before it:
    expected in one of those cases and surplus in another, so the convention is minimality,
    not a blanket exclusion of documentation.
 
-Every rule is a **convention**, never an answer. The existing security test forbids
-path-shaped fragments in the assembled instructions and now covers the two new classes, so
-a rule that named a file would fail the suite.
+Every rule is a **convention**, never an answer. Two mechanisms hold that line, and the
+sentence claims exactly what they enforce:
+
+- The security test forbids twelve path-shaped fragments (`src/`, `tests/`, `.py`, …) in
+  the assembled instructions of every class.
+- The same test derives the stem of every expected changed, cited, and context path from
+  `fixtures/evals/gate2/manifest.v2.json` and refuses any class's instructions that contain
+  one as a word. The answer contract's own member names (`files`, `citations`, …) are
+  exempt, derived from the policy's answer-shape examples, because they are identical for
+  every case and can carry no answer; a hyphenated identifier such as a finding ID counts
+  as one word. Review of this revision planted "a new module named money" and the gate
+  stayed green; this check fails on that plant, and it failed on the first draft of these
+  rules for the word "verify", which is also the stem of `checks/verify.py`.
+
+Neither mechanism catches a rule that names an answer by paraphrase. That line is held by
+authorship, under one rule a future author has to meet: **a class rule must hold for more
+than one case, or be recorded here as steering.** Today's record: `repair` rule 1
+(prove-or-confirm with a correct implementation) and `refactor` rule 2 (an entry-point move)
+each cover exactly one manifest case; `refactor` rule 3 (projection into an offline
+contract) maps one-to-one onto `refactor-schema-task-view` but is task-conditioned — the
+task says not to change the table, and the repair case that asks to change the snapshot
+expects the opposite set. None of the three names a stem. A revision that adds cases should
+re-examine them.
 
 ## What this does not claim
 

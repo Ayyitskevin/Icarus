@@ -46,7 +46,7 @@ export const GATE2_LIVE_INSTRUCTION_POLICY = Object.freeze({
       "Preserve every word of the task's domain subject in any new module name, and keep the repository's established naming style rather than inventing a parallel one.",
     ]),
     repair: Object.freeze([
-      "When the task asks to prove, demonstrate, or verify a property and the implementation already satisfies it, the deliverable is the check that proves it; the implementation is not a target.",
+      "When the task asks to prove, demonstrate, or confirm a property and the implementation already satisfies it, the deliverable is the check that proves it; the implementation is not a target.",
       "When a behavior change is the repair, the existing check that covers that behavior is part of the target set alongside the implementation, so the fix is proven rather than asserted.",
     ]),
     scaffold: Object.freeze([

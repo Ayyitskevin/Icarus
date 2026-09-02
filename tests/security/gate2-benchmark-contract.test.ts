@@ -238,3 +238,22 @@ describe("Gate 2 benchmark manifest contract", () => {
     );
   });
 });
+
+describe("Gate 2 strict-JSON shape vocabulary, edge cases from review", () => {
+  it("classifies a truncated answer the same with or without a leading byte-order mark", () => {
+    // `trim` strips U+FEFF; parsing the untrimmed source reported position 0 and lost
+    // the one distinction the classifier exists to make.
+    expect(describeNonStrictGate2Json('{"a": 1')).toBe("truncated");
+    expect(describeNonStrictGate2Json('﻿{"a": 1')).toBe("truncated");
+  });
+
+  it("reports not_text through the parser, shaped like every other refusal", () => {
+    expect(() => parseStrictGate2Json(null as unknown as string)).toThrow(
+      /manifest must be strict JSON \(not_text\)$/,
+    );
+  });
+
+  it("names one shape, first match first: fenced beats truncated", () => {
+    expect(describeNonStrictGate2Json('```json\n{"a":')).toBe("markdown_fenced");
+  });
+});

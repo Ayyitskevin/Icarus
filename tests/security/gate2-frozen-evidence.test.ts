@@ -199,3 +199,23 @@ describe("Gate 2 frozen evidence record contract", () => {
     );
   });
 });
+
+describe("Gate 2 frozen evidence on the committed bytes", () => {
+  it("accepts the repository's frozen 2026-09-01 set, the only bytes the verifier exists for", async () => {
+    // Every other test here points at a temp fixture. This one points at the real set, so
+    // a verifier that refuses the repository's own evidence cannot ship green again.
+    const repositoryRoot = decodeURIComponent(new URL("../../", import.meta.url).pathname);
+    const committed = path.join(
+      repositoryRoot,
+      "docs/evals/artifacts/gate2-reasoning-suppressed-20260901",
+    );
+    expect(await verifyFrozenEvidence(committed)).toEqual([]);
+    expect(await deriveRecordContract(committed)).toEqual({
+      evidenceRecordRevision: 5,
+      requestedThinkMemberPresent: false,
+      absentThinkingEncodedAs: 0,
+      writtenOn: "2026-09-01",
+      everyRecordReasoningChars: 0,
+    });
+  });
+});

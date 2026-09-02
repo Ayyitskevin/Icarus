@@ -831,26 +831,34 @@ const STRICT_JSON_DEFAULT_MESSAGE = "manifest must be strict JSON";
  * malformed one -- and the diagnosis had to be re-derived by hand.
  */
 export function describeNonStrictGate2Json(source) {
+  // First match wins: a fenced answer that is also truncated reports "markdown_fenced",
+  // because the fence is what the reader sees first and what the model did wrong first.
+  // The vocabulary names one shape, never a set.
   if (typeof source !== "string") return "not_text";
   const trimmed = source.trim();
   if (trimmed.length === 0) return "empty";
   if (/^```/.test(trimmed)) return "markdown_fenced";
   if (!/^[{[]/.test(trimmed)) return "leading_prose";
   try {
-    JSON.parse(source);
+    // Parse the same text the gates above inspected. `trim` strips U+FEFF and the other
+    // Unicode spaces that JSON.parse rejects at position 0, so parsing the untrimmed
+    // source would report a truncated answer with a leading BOM as "other".
+    JSON.parse(trimmed);
     return "other";
   } catch (error) {
     const message = String(error?.message ?? "");
     const position = /position (\d+)/.exec(message);
     // JSON.parse reports the offset it gave up at. Giving up at the end of the input
     // means the structure was never closed: the document is truncated, not malformed.
-    if (position !== null && Number(position[1]) >= source.length) return "truncated";
+    if (position !== null && Number(position[1]) >= trimmed.length) return "truncated";
     return "other";
   }
 }
 
 export function parseStrictGate2Json(source) {
-  if (typeof source !== "string") invalidJson();
+  if (typeof source !== "string") {
+    invalidJson(`${STRICT_JSON_DEFAULT_MESSAGE} (${describeNonStrictGate2Json(source)})`);
+  }
   if (Buffer.byteLength(source, "utf8") > MAX_GATE2_JSON_BYTES) {
     invalidJson("input exceeds the Gate 2 JSON byte limit");
   }
@@ -859,13 +867,14 @@ export function parseStrictGate2Json(source) {
     return JSON.parse(source);
   } catch (error) {
     // The scanner's own messages (depth, duplicate keys, byte limits) are specific and
-    // are kept verbatim. Only the generic refusal gains the shape, so a reader of the
-    // recorded error can tell an empty answer from a fenced one from a truncated one.
+    // are kept verbatim. Only two refusals gain the shape: the scanner's generic one and
+    // JSON.parse's own SyntaxError. Anything else -- a RangeError, a fault inside the
+    // scanner -- is a defect, not a data shape, and is rethrown as itself.
     const message = String(error?.message ?? "");
-    if (
-      message.endsWith(STRICT_JSON_DEFAULT_MESSAGE) ||
-      !message.includes("Gate 2 benchmark contract")
-    ) {
+    const genericContractRefusal =
+      message.startsWith("Gate 2 benchmark contract") &&
+      message.endsWith(STRICT_JSON_DEFAULT_MESSAGE);
+    if (genericContractRefusal || error instanceof SyntaxError) {
       invalidJson(`${STRICT_JSON_DEFAULT_MESSAGE} (${describeNonStrictGate2Json(source)})`);
     }
     throw error;
