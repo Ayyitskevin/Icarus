@@ -188,7 +188,8 @@ still fail, and the pair comparison fails on cost reduction (0.14 against 0.3). 
 this does not claim*, this is a new measurement under a changed instrument, not a
 before-and-after against 12/30. The leak guard that holds this policy's boundary went
 through fourteen adversarial rounds before it landed (PR #83); the policy digest did not
-move during any of them.
+move during any of those rounds — it moved once, at the start of #83, when the guard forced
+the rewording recorded above.
 
 ## Consequences
 

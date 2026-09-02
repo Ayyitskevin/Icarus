@@ -31,7 +31,7 @@ mechanically. What does the same benchmark measure under it?
 | execution profile | `03399661d250…` |
 | benchmark manifest | `fixtures/evals/gate2/manifest.v2.json` (`0eca6348be78…`), 30 cases, 5 classes |
 | freezer | schema `icarus.gate2-frozen-evidence.v2`, 64 files, manifest hashed after formatting, `recordContract` derived from the records |
-| record contract | revision 6 · `requestedThink` present in every record · absent thinking encoded as `null` · written 2026-09-02 · no single `reasoningChars` value across the set (every record reports `null`) |
+| record contract | revision 6 · `requestedThink` present in every record · absent thinking encoded as `null` · written 2026-09-02 · `everyRecordReasoningChars: null` (every record reports `null`) |
 | wall clock | baseline arm 17:21:47–17:24:24 EDT; routed arm –17:31:37; freeze and verify 17:31:38 |
 
 ## What this is not
@@ -66,7 +66,7 @@ from the frozen result files the manifest covers.
 | macro retrieval precision | 0.8083 | 0.8083 |
 | digest provenance coverage | 1 | 1 |
 | incorrect edits | 0 | 0 |
-| median estimated cost per success (USD) | 0.001029 | 0.000885 |
+| median estimated cost per success (USD) | 0.001029 | 0.000884916 |
 | thresholds passed (recorded) | false | false |
 
 | pair | value | required |
@@ -103,9 +103,14 @@ Unparseable, by the shape the record itself names:
 | routed | `markdown_fenced` ×1 (`repair-public-path-containment`), `truncated` ×1 (`scaffold-greeting-command`, 450 characters, `finishReason: stop`) |
 
 The routed arm's thirteen failures: 6 plan rejections, 2 unparseable, 5 executed-and-failed.
-The two classes that were 0/5 under revision 9 split: **refactor** went to 4/5 under the new
-class rules; **scaffold** stayed at 0/5, with one truncated answer and four cases whose
-failures are the next diagnosis, not this record's claim.
+The two classes that were 0/5 under revision 9 split: **refactor** measured 4/5 and
+**scaffold** stayed at 0/5, with one truncated answer and four cases whose failures are the
+next diagnosis, not this record's claim. The refactor figure is not a capability claim:
+three of the four passing cases (`refactor-name-normalization`, `refactor-lantern-config-loader`,
+`refactor-schema-task-view`) are covered by rules ADR 0071 records as holding for exactly one
+case, and the fourth (`refactor-parser-token-table`) passed with no new rule firing — which is
+the re-examination ADR 0071's authoring rule calls for when cases are added, not evidence
+that the conventions generalise.
 
 ## Decision items
 
@@ -137,9 +142,9 @@ node scripts/gate2-frozen-evidence-figures.mjs --set docs/evals/artifacts/gate2-
 
 The freeze ran on mickey immediately after the routed arm (`.local/gate2-run.log`:
 `FREEZE_EXIT=0`, `VERIFY_EXIT=0`, `FRESH_CHECK records=60 reassessed=0`), and the set was
-verified again on flow before this record was written. Reviewed before merge by the Codex
-seat (figures against bytes) and the Opus seat (record against its skeleton and the three
-documents below).
+verified again on flow before this record was written. Review before merge: the Codex seat
+checks every figure against the bytes, and the Opus seat checks the record against its
+skeleton and the three documents below; their verdicts are on PR #101.
 
 ## Documents this result updates
 
