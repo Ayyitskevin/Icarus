@@ -11,7 +11,7 @@ const FINDING_TAXONOMY = Object.freeze({
     "code consumes configuration fields across a trust boundary without validating their required types or shape",
 });
 
-export const GATE2_LIVE_INSTRUCTION_POLICY = Object.freeze({
+const POLICY_SOURCE = Object.freeze({
   schemaVersion: 1,
   revision: GATE2_LIVE_INSTRUCTION_POLICY_REVISION,
   // ADR 0070: `think: false` makes maxTokens mean what this policy says it means.
@@ -70,6 +70,128 @@ export const GATE2_LIVE_INSTRUCTION_POLICY = Object.freeze({
   findingTaxonomy: FINDING_TAXONOMY,
 });
 
+/**
+ * The benchmark classes the policy is written for and the answer kind each one produces;
+ * bound to the manifest by test. The assembler refuses any other class or pair, so the
+ * taxonomy line reaches only the read-only classes the leak scan checks it against.
+ */
+export const GATE2_LIVE_BENCHMARK_CLASS_KINDS = Object.freeze({
+  explanation: "read_only",
+  refactor: "mutation",
+  repair: "mutation",
+  scaffold: "mutation",
+  security_review: "read_only",
+});
+export const GATE2_LIVE_BENCHMARK_CLASSES = Object.freeze(
+  Object.keys(GATE2_LIVE_BENCHMARK_CLASS_KINDS),
+);
+const POLICY_MEMBERS = new Set([
+  "schemaVersion",
+  "revision",
+  "generation",
+  "common",
+  "mutation",
+  "readOnly",
+  "classRules",
+  "templates",
+  "findingTaxonomy",
+]);
+const TEMPLATE_MEMBERS = ["schemaVersion", "selectedContextPaths", "plan", "answer"];
+
+function deepFreeze(value) {
+  if (value !== null && typeof value === "object") {
+    Object.freeze(value);
+    for (const member of Object.values(value)) deepFreeze(member);
+  }
+  return value;
+}
+
+function invalidPolicy(message) {
+  throw new Error(`Gate 2 live instruction policy is invalid: ${message}`);
+}
+
+function assertStringArray(value, where) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || item === "")) {
+    invalidPolicy(`${where} must be an array of non-empty strings`);
+  }
+}
+
+/**
+ * Turns a policy source into the plain data the digest, the leak scan, and the assembler
+ * all read. A JSON round-trip evaluates every accessor exactly once, here, and drops
+ * Symbol keys, functions, and anything that is not JSON; the shape is then asserted --
+ * string arrays, templates that are strings parsing to the required object, string
+ * taxonomy definitions, class-rule keys among the benchmark classes -- and the result is
+ * deep-frozen. A review planted a getter that returned the recorded rule on its first read
+ * and an answer on its second, so the digest matched while the model saw the answer; and a
+ * one-element array as a template, which coerced to an expected stem where the template is
+ * interpolated. Neither survives this function: what is hashed is what is assembled.
+ */
+export function snapshotGate2LivePolicy(source) {
+  const policy = JSON.parse(JSON.stringify(source));
+  if (policy === null || typeof policy !== "object" || Array.isArray(policy)) {
+    invalidPolicy("policy must be an object");
+  }
+  for (const member of Object.keys(policy)) {
+    if (!POLICY_MEMBERS.has(member)) invalidPolicy(`unknown member ${member}`);
+  }
+  if (policy.schemaVersion !== 1) invalidPolicy("schemaVersion must be 1");
+  if (!Number.isSafeInteger(policy.revision)) invalidPolicy("revision must be an integer");
+  const generation = policy.generation;
+  if (
+    generation === null ||
+    typeof generation !== "object" ||
+    typeof generation.temperature !== "number" ||
+    typeof generation.maxTokens !== "number" ||
+    typeof generation.think !== "boolean"
+  ) {
+    invalidPolicy("generation must carry temperature, maxTokens, and think");
+  }
+  for (const member of ["common", "mutation", "readOnly"])
+    assertStringArray(policy[member], member);
+  if (policy.classRules === null || typeof policy.classRules !== "object") {
+    invalidPolicy("classRules must be an object");
+  }
+  for (const [benchmarkClass, rules] of Object.entries(policy.classRules)) {
+    if (!Object.hasOwn(GATE2_LIVE_BENCHMARK_CLASS_KINDS, benchmarkClass)) {
+      invalidPolicy(`classRules.${benchmarkClass} is not a benchmark class`);
+    }
+    assertStringArray(rules, `classRules.${benchmarkClass}`);
+  }
+  if (policy.templates === null || typeof policy.templates !== "object") {
+    invalidPolicy("templates must be an object");
+  }
+  for (const kind of ["mutation", "readOnly"]) {
+    const template = policy.templates[kind];
+    if (typeof template !== "string") invalidPolicy(`templates.${kind} must be a string`);
+    let parsed;
+    try {
+      parsed = JSON.parse(template);
+    } catch {
+      invalidPolicy(`templates.${kind} must be JSON`);
+    }
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      TEMPLATE_MEMBERS.some((member) => !Object.hasOwn(parsed, member))
+    ) {
+      invalidPolicy(`templates.${kind} must be an object with ${TEMPLATE_MEMBERS.join(", ")}`);
+    }
+  }
+  if (policy.findingTaxonomy === null || typeof policy.findingTaxonomy !== "object") {
+    invalidPolicy("findingTaxonomy must be an object");
+  }
+  for (const [id, definition] of Object.entries(policy.findingTaxonomy)) {
+    if (id === "" || typeof definition !== "string" || definition === "") {
+      invalidPolicy(`findingTaxonomy.${id} must be a non-empty string`);
+    }
+  }
+  return deepFreeze(policy);
+}
+
+export const GATE2_LIVE_INSTRUCTION_POLICY = snapshotGate2LivePolicy(POLICY_SOURCE);
+
 function stableJson(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -83,15 +205,6 @@ export const GATE2_LIVE_INSTRUCTION_POLICY_SHA256 = createHash("sha256")
   .update(stableJson(GATE2_LIVE_INSTRUCTION_POLICY))
   .digest("hex");
 
-/** The benchmark classes the policy is written for; bound to the manifest's classes by test. */
-export const GATE2_LIVE_BENCHMARK_CLASSES = Object.freeze([
-  "explanation",
-  "refactor",
-  "repair",
-  "scaffold",
-  "security_review",
-]);
-
 /**
  * Assembles the instructions for one class and answer kind from a policy object. Pure, so
  * a test can hand it a policy with an inherited or unknown class rule and prove neither
@@ -101,11 +214,14 @@ export const GATE2_LIVE_BENCHMARK_CLASSES = Object.freeze([
  * GATE2_LIVE_BENCHMARK_CLASSES is refused rather than echoed into the class/kind line.
  */
 export function assembleGate2LiveInstructions(policy, benchmarkClass, expectedKind) {
-  if (!GATE2_LIVE_BENCHMARK_CLASSES.includes(benchmarkClass)) {
+  if (!Object.hasOwn(GATE2_LIVE_BENCHMARK_CLASS_KINDS, benchmarkClass)) {
     throw new Error("Gate 2 live benchmark class is invalid");
   }
   if (expectedKind !== "mutation" && expectedKind !== "read_only") {
     throw new Error("Gate 2 live expected kind is invalid");
+  }
+  if (GATE2_LIVE_BENCHMARK_CLASS_KINDS[benchmarkClass] !== expectedKind) {
+    throw new Error("Gate 2 live benchmark class and kind do not match");
   }
   const kindInstructions = expectedKind === "mutation" ? policy.mutation : policy.readOnly;
   const classRules = Object.hasOwn(policy.classRules, benchmarkClass)

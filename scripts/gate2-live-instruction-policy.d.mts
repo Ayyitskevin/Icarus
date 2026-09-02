@@ -4,8 +4,15 @@ export const GATE2_LIVE_INSTRUCTION_POLICY: Readonly<{
 }> &
   Readonly<Record<string, unknown>>;
 export const GATE2_LIVE_INSTRUCTION_POLICY_SHA256: string;
+/** Benchmark class → answer kind; bound to the manifest by test. The assembler refuses other pairs. */
+export const GATE2_LIVE_BENCHMARK_CLASS_KINDS: Readonly<Record<string, "mutation" | "read_only">>;
 /** The benchmark classes the policy is written for; bound to the manifest's classes by test. */
 export const GATE2_LIVE_BENCHMARK_CLASSES: readonly string[];
+/**
+ * Turns a policy source into the plain data the digest, the leak scan, and the assembler read:
+ * JSON round-trip (accessors evaluated once, non-JSON dropped), shape asserted, deep-frozen.
+ */
+export function snapshotGate2LivePolicy(source: unknown): typeof GATE2_LIVE_INSTRUCTION_POLICY;
 /** Pure assembly from a policy object; reads class rules as own properties only. */
 export function assembleGate2LiveInstructions(
   policy: typeof GATE2_LIVE_INSTRUCTION_POLICY,

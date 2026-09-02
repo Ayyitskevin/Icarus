@@ -87,6 +87,20 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   properties only, after a fifth review planted a rule on the `classRules` prototype that
   reached the model while the scan, the digest, and the structural check — all own-key
   walks — stayed unchanged. That plant is now a regression test.
+- The policy the model sees is **plain data by construction**. The module snapshots its
+  source through a JSON round-trip at load — every accessor is evaluated exactly once,
+  there; Symbol keys, functions, and non-JSON values do not survive — asserts the shape
+  (string arrays; templates that are strings parsing to the required object; string
+  taxonomy definitions; class-rule keys among the benchmark classes) and deep-freezes the
+  result. The digest, the scan, and the assembler all read that one snapshot, so what is
+  hashed is what is assembled. A sixth review planted a getter that returned the recorded
+  rule on its first read and an answer on its second, and a one-element array as a
+  template that coerced to an expected stem; both are regression tests now. Each class is
+  bound to one answer kind, matched against the manifest, and the assembler refuses any
+  other pair, so the taxonomy line reaches only the read-only classes the scan checks it
+  against. What this does not cover, and says so: a policy module that is itself
+  adversarial code replacing the snapshot — that is held by review of the module, not by
+  this test.
 
 Neither mechanism catches a rule that names an answer by paraphrase. That line is held by
 authorship, under one rule a future author has to meet: **a class rule must hold for more

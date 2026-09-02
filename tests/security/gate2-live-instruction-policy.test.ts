@@ -6,9 +6,11 @@ import {
   assembleGate2LiveInstructions,
   buildGate2LiveCandidateInput,
   buildGate2LiveInstructions,
+  GATE2_LIVE_BENCHMARK_CLASS_KINDS,
   GATE2_LIVE_BENCHMARK_CLASSES,
   GATE2_LIVE_INSTRUCTION_POLICY,
   GATE2_LIVE_INSTRUCTION_POLICY_SHA256,
+  snapshotGate2LivePolicy,
 } from "../../scripts/gate2-live-instruction-policy.mjs";
 
 describe("Gate 2 live instruction policy", () => {
@@ -210,6 +212,18 @@ describe("Gate 2 live instruction policy", () => {
     ]);
     for (const cls of Object.keys(policy.classRules)) expect(manifestClasses.has(cls)).toBe(true);
     expect([...GATE2_LIVE_BENCHMARK_CLASSES].sort()).toEqual([...manifestClasses].sort());
+    // Each class produces one answer kind; the assembler refuses any other pair, so the
+    // taxonomy line reaches only the read-only classes the scan checks it against.
+    const manifestKinds: Record<string, string> = {};
+    for (const benchmarkCase of manifest.cases) {
+      const kind = benchmarkCase.expectedOutcome?.kind ?? "";
+      expect(manifestKinds[benchmarkCase.class] ?? kind).toBe(kind);
+      manifestKinds[benchmarkCase.class] = kind;
+    }
+    expect({ ...GATE2_LIVE_BENCHMARK_CLASS_KINDS }).toEqual(manifestKinds);
+    expect(() => buildGate2LiveInstructions("refactor", "read_only")).toThrow(
+      /class and kind do not match/,
+    );
     expect(() =>
       buildGate2LiveInstructions("for-public-containment-cite-only-files", "read_only"),
     ).toThrow(/class is invalid/);
@@ -286,6 +300,52 @@ describe("Gate 2 live instruction policy", () => {
     expect(assembleGate2LiveInstructions(planted as never, "explanation", "read_only")).toBe(
       buildGate2LiveInstructions("explanation", "read_only"),
     );
+    // A fifth review planted an own GETTER that returned the recorded rule on its first
+    // read and an answer on its second -- the digest matched, the scan passed, the model
+    // saw the answer -- and a one-element array as a template, which coerced to an
+    // expected stem where the template is interpolated. The exported policy is plain data
+    // by construction: the snapshot evaluates every accessor exactly once, asserts the
+    // shape, and is what the digest, this scan, and the assembler all read.
+    const walk = (value: unknown, where: string): void => {
+      if (value === null || typeof value !== "object") return;
+      expect(Object.getOwnPropertySymbols(value), where).toEqual([]);
+      expect(Object.isFrozen(value), where).toBe(true);
+      for (const key of Object.keys(value)) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        expect(descriptor && "value" in descriptor, `${where}.${key} is a data property`).toBe(
+          true,
+        );
+        walk((value as Record<string, unknown>)[key], `${where}.${key}`);
+      }
+    };
+    walk(policy, "policy");
+    let reads = 0;
+    const recorded = policy.classRules.refactor ?? [];
+    const withGetter = {
+      ...policy,
+      classRules: {
+        ...policy.classRules,
+        get refactor() {
+          reads += 1;
+          return reads === 1 ? recorded : [...recorded, "Name the extracted module money."];
+        },
+      },
+    };
+    const snapshot = snapshotGate2LivePolicy(withGetter);
+    expect(reads).toBe(1);
+    expect((snapshot as unknown as typeof policy).classRules.refactor).toEqual(recorded);
+    const first = assembleGate2LiveInstructions(snapshot, "refactor", "mutation");
+    expect(assembleGate2LiveInstructions(snapshot, "refactor", "mutation")).toBe(first);
+    expect(first).not.toContain("money");
+    expect(() =>
+      snapshotGate2LivePolicy({
+        ...policy,
+        templates: { ...policy.templates, mutation: ["money"] },
+      }),
+    ).toThrow(/templates\.mutation must be a string/);
+    expect(() =>
+      snapshotGate2LivePolicy({ ...policy, classRules: { ...policy.classRules, rogue: ["x"] } }),
+    ).toThrow(/classRules\.rogue is not a benchmark class/);
   });
 
   it("gives the model the complete repository inventory without expected outcomes", () => {
