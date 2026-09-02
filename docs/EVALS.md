@@ -455,10 +455,19 @@ freezer, fixed `code-fast` measured 3/30 with acceptance `0.2` and routed `code`
 evidence frozen at `evals/artifacts/gate2-r10-20260902/`). Policy text, writer, and freezer
 all changed, so this is a new measurement rather than a controlled comparison with revision
 9; the revision-9 figures remain valid records of what was measured then.
+Superseded as the current measurement 2026-09-02 (evening): under manifest v3 (ADR 0073 —
+three successor cases whose task text entails the expected target set; policy revision 10
+unchanged), two predeclared runs each measured fixed `code-fast` 3/30 with acceptance `0.2`
+and routed `code` 19/30 with acceptance `0.8333`
+([evaluation](evals/2026-09-02-gate2-manifest-v3-two-runs.md), evidence frozen at
+`evals/artifacts/gate2-r10v3-run1-20260902/` and `…-run2-20260902/`). The acceptance
+threshold is met on this instrument; the success threshold and the pair's cost-reduction
+threshold are not. Three cases changed identity, so this is a new measurement and never a
+delta against 17/30; the two runs agree exactly because decoding is pinned at temperature 0.
 Routed class success under revision 8 was repair 7/10, refactor 4/5, explanation 3/5,
 security review 2/5, and scaffold 0/5; under revision 9 it was repair 7/10, refactor 0/5,
 explanation 3/5, security review 2/5, and scaffold 0/5; under revision 10 it is repair
-7/10, refactor 4/5, explanation 3/5, security review 3/5, and scaffold 0/5. Both revision-8 arms retained macro recall `0.9917`, precision
+7/10, refactor 4/5, explanation 3/5, security review 3/5, and scaffold 0/5; under manifest v3 (revision 10 unchanged, both runs) it is repair 7/10, refactor 5/5, explanation 3/5, security review 3/5, and scaffold 1/5. Both revision-8 arms retained macro recall `0.9917`, precision
 `0.8083`, provenance `1.0`, and zero incorrect edits. The routed run improved
 the success count and lowered median estimated proxy cost per success by
 `0.554217121588`, but it still missed the predeclared 24/30 and 0.80 absolute
@@ -476,6 +485,8 @@ artifact-size proxy, not billed USD; all actual billed cost fields remain null.
 These unkeyed records establish reviewable self-consistency, not runner
 authentication, multi-seed generalization, new runtime authority, or Gate 2
 completion. The current dated record is
+[`docs/evals/2026-09-02-gate2-manifest-v3-two-runs.md`](evals/2026-09-02-gate2-manifest-v3-two-runs.md);
+the revision-10-on-v2 record
 [`docs/evals/2026-09-02-gate2-revision-10.md`](evals/2026-09-02-gate2-revision-10.md);
 the revision-8 record
 [`docs/evals/2026-08-28-gate2-target-discovery-profile.md`](evals/2026-08-28-gate2-target-discovery-profile.md)

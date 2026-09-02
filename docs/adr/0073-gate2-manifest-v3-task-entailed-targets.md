@@ -109,6 +109,17 @@ Mechanism, so that a fourth revision is a registration and not a rewrite:
   it — under rule 2 a model keeps "mode", and with no existing check to imitate the `test_`
   prefix had no anchor. The task now names `test_json_output.py`.
 
+## Outcome (2026-09-02, evening)
+
+Two predeclared paired runs on mickey under revision 10 and v3
+([record](../evals/2026-09-02-gate2-manifest-v3-two-runs.md)): routed 19/30 at first-plan
+acceptance 0.8333 in both, baseline 3/30 in both. `refactor-cart-money-extraction` and
+`scaffold-json-output-mode` passed; `scaffold-parser-cli-check` proposed exactly its expected
+set and failed its check — the benchmark defect is gone and the case measures the model. The
+acceptance threshold is met on this instrument; the success threshold is not. The two runs
+agree because decoding is pinned at temperature 0 (59 of 60 candidates byte-identical), so
+they replicate rather than sample. A new measurement, never a delta against 17/30.
+
 ## Verification
 
     node scripts/gate2-benchmark-contract.mjs
