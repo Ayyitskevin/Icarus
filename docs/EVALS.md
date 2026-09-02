@@ -462,8 +462,12 @@ artifact-size proxy, not billed USD; all actual billed cost fields remain null.
 These unkeyed records establish reviewable self-consistency, not runner
 authentication, multi-seed generalization, new runtime authority, or Gate 2
 completion. The current dated record is
-[`docs/evals/2026-08-28-gate2-target-discovery-profile.md`](evals/2026-08-28-gate2-target-discovery-profile.md);
-the historical first comparison remains
+[`docs/evals/2026-09-02-gate2-revision-10.md`](evals/2026-09-02-gate2-revision-10.md);
+the revision-8 record
+[`docs/evals/2026-08-28-gate2-target-discovery-profile.md`](evals/2026-08-28-gate2-target-discovery-profile.md)
+and the revision-9 record
+[`docs/evals/2026-08-31-gate2-reasoning-suppressed.md`](evals/2026-08-31-gate2-reasoning-suppressed.md)
+are historical, and the historical first comparison remains
 [`docs/evals/2026-08-28-gate2-live-model-comparison.md`](evals/2026-08-28-gate2-live-model-comparison.md).
 
 ## Measures

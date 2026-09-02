@@ -4,7 +4,9 @@
 > `docs/evals/artifacts/gate2-r10-20260902/` by
 > `node scripts/gate2-frozen-evidence-figures.mjs --set docs/evals/artifacts/gate2-r10-20260902`,
 > which first verifies the set's manifest against those bytes and refuses to compute
-> anything otherwise. Nothing below is cited from a log, a terminal, or memory.
+> anything otherwise. Two things below are not in the frozen bytes and are marked as such:
+> the run's wall clock and its exit lines, quoted from mickey's uncommitted
+> `.local/gate2-run.log`. They describe how the run was conducted; no figure rests on them.
 
 ## Question
 
@@ -32,7 +34,7 @@ mechanically. What does the same benchmark measure under it?
 | benchmark manifest | `fixtures/evals/gate2/manifest.v2.json` (`0eca6348be78…`), 30 cases, 5 classes |
 | freezer | schema `icarus.gate2-frozen-evidence.v2`, 64 files, manifest hashed after formatting, `recordContract` derived from the records |
 | record contract | revision 6 · `requestedThink` present in every record · absent thinking encoded as `null` · written 2026-09-02 · `everyRecordReasoningChars: null` (every record reports `null`) |
-| wall clock | baseline arm 17:21:47–17:24:24 EDT; routed arm –17:31:37; freeze and verify 17:31:38 |
+| wall clock (from the run log, not frozen) | baseline arm 17:21:47–17:24:24 EDT; routed arm –17:31:37; freeze and verify 17:31:38 |
 
 ## What this is not
 
@@ -140,9 +142,12 @@ node scripts/gate2-frozen-evidence-figures.mjs --set docs/evals/artifacts/gate2-
 node scripts/gate2-frozen-evidence-figures.mjs --set docs/evals/artifacts/gate2-reasoning-suppressed-20260901
 ```
 
-The freeze ran on mickey immediately after the routed arm (`.local/gate2-run.log`:
-`FREEZE_EXIT=0`, `VERIFY_EXIT=0`, `FRESH_CHECK records=60 reassessed=0`), and the set was
-verified again on flow before this record was written. Review before merge: the Codex seat
+The freeze ran on mickey immediately after the routed arm — its run log, not frozen and not
+verifiable from the repository, recorded `FREEZE_EXIT=0`, `VERIFY_EXIT=0`, and
+`FRESH_CHECK records=60 reassessed=0` — and the frozen set was then verified from the
+committed bytes on flow before this record was written; the freshness claim above
+(`reassessedFromEvidenceSha256: null`, 60 of 60) is recomputed from those bytes, not from
+the log. Review before merge: the Codex seat
 checks every figure against the bytes, and the Opus seat checks the record against its
 skeleton and the three documents below; their verdicts are on PR #101.
 

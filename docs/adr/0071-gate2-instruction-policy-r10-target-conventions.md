@@ -195,9 +195,11 @@ the rewording recorded above.
 
 - The policy SHA moves; every record from a revision-10 run carries it, and published
   revision-8 and revision-9 sets stay pinned by value to the digests that produced them.
-- If the output-boundary rule lands, the baseline arm's score becomes a measurement of the
-  baseline model rather than of its fencing habit. That may change the routed-vs-baseline
-  ratio substantially and should be read as the instrument improving.
+- The output-boundary rule landed, and the measured consequence is smaller than hoped: the
+  baseline arm still fenced 20 of its 27 failures under revision 10 (27 of 28 under
+  revision 9), while the routed arm fenced 1 of 13. The baseline score therefore still
+  measures `code-fast`'s fencing habit as much as its answers; the rule moved the routed
+  arm's shape, not the baseline's.
 - `think: false` remains. The reasoning-in-content case is recorded in ADR 0070 as a
   limitation of suppression; the output-boundary rule is the only mitigation this revision
   attempts.
