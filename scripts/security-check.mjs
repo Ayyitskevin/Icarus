@@ -215,6 +215,10 @@ const gate2InstructionPolicySource = await readFile(
   "scripts/gate2-live-instruction-policy.mjs",
   "utf8",
 );
+const gate2FrozenFiguresSource = await readFile(
+  "scripts/gate2-frozen-evidence-figures.mjs",
+  "utf8",
+);
 const gate2RetrievalManifestSource = await readFile(
   "fixtures/evals/gate2/retrieval-manifest.v1.json",
   "utf8",
@@ -2638,6 +2642,39 @@ const assertions = {
     gate2LiveBenchmarkSource.includes("omittedMatches: retrieval.omittedMatches") &&
     gate2LiveBenchmarkSource.includes("omittedReferences: retrieval.omittedReferences") &&
     gate2LiveBenchmarkSource.includes("excludedFiles: retrieval.excludedFiles"),
+  gate2FrozenEvidenceFiguresRecomputeOfflineFromVerifiedBytes:
+    // A figure nobody recomputes goes stale in place: the 2026-09-01 evaluation carried a
+    // token total that survived a review because nothing derived it a second time, and its
+    // bucket counts existed only in prose. This script derives them from the case records,
+    // and must refuse before reading any figure out of a directory whose manifest is not
+    // true of its bytes -- the freeze exists precisely because one was not.
+    gate2FrozenFiguresSource.includes("await verifyFrozenEvidence(absoluteSet)") &&
+    gate2FrozenFiguresSource.includes("did not verify") &&
+    // Every record and result is bound to the pinned benchmark manifest, so a figure
+    // cannot be assembled from two different runs.
+    gate2FrozenFiguresSource.includes("was measured against a different benchmark manifest") &&
+    // The four buckets are disjoint and must account for every task.
+    gate2FrozenFiguresSource.includes("buckets sum to") &&
+    // The strict-JSON shape is READ from the record's own error text and never recomputed
+    // for that field, so a set frozen before the shape vocabulary existed reads as null
+    // rather than as a shape nobody wrote down.
+    gate2FrozenFiguresSource.includes("function recordedStrictJsonShape(candidateError)") &&
+    gate2FrozenFiguresSource.includes("recordedStrictJsonShape(record.candidateError)") &&
+    // The fallback is pinned, not just the call: without this the function can be made to
+    // derive a shape when the record names none, and every static check above still
+    // passes. Found by mutating exactly that.
+    gate2FrozenFiguresSource.includes("return match === null ? null : match[1];") &&
+    // A recomputed figure that disagrees with the committed result is reported and exits
+    // non-zero rather than being smoothed over by the report that found it.
+    gate2FrozenFiguresSource.includes("agreesWithCommittedResults: disagreements.length === 0") &&
+    gate2FrozenFiguresSource.includes(
+      "if (!figures.agreesWithCommittedResults) process.exitCode",
+    ) &&
+    // Offline and read-only: no process execution, network, credentials, or writes.
+    !/(?:node:child_process|node:http|node:https|fetch\(|api\.github\.com|process\.env\.|credential|deploy)/.test(
+      gate2FrozenFiguresSource,
+    ) &&
+    !/\b(?:writeFile|mkdir|rename|unlink|rm)\(/.test(gate2FrozenFiguresSource),
   gate2RetrievalRunnerUsesPinnedLocalReadOnlyEvidence:
     gate2RetrievalRunnerSource.includes('spawnSync(\n    "/usr/bin/git"') &&
     gate2RetrievalRunnerSource.includes("retrieveReadOnlyContextV3(") &&
