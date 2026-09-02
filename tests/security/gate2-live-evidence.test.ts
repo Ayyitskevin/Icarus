@@ -194,6 +194,28 @@ describe("Gate 2 published live evidence", () => {
     });
   });
 
+  it("refuses a frozen record that contradicts the contract its manifest declares", async () => {
+    // Carried forward from the publisher-v2 lane. Its sibling on `main`
+    // ("refuses a manifest whose record contract says what the records contradict")
+    // mutates the MANIFEST and leaves the bytes; this one mutates the BYTES and repairs
+    // the manifest, so the digest comparison cannot object and only the declared record
+    // contract is left to catch it. The guard needs binding from both sides: a check that
+    // compared the manifest against itself would pass the manifest-side test alone.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const recordPath = path.join(artifactDirectory, "routed/explain-lantern-flow.json");
+      const record = JSON.parse(await readFile(recordPath, "utf8"));
+      // A nonzero reading in a set whose manifest says every reading is an encoded absence.
+      record.reasoningChars = 5;
+      await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+      await repairManifest(artifactDirectory);
+      // The declared contract claims every record reads 0; the freezer derives no such
+      // claim from bytes that now disagree, so the two sides cannot be reconciled.
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        /recordContract: manifest .* != bytes /,
+      );
+    });
+  });
+
   it("refuses a file the frozen manifest never listed", async () => {
     await withFrozenCopy(async (temporary, artifactDirectory) => {
       // An unlisted file is screened by nothing: not the digest comparison it is absent
