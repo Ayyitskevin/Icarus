@@ -319,12 +319,17 @@ describe("Gate 2 frozen evidence: the root and the second pass", () => {
     );
   });
 
-  it("rethrows a fault met in the second pass instead of reporting it as evidence", async () => {
-    // A directory named like a record passes the digest walk (it holds no files) and then
-    // fails the record read with EISDIR -- a fault, reaching the catch after the walk.
+  it("reports a directory named like a record as a verdict, from the record read", async () => {
+    // This once injected a second-pass EISDIR: the walk recursed into the empty directory
+    // and the record read hit it. The record read now lstat-checks every record before
+    // reading, so the same input is a verdict. Both passes read the same entries, so a
+    // genuine second-pass fault cannot be staged from the filesystem; the boundary of the
+    // second catch is bound by the classifier test below.
     const root = await frozenSet();
     await mkdir(path.join(root, "routed", "fault.json"));
-    await expect(verifyFrozenEvidence(root)).rejects.toThrow(/EISDIR/);
+    expect(await verifyFrozenEvidence(root)).toEqual([
+      "recordContract: Gate 2 evidence freeze: routed/fault.json is not a regular file",
+    ]);
   });
 
   it("classifies only deliberate refusals as verdicts", () => {
@@ -368,5 +373,56 @@ describe("Gate 2 frozen evidence: the root check runs before the manifest read",
         path.join(repositoryRoot, "docs/evals/artifacts/gate2-reasoning-suppressed-20260901"),
       ),
     ).toEqual([]);
+  });
+});
+
+describe("Gate 2 frozen evidence: no read before the closed-tree verdict", () => {
+  it("refuses a symlinked manifest before parsing it, so planted outside bytes never speak", async () => {
+    // A review moved manifest.json outside the set behind a symlink and planted a duplicate
+    // member in the outside copy; the parser reported the planted bytes before the walk.
+    const root = await frozenSet();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "icarus-frozen-outside-"));
+    roots.push(outside);
+    const manifestPath = path.join(root, "manifest.json");
+    const text = await readFile(manifestPath, "utf8");
+    await writeFile(
+      path.join(outside, "manifest.json"),
+      text.replace(/^\{/, '{\n  "schema": "icarus.gate2-frozen-evidence.v2",'),
+    );
+    await rm(manifestPath);
+    await symlink(path.join(outside, "manifest.json"), manifestPath);
+    const problems = await verifyFrozenEvidence(root);
+    expect(problems).toEqual(["Gate 2 evidence freeze: manifest.json is not a regular file"]);
+  });
+
+  it("refuses a symlinked record directory from both entry points, before any record read", async () => {
+    const root = await frozenSet();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "icarus-frozen-outside-"));
+    roots.push(outside);
+    const routed = path.join(root, "routed");
+    const text = await readFile(path.join(routed, "case-a.json"), "utf8");
+    await writeFile(
+      path.join(outside, "case-a.json"),
+      text.replace(/^\{/, '{\n  "caseId": "case-a",'),
+    );
+    await rm(routed, { recursive: true });
+    await symlink(outside, routed, "dir");
+    expect(await verifyFrozenEvidence(root)).toEqual([
+      "Gate 2 evidence freeze: routed is not a regular file",
+    ]);
+    await expect(deriveRecordContract(root)).rejects.toThrow(/routed is not a regular file/);
+  });
+
+  it("refuses a symlinked record file on the direct contract path", async () => {
+    const root = await frozenSet();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "icarus-frozen-outside-"));
+    roots.push(outside);
+    const target = path.join(root, "routed", "case-a.json");
+    await writeFile(path.join(outside, "case-a.json"), await readFile(target));
+    await rm(target);
+    await symlink(path.join(outside, "case-a.json"), target);
+    await expect(deriveRecordContract(root)).rejects.toThrow(
+      /routed\/case-a\.json is not a regular file/,
+    );
   });
 });
