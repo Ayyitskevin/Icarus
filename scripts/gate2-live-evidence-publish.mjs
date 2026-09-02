@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { findSecretSpans } from "../packages/core/dist/context.js";
 import { loadGate2BenchmarkContract, parseStrictGate2Json } from "./gate2-benchmark-contract.mjs";
+import { computeFrozenEntries, verifyFrozenEvidence } from "./gate2-freeze-live-evidence.mjs";
 import {
   compareGate2BenchmarkResults,
   computeGate2ExecutionProfileDigest,
@@ -171,12 +172,6 @@ function assertNoUnknownSecretShape(bytes, relative) {
     (span) => !ALLOWED_FALSE_POSITIVE_SECRET_TOKENS.has(text.slice(span.start, span.end)),
   );
   assertCondition(unknown.length === 0, `${relative} contains an unknown secret-shaped span`);
-}
-
-function byPath(files) {
-  return Array.isArray(files)
-    ? [...files].sort((left, right) => String(left?.path).localeCompare(String(right?.path)))
-    : files;
 }
 
 /** The declaration a frozen manifest must carry, rebuilt from the pinned config. */
@@ -379,7 +374,9 @@ export async function verifyGate2PublishedEvidence(
     config.artifactDirectory ?? profile.profileId,
   );
   const validated = await validateEvidenceSet(destination, loaded, profile, config);
-  await assertNoUnlistedFile(destination, validated.relativePaths, config);
+  if (config.manifestSchema === undefined) {
+    await assertNoUnlistedFile(destination, validated.relativePaths, config);
+  }
   const manifestFile = config.manifestFile ?? "artifact-manifest.json";
   const manifestBytes = await regularBytes(path.join(destination, manifestFile), manifestFile);
   assertNoUnknownSecretShape(manifestBytes, manifestFile);
@@ -396,17 +393,34 @@ export async function verifyGate2PublishedEvidence(
       "published artifact manifest is invalid",
     );
   } else {
+    // What this publisher pins BY VALUE, which the freezer cannot know: the schema and
+    // record revision this set was published under, the execution profile and instruction
+    // policy that produced it, and the record contract as reviewed. The freezer checks a
+    // manifest against its own bytes; these check it against the reviewed publication.
     assertCondition(
       manifest.schema === config.manifestSchema &&
         manifest.evidenceRecordRevision === config.evidenceRecordRevision &&
         manifest.executionProfileDigestSha256 === profile.profileDigestSha256 &&
         instructionPolicyBound(manifest, config) &&
         manifest.recordContract?.evidenceRecordRevision === config.evidenceRecordRevision &&
-        stableJson(manifest.recordContract) === stableJson(frozenRecordContract(config)) &&
-        // The frozen manifest lists its files in path order and excludes itself; the
-        // validated list is in read order. Compare as sets of the same triples.
-        stableJson(byPath(manifest.files)) === stableJson(byPath(validated.files)),
+        stableJson(manifest.recordContract) === stableJson(frozenRecordContract(config)),
       "frozen evidence manifest is invalid",
+    );
+    // One digest walk in the repository. The freezer owns manifest-versus-bytes, the
+    // closed-directory refusal, and re-deriving the record contract from the records;
+    // duplicating it here is how the two verifiers came to accept different inputs.
+    const problems = await verifyFrozenEvidence(destination);
+    assertCondition(
+      problems.length === 0,
+      `frozen evidence manifest is invalid: ${problems.join("; ")}`,
+    );
+    // The freezer proves the directory holds exactly what its manifest lists. This proves
+    // that list is exactly the benchmark contract's file set, so every present file is one
+    // the secret screen above actually read.
+    const present = (await computeFrozenEntries(destination)).map((entry) => entry.path);
+    assertCondition(
+      stableJson([...present].sort()) === stableJson([...validated.relativePaths].sort()),
+      "frozen evidence directory does not hold exactly the contract's files",
     );
   }
   return { destination, manifest, ...validated };
