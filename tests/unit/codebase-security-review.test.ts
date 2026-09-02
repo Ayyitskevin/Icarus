@@ -7,6 +7,7 @@ import {
 import { retrieveReadOnlyContextV3 } from "../../packages/core/src/context-retrieval.js";
 import type { TreeEntry } from "../../packages/core/src/git.js";
 import { createProviderConfig, type ModelGateway } from "../../packages/core/src/provider.js";
+import { syntheticReportedIdentity } from "../support/provider-result.js";
 
 const TASK =
   "Review Lantern's configuration loading for source-backed security findings without changing the repository.";
@@ -78,6 +79,7 @@ function gateway(response: unknown = findingResponse()): ModelGateway {
     generateStructured: vi.fn(async () => ({
       text: JSON.stringify(response),
       usage: { inputTokens: 120, outputTokens: 80, estimatedCostUsd: 0, latencyMs: 12 },
+      reportedIdentity: syntheticReportedIdentity("fixture-security-reviewer"),
     })),
   };
 }
@@ -253,6 +255,7 @@ describe("Gate 2 read-only codebase security review", () => {
     vi.mocked(provider.generateStructured).mockResolvedValueOnce({
       text: '{"assessment":"findings","assessment":"no_finding"}',
       usage: { inputTokens: 1, outputTokens: 1, estimatedCostUsd: 0, latencyMs: 1 },
+      reportedIdentity: syntheticReportedIdentity("fixture-security-reviewer"),
     });
 
     await expect(reviewCodebaseSecurityV2(provider, context, TASK)).rejects.toMatchObject({
@@ -276,6 +279,7 @@ describe("Gate 2 read-only codebase security review", () => {
     vi.mocked(provider.generateStructured).mockResolvedValueOnce({
       text: "x".repeat(128 * 1024 + 1),
       usage: { inputTokens: 1, outputTokens: 1, estimatedCostUsd: 0, latencyMs: 1 },
+      reportedIdentity: syntheticReportedIdentity("fixture-security-reviewer"),
     });
 
     await expect(reviewCodebaseSecurityV2(provider, context, TASK)).rejects.toMatchObject({
@@ -289,6 +293,7 @@ describe("Gate 2 read-only codebase security review", () => {
     vi.mocked(provider.generateStructured).mockResolvedValueOnce({
       text: JSON.stringify(findingResponse()),
       usage: { inputTokens: -1, outputTokens: 1, estimatedCostUsd: 0, latencyMs: 1 },
+      reportedIdentity: syntheticReportedIdentity("fixture-security-reviewer"),
     });
 
     await expect(reviewCodebaseSecurityV2(provider, context, TASK)).rejects.toMatchObject({

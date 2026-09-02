@@ -66,6 +66,8 @@ describe("OpenAI remote lifecycle", () => {
       expect(new Headers(init.headers).get("authorization")).toBe(`Bearer ${apiKey}`);
       return new Response(
         JSON.stringify({
+          id: `resp-openai-lifecycle-${requests.length}`,
+          model: "gpt-5-mini",
           status: "completed",
           output: [
             {

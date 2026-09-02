@@ -733,7 +733,10 @@ describe("release security regressions", () => {
     const provider = await startOllamaQueue([
       {
         rawBody: JSON.stringify({
+          model: "contract-model",
           message: { content: encodedPlan },
+          done: true,
+          done_reason: "stop",
           prompt_eval_count: 12,
           eval_count: 8,
         }),

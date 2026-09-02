@@ -137,10 +137,11 @@ async function startProvider() {
     request.on("data", (chunk) => chunks.push(chunk));
     request.on("end", () => {
       requests += 1;
-      JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
+          model: body.model,
           message: {
             content: JSON.stringify({
               summary: "Inspect one exact local target before any guarded execution.",
@@ -152,6 +153,8 @@ async function startProvider() {
               checkIds: ["verify"],
             }),
           },
+          done: true,
+          done_reason: "stop",
           prompt_eval_count: 12,
           eval_count: 8,
         }),

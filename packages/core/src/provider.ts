@@ -17,9 +17,31 @@ export interface StructuredGenerationRequest {
   readonly timeoutMs: number;
 }
 
+/**
+ * Identity asserted by the provider in a successful response. This is observed
+ * evidence, not configured intent: no member may fall back to the model or
+ * provider that Icarus requested.
+ *
+ * Vulcan is deliberately weaker than the other adapters. Its reported `model`
+ * is the requested public alias echoed by Vulcan, so equality with the
+ * configured model is not independent confirmation. `providerId` is the only
+ * route identity Vulcan exposes, while `upstreamModel` and `upstreamHost` stay
+ * null because its protocol cannot express native vendor identity. Capturing
+ * that identity requires a Vulcan protocol change and is outside this seam.
+ */
+export interface ProviderReportedIdentity {
+  readonly model: string;
+  readonly responseId: string | null;
+  readonly requestId: string | null;
+  readonly providerId: string | null;
+  readonly upstreamModel: string | null;
+  readonly upstreamHost: string | null;
+}
+
 export interface StructuredGenerationResult {
   readonly text: string;
   readonly usage: ProviderUsage;
+  readonly reportedIdentity: ProviderReportedIdentity;
 }
 
 export interface ModelGateway {

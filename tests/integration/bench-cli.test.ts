@@ -8,6 +8,7 @@ import type { BenchComparisonV1 } from "../../packages/core/src/bench.js";
 import { jsonOutput, runCli } from "../support/integration-cli.js";
 import {
   type ProviderHttpServer,
+  parseProviderRequestBody,
   sendProviderJson,
   startProviderHttpServer,
 } from "../support/provider-http.js";
@@ -27,8 +28,10 @@ describe("bench CLI", () => {
   });
 
   it("compares two models end-to-end and records the one request both answered", async () => {
-    server = await startProviderHttpServer((_request, response) => {
+    server = await startProviderHttpServer((request, response) => {
+      const body = parseProviderRequestBody(request) as Record<string, unknown>;
       sendProviderJson(response, 200, {
+        model: body.model,
         message: {
           role: "assistant",
           content: JSON.stringify({
@@ -37,6 +40,8 @@ describe("bench CLI", () => {
             findings: [{ title: "monitoring missed duplicates", confirmed: true }],
           }),
         },
+        done: true,
+        done_reason: "stop",
         prompt_eval_count: 64,
         eval_count: 48,
       });

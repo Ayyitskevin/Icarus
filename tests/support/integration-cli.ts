@@ -161,7 +161,10 @@ export async function startOllamaQueue(initial: readonly QueuedProviderResponse[
       response.end(
         next.rawBody ??
           JSON.stringify({
+            model: typeof body.model === "string" ? body.model : "synthetic-ollama-model",
             message: { content: JSON.stringify(next.content ?? {}) },
+            done: true,
+            done_reason: "stop",
             prompt_eval_count: 12,
             eval_count: 8,
           }),

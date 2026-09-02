@@ -504,7 +504,10 @@ async function startDeterministicOllama(responses) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
+          model: body.model,
           message: { content: JSON.stringify(next) },
+          done: true,
+          done_reason: "stop",
           prompt_eval_count: 24,
           eval_count: 16,
         }),

@@ -45,7 +45,11 @@ describe("VulcanChatCompletionsGateway HTTP contract", () => {
 
   it("sends the exact seated payload, passes the alias through, and extracts text and usage", async () => {
     server = await startProviderHttpServer((_request, response) => {
+      response.setHeader("x-request-id", "vulcan-request-123");
       sendProviderJson(response, 200, {
+        id: "vulcan-response-123",
+        model: "code",
+        provider: "local-ollama",
         choices: [
           {
             index: 0,
@@ -77,6 +81,16 @@ describe("VulcanChatCompletionsGateway HTTP contract", () => {
     // Vulcan's own budget ledger meters hosted aliases against the seat.
     expect(result.usage.estimatedCostUsd).toBe(0);
     expect(result.usage.latencyMs).toBeGreaterThanOrEqual(0);
+    // Vulcan's model matches the request by construction; this equality is not
+    // independent model confirmation. providerId is the only reported route identity.
+    expect(result.reportedIdentity).toEqual({
+      model: "code",
+      responseId: "vulcan-response-123",
+      requestId: "vulcan-request-123",
+      providerId: "local-ollama",
+      upstreamModel: null,
+      upstreamHost: null,
+    });
     expect(server.requests).toHaveLength(1);
     const captured = server.requests[0];
     expect(captured).toBeDefined();
@@ -104,6 +118,9 @@ describe("VulcanChatCompletionsGateway HTTP contract", () => {
   it("prices reported usage with explicit positive host-catalog rates", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, {
+        id: "vulcan-priced-response",
+        model: "code",
+        provider: "hosted-code",
         choices: [
           {
             index: 0,
@@ -131,7 +148,64 @@ describe("VulcanChatCompletionsGateway HTTP contract", () => {
       outputTokens: 9,
       estimatedCostUsd: 0.000198,
     });
+    expect(result.reportedIdentity.requestId).toBeNull();
     expect(server.requests).toHaveLength(1);
+  });
+
+  it.each([undefined, null, "", "   "])(
+    "rejects a missing or malformed reported model alias: %p",
+    async (model) => {
+      server = await startProviderHttpServer((_request, response) => {
+        sendProviderJson(response, 200, {
+          id: "vulcan-model-check",
+          model,
+          provider: "local-ollama",
+          choices: [
+            {
+              message: { content: '{"summary":"ok","steps":[]}' },
+              finish_reason: "stop",
+            },
+          ],
+        });
+      });
+      const gateway = new VulcanChatCompletionsGateway(
+        createProviderConfig({ kind: "vulcan", model: "code", baseUrl: server.baseUrl }),
+      );
+
+      await expect(gateway.generateStructured(generationRequest)).rejects.toEqual(
+        expect.objectContaining({ code: "PROVIDER_PROTOCOL_ERROR" }),
+      );
+    },
+  );
+
+  it.each([
+    {
+      name: "response ID",
+      identity: { model: "code", provider: "local-ollama" },
+    },
+    {
+      name: "provider route ID",
+      identity: { id: "vulcan-route-check", model: "code" },
+    },
+  ])("rejects a successful response without its required $name", async ({ identity }) => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, {
+        ...identity,
+        choices: [
+          {
+            message: { content: '{"summary":"ok","steps":[]}' },
+            finish_reason: "stop",
+          },
+        ],
+      });
+    });
+    const gateway = new VulcanChatCompletionsGateway(
+      createProviderConfig({ kind: "vulcan", model: "code", baseUrl: server.baseUrl }),
+    );
+
+    await expect(gateway.generateStructured(generationRequest)).rejects.toEqual(
+      expect.objectContaining({ code: "PROVIDER_PROTOCOL_ERROR" }),
+    );
   });
 
   it("refuses a non-loopback base URL before any transport", async () => {
@@ -244,6 +318,9 @@ describe("VulcanChatCompletionsGateway HTTP contract", () => {
   it("reports null usage when the response carries none", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, {
+        id: "vulcan-no-usage-response",
+        model: "code",
+        provider: "local-ollama",
         choices: [{ message: { content: '{"summary":"ok","steps":[]}' }, finish_reason: "stop" }],
       });
     });

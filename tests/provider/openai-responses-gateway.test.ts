@@ -39,7 +39,10 @@ describe("OpenAIResponsesGateway HTTP contract", () => {
 
   it("sends the exact safe Responses payload and extracts output text and usage", async () => {
     server = await startProviderHttpServer((_request, response) => {
+      response.setHeader("x-request-id", "req_openai_123");
       sendProviderJson(response, 200, {
+        id: "resp_openai_123",
+        model: "gpt-5-mini-2026-08-07",
         status: "completed",
         output: [
           {
@@ -69,6 +72,14 @@ describe("OpenAIResponsesGateway HTTP contract", () => {
     expect(result.usage).toMatchObject({ inputTokens: 11, outputTokens: 7 });
     expect(result.usage.estimatedCostUsd).toBeCloseTo(0.000_05, 10);
     expect(result.usage.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(result.reportedIdentity).toEqual({
+      model: "gpt-5-mini-2026-08-07",
+      responseId: "resp_openai_123",
+      requestId: "req_openai_123",
+      providerId: null,
+      upstreamModel: null,
+      upstreamHost: null,
+    });
     expect(server.requests).toHaveLength(1);
     const captured = server.requests[0];
     expect(captured).toBeDefined();
@@ -95,6 +106,117 @@ describe("OpenAIResponsesGateway HTTP contract", () => {
       tool_choice: "none",
       truncation: "disabled",
     });
+  });
+
+  it("represents an absent compatible request ID without inventing one", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, {
+        id: "resp_without_request_header",
+        model: "provider-reported-model",
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            content: [{ type: "output_text", text: '{"summary":"ok","steps":[]}' }],
+          },
+        ],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+    });
+    const gateway = new OpenAIResponsesGateway(
+      createProviderConfig({ kind: "openai", model: "configured-model", baseUrl: server.baseUrl }),
+      apiKey,
+    );
+
+    const result = await gateway.generateStructured(generationRequest);
+
+    expect(result.reportedIdentity.model).toBe("provider-reported-model");
+    expect(result.reportedIdentity.requestId).toBeNull();
+  });
+
+  it("discards an allowlisted request ID that reflects the credential", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      response.setHeader("x-request-id", apiKey);
+      sendProviderJson(response, 200, {
+        id: "resp_safe",
+        model: "provider-reported-model",
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            content: [{ type: "output_text", text: '{"summary":"ok","steps":[]}' }],
+          },
+        ],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+    });
+    const gateway = new OpenAIResponsesGateway(
+      createProviderConfig({ kind: "openai", model: "configured-model", baseUrl: server.baseUrl }),
+      apiKey,
+    );
+
+    const error = await gateway
+      .generateStructured(generationRequest)
+      .catch((reason: unknown) => reason);
+
+    expect(error).toEqual(expect.objectContaining({ code: "PROVIDER_SECRET_DETECTED" }));
+    expect(JSON.stringify(error)).not.toContain(apiKey);
+  });
+
+  it.each([undefined, null, "", "   "])(
+    "rejects a missing or malformed reported model: %p",
+    async (model) => {
+      server = await startProviderHttpServer((_request, response) => {
+        sendProviderJson(response, 200, {
+          id: "resp_model_check",
+          model,
+          status: "completed",
+          output: [
+            {
+              type: "message",
+              content: [{ type: "output_text", text: '{"summary":"ok","steps":[]}' }],
+            },
+          ],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      });
+      const gateway = new OpenAIResponsesGateway(
+        createProviderConfig({
+          kind: "openai",
+          model: "configured-model",
+          baseUrl: server.baseUrl,
+        }),
+        apiKey,
+      );
+
+      await expect(gateway.generateStructured(generationRequest)).rejects.toEqual(
+        expect.objectContaining({ code: "PROVIDER_PROTOCOL_ERROR" }),
+      );
+    },
+  );
+
+  it("rejects a successful response without its required response ID", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, {
+        model: "provider-reported-model",
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            content: [{ type: "output_text", text: '{"summary":"ok","steps":[]}' }],
+          },
+        ],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+    });
+    const gateway = new OpenAIResponsesGateway(
+      createProviderConfig({ kind: "openai", model: "configured-model", baseUrl: server.baseUrl }),
+      apiKey,
+    );
+
+    await expect(gateway.generateStructured(generationRequest)).rejects.toEqual(
+      expect.objectContaining({ code: "PROVIDER_PROTOCOL_ERROR" }),
+    );
   });
 
   it("does not issue a request when the caller signal is already aborted", async () => {

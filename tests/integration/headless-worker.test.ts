@@ -38,6 +38,7 @@ import type {
   ProviderConfig,
   SunCeiling,
 } from "../../packages/core/src/types.js";
+import { syntheticReportedIdentity } from "../support/provider-result.js";
 
 const TARGET = "src/greeting.txt";
 const BASELINE = "Hello, world!\n";
@@ -210,6 +211,7 @@ function gatewayFactory(
       return Promise.resolve({
         text: JSON.stringify(output),
         usage: { inputTokens: 1, outputTokens: 1, estimatedCostUsd, latencyMs: 1 },
+        reportedIdentity: syntheticReportedIdentity(config.model),
       });
     },
   });

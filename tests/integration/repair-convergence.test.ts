@@ -37,6 +37,7 @@ import type {
   ProviderConfig,
   SunCeiling,
 } from "../../packages/core/src/types.js";
+import { syntheticReportedIdentity } from "../support/provider-result.js";
 
 const TARGET = "src/greeting.txt";
 const LARGE_READ_TARGET = "src/large.txt";
@@ -384,6 +385,7 @@ function gatewayFactory(outputs: readonly JsonValue[]): (config: ProviderConfig)
       return Promise.resolve({
         text: JSON.stringify(value),
         usage: { inputTokens: 1, outputTokens: 1, estimatedCostUsd: 0, latencyMs: 1 },
+        reportedIdentity: syntheticReportedIdentity(config.model),
       });
     },
   });

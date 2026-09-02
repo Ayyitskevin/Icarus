@@ -316,7 +316,10 @@ async function startLoopbackProvider(initialQueue) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
+          model: body.model,
           message: { content: JSON.stringify(next.response) },
+          done: true,
+          done_reason: "stop",
           prompt_eval_count: next.inputTokens,
           eval_count: next.outputTokens,
         }),

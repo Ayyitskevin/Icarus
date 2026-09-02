@@ -30,6 +30,7 @@ import type {
   RunRecord,
   SunCeiling,
 } from "../../packages/core/src/types.js";
+import { syntheticReportedIdentity } from "../support/provider-result.js";
 
 const BASELINE = "Hello, world!\n";
 const APPROVED = "Hello, Icarus!\n";
@@ -342,6 +343,7 @@ function gatewayFactory(outputs: JsonValue[]): (config: ProviderConfig) => Model
           estimatedCostUsd: 0,
           latencyMs: 1,
         },
+        reportedIdentity: syntheticReportedIdentity(config.model),
       });
     },
   });
@@ -531,6 +533,7 @@ describe("aggregate runtime ceilings and signal cancellation", () => {
             estimatedCostUsd: 0,
             latencyMs: 1,
           },
+          reportedIdentity: syntheticReportedIdentity(config.model),
         });
       },
     });
@@ -608,6 +611,7 @@ describe("aggregate runtime ceilings and signal cancellation", () => {
             estimatedCostUsd: 0,
             latencyMs: 1,
           },
+          reportedIdentity: syntheticReportedIdentity(config.model),
         });
       },
     });
@@ -681,6 +685,7 @@ describe("aggregate runtime ceilings and signal cancellation", () => {
             estimatedCostUsd: 9_999,
             latencyMs: 1,
           },
+          reportedIdentity: syntheticReportedIdentity(config.model),
         });
       },
     });
@@ -760,6 +765,7 @@ describe("aggregate runtime ceilings and signal cancellation", () => {
             estimatedCostUsd: 0,
             latencyMs: 1,
           },
+          reportedIdentity: syntheticReportedIdentity(config.model),
         });
       },
     });

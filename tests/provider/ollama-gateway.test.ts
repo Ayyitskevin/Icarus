@@ -35,7 +35,12 @@ describe("OllamaGateway HTTP contract", () => {
   it("sends the exact non-streaming structured payload and extracts text and usage", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, {
+        model: "qwen3.6:27b-resolved",
+        remote_model: "qwen3.6:27b-upstream",
+        remote_host: "https://ollama.example.test",
         message: { role: "assistant", content: '{"replaceText":"hello, Icarus"}' },
+        done: true,
+        done_reason: "stop",
         prompt_eval_count: 12,
         eval_count: 4,
       });
@@ -54,6 +59,14 @@ describe("OllamaGateway HTTP contract", () => {
     expect(result.usage).toMatchObject({ inputTokens: 12, outputTokens: 4 });
     expect(result.usage.estimatedCostUsd).toBeCloseTo(0.000_012, 10);
     expect(result.usage.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(result.reportedIdentity).toEqual({
+      model: "qwen3.6:27b-resolved",
+      responseId: null,
+      requestId: null,
+      providerId: null,
+      upstreamModel: "qwen3.6:27b-upstream",
+      upstreamHost: "https://ollama.example.test",
+    });
     expect(server.requests).toHaveLength(1);
     const captured = server.requests[0];
     expect(captured).toBeDefined();
@@ -73,6 +86,79 @@ describe("OllamaGateway HTTP contract", () => {
       ],
       options: { num_predict: generationRequest.maxOutputTokens },
     });
+  });
+
+  it("represents absent local-only identity without copying the configured model", async () => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, {
+        model: "provider-reported-model",
+        message: { role: "assistant", content: '{"replaceText":"ok"}' },
+        done: true,
+        done_reason: "stop",
+      });
+    });
+    const gateway = new OllamaGateway(
+      createProviderConfig({ kind: "ollama", model: "configured-model", baseUrl: server.baseUrl }),
+    );
+
+    const result = await gateway.generateStructured(generationRequest);
+
+    expect(result.reportedIdentity).toEqual({
+      model: "provider-reported-model",
+      responseId: null,
+      requestId: null,
+      providerId: null,
+      upstreamModel: null,
+      upstreamHost: null,
+    });
+  });
+
+  it.each([undefined, null, "", "   "])(
+    "rejects a missing or malformed reported model: %p",
+    async (model) => {
+      server = await startProviderHttpServer((_request, response) => {
+        sendProviderJson(response, 200, {
+          model,
+          message: { role: "assistant", content: '{"replaceText":"ok"}' },
+          done: true,
+          done_reason: "stop",
+        });
+      });
+      const gateway = new OllamaGateway(
+        createProviderConfig({
+          kind: "ollama",
+          model: "configured-model",
+          baseUrl: server.baseUrl,
+        }),
+      );
+
+      await expect(gateway.generateStructured(generationRequest)).rejects.toEqual(
+        expect.objectContaining({ code: "PROVIDER_PROTOCOL_ERROR" }),
+      );
+    },
+  );
+
+  it.each([
+    { done: false, doneReason: "stop", name: "unfinished" },
+    { done: true, doneReason: "length", name: "output ceiling" },
+    { done: true, doneReason: undefined, name: "missing reason" },
+    { done: true, doneReason: "unknown", name: "unknown reason" },
+  ])("rejects $name completion evidence", async ({ done, doneReason }) => {
+    server = await startProviderHttpServer((_request, response) => {
+      sendProviderJson(response, 200, {
+        model: "provider-reported-model",
+        message: { role: "assistant", content: '{"replaceText":"valid but incomplete"}' },
+        done,
+        done_reason: doneReason,
+      });
+    });
+    const gateway = new OllamaGateway(
+      createProviderConfig({ kind: "ollama", model: "configured-model", baseUrl: server.baseUrl }),
+    );
+
+    await expect(gateway.generateStructured(generationRequest)).rejects.toEqual(
+      expect.objectContaining({ code: "PROVIDER_PROTOCOL_ERROR" }),
+    );
   });
 
   it("does not issue a request when the caller signal is already aborted", async () => {
@@ -147,7 +233,10 @@ describe("OllamaGateway HTTP contract", () => {
   it("rejects negative or non-integral token usage", async () => {
     server = await startProviderHttpServer((_request, response) => {
       sendProviderJson(response, 200, {
+        model: "test-model",
         message: { content: '{"replaceText":"ok"}' },
+        done: true,
+        done_reason: "stop",
         prompt_eval_count: -1,
         eval_count: 1.5,
       });

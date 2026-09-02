@@ -395,7 +395,10 @@ async function startOllamaQueue(initialResponses) {
       response.end(
         next.rawBody ??
           JSON.stringify({
+            model: body.model,
             message: { content: JSON.stringify(next.content) },
+            done: true,
+            done_reason: "stop",
             prompt_eval_count: next.inputTokens ?? 12,
             eval_count: next.outputTokens ?? 8,
           }),

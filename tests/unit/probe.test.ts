@@ -14,11 +14,12 @@ import type {
 } from "../../packages/core/src/provider.js";
 import { createProviderConfig } from "../../packages/core/src/provider.js";
 import type { ProviderUsage } from "../../packages/core/src/types.js";
+import { syntheticReportedIdentity } from "../support/provider-result.js";
 
 type Responder = (
   request: StructuredGenerationRequest,
   attemptIndex: number,
-) => StructuredGenerationResult;
+) => Omit<StructuredGenerationResult, "reportedIdentity">;
 
 function usage(partial: Partial<ProviderUsage>): ProviderUsage {
   return {
@@ -47,7 +48,10 @@ class FakeGateway implements ModelGateway {
     request: StructuredGenerationRequest,
   ): Promise<StructuredGenerationResult> {
     this.requests.push(request);
-    return this.#respond(request, this.requests.length - 1);
+    return {
+      ...this.#respond(request, this.requests.length - 1),
+      reportedIdentity: syntheticReportedIdentity(this.config.model),
+    };
   }
 }
 
