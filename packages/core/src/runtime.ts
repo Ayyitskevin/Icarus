@@ -1,4 +1,14 @@
-import { chmod, lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  realpath,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -16,6 +26,7 @@ export interface IcarusRuntime {
 }
 
 const STATE_MARKER = '{"application":"icarus","format":1}\n';
+const GITFILE_PREFIX = Buffer.from("gitdir:");
 
 /**
  * Test seam only: when `ICARUS_TEST_PAUSE_AFTER_PATCH_SET_INTENT_FILE` names a
@@ -92,19 +103,60 @@ async function canonicalProspectivePath(requestedPath: string): Promise<string> 
 }
 
 async function gitMarkerExists(directory: string): Promise<boolean> {
-  try {
-    await lstat(path.join(directory, ".git"));
-    return true;
-  } catch (error) {
+  const markerPath = path.join(directory, ".git");
+  let markerStat = await lstat(markerPath).catch((error: unknown) => {
     if (
       typeof error === "object" &&
       error !== null &&
       "code" in error &&
       (error as NodeJS.ErrnoException).code === "ENOENT"
     ) {
-      return false;
+      return null;
     }
     throw error;
+  });
+  if (markerStat === null) return false;
+
+  if (markerStat.isSymbolicLink()) {
+    markerStat = await stat(markerPath).catch((error: unknown) => {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+      ) {
+        return null;
+      }
+      throw error;
+    });
+    if (markerStat === null) return false;
+  }
+
+  if (markerStat.isDirectory()) {
+    try {
+      await lstat(path.join(markerPath, "HEAD"));
+      return true;
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+      ) {
+        return false;
+      }
+      throw error;
+    }
+  }
+  if (!markerStat.isFile()) return false;
+
+  const marker = await open(markerPath, "r");
+  try {
+    const prefix = Buffer.alloc(GITFILE_PREFIX.length);
+    const { bytesRead } = await marker.read(prefix, 0, prefix.length, 0);
+    return bytesRead === prefix.length && prefix.equals(GITFILE_PREFIX);
+  } finally {
+    await marker.close();
   }
 }
 
