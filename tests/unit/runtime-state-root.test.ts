@@ -111,6 +111,19 @@ describe("state-root ownership boundary", () => {
     await expectUnsafe(() => createIcarusRuntime(path.join(linkedParent, "state")));
   });
 
+  it("accepts a state root beneath an empty .git directory that is not a repository", async () => {
+    const parent = await makeTemporaryRoot();
+    const stateRoot = path.join(parent, "state");
+    await mkdir(path.join(parent, ".git"), { mode: 0o700 });
+
+    const runtime = await createIcarusRuntime(stateRoot);
+    runtime.close();
+
+    expect(await readFile(path.join(stateRoot, ".icarus-state-v1"), "utf8")).toBe(
+      '{"application":"icarus","format":1}\n',
+    );
+  });
+
   it("detects a prospective state root inside a repository through a symlink alias", async () => {
     const parent = await makeTemporaryRoot();
     const repository = path.join(parent, "repository");
@@ -118,6 +131,7 @@ describe("state-root ownership boundary", () => {
     const nestedState = path.join(alias, ".state");
     await mkdir(repository, { mode: 0o700 });
     await mkdir(path.join(repository, ".git"), { mode: 0o700 });
+    await writeFile(path.join(repository, ".git", "HEAD"), "ref: refs/heads/main\n");
     await symlink(repository, alias);
 
     await expect(createIcarusRuntime(nestedState)).rejects.toMatchObject({
@@ -128,5 +142,16 @@ describe("state-root ownership boundary", () => {
       code: "STATE_REPOSITORY_OVERLAP",
     });
     await expect(lstat(path.join(repository, ".state"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects a state root beneath a linked-worktree gitfile", async () => {
+    const parent = await makeTemporaryRoot();
+    const stateRoot = path.join(parent, "state");
+    await writeFile(path.join(parent, ".git"), "gitdir: /repository/.git/worktrees/fixture\n");
+
+    await expect(createIcarusRuntime(stateRoot)).rejects.toMatchObject({
+      code: "STATE_REPOSITORY_OVERLAP",
+    });
+    await expect(lstat(stateRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
