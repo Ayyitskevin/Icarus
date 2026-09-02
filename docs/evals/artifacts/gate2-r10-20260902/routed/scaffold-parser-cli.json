@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "scaffold-parser-cli",
+  "modelId": "code",
+  "generatedAt": "2026-09-02T21:31:14.288Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "6980aad15d1a2fd1aa0669ee11249aa4e0150a19",
+    "digestSha256": "6bf36d79e48f23dc6e13e4314b80adbced6b7326c94c20cb98c014ef61cc97cc",
+    "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"README.md\",\n    \"checks/test_parser.py\",\n    \"checks/verify.py\",\n    \"src/parser.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"checks/test_parser_cli.py\",\n      \"src/parser_cli.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"parser-cli\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/parser_cli.py\",\n        \"content\": \"import sys\\n\\nfrom src.parser import parse_enabled\\n\\n\\ndef main(argv: list[str] | None = None) -> int:\\n    args = list(sys.argv[1:] if argv is None else argv)\\n    if len(args) != 1:\\n        print(\\\"usage: parser-cli <value>\\\", file=sys.stderr)\\n        return 2\\n    if parse_enabled(args[0]):\\n        print(\\\"true\\\")\\n        return 0\\n    print(\\\"false\\\")\\n    return 1\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    raise SystemExit(main())\\n\"\n      },\n      {\n        \"path\": \"checks/test_parser_cli.py\",\n        \"content\": \"import subprocess\\nimport sys\\nfrom pathlib import Path\\n\\nroot = Path(__file__).resolve().parents[1]\\n\\n\\ndef run_cli(*args: str) -> subprocess.CompletedProcess:\\n    return subprocess.run(\\n        [sys.executable, \\\"-m\\\", \\\"src.parser_cli\\\", *args],\\n        cwd=root,\\n        capture_output=True,\\n        text=True,\\n    )\\n\\n\\ntrue_result = run_cli(\\\"true\\\")\\nassert true_result.returncode == 0\\nassert true_result.stdout.strip() == \\\"true\\\"\\n\\nfalse_result = run_cli(\\\"false\\\")\\nassert false_result.returncode == 1\\nassert false_result.stdout.strip() == \\\"false\\\"\\n\\nusage_result = run_cli()\\nassert usage_result.returncode == 2\\nassert \\\"usage\\\" in usage_result.stderr\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Added a dependency-free parser CLI module with deterministic exit codes and a subprocess-based check.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/test_parser.py",
+      "checks/verify.py",
+      "README.md",
+      "src/parser.py"
+    ],
+    "plan": {
+      "mutationTargets": ["checks/test_parser_cli.py", "src/parser_cli.py"],
+      "requestedCheckIds": ["parser-cli"]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "checks/test_parser_cli.py",
+          "content": "import subprocess\nimport sys\nfrom pathlib import Path\n\nroot = Path(__file__).resolve().parents[1]\n\n\ndef run_cli(*args: str) -> subprocess.CompletedProcess:\n    return subprocess.run(\n        [sys.executable, \"-m\", \"src.parser_cli\", *args],\n        cwd=root,\n        capture_output=True,\n        text=True,\n    )\n\n\ntrue_result = run_cli(\"true\")\nassert true_result.returncode == 0\nassert true_result.stdout.strip() == \"true\"\n\nfalse_result = run_cli(\"false\")\nassert false_result.returncode == 1\nassert false_result.stdout.strip() == \"false\"\n\nusage_result = run_cli()\nassert usage_result.returncode == 2\nassert \"usage\" in usage_result.stderr\n"
+        },
+        {
+          "path": "src/parser_cli.py",
+          "content": "import sys\n\nfrom src.parser import parse_enabled\n\n\ndef main(argv: list[str] | None = None) -> int:\n    args = list(sys.argv[1:] if argv is None else argv)\n    if len(args) != 1:\n        print(\"usage: parser-cli <value>\", file=sys.stderr)\n        return 2\n    if parse_enabled(args[0]):\n        print(\"true\")\n        return 0\n    print(\"false\")\n    return 1\n\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Added a dependency-free parser CLI module with deterministic exit codes and a subprocess-based check."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-parser-cli",
+    "evaluatorId": "scaffold-parser-cli-evaluator",
+    "candidateSha256": "e26786fa6a0d56ac6f7c177d1903c0d25c085e812e526f3184b5df09bc4be711",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-parser-cli",
+    "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+    "taskSha256": "5e072062df28e307690786452e53acec3d94b0266c19dcc11a6a7b15f3804d5a",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_parser.py",
+        "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+      },
+      {
+        "path": "README.md",
+        "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+      },
+      {
+        "path": "src/parser.py",
+        "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-parser-cli-evaluator",
+    "scenarioEvidenceSha256": "1a6ab0504e7053c4b27b834c48026f6c04e43afcbf2bda693d6a4bcf25992a27",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1022,
+      "outputTokens": 527,
+      "estimatedCostUsd": 0.0012151905,
+      "actualBilledUsd": null,
+      "latencyMs": 25787
+    }
+  }
+}

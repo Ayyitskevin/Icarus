@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "scaffold-greeting-command",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-02T21:24:24.732Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "698075f5ca0747820e498bb1b3e65c4a5c772577",
+    "digestSha256": "bca8bd584b6997340db5a67fd056dd7a50cca5c33026119c8997fe50eea4d589",
+    "repositoryDigestSha256": "eea916c04927c9236ad5f517ccbdf4ac4e8127eced8bb778697e7cfd7475382f",
+    "matchedFiles": 3,
+    "selectedFiles": 3,
+    "selectedQueryMatches": 3,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"AGENTS.md\",\n    \"checks/verify.py\",\n    \"src/greeting.txt\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"checks/verify.py\",\n      \"src/greeting.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"greeting-command\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/greeting.py\",\n        \"content\": \"#!/usr/bin/env python3\\n\\\"\\\"\\\"Print the repository greeting from the source-of-truth file.\\\"\\\"\\\"\\n\\nfrom pathlib import Path\\n\\n\\ndef main() -> None:\\n    greeting = Path(__file__).resolve().parent / \\\"greeting.txt\\\"\\n    print(greeting.read_text(encoding=\\\"utf-8\\\").rstrip(\\\"\\\\n\\\"))\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    main()\\n\"\n      },\n      {\n        \"path\": \"checks/verify.py\",\n        \"content\": \"import subprocess\\nimport sys\\nfrom pathlib import Path\\n\\nassert Path(\\\"src/greeting.txt\\\").read_text(encoding=\\\"utf-8\\\") == \\\"Hello, world!\\\\n\\\"\\n\\nresult = subprocess.run(\\n    [sys.executable, \\\"src/greeting.py\\\"],\\n    capture_output=True,\\n    text=True,\\n    check=True,\\n)\\n\\nassert result.stdout.rstrip(\\\"\\\\n\\\") == \\\"Hello, world!\\\"\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Added a dependency-free src/greeting.py command that reads and prints the repository greeting from src/greeting.txt, preserving the one-line rule and keeping the greeting file as the source of truth. Updated checks/verify.py to assert both the source file content and the command output.\"\n  }\n}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON (markdown_fenced)",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-greeting-command",
+    "evaluatorId": "scaffold-greeting-command-evaluator",
+    "candidateSha256": "e2d47a85c6e265e9f06c1e97e2c7b22db3a45cb513de9468b8c512cf75ff4ca0",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-greeting-command",
+    "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+    "taskSha256": "3adc6bd07f3a8e5943dc18eb80c07fb1267f597e1875a31dd6f2ae1f9ba7c882",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+      },
+      {
+        "path": "src/greeting.txt",
+        "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-greeting-command-evaluator",
+    "scenarioEvidenceSha256": "f0203f41f4bcf35a2a3e21c146dbfb09fcb2b96fdf69944e9a882baac624d19c",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 942,
+      "outputTokens": 446,
+      "estimatedCostUsd": 0.001388,
+      "actualBilledUsd": null,
+      "latencyMs": 9411
+    }
+  }
+}

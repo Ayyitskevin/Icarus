@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "repair-basic-newline",
+  "modelId": "code",
+  "generatedAt": "2026-09-02T21:26:20.907Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "698075f5ca0747820e498bb1b3e65c4a5c772577",
+    "digestSha256": "555c8d2e0e29bc1ac125d74818003e337eb293ddd9dc79b80cfe154024f3a043",
+    "repositoryDigestSha256": "eea916c04927c9236ad5f517ccbdf4ac4e8127eced8bb778697e7cfd7475382f",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"AGENTS.md\",\n    \"checks/verify.py\",\n    \"src/greeting.txt\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/greeting.txt\"\n    ],\n    \"requestedCheckIds\": [\n      \"basic-greeting\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/greeting.txt\",\n        \"content\": \"Hello, Icarus!\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Updated the greeting to the expected one-line value with a single trailing newline.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["AGENTS.md", "checks/verify.py", "src/greeting.txt"],
+    "plan": {
+      "mutationTargets": ["src/greeting.txt"],
+      "requestedCheckIds": ["basic-greeting"]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/greeting.txt",
+          "content": "Hello, Icarus!\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Updated the greeting to the expected one-line value with a single trailing newline."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-basic-newline",
+    "evaluatorId": "repair-basic-newline-evaluator",
+    "candidateSha256": "9fa6aecfd12fc6ca01ffa17fc6f0e9fbadfc34c11572224e5cd108b8000a30a2",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["src/greeting.txt"],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "basic-greeting",
+        "argv": ["python", "checks/verify.py"],
+        "exitCode": 0,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-basic-newline",
+    "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+    "taskSha256": "7d31d4951f36558bc80acd336c3eebf3121ddfe8aa9b4e0edf3c71ad7e442fc5",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+      },
+      {
+        "path": "README.md",
+        "sha256": "fa5d1662ca22c8397bcaef17daa0e0af2c383b8b7b75cb4a79698cceefcbf034"
+      },
+      {
+        "path": "src/greeting.txt",
+        "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["src/greeting.txt"],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-basic-newline-evaluator",
+    "scenarioEvidenceSha256": "5ee0a2688cffee1331f7dccf893dcc087d9d307ac93146c0afa179340553693d",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 907,
+      "outputTokens": 184,
+      "estimatedCostUsd": 0.0008558895,
+      "actualBilledUsd": null,
+      "latencyMs": 10285
+    }
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "repair-parser-false",
+  "modelId": "code",
+  "generatedAt": "2026-09-02T21:25:00.010Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "6980aad15d1a2fd1aa0669ee11249aa4e0150a19",
+    "digestSha256": "15cda20f93eac28584fe761d33a215db4d016629c841968a49d78eef150db5c6",
+    "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"checks/test_parser.py\",\n    \"src/parser.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/parser.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"parser-explicit-false\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/parser.py\",\n        \"content\": \"def parse_enabled(value: str) -> bool:\\n    lowered = value.strip().lower()\\n    if lowered == \\\"true\\\":\\n        return True\\n    if lowered == \\\"false\\\":\\n        return False\\n    raise ValueError(f\\\"expected 'true' or 'false', got {value!r}\\\")\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Recognize explicit true/false strings and reject arbitrary truthy input.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["checks/test_parser.py", "src/parser.py"],
+    "plan": {
+      "mutationTargets": ["src/parser.py"],
+      "requestedCheckIds": ["parser-explicit-false"]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/parser.py",
+          "content": "def parse_enabled(value: str) -> bool:\n    lowered = value.strip().lower()\n    if lowered == \"true\":\n        return True\n    if lowered == \"false\":\n        return False\n    raise ValueError(f\"expected 'true' or 'false', got {value!r}\")\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Recognize explicit true/false strings and reject arbitrary truthy input."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-parser-false",
+    "evaluatorId": "repair-parser-false-evaluator",
+    "candidateSha256": "5c3808fbab14dcc4c8e197f16c9260c39e7707204068d79f7b7e8e944601dc76",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["src/parser.py"],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "parser-explicit-false",
+        "argv": ["python", "checks/verify.py"],
+        "exitCode": 0,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-parser-false",
+    "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+    "taskSha256": "f9a110931ffe2223830b38922d2b83baca52464753529e7ba611ed05e6e74a7c",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_parser.py",
+        "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+      },
+      {
+        "path": "README.md",
+        "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+      },
+      {
+        "path": "src/parser.py",
+        "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["src/parser.py"],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-parser-false-evaluator",
+    "scenarioEvidenceSha256": "39c047582b4a40bb5d922de9f4c681697fc9be968715b61a76a1a89b16de7f54",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 908,
+      "outputTokens": 235,
+      "estimatedCostUsd": 0.0008966835,
+      "actualBilledUsd": null,
+      "latencyMs": 12173
+    }
+  }
+}

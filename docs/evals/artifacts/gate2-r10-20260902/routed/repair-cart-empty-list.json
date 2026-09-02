@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "repair-cart-empty-list",
+  "modelId": "code",
+  "generatedAt": "2026-09-02T21:26:37.043Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "3f4872e01ba7def1b6797a5ceacc3e31e86086b0166f9d6de559e1dd39981259",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"README.md\",\n    \"checks/test_cart.py\",\n    \"src/cart.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"checks/test_cart.py\",\n      \"src/cart.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"cart-empty-list\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/cart.py\",\n        \"content\": \"def subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the cart subtotal in cents.\\\"\\\"\\\"\\n    return sum(cents)\\n\"\n      },\n      {\n        \"path\": \"checks/test_cart.py\",\n        \"content\": \"from src.cart import subtotal\\n\\nassert subtotal([100, 200]) == 300\\nassert subtotal([]) == 0\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Removed the deliberate one-cent defect so subtotal returns the sum of item prices, and added a regression check asserting an empty cart subtotal is zero.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["checks/test_cart.py", "README.md", "src/cart.py"],
+    "plan": {
+      "mutationTargets": ["checks/test_cart.py", "src/cart.py"],
+      "requestedCheckIds": ["cart-empty-list"]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "checks/test_cart.py",
+          "content": "from src.cart import subtotal\n\nassert subtotal([100, 200]) == 300\nassert subtotal([]) == 0\n"
+        },
+        {
+          "path": "src/cart.py",
+          "content": "def subtotal(cents: list[int]) -> int:\n    \"\"\"Return the cart subtotal in cents.\"\"\"\n    return sum(cents)\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Removed the deliberate one-cent defect so subtotal returns the sum of item prices, and added a regression check asserting an empty cart subtotal is zero."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-cart-empty-list",
+    "evaluatorId": "repair-cart-empty-list-evaluator",
+    "candidateSha256": "64d9290288cb61add39132f7499e66b3282c3382a01cc3cb96f48c78bd09b867",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["checks/test_cart.py", "src/cart.py"],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "cart-empty-list",
+        "argv": ["python", "checks/verify.py"],
+        "exitCode": 0,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-cart-empty-list",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "b663cdf70ad8934e8068f3c1619324945802e6f3b13ec5c74a754cc8dd9d2f61",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["checks/test_cart.py", "src/cart.py"],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-cart-empty-list-evaluator",
+    "scenarioEvidenceSha256": "da43e456455b160fd7fb0b4c2f63e6a25bdca22bedc61d532e49afeac3a7e2e5",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 943,
+      "outputTokens": 284,
+      "estimatedCostUsd": 0.0009625815,
+      "actualBilledUsd": null,
+      "latencyMs": 15386
+    }
+  }
+}
