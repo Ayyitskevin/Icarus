@@ -22,7 +22,10 @@ export const GATE2_LIVE_BENCHMARK_CLASSES: readonly string[];
  * JSON round-trip (every property access happens in that one pass; non-JSON dropped), shape
  * asserted, deep-frozen. Later consumers read the snapshot, never the source.
  */
-export function snapshotGate2LivePolicy(source: unknown): typeof GATE2_LIVE_INSTRUCTION_POLICY;
+export function snapshotGate2LivePolicy(
+  source: unknown,
+  canonicalTemplates?: typeof GATE2_LIVE_TEMPLATES,
+): typeof GATE2_LIVE_INSTRUCTION_POLICY;
 /** Pure assembly from a policy object; reads class rules as own properties only. */
 export function assembleGate2LiveInstructions(
   policy: typeof GATE2_LIVE_INSTRUCTION_POLICY,

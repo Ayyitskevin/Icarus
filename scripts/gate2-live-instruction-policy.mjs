@@ -269,7 +269,7 @@ function assertStringArray(value, where) {
  * one-element array as a template, which coerced to an expected stem where the template is
  * interpolated. Neither survives this function: what is hashed is what is assembled.
  */
-export function snapshotGate2LivePolicy(source) {
+export function snapshotGate2LivePolicy(source, canonicalTemplates = GATE2_LIVE_TEMPLATES) {
   const policy = JSON.parse(JSON.stringify(source));
   if (policy === null || typeof policy !== "object" || Array.isArray(policy)) {
     invalidPolicy("policy must be an object");
@@ -314,7 +314,10 @@ export function snapshotGate2LivePolicy(source) {
     }
   }
   for (const kind of ["mutation", "readOnly"]) {
-    const canonical = GATE2_LIVE_TEMPLATES[kind];
+    // The canonical templates are a parameter so a test can prove this edge: a planted
+    // constant with a matching serialised string must be refused HERE, on the snapshot
+    // path, not only by the validator called directly.
+    const canonical = canonicalTemplates[kind];
     validateGate2LiveTemplate(canonical, kind);
     if (policy.templates[kind] !== JSON.stringify(canonical)) {
       invalidPolicy(`templates.${kind} must equal the canonical template byte for byte`);
