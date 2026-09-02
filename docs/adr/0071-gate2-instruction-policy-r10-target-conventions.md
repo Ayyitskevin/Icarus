@@ -68,12 +68,14 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   exempt; a finding ID written into a rule is scanned as the words it contains. The only
   unscanned text is what the builder owns structurally — the class/kind line, the JSON
   template's keys, and the taxonomy IDs as identifiers — and the test asserts the assembled
-  instructions contain nothing beyond those pieces. The template's string values are text
-  the model sees and are scanned like identifiers, against the stems of the cases whose
-  answer kind receives that template; its top-level keys are exact and it parses under the
-  strict parser. A seventh review changed only `answer.summary` from "text" to
-  "test-json-output" in a valid template and every test stayed green; that plant is a
-  regression test now. Three reviews shaped this: the first
+  instructions contain nothing beyond those pieces. The template's complete key tree is
+  pinned in the module, at every level, to the answer contract's skeleton — a template with
+  a missing, extra, or nested foreign key is refused at load — and its string values are
+  text the model sees, scanned like identifiers against the stems of the cases whose answer
+  kind receives that template. A seventh review changed only `answer.summary` from "text"
+  to "test-json-output" in a valid template, and an eighth planted the same stem as a
+  nested key inside `answer`; every test stayed green both times, and both plants are
+  regression tests now. Three reviews shaped this: the first
   planted "a new module named money" and the old gate stayed green; the second beat the
   first version with "test-json-output" and with the member name `files` used as prose;
   the third beat the second version by writing a finding ID into a rule so that the stem
@@ -106,7 +108,8 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   other pair, so the taxonomy line reaches only the read-only classes the scan checks it
   against. The taxonomy line is rendered in sorted id order because the digest
   canonicalises key order — what is hashed is what is assembled, in the same order — and
-  the shape assertion refuses ids that are not kebab-case identifiers, definitions that
+  the shape assertion refuses ids that are not kebab-case identifiers (non-empty lowercase
+  alphanumeric segments joined by single hyphens), definitions that
   carry the line's own delimiters, a `generation` outside its ranges, and template keys
   that are not answer kinds. What this does not cover, and says so: code running in the
   same process with authority over the module or the language's intrinsics — a policy

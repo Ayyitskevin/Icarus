@@ -4,6 +4,8 @@ export const GATE2_LIVE_INSTRUCTION_POLICY: Readonly<{
 }> &
   Readonly<Record<string, unknown>>;
 export const GATE2_LIVE_INSTRUCTION_POLICY_SHA256: string;
+/** The exact key tree of an answer template at every level; a template must match it exactly. */
+export const GATE2_LIVE_TEMPLATE_SKELETON: Readonly<Record<string, unknown>>;
 /** Benchmark class → answer kind; bound to the manifest by test. The assembler refuses other pairs. */
 export const GATE2_LIVE_BENCHMARK_CLASS_KINDS: Readonly<Record<string, "mutation" | "read_only">>;
 /** The benchmark classes the policy is written for; bound to the manifest's classes by test. */

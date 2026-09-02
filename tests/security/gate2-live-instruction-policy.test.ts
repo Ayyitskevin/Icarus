@@ -11,6 +11,7 @@ import {
   GATE2_LIVE_BENCHMARK_CLASSES,
   GATE2_LIVE_INSTRUCTION_POLICY,
   GATE2_LIVE_INSTRUCTION_POLICY_SHA256,
+  GATE2_LIVE_TEMPLATE_SKELETON,
   snapshotGate2LivePolicy,
 } from "../../scripts/gate2-live-instruction-policy.mjs";
 
@@ -298,9 +299,52 @@ describe("Gate 2 live instruction policy", () => {
       return found;
     };
     expect(templateCollisionsOf(policy.templates)).toEqual([]);
+    // The template's complete key tree is pinned in the module, at every level, to the
+    // answer contract's skeleton; a seventh review planted an expected stem as a NESTED
+    // key ("answer": {"test-json-output": "text"}) with every check green. The skeleton
+    // itself is bound here to the contract members the scorer reads.
+    expect(GATE2_LIVE_TEMPLATE_SKELETON).toEqual({
+      schemaVersion: "number",
+      selectedContextPaths: ["string"],
+      plan: { mutationTargets: ["string"], requestedCheckIds: ["string"] },
+      answer: {
+        kind: "string",
+        files: [{ path: "string", content: "string" }],
+        citations: ["string"],
+        findingIds: ["string"],
+        summary: "string",
+      },
+    });
     const mutationTemplate = JSON.parse(policy.templates.mutation) as {
       answer: Record<string, unknown>;
     };
+    const nestedKeyTemplate = JSON.stringify({
+      ...mutationTemplate,
+      answer: { ...mutationTemplate.answer, "test-json-output": "text" },
+    });
+    expect(() =>
+      snapshotGate2LivePolicy({
+        ...policy,
+        templates: { ...policy.templates, mutation: nestedKeyTemplate },
+      }),
+    ).toThrow(/templates\.mutation\.answer must have exactly the members/);
+    expect(() =>
+      snapshotGate2LivePolicy({
+        ...policy,
+        templates: {
+          ...policy.templates,
+          mutation: JSON.stringify({
+            ...mutationTemplate,
+            answer: { ...mutationTemplate.answer, kind: "read_only" },
+          }),
+        },
+      }),
+    ).toThrow(/templates\.mutation\.answer\.kind must be mutation/);
+    for (const badId of ["x-", "x--y", "-x", "X"]) {
+      expect(() =>
+        snapshotGate2LivePolicy({ ...policy, findingTaxonomy: { [badId]: "d" } }),
+      ).toThrow(/must be a kebab-case identifier/);
+    }
     const plantedTemplate = JSON.stringify({
       ...mutationTemplate,
       answer: { ...mutationTemplate.answer, summary: "test-json-output" },

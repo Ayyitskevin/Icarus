@@ -96,7 +96,48 @@ const POLICY_MEMBERS = new Set([
   "templates",
   "findingTaxonomy",
 ]);
-const TEMPLATE_MEMBERS = ["schemaVersion", "selectedContextPaths", "plan", "answer"];
+/**
+ * The exact key tree of an answer template, at every level: what the model is shown as
+ * "Required shape". A template must have exactly these members and no others anywhere
+ * in the tree -- a nested key is model-visible text, and a review planted an expected
+ * stem as one ("answer": {"test-json-output": "text"}) with every check green.
+ */
+export const GATE2_LIVE_TEMPLATE_SKELETON = Object.freeze({
+  schemaVersion: "number",
+  selectedContextPaths: ["string"],
+  plan: { mutationTargets: ["string"], requestedCheckIds: ["string"] },
+  answer: {
+    kind: "string",
+    files: [{ path: "string", content: "string" }],
+    citations: ["string"],
+    findingIds: ["string"],
+    summary: "string",
+  },
+});
+const TEMPLATE_ANSWER_KIND = Object.freeze({ mutation: "mutation", readOnly: "read_only" });
+
+function assertTemplateShape(value, skeleton, where) {
+  if (Array.isArray(skeleton)) {
+    if (!Array.isArray(value)) invalidPolicy(`${where} must be an array`);
+    for (const [index, item] of value.entries()) {
+      assertTemplateShape(item, skeleton[0], `${where}[${index}]`);
+    }
+    return;
+  }
+  if (typeof skeleton === "object") {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      invalidPolicy(`${where} must be an object`);
+    }
+    const expected = Object.keys(skeleton).sort();
+    const actual = Object.keys(value).sort();
+    if (expected.join(",") !== actual.join(",")) {
+      invalidPolicy(`${where} must have exactly the members ${expected.join(", ")}`);
+    }
+    for (const key of expected) assertTemplateShape(value[key], skeleton[key], `${where}.${key}`);
+    return;
+  }
+  if (typeof value !== skeleton) invalidPolicy(`${where} must be a ${skeleton}`);
+}
 
 function deepFreeze(value) {
   if (value !== null && typeof value === "object") {
@@ -182,13 +223,9 @@ export function snapshotGate2LivePolicy(source) {
     } catch {
       invalidPolicy(`templates.${kind} must be JSON`);
     }
-    if (
-      parsed === null ||
-      typeof parsed !== "object" ||
-      Array.isArray(parsed) ||
-      TEMPLATE_MEMBERS.some((member) => !Object.hasOwn(parsed, member))
-    ) {
-      invalidPolicy(`templates.${kind} must be an object with ${TEMPLATE_MEMBERS.join(", ")}`);
+    assertTemplateShape(parsed, GATE2_LIVE_TEMPLATE_SKELETON, `templates.${kind}`);
+    if (parsed.answer.kind !== TEMPLATE_ANSWER_KIND[kind]) {
+      invalidPolicy(`templates.${kind}.answer.kind must be ${TEMPLATE_ANSWER_KIND[kind]}`);
     }
   }
   if (policy.findingTaxonomy === null || typeof policy.findingTaxonomy !== "object") {
@@ -197,7 +234,7 @@ export function snapshotGate2LivePolicy(source) {
   for (const [id, definition] of Object.entries(policy.findingTaxonomy)) {
     // The taxonomy line joins entries with " = " and "; "; an id or definition carrying
     // those would render as more entries than exist. Ids are kebab-case identifiers.
-    if (!/^[a-z][a-z0-9-]*$/.test(id)) {
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(id)) {
       invalidPolicy(`findingTaxonomy id "${id}" must be a kebab-case identifier`);
     }
     if (typeof definition !== "string" || definition === "") {
