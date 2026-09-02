@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -302,6 +302,71 @@ describe("Gate 2 published live evidence", () => {
       expect(problems.some((problem: string) => problem.startsWith(`${relative}:`))).toBe(true);
       await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
         relative,
+      );
+    });
+
+    // (d) a manifest with a duplicated member: both refuse. The manifest is the one file
+    // in the set its own digests do not cover, so the strict parser -- not the digest --
+    // is what refuses it, on both sides. #85 added this refusal to the freezer.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const manifestPath = path.join(artifactDirectory, "manifest.json");
+      const text = await readFile(manifestPath, "utf8");
+      await writeFile(
+        manifestPath,
+        text.replace(/^\{/, '{\n  "schema": "icarus.gate2-frozen-evidence.v2",'),
+      );
+      await expect(verifyFrozenEvidence(artifactDirectory)).rejects.toThrow(
+        "duplicate JSON object members",
+      );
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        "duplicate JSON object members",
+      );
+    });
+
+    // (e) a listed record replaced by a symlink to byte-identical content outside the set:
+    // both refuse. The digests still agree, so only an entry-type check can catch it --
+    // otherwise the manifest vouches for bytes the frozen directory does not own.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const relative = "routed/explain-lantern-flow.json";
+      const target = path.join(artifactDirectory, relative);
+      const outside = path.join(temporary, "outside-the-set.json");
+      await writeFile(outside, await readFile(target));
+      await rm(target);
+      await symlink(outside, target);
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([
+        `Gate 2 evidence freeze: ${relative} is not a regular file`,
+      ]);
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        `${relative} must be one non-linked regular file`,
+      );
+    });
+  });
+
+  it("refuses a file the manifest lists that the benchmark contract does not", async () => {
+    // The publisher's own pin, not a freezer divergence: the freezer proves a manifest is
+    // internally true of its directory, and a 65th file listed with a correct digest is
+    // internally true. Only the publisher knows the set must be exactly the contract's 64
+    // paths -- the ones `validateEvidenceSet` read and screened for secret shapes. Without
+    // this, a listed extra file rides along unscreened.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const extra = "extra.json";
+      const bytes = Buffer.from('{"unscreened":true}\n');
+      await writeFile(path.join(artifactDirectory, extra), bytes);
+      const manifestPath = path.join(artifactDirectory, "manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      manifest.files.push({
+        path: extra,
+        bytes: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      });
+      manifest.files.sort((left: { path: string }, right: { path: string }) =>
+        left.path.localeCompare(right.path),
+      );
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      // The freezer accepts it: listed, present, digest correct.
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([]);
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        "frozen evidence directory does not hold exactly the contract's files",
       );
     });
   });

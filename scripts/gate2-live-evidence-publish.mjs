@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { findSecretSpans } from "../packages/core/dist/context.js";
 import { loadGate2BenchmarkContract, parseStrictGate2Json } from "./gate2-benchmark-contract.mjs";
-import { computeFrozenEntries, verifyFrozenEvidence } from "./gate2-freeze-live-evidence.mjs";
+import { verifyFrozenEvidence } from "./gate2-freeze-live-evidence.mjs";
 import {
   compareGate2BenchmarkResults,
   computeGate2ExecutionProfileDigest,
@@ -414,10 +414,13 @@ export async function verifyGate2PublishedEvidence(
       problems.length === 0,
       `frozen evidence manifest is invalid: ${problems.join("; ")}`,
     );
-    // The freezer proves the directory holds exactly what its manifest lists. This proves
-    // that list is exactly the benchmark contract's file set, so every present file is one
-    // the secret screen above actually read.
-    const present = (await computeFrozenEntries(destination)).map((entry) => entry.path);
+    // `verifyFrozenEvidence` returned no problem, so the directory holds exactly what
+    // `manifest.files` lists and every listed digest matches its bytes. The list is
+    // therefore the directory, and reading the present paths from it rather than walking
+    // again is the last duplicate walk gone. This proves that list is exactly the
+    // benchmark contract's file set, so every present file is one the secret screen above
+    // actually read.
+    const present = manifest.files.map((entry) => entry.path);
     assertCondition(
       stableJson([...present].sort()) === stableJson([...validated.relativePaths].sort()),
       "frozen evidence directory does not hold exactly the contract's files",
