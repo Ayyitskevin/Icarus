@@ -17,7 +17,7 @@ The current sequence is:
 | --- | --- | --- |
 | 0 | Restore release truth for ADR 0026 — **released** | remote-egress and mutation-scope defects closed; missing crash/atomicity/cancellation/compaction evidence added; exact-tree local/hosted/security gates green at `802b91e6f6c9b392f56c9ee3660be818a0f74a62` |
 | 1 | Verified Change Gate — **live 3/3 recorded** | the closed three-stack contract, human-approved credential-gated profile, operator-assessed inert repositories, deterministic candidates, absent-only `icarus/<run-id>` refs, bounded GitHub REST upload, three draft PRs, immutable receipts, and credential-free terminal replay completed 2026-08-23; no direct ref update/deletion, force-push, merge, deployment, or source-checkout mutation endpoint |
-| 2 | Context and agent quality — **target discovery improved; quality gate open** | deterministic v2 adoption remains 30/30 replay-valid; ADR 0067's leak-free versioned target-discovery profile measured fixed `code-fast` at 5/30 and routed `code` at 16/30, including security review 2/5 and scaffold 0/5, with unchanged retrieval/provenance and zero incorrect edits; the routed run still missed the predeclared 24/30 success and 0.80 first-plan thresholds, so Gate 2 remains open |
+| 2 | Context and agent quality — **target discovery improved; quality gate open** | deterministic v2 adoption remains 30/30 replay-valid; ADR 0067's leak-free versioned target-discovery profile measured fixed `code-fast` at 5/30 and routed `code` at 16/30, including security review 2/5 and scaffold 0/5, with unchanged retrieval/provenance and zero incorrect edits; the routed run still missed the predeclared 24/30 success and 0.80 first-plan thresholds; the current measurement (2026-09-02, revision 10, evidence record 6) is routed `code` 17/30 at 0.7333 and fixed `code-fast` 3/30, a new measurement under a changed instrument rather than a before-and-after, still short of both thresholds, so Gate 2 remains open |
 | 3 | VS Code workbench | Linux/macOS/Windows extension, three language stacks, 30 IDE dogfood tasks with ≥70% completed without manual file editing |
 | C1 | Read-only agent Council | accepted ADR 0037; 30 tasks across three fixed seeds show predeclared quality lift at non-inferior per-class success, bounded cost/latency, and zero authority violations |
 | C2 | Executable Crew | isolated lineage-pinned child runs, explicit write sets, deterministic integration, ≥24/30 fixed multi-module tasks per seed, measurable lift at non-inferior per-class success |
@@ -110,6 +110,18 @@ first time in this run, shows no query match excluded by a file or byte ceiling 
 case — which rules out selection-ceiling truncation as the explanation for `refactor` 0/5
 and `scaffold` 0/5 without ruling out other retrieval mechanisms, since macro recall is
 0.9917 rather than 1.0.
+Superseded as the current measurement 2026-09-02: ADR 0071 added instruction-policy
+revision 10 (digest `116168c9…`) — class conventions for `refactor` and `repair`, which had
+none, a narrowed check rule, citation minimality, and an output boundary — and the run was
+written under evidence record revision 6 and frozen with the schema-v2 freezer. On that
+instrument fixed `code-fast` measured 3/30 and routed `code` measured 17/30 with first-plan
+acceptance 0.7333, retrieval recall 0.9917 / precision 0.8083, zero incorrect edits, 60/60
+clean stops, and `reasoningChars: null` on every record — absence recorded as absence
+([evaluation](evals/2026-09-02-gate2-revision-10.md), evidence frozen at
+`evals/artifacts/gate2-r10-20260902/`). `refactor` measured 4/5 where revision 9 measured
+0/5; `scaffold` stayed 0/5. Three instruments changed at once — policy text, evidence writer,
+freezer — so this is a new measurement, NOT a before-and-after against 12/30; the pair
+comparison fails on cost reduction (0.14 against 0.3), not on the success ratio.
 Gate 2 remains open for
 stable success of at least 24/30 and plan acceptance of at least 0.80. The
 separate Gate 2 contract now pins seven fixture repositories, 30 task documents

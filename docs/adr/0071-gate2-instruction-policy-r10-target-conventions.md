@@ -1,6 +1,6 @@
 # ADR 0071: Gate 2 instruction policy revision 10 — target conventions and an output boundary
 
-- Status: **Proposed** — built under the day-2 delegation; lands after independent review
+- Status: **Accepted** 2026-09-02 — the conventions are measured; outcome below
 - Date: 2026-09-01
 - Related: [ADR 0067](0067-gate2-target-discovery-profile.md) (the leak-free policy pattern
   this follows), [ADR 0070](0070-gate2-rerun-with-reasoning-suppressed.md) (the honest budget
@@ -176,6 +176,19 @@ re-examine them.
 - It does not steer `refactor-cart-money-module`, where the task says *"private helper"* and
   the manifest expects a new module. That reading is defensible and the case is flagged for
   manifest review rather than bent toward its answer, which would be a leak.
+
+## Outcome (measured 2026-09-02)
+
+One paired run on mickey under revision 10 (digest `116168c9…`), evidence record revision 6,
+frozen and verified at `docs/evals/artifacts/gate2-r10-20260902/`, recorded in
+`docs/evals/2026-09-02-gate2-revision-10.md`. Routed `code` measured **17/30** with first-plan
+acceptance 0.7333; baseline `code-fast` 3/30 at 0.2. Of the two classes that scored 0/5 under
+revision 9, `refactor` measured 4/5 and `scaffold` 0/5. The exit thresholds (24/30, 0.80)
+still fail, and the pair comparison fails on cost reduction (0.14 against 0.3). Per *What
+this does not claim*, this is a new measurement under a changed instrument, not a
+before-and-after against 12/30. The leak guard that holds this policy's boundary went
+through fourteen adversarial rounds before it landed (PR #83); the policy digest did not
+move during any of them.
 
 ## Consequences
 

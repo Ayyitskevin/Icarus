@@ -433,8 +433,18 @@ and routed `code` measured 12/30 with acceptance `0.60`
 `evals/artifacts/gate2-reasoning-suppressed-20260901/`). The two sets were taken under
 different budget contracts and are not a controlled comparison; the revision-8 figures
 remain valid records of what was measured then.
-Routed class success was repair 7/10, refactor 4/5, explanation 3/5, security
-review 2/5, and scaffold 0/5. Both retained macro recall `0.9917`, precision
+Superseded as the current measurement 2026-09-02: under revision 10 (ADR 0071 — class
+conventions for `refactor` and `repair`, a narrowed check rule, citation minimality, an
+output boundary), written under evidence record revision 6 and frozen with the schema-v2
+freezer, fixed `code-fast` measured 3/30 with acceptance `0.2` and routed `code` measured
+17/30 with acceptance `0.7333` ([evaluation](evals/2026-09-02-gate2-revision-10.md),
+evidence frozen at `evals/artifacts/gate2-r10-20260902/`). Policy text, writer, and freezer
+all changed, so this is a new measurement rather than a controlled comparison with revision
+9; the revision-9 figures remain valid records of what was measured then.
+Routed class success under revision 8 was repair 7/10, refactor 4/5, explanation 3/5,
+security review 2/5, and scaffold 0/5; under revision 9 it was repair 7/10, refactor 0/5,
+explanation 3/5, security review 2/5, and scaffold 0/5; under revision 10 it is repair
+7/10, refactor 4/5, explanation 3/5, security review 3/5, and scaffold 0/5. Both revision-8 arms retained macro recall `0.9917`, precision
 `0.8083`, provenance `1.0`, and zero incorrect edits. The routed run improved
 the success count and lowered median estimated proxy cost per success by
 `0.554217121588`, but it still missed the predeclared 24/30 and 0.80 absolute
