@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { parseStrictGate2Json } from "../../scripts/gate2-benchmark-contract.mjs";
+import {
+  GATE2_CURRENT_MANIFEST_PATH,
+  parseStrictGate2Json,
+} from "../../scripts/gate2-benchmark-contract.mjs";
 import { validateGate2LiveCandidate } from "../../scripts/gate2-live-candidate-contract.mjs";
 import {
   assembleGate2LiveInstructions,
@@ -121,7 +124,7 @@ describe("Gate 2 live instruction policy", () => {
     // Paraphrase is not caught here and is held by the authoring rule in ADR 0071.
     const repositoryRoot = decodeURIComponent(new URL("../../", import.meta.url).pathname);
     const manifest = JSON.parse(
-      readFileSync(path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v2.json"), "utf8"),
+      readFileSync(path.join(repositoryRoot, GATE2_CURRENT_MANIFEST_PATH), "utf8"),
     ) as {
       cases: Array<{
         id: string;
@@ -681,7 +684,7 @@ describe("Gate 2 live instruction policy", () => {
         "mutation",
       ),
     ).toEqual([
-      'assembled scaffold: "test_json_output" names scaffold-lantern-json-output across classRules.scaffold',
+      'assembled scaffold: "test_json_output" names scaffold-json-output-mode across classRules.scaffold',
     ]);
     // Thirteenth review: identifier spellings. Every one is the same name.
     for (const spelling of [
@@ -706,7 +709,7 @@ describe("Gate 2 live instruction policy", () => {
           "mutation",
         ),
       ).toEqual([
-        'assembled scaffold: "test_json_output" names scaffold-lantern-json-output across classRules.scaffold',
+        'assembled scaffold: "test_json_output" names scaffold-json-output-mode across classRules.scaffold',
       ]);
     }
     expect(
@@ -745,7 +748,7 @@ describe("Gate 2 live instruction policy", () => {
     });
     // The leaf scan on its own catches the value plant (round six) ...
     expect(templateCollisionsOf({ ...policy.templates, mutation: plantedTemplate })).toEqual([
-      'templates.mutation value "test-json-output": "test_json_output" names scaffold-lantern-json-output',
+      'templates.mutation value "test-json-output": "test_json_output" names scaffold-json-output-mode',
     ]);
     // ... and the snapshot refuses it before the scan is even reached (round nine).
     expect(() =>

@@ -105,3 +105,43 @@ describe("Gate 2 fixture boundary", () => {
     ).rejects.toThrow("special path");
   });
 });
+
+describe("Gate 2 fixture boundary, manifest v3", () => {
+  const manifestV3Path = path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v3.json");
+
+  it("loads v3 only with its exact committed v2 predecessor", async () => {
+    const result = await loadGate2BenchmarkContract(manifestV3Path, repositoryRoot);
+
+    expect(result.manifest.schemaVersion).toBe(2);
+    expect(result.manifest.benchmarkRevision).toBe("gate2-thirty-task-v3-task-entailed-targets");
+    expect(result.manifest.cases).toHaveLength(30);
+    expect(result.predecessorManifestSha256).toBe(
+      "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+    );
+
+    const root = await fixtureCopy();
+    const predecessor = path.join(root, "fixtures/evals/gate2/manifest.v2.json");
+    await writeFile(predecessor, `${await readFile(predecessor, "utf8")} `, "utf8");
+    await expect(
+      loadGate2BenchmarkContract(path.join(root, "fixtures/evals/gate2/manifest.v3.json"), root),
+    ).rejects.toThrow("predecessor manifest digest");
+  });
+
+  it("walks the lineage to v1: an edited v1 refuses v3 as well", async () => {
+    const root = await fixtureCopy();
+    const origin = path.join(root, "fixtures/evals/gate2/manifest.v1.json");
+    await writeFile(origin, `${await readFile(origin, "utf8")} `, "utf8");
+    await expect(
+      loadGate2BenchmarkContract(path.join(root, "fixtures/evals/gate2/manifest.v3.json"), root),
+    ).rejects.toThrow("predecessor manifest digest");
+  });
+
+  it("rejects a single-byte mutation of a successor task", async () => {
+    const root = await fixtureCopy();
+    const target = path.join(root, "fixtures/evals/gate2/tasks/scaffold-parser-cli-check.md");
+    await writeFile(target, `${await readFile(target, "utf8")}x`, "utf8");
+    await expect(
+      loadGate2BenchmarkContract(path.join(root, "fixtures/evals/gate2/manifest.v3.json"), root),
+    ).rejects.toThrow("task digest for scaffold-parser-cli-check");
+  });
+});

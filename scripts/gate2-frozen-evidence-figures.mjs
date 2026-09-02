@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   describeNonStrictGate2Json,
+  GATE2_MANIFEST_PATHS_BY_SHA256,
   loadGate2BenchmarkContract,
   parseStrictGate2Json,
 } from "./gate2-benchmark-contract.mjs";
@@ -22,7 +23,6 @@ import { verifyFrozenEvidence } from "./gate2-freeze-live-evidence.mjs";
 const scriptPath = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(scriptPath), "..");
 const MODES = Object.freeze(["baseline", "routed"]);
-const DEFAULT_MANIFEST = "fixtures/evals/gate2/manifest.v2.json";
 /** The closed vocabulary `describeNonStrictGate2Json` uses. */
 const STRICT_JSON_SHAPES = Object.freeze([
   "not_text",
@@ -72,6 +72,17 @@ function tally(values) {
   const counts = new Map();
   for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
   return Object.fromEntries([...counts].sort((left, right) => right[1] - left[1]));
+}
+
+async function registeredManifestPath(setDirectory) {
+  const result = parseStrictGate2Json(
+    await readFile(path.join(setDirectory, "baseline-result.json"), "utf8"),
+  );
+  const digest = result?.manifestSha256;
+  if (typeof digest !== "string" || !Object.hasOwn(GATE2_MANIFEST_PATHS_BY_SHA256, digest)) {
+    fail(`baseline-result.json names an unregistered benchmark manifest digest ${String(digest)}`);
+  }
+  return GATE2_MANIFEST_PATHS_BY_SHA256[digest];
 }
 
 async function readArmRecords(setDirectory, mode, manifestSha256) {
@@ -191,7 +202,13 @@ export async function computeGate2FrozenEvidenceFigures(setDirectory, options = 
   const frozenManifest = parseStrictGate2Json(
     await readFile(path.join(absoluteSet, "manifest.json"), "utf8"),
   );
-  const manifestPath = path.resolve(repositoryRoot, options.manifestPath ?? DEFAULT_MANIFEST);
+  // The set names its benchmark by digest (every record and result file carries it); the
+  // digest becomes a path only through the contract's registry, so an unregistered manifest
+  // fails here instead of being recomputed against whatever is current.
+  const manifestPath = path.resolve(
+    repositoryRoot,
+    options.manifestPath ?? (await registeredManifestPath(absoluteSet)),
+  );
   const loaded = await loadGate2BenchmarkContract(manifestPath, repositoryRoot);
   const disagreements = [];
   const arms = {};

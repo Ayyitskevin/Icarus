@@ -159,9 +159,31 @@ const GATE2_V2_CASE_IDS = Object.freeze(
 
 export const GATE2_V1_MANIFEST_SHA256 =
   "43159d8a174312e7fd720fbb625173601e7c90f6e5983c62c206b69ce99c9558";
+export const GATE2_V2_MANIFEST_SHA256 =
+  "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5";
+// Pinned from the committed bytes; a change to manifest.v3.json is a new revision, not an edit.
+export const GATE2_V3_MANIFEST_SHA256 =
+  "4d41eb673de92e5194946f3cc4560cc7e06326bb4a89d44e6a10f0ea7528da51";
+const GATE2_V3_CASE_IDS = Object.freeze(
+  GATE2_V2_CASE_IDS.map((caseId) => {
+    if (caseId === "refactor-cart-money-module") return "refactor-cart-money-extraction";
+    if (caseId === "scaffold-parser-cli") return "scaffold-parser-cli-check";
+    if (caseId === "scaffold-lantern-json-output") return "scaffold-json-output-mode";
+    return caseId;
+  }),
+);
 export const GATE2_CASE_IDS_BY_REVISION = Object.freeze({
   "gate2-thirty-task-v1": GATE2_CASE_IDS,
   "gate2-thirty-task-v2-host-policy-compatible": GATE2_V2_CASE_IDS,
+  "gate2-thirty-task-v3-task-entailed-targets": GATE2_V3_CASE_IDS,
+});
+export const GATE2_CURRENT_BENCHMARK_REVISION = "gate2-thirty-task-v3-task-entailed-targets";
+export const GATE2_CURRENT_MANIFEST_PATH = "fixtures/evals/gate2/manifest.v3.json";
+// A frozen set names its benchmark by digest; this is the only place a digest becomes a path.
+export const GATE2_MANIFEST_PATHS_BY_SHA256 = Object.freeze({
+  [GATE2_V1_MANIFEST_SHA256]: "fixtures/evals/gate2/manifest.v1.json",
+  [GATE2_V2_MANIFEST_SHA256]: "fixtures/evals/gate2/manifest.v2.json",
+  [GATE2_V3_MANIFEST_SHA256]: GATE2_CURRENT_MANIFEST_PATH,
 });
 
 const GATE2_V2_REPLACEMENTS = Object.freeze([
@@ -226,6 +248,111 @@ const GATE2_V2_SUCCESSOR_CASES = Object.freeze([
     }),
   }),
 ]);
+
+const GATE2_V3_REPLACEMENTS = Object.freeze([
+  Object.freeze({
+    predecessorCaseId: "refactor-cart-money-module",
+    successorCaseId: "refactor-cart-money-extraction",
+    reason: "task-text-did-not-entail-the-expected-new-module",
+  }),
+  Object.freeze({
+    predecessorCaseId: "scaffold-parser-cli",
+    successorCaseId: "scaffold-parser-cli-check",
+    reason: "expected-check-path-contradicted-the-fixture-check-directory-convention",
+  }),
+  Object.freeze({
+    predecessorCaseId: "scaffold-lantern-json-output",
+    successorCaseId: "scaffold-json-output-mode",
+    reason: "task-title-left-the-expected-check-name-underdetermined",
+  }),
+]);
+
+const GATE2_V3_SUCCESSOR_CASES = Object.freeze([
+  Object.freeze({
+    id: "refactor-cart-money-extraction",
+    class: "refactor",
+    repositoryId: "buggy",
+    task: Object.freeze({
+      path: "fixtures/evals/gate2/tasks/refactor-cart-money-extraction.md",
+      sha256: "8f1bdefcc33cdc0e9fed80466a1f00864f854ca7d28da36b2ad367d8bfc628f8",
+    }),
+    expectedContextPaths: Object.freeze(["checks/test_cart.py", "README.md", "src/cart.py"]),
+    expectedOutcome: Object.freeze({
+      kind: "mutation",
+      expectedChangedPaths: Object.freeze(["src/cart.py", "src/money.py"]),
+      expectedCitationPaths: Object.freeze([]),
+      expectedFindingIds: Object.freeze([]),
+      allowNoFinding: false,
+      scenarioEvaluatorId: "refactor-cart-money-extraction-evaluator",
+    }),
+  }),
+  Object.freeze({
+    id: "scaffold-json-output-mode",
+    class: "scaffold",
+    repositoryId: "unfamiliar",
+    task: Object.freeze({
+      path: "fixtures/evals/gate2/tasks/scaffold-json-output-mode.md",
+      sha256: "d8bc9f334d938437a64db4a149a718e71e606024be91b6b8144ed00a5937518b",
+    }),
+    expectedContextPaths: Object.freeze([
+      "config/app.json",
+      "README.md",
+      "src/greeting.py",
+      "src/main.py",
+    ]),
+    expectedOutcome: Object.freeze({
+      kind: "mutation",
+      expectedChangedPaths: Object.freeze(["src/main.py", "tests/test_json_output.py"]),
+      expectedCitationPaths: Object.freeze([]),
+      expectedFindingIds: Object.freeze([]),
+      allowNoFinding: false,
+      scenarioEvaluatorId: "scaffold-json-output-mode-evaluator",
+    }),
+  }),
+  Object.freeze({
+    id: "scaffold-parser-cli-check",
+    class: "scaffold",
+    repositoryId: "failing",
+    task: Object.freeze({
+      path: "fixtures/evals/gate2/tasks/scaffold-parser-cli-check.md",
+      sha256: "9112ed62adbb5215b577531e7eb78b43470b69d22d49f55cfa121b2e155df01b",
+    }),
+    expectedContextPaths: Object.freeze(["checks/test_parser.py", "README.md", "src/parser.py"]),
+    expectedOutcome: Object.freeze({
+      kind: "mutation",
+      expectedChangedPaths: Object.freeze(["checks/test_cli.py", "src/cli.py"]),
+      expectedCitationPaths: Object.freeze([]),
+      expectedFindingIds: Object.freeze([]),
+      allowNoFinding: false,
+      scenarioEvaluatorId: "scaffold-parser-cli-check-evaluator",
+    }),
+  }),
+]);
+
+// Every schema-2 revision is registered here by lineage: which manifest it supersedes (by
+// digest), which cases it replaces, and the successor cases by exact value. A manifest whose
+// benchmarkRevision is not registered is refused; nothing about a lineage is read from the
+// manifest that claims it.
+const GATE2_LINEAGE = Object.freeze({
+  "gate2-thirty-task-v2-host-policy-compatible": Object.freeze({
+    predecessor: Object.freeze({
+      benchmarkRevision: "gate2-thirty-task-v1",
+      manifestPath: "fixtures/evals/gate2/manifest.v1.json",
+      manifestSha256: GATE2_V1_MANIFEST_SHA256,
+    }),
+    replacements: GATE2_V2_REPLACEMENTS,
+    successorCases: GATE2_V2_SUCCESSOR_CASES,
+  }),
+  "gate2-thirty-task-v3-task-entailed-targets": Object.freeze({
+    predecessor: Object.freeze({
+      benchmarkRevision: "gate2-thirty-task-v2-host-policy-compatible",
+      manifestPath: "fixtures/evals/gate2/manifest.v2.json",
+      manifestSha256: GATE2_V2_MANIFEST_SHA256,
+    }),
+    replacements: GATE2_V3_REPLACEMENTS,
+    successorCases: GATE2_V3_SUCCESSOR_CASES,
+  }),
+});
 
 const EXPECTED_CLASS_BY_INDEX = Object.freeze([
   ...Array(10).fill("repair"),
@@ -560,21 +687,14 @@ function validateCase(value, index, repositoriesById, caseIds, schemaVersion) {
   return benchmarkCase;
 }
 
-function validateV2LineageMetadata(manifest) {
+function validateLineageMetadata(manifest, lineage) {
   const supersedes = assertPlainRecord(manifest.supersedes, "supersedes", SUPERSEDES_KEYS);
-  assertLiteral(
-    supersedes.benchmarkRevision,
-    "gate2-thirty-task-v1",
-    "supersedes.benchmarkRevision",
-  );
-  assertLiteral(
-    supersedes.manifestPath,
-    "fixtures/evals/gate2/manifest.v1.json",
-    "supersedes.manifestPath",
-  );
-  assertLiteral(supersedes.manifestSha256, GATE2_V1_MANIFEST_SHA256, "supersedes.manifestSha256");
-  const replacements = assertArray(manifest.replacements, "replacements", 2, 2);
-  for (const [index, expected] of GATE2_V2_REPLACEMENTS.entries()) {
+  for (const key of SUPERSEDES_KEYS) {
+    assertLiteral(supersedes[key], lineage.predecessor[key], `supersedes.${key}`);
+  }
+  const count = lineage.replacements.length;
+  const replacements = assertArray(manifest.replacements, "replacements", count, count);
+  for (const [index, expected] of lineage.replacements.entries()) {
     const replacement = assertPlainRecord(
       replacements[index],
       `replacements[${index}]`,
@@ -584,6 +704,13 @@ function validateV2LineageMetadata(manifest) {
       assertLiteral(replacement[key], expected[key], `replacement lineage ${index}.${key}`);
     }
   }
+}
+
+function lineageOf(benchmarkRevision) {
+  if (typeof benchmarkRevision !== "string" || !Object.hasOwn(GATE2_LINEAGE, benchmarkRevision)) {
+    fail("benchmarkRevision must name a registered successor revision");
+  }
+  return GATE2_LINEAGE[benchmarkRevision];
 }
 
 /**
@@ -596,10 +723,13 @@ export function validateGate2BenchmarkManifest(value) {
   const manifest = assertPlainRecord(value, "root", topLevelKeys);
   if (schemaVersion !== 1 && schemaVersion !== 2) fail("schemaVersion must equal 1 or 2");
   assertLiteral(manifest.benchmarkId, "gate2-context-agent-quality", "benchmarkId");
-  const benchmarkRevision =
-    schemaVersion === 1 ? "gate2-thirty-task-v1" : "gate2-thirty-task-v2-host-policy-compatible";
-  assertLiteral(manifest.benchmarkRevision, benchmarkRevision, "benchmarkRevision");
-  if (schemaVersion === 2) validateV2LineageMetadata(manifest);
+  let benchmarkRevision = "gate2-thirty-task-v1";
+  if (schemaVersion === 1) {
+    assertLiteral(manifest.benchmarkRevision, benchmarkRevision, "benchmarkRevision");
+  } else {
+    benchmarkRevision = manifest.benchmarkRevision;
+    validateLineageMetadata(manifest, lineageOf(benchmarkRevision));
+  }
   assertLiteral(manifest.digestEncoding, "raw-bytes-sha256-lowercase-hex", "digestEncoding");
   assertLiteral(manifest.resultSchemaVersion, 1, "resultSchemaVersion");
   validateExecutionBoundary(manifest.executionBoundary);
@@ -627,9 +757,18 @@ export function validateGate2BenchmarkSuccessor(
 ) {
   const predecessor = validateGate2BenchmarkManifest(predecessorInput);
   const successor = validateGate2BenchmarkManifest(successorInput);
-  assertLiteral(predecessor.schemaVersion, 1, "predecessor schemaVersion");
   assertLiteral(successor.schemaVersion, 2, "successor schemaVersion");
-  assertLiteral(predecessorManifestSha256, GATE2_V1_MANIFEST_SHA256, "predecessor manifest digest");
+  const lineage = lineageOf(successor.benchmarkRevision);
+  assertLiteral(
+    predecessor.benchmarkRevision,
+    lineage.predecessor.benchmarkRevision,
+    "predecessor benchmarkRevision",
+  );
+  assertLiteral(
+    predecessorManifestSha256,
+    lineage.predecessor.manifestSha256,
+    "predecessor manifest digest",
+  );
   assertLiteral(
     successor.supersedes.manifestSha256,
     predecessorManifestSha256,
@@ -650,17 +789,20 @@ export function validateGate2BenchmarkSuccessor(
     }
   }
 
-  const replacedIds = new Set(GATE2_V2_REPLACEMENTS.map((entry) => entry.predecessorCaseId));
+  const replacedIds = new Set(lineage.replacements.map((entry) => entry.predecessorCaseId));
+  const unchangedCount = 30 - lineage.replacements.length;
   const predecessorCases = new Map(predecessor.cases.map((entry) => [entry.id, entry]));
   const unchangedSuccessors = successor.cases.filter((entry) => predecessorCases.has(entry.id));
-  if (unchangedSuccessors.length !== 28) fail("successor must preserve exactly 28 unchanged cases");
+  if (unchangedSuccessors.length !== unchangedCount) {
+    fail(`successor must preserve exactly ${unchangedCount} unchanged cases`);
+  }
   for (const benchmarkCase of unchangedSuccessors) {
     if (replacedIds.has(benchmarkCase.id)) fail("successor retained a replaced case identity");
     if (JSON.stringify(benchmarkCase) !== JSON.stringify(predecessorCases.get(benchmarkCase.id))) {
-      fail(`successor 28 unchanged cases drifted at ${benchmarkCase.id}`);
+      fail(`successor ${unchangedCount} unchanged cases drifted at ${benchmarkCase.id}`);
     }
   }
-  for (const expected of GATE2_V2_SUCCESSOR_CASES) {
+  for (const expected of lineage.successorCases) {
     const observed = successor.cases.find((entry) => entry.id === expected.id);
     if (JSON.stringify(observed) !== JSON.stringify(expected)) {
       fail(`successor replacement case drifted at ${expected.id}`);
@@ -911,17 +1053,18 @@ export async function loadGate2BenchmarkContract(manifestPath, repositoryRoot) {
   const raw = await readFile(manifestPath);
   const manifest = validateGate2BenchmarkManifest(parseStrictGate2Json(raw.toString("utf8")));
   let predecessorManifestSha256 = null;
-  if (manifest.schemaVersion === 2) {
-    const predecessorPath = path.resolve(repositoryRoot, manifest.supersedes.manifestPath);
+  // Walk the whole lineage against committed bytes: v3 binds v2's digest, v2 binds v1's.
+  // A predecessor edited anywhere in the chain refuses every manifest above it.
+  let successor = manifest;
+  while (successor.schemaVersion === 2) {
+    const predecessorPath = path.resolve(repositoryRoot, successor.supersedes.manifestPath);
     const predecessorRaw = await readFile(predecessorPath);
-    predecessorManifestSha256 = sha256Raw(predecessorRaw);
-    assertLiteral(
-      predecessorManifestSha256,
-      manifest.supersedes.manifestSha256,
-      "predecessor manifest digest",
-    );
+    const digest = sha256Raw(predecessorRaw);
+    assertLiteral(digest, successor.supersedes.manifestSha256, "predecessor manifest digest");
     const predecessor = parseStrictGate2Json(predecessorRaw.toString("utf8"));
-    validateGate2BenchmarkSuccessor(manifest, predecessor, predecessorManifestSha256);
+    validateGate2BenchmarkSuccessor(successor, predecessor, digest);
+    if (predecessorManifestSha256 === null) predecessorManifestSha256 = digest;
+    successor = validateGate2BenchmarkManifest(predecessor);
   }
   for (const benchmarkCase of manifest.cases) {
     const taskBytes = await readFile(path.resolve(repositoryRoot, benchmarkCase.task.path));
@@ -958,11 +1101,12 @@ async function main() {
   const manifestPaths = [
     path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v1.json"),
     path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v2.json"),
+    path.join(repositoryRoot, GATE2_CURRENT_MANIFEST_PATH),
   ];
   const loadedContracts = await Promise.all(
     manifestPaths.map((manifestPath) => loadGate2BenchmarkContract(manifestPath, repositoryRoot)),
   );
-  const loaded = loadedContracts[1];
+  const loaded = loadedContracts[2];
   process.stdout.write(
     `${JSON.stringify({
       benchmarkId: loaded.manifest.benchmarkId,

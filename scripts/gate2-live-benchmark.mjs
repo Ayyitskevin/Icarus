@@ -21,7 +21,11 @@ import { GitController } from "../packages/core/dist/git.js";
 import { retrieveReadOnlyContextV3 } from "../packages/core/dist/index.js";
 import { DEFAULT_CEILING, DEFAULT_SANDBOX_LIMITS } from "../packages/core/dist/policy.js";
 import { DockerSandboxRunner } from "../packages/core/dist/sandbox.js";
-import { loadGate2BenchmarkContract, parseStrictGate2Json } from "./gate2-benchmark-contract.mjs";
+import {
+  GATE2_CURRENT_MANIFEST_PATH,
+  loadGate2BenchmarkContract,
+  parseStrictGate2Json,
+} from "./gate2-benchmark-contract.mjs";
 import {
   compareGate2BenchmarkResults,
   computeGate2BenchmarkAggregates,
@@ -51,10 +55,11 @@ import { GATE2_REPAIR_A_ORACLES } from "./gate2-repair-cohort-a-contract.mjs";
 import { GATE2_REPAIR_B_ORACLES } from "./gate2-repair-cohort-b-contract.mjs";
 import { GATE2_SCAFFOLD_A_ORACLES } from "./gate2-scaffold-cohort-a-contract.mjs";
 import { GATE2_SCHEMA_SUCCESSOR_ORACLES } from "./gate2-schema-successor-cohort-contract.mjs";
+import { GATE2_V3_SUCCESSOR_ORACLES } from "./gate2-v3-successor-oracles.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(scriptPath), "..");
-const manifestPath = path.join(root, "fixtures/evals/gate2/manifest.v2.json");
+const manifestPath = path.join(root, GATE2_CURRENT_MANIFEST_PATH);
 const profilePath = path.join(root, "fixtures/evals/gate2/live-profile.v2.json");
 const evidenceRoot = path.join(root, ".local/gate2-live-v2");
 const VULCAN_BASE_URL = "http://127.0.0.1:8140/v1/";
@@ -417,9 +422,15 @@ function oracleRegistry() {
     ...GATE2_REFACTOR_ORACLES,
     ...GATE2_SCAFFOLD_A_ORACLES,
     ...GATE2_SCHEMA_SUCCESSOR_ORACLES,
+    ...GATE2_V3_SUCCESSOR_ORACLES,
   ];
   const registry = new Map(entries.map((entry) => [entry.caseId, entry]));
-  assertCondition(registry.size === 20, "mutation evaluator registry must contain 20 cases");
+  // Twenty mutation cases across v1 and v2, plus the three v3 successors; a manifest
+  // selects its own twenty by id, so superseded entries are never reached.
+  assertCondition(
+    registry.size === 23 && entries.length === 23,
+    "mutation evaluator registry must contain 23 distinct cases",
+  );
   return registry;
 }
 
