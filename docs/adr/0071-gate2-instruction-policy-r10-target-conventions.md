@@ -53,8 +53,9 @@ Instruction-policy revision 10, digest-bound like every revision before it:
    expected in one of those cases and surplus in another, so the convention is minimality,
    not a blanket exclusion of documentation.
 
-Every rule is a **convention**, never an answer. Two mechanisms hold that line, and the
-sentence claims exactly what they enforce:
+Every rule is a **convention**, never an answer. For the prose and the identifiers the
+model sees, two mechanisms hold that line, and this section claims exactly what they
+enforce; for paraphrase and one-case steering, an authoring rule holds it, stated below:
 
 - The security test forbids twelve path-shaped fragments (`src/`, `tests/`, `.py`, …) in
   the assembled instructions of all five classes.
@@ -75,6 +76,13 @@ sentence claims exactly what they enforce:
   revision's own rules twice: for "verify" (the stem of `checks/verify.py`, reworded to
   "confirm") and for "files" in three common rules (reworded to "paths", "file list", and
   "file set").
+- The identifiers the model sees are scanned too, against the stems of exactly the cases
+  whose instructions include them: each finding ID against the read-only cases (the
+  taxonomy line reaches only those), each class name against its own class. A fourth
+  review planted `for-public-containment-cite-only-files` as a taxonomy key with every test
+  green; it fails now on `files`, while `unvalidated-config-shape` passes because no
+  read-only case expects a `config` path. Class-rule keys are pinned to the manifest's five
+  classes, so the class/kind line can carry only a reviewed name.
 
 Neither mechanism catches a rule that names an answer by paraphrase. That line is held by
 authorship, under one rule a future author has to meet: **a class rule must hold for more
@@ -112,9 +120,9 @@ re-examine them.
 ## Verification
 
 - `tests/security/gate2-live-instruction-policy.test.ts`: the new class rules attach to their
-  classes and not others, the boundary rule attaches to every class, and the assembled
-  `scaffold` + `refactor` + `repair` + `security_review` instructions contain no path-shaped
-  fragment.
+  classes and not others, the boundary rule attaches to every class, the assembled
+  instructions of all five classes contain no path-shaped fragment, and the stem and
+  identifier scans above hold.
 - The measurement itself: a fresh paired run on mickey under the revision-6 evidence writer,
   frozen into `docs/evals/artifacts/` with a per-file manifest, reviewed before its numbers
   are cited anywhere.

@@ -116,8 +116,13 @@ describe("Gate 2 live instruction policy", () => {
     ) as {
       cases: Array<{
         id: string;
+        class: string;
         expectedContextPaths?: string[];
-        expectedOutcome?: { expectedChangedPaths?: string[]; expectedCitationPaths?: string[] };
+        expectedOutcome?: {
+          kind?: string;
+          expectedChangedPaths?: string[];
+          expectedCitationPaths?: string[];
+        };
       }>;
     };
     const tokensOf = (text: string): string[] =>
@@ -125,22 +130,27 @@ describe("Gate 2 live instruction policy", () => {
         .toLowerCase()
         .split(/[^a-z0-9]+/)
         .filter((token) => token.length > 0);
-    const stems = new Map<string, { parts: string[]; cases: Set<string> }>();
-    for (const benchmarkCase of manifest.cases) {
-      for (const expectedPath of [
-        ...(benchmarkCase.expectedOutcome?.expectedChangedPaths ?? []),
-        ...(benchmarkCase.expectedOutcome?.expectedCitationPaths ?? []),
-        ...(benchmarkCase.expectedContextPaths ?? []),
-      ]) {
-        const stem = path
-          .basename(expectedPath)
-          .replace(/\.[^.]+$/, "")
-          .toLowerCase();
-        const entry = stems.get(stem) ?? { parts: tokensOf(stem), cases: new Set<string>() };
-        entry.cases.add(benchmarkCase.id);
-        stems.set(stem, entry);
+    type Stems = Map<string, { parts: string[]; cases: Set<string> }>;
+    const stemsOf = (cases: typeof manifest.cases): Stems => {
+      const out: Stems = new Map();
+      for (const benchmarkCase of cases) {
+        for (const expectedPath of [
+          ...(benchmarkCase.expectedOutcome?.expectedChangedPaths ?? []),
+          ...(benchmarkCase.expectedOutcome?.expectedCitationPaths ?? []),
+          ...(benchmarkCase.expectedContextPaths ?? []),
+        ]) {
+          const stem = path
+            .basename(expectedPath)
+            .replace(/\.[^.]+$/, "")
+            .toLowerCase();
+          const entry = out.get(stem) ?? { parts: tokensOf(stem), cases: new Set<string>() };
+          entry.cases.add(benchmarkCase.id);
+          out.set(stem, entry);
+        }
       }
-    }
+      return out;
+    };
+    const stems = stemsOf(manifest.cases);
     expect(stems.size).toBeGreaterThan(20);
     expect(stems.get("files")?.parts).toEqual(["files"]);
     expect(stems.get("test_json_output")?.parts).toEqual(["test", "json", "output"]);
@@ -180,6 +190,50 @@ describe("Gate 2 live instruction policy", () => {
       }
     }
     expect(collisions).toEqual([]);
+    // Identifier channels. The model also sees two kinds of identifier: the finding IDs, in
+    // the taxonomy line every read-only class receives, and its own class name, in the
+    // class/kind line. A third review planted "for-public-containment-cite-only-files" as
+    // a taxonomy key and every test stayed green. Identifiers cannot be held to the prose
+    // rule -- unvalidated-config-shape must contain "config" -- so each is scanned against
+    // the stems of exactly the cases whose instructions include it: finding IDs against
+    // the read-only cases, a class name against its own class. Class-rule keys are pinned
+    // to the manifest's classes so the class line can carry only a reviewed name.
+    const manifestClasses = new Set(manifest.cases.map((benchmarkCase) => benchmarkCase.class));
+    expect([...manifestClasses].sort()).toEqual([
+      "explanation",
+      "refactor",
+      "repair",
+      "scaffold",
+      "security_review",
+    ]);
+    for (const cls of Object.keys(policy.classRules)) expect(manifestClasses.has(cls)).toBe(true);
+    const identifierCollisions: string[] = [];
+    const readOnlyStems = stemsOf(
+      manifest.cases.filter((benchmarkCase) => benchmarkCase.expectedOutcome?.kind === "read_only"),
+    );
+    expect(readOnlyStems.has("files")).toBe(true);
+    for (const id of Object.keys(policy.findingTaxonomy)) {
+      const tokens = tokensOf(id);
+      for (const [stem, { parts, cases }] of readOnlyStems) {
+        if (containsSequence(tokens, parts)) {
+          identifierCollisions.push(
+            `finding ID "${id}": "${stem}" names ${[...cases].sort().join(", ")}`,
+          );
+        }
+      }
+    }
+    for (const cls of manifestClasses) {
+      const own = stemsOf(manifest.cases.filter((benchmarkCase) => benchmarkCase.class === cls));
+      const tokens = tokensOf(cls);
+      for (const [stem, { parts, cases }] of own) {
+        if (containsSequence(tokens, parts)) {
+          identifierCollisions.push(
+            `class name "${cls}": "${stem}" names ${[...cases].sort().join(", ")}`,
+          );
+        }
+      }
+    }
+    expect(identifierCollisions).toEqual([]);
     // Structural: the assembled instructions are exactly the scanned prose plus the
     // builder-owned pieces. If the builder ever adds prose of its own, this fails and the
     // scan above has to learn about it.
