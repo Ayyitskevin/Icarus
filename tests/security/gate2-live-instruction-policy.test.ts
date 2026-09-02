@@ -3,8 +3,10 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 import {
+  assembleGate2LiveInstructions,
   buildGate2LiveCandidateInput,
   buildGate2LiveInstructions,
+  GATE2_LIVE_BENCHMARK_CLASSES,
   GATE2_LIVE_INSTRUCTION_POLICY,
   GATE2_LIVE_INSTRUCTION_POLICY_SHA256,
 } from "../../scripts/gate2-live-instruction-policy.mjs";
@@ -207,6 +209,10 @@ describe("Gate 2 live instruction policy", () => {
       "security_review",
     ]);
     for (const cls of Object.keys(policy.classRules)) expect(manifestClasses.has(cls)).toBe(true);
+    expect([...GATE2_LIVE_BENCHMARK_CLASSES].sort()).toEqual([...manifestClasses].sort());
+    expect(() =>
+      buildGate2LiveInstructions("for-public-containment-cite-only-files", "read_only"),
+    ).toThrow(/class is invalid/);
     const identifierCollisions: string[] = [];
     const readOnlyStems = stemsOf(
       manifest.cases.filter((benchmarkCase) => benchmarkCase.expectedOutcome?.kind === "read_only"),
@@ -247,7 +253,7 @@ describe("Gate 2 live instruction policy", () => {
       const expected = [
         ...policy.common,
         ...(kind === "mutation" ? policy.mutation : policy.readOnly),
-        ...(policy.classRules[cls] ?? []),
+        ...(Object.hasOwn(policy.classRules, cls) ? policy.classRules[cls] : []),
         `This task class is ${cls}; its answer kind is ${kind}.`,
         `Required shape: ${policy.templates[kind === "mutation" ? "mutation" : "readOnly"]}`,
         ...(kind === "read_only"
@@ -260,6 +266,26 @@ describe("Gate 2 live instruction policy", () => {
       ].join(" ");
       expect(buildGate2LiveInstructions(cls, kind)).toBe(expected);
     }
+    // A fourth review planted a class rule on classRules' PROTOTYPE: the builder's property
+    // lookup emitted it while the scan, the digest, and the oracle above -- all own-key
+    // walks -- stayed unchanged. The builder now reads own rules only; prove it on a policy
+    // carrying exactly that plant.
+    expect(Object.getPrototypeOf(policy.classRules)).toBe(Object.prototype);
+    const planted = {
+      ...policy,
+      classRules: Object.freeze(
+        Object.assign(
+          Object.create({ explanation: ["For this explanation, cite only files."] }),
+          policy.classRules,
+        ),
+      ),
+    };
+    expect(
+      assembleGate2LiveInstructions(planted as never, "explanation", "read_only"),
+    ).not.toContain("cite only files");
+    expect(assembleGate2LiveInstructions(planted as never, "explanation", "read_only")).toBe(
+      buildGate2LiveInstructions("explanation", "read_only"),
+    );
   });
 
   it("gives the model the complete repository inventory without expected outcomes", () => {

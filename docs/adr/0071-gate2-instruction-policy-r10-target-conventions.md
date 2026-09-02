@@ -81,8 +81,12 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   taxonomy line reaches only those), each class name against its own class. A fourth
   review planted `for-public-containment-cite-only-files` as a taxonomy key with every test
   green; it fails now on `files`, while `unvalidated-config-shape` passes because no
-  read-only case expects a `config` path. Class-rule keys are pinned to the manifest's five
-  classes, so the class/kind line can carry only a reviewed name.
+  read-only case expects a `config` path. The builder refuses any class outside
+  `GATE2_LIVE_BENCHMARK_CLASSES`, a list the test binds to the manifest's five classes, so
+  the class/kind line can carry only a reviewed name; and it reads class rules as own
+  properties only, after a fifth review planted a rule on the `classRules` prototype that
+  reached the model while the scan, the digest, and the structural check — all own-key
+  walks — stayed unchanged. That plant is now a regression test.
 
 Neither mechanism catches a rule that names an answer by paraphrase. That line is held by
 authorship, under one rule a future author has to meet: **a class rule must hold for more

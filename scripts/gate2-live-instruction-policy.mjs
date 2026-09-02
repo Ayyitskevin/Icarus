@@ -83,31 +83,52 @@ export const GATE2_LIVE_INSTRUCTION_POLICY_SHA256 = createHash("sha256")
   .update(stableJson(GATE2_LIVE_INSTRUCTION_POLICY))
   .digest("hex");
 
-export function buildGate2LiveInstructions(benchmarkClass, expectedKind) {
-  if (typeof benchmarkClass !== "string" || benchmarkClass.length === 0) {
+/** The benchmark classes the policy is written for; bound to the manifest's classes by test. */
+export const GATE2_LIVE_BENCHMARK_CLASSES = Object.freeze([
+  "explanation",
+  "refactor",
+  "repair",
+  "scaffold",
+  "security_review",
+]);
+
+/**
+ * Assembles the instructions for one class and answer kind from a policy object. Pure, so
+ * a test can hand it a policy with an inherited or unknown class rule and prove neither
+ * reaches the model: class rules are read as OWN properties only (a prototype-injected
+ * rule was a review finding -- it reached the model while the leak scan and the digest,
+ * which both enumerate own keys, stayed unchanged), and a class outside
+ * GATE2_LIVE_BENCHMARK_CLASSES is refused rather than echoed into the class/kind line.
+ */
+export function assembleGate2LiveInstructions(policy, benchmarkClass, expectedKind) {
+  if (!GATE2_LIVE_BENCHMARK_CLASSES.includes(benchmarkClass)) {
     throw new Error("Gate 2 live benchmark class is invalid");
   }
   if (expectedKind !== "mutation" && expectedKind !== "read_only") {
     throw new Error("Gate 2 live expected kind is invalid");
   }
-  const kindInstructions =
-    expectedKind === "mutation"
-      ? GATE2_LIVE_INSTRUCTION_POLICY.mutation
-      : GATE2_LIVE_INSTRUCTION_POLICY.readOnly;
+  const kindInstructions = expectedKind === "mutation" ? policy.mutation : policy.readOnly;
+  const classRules = Object.hasOwn(policy.classRules, benchmarkClass)
+    ? policy.classRules[benchmarkClass]
+    : [];
   const instructions = [
-    ...GATE2_LIVE_INSTRUCTION_POLICY.common,
+    ...policy.common,
     ...kindInstructions,
-    ...(GATE2_LIVE_INSTRUCTION_POLICY.classRules[benchmarkClass] ?? []),
+    ...classRules,
     `This task class is ${benchmarkClass}; its answer kind is ${expectedKind}.`,
-    `Required shape: ${GATE2_LIVE_INSTRUCTION_POLICY.templates[expectedKind === "mutation" ? "mutation" : "readOnly"]}`,
+    `Required shape: ${policy.templates[expectedKind === "mutation" ? "mutation" : "readOnly"]}`,
   ];
   if (expectedKind === "read_only") {
-    const taxonomy = Object.entries(GATE2_LIVE_INSTRUCTION_POLICY.findingTaxonomy)
+    const taxonomy = Object.entries(policy.findingTaxonomy)
       .map(([id, definition]) => `${id} = ${definition}`)
       .join("; ");
     instructions.push(`Finding taxonomy: ${taxonomy}.`);
   }
   return instructions.join(" ");
+}
+
+export function buildGate2LiveInstructions(benchmarkClass, expectedKind) {
+  return assembleGate2LiveInstructions(GATE2_LIVE_INSTRUCTION_POLICY, benchmarkClass, expectedKind);
 }
 
 export function buildGate2LiveCandidateInput({
