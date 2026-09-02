@@ -137,13 +137,22 @@ async function readRecords(root) {
     // A record directory that does not exist holds no records; one that cannot be read is
     // a fault, and a fault must not become "no records here" -- absence produced by an
     // error and then reported as measurement is the defect this campaign exists to remove.
-    const names = await readdir(path.join(root, directory)).catch((error) => {
-      if (error?.code === "ENOENT") return [];
+    const directoryPath = path.join(root, directory);
+    const directoryStat = await lstat(directoryPath).catch((error) => {
+      if (error?.code === "ENOENT") return null;
       throw error;
     });
+    if (directoryStat === null) continue;
+    // Read through nothing: the record directory must be a real directory, and each record
+    // a regular, unlinked file. `readdir` and `readFile` follow symlinks; `lstat` does not.
+    if (!directoryStat.isDirectory()) fail(`${directory} is not a regular file`);
+    const names = await readdir(directoryPath);
     for (const name of names.sort()) {
       if (!name.endsWith(".json")) continue;
       const relative = `${directory}/${name}`;
+      const recordStat = await lstat(path.join(root, relative));
+      if (!recordStat.isFile()) fail(`${relative} is not a regular file`);
+      if (recordStat.nlink > 1) fail(`${relative} is hard-linked`);
       const record = parseStrictGate2Json(await readFile(path.join(root, relative), "utf8"));
       if (
         !Number.isSafeInteger(record?.evidenceRecordRevision) ||
@@ -201,21 +210,11 @@ export async function deriveRecordContract(root) {
 
 /** Returns the mismatched paths; an empty array means the manifest is true of the bytes. */
 export async function verifyFrozenEvidence(root) {
-  // Before any byte of the set is read. The root check already ran inside
-  // `computeFrozenEntries`, but the manifest read above it got there first, so a root that
-  // did not exist or was not a directory crashed with ENOENT/ENOTDIR at that read rather
-  // than returning this guard's verdict -- a fact about the directory reported as a fault
-  // (issue #88). A refusal here is a verdict like the walk's, not a throw.
-  try {
-    await assertRootIsReal(root);
-  } catch (error) {
-    if (!isFreezerRefusal(error)) throw error;
-    return [error.message];
-  }
-  // The same strict parser the publisher and the benchmark use: a manifest with a
-  // duplicated member is refused here as it is there, never read twice two ways.
-  const manifest = parseStrictGate2Json(await readFile(path.join(root, MANIFEST), "utf8"));
-  if (manifest.schema !== GATE2_FROZEN_EVIDENCE_SCHEMA) fail("manifest schema is not recognised");
+  // Before any byte of the set is read: the root must be the directory it names, and the
+  // closed-tree walk must have accepted every entry -- manifest.json included, which the
+  // walk type-checks and hard-link-checks even though it never lists it. A review moved
+  // the manifest outside the set behind a symlink with a duplicate member planted in the
+  // outside copy, and the parser reported the planted bytes before the walk's verdict.
   const problems = [];
   let entries;
   try {
@@ -227,6 +226,10 @@ export async function verifyFrozenEvidence(root) {
     problems.push(error.message);
     return problems;
   }
+  // The same strict parser the publisher and the benchmark use: a manifest with a
+  // duplicated member is refused here as it is there, never read twice two ways.
+  const manifest = parseStrictGate2Json(await readFile(path.join(root, MANIFEST), "utf8"));
+  if (manifest.schema !== GATE2_FROZEN_EVIDENCE_SCHEMA) fail("manifest schema is not recognised");
   const actual = new Map(entries.map((e) => [e.path, e]));
   for (const claimed of manifest.files) {
     const found = actual.get(claimed.path);
