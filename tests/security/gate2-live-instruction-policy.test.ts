@@ -253,7 +253,7 @@ describe("Gate 2 live instruction policy", () => {
       const expected = [
         ...policy.common,
         ...(kind === "mutation" ? policy.mutation : policy.readOnly),
-        ...(Object.hasOwn(policy.classRules, cls) ? policy.classRules[cls] : []),
+        ...(Object.hasOwn(policy.classRules, cls) ? (policy.classRules[cls] ?? []) : []),
         `This task class is ${cls}; its answer kind is ${kind}.`,
         `Required shape: ${policy.templates[kind === "mutation" ? "mutation" : "readOnly"]}`,
         ...(kind === "read_only"
