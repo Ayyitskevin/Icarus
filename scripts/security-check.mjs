@@ -220,6 +220,78 @@ const gate2FrozenFiguresSource = await readFile(
   "utf8",
 );
 const gate2PublishSource = await readFile("scripts/gate2-live-evidence-publish.mjs", "utf8");
+/**
+ * The publisher's filesystem surface, resolved rather than counted.
+ *
+ * `bodyOf` slices a function from its declaration to the brace that closes it. It counts
+ * braces without parsing, which is sound for these two helpers -- their only braces are
+ * balanced object literals and template placeholders -- and fails CLOSED if it ever is not,
+ * because a mis-sliced body will not contain the call the assertions below require.
+ */
+function bodyOf(source, declaration) {
+  const start = source.indexOf(declaration);
+  if (start === -1) return "";
+  let depth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    else if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  return "";
+}
+const GATE2_PUBLISH_ALLOWED_FS_IMPORTS =
+  "lstat, mkdir, open, readdir, readFile, realpath, rename, unlink";
+const gate2PublishFsImport = /import \{([^}]*)\} from "node:fs\/promises";/.exec(
+  gate2PublishSource,
+);
+const gate2PublishFilesystemImportIsExact =
+  gate2PublishFsImport !== null &&
+  gate2PublishFsImport[1]
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .join(", ") === GATE2_PUBLISH_ALLOWED_FS_IMPORTS;
+const gate2PublishReadBody = bodyOf(
+  gate2PublishSource,
+  "async function readRegularFile(base, relative, label = relative) {",
+);
+const gate2PublishListBody = bodyOf(
+  gate2PublishSource,
+  "async function listDirectoryEntries(base, relative, label) {",
+);
+const gate2PublishWriteBody = bodyOf(gate2PublishSource, "async function exclusiveWrite(");
+// The source with the import statement and the three owning bodies removed: whatever reads
+// out here does so without the walk in front of it.
+const gate2PublishOutsideHelpers = [
+  gate2PublishFsImport?.[0] ?? "",
+  gate2PublishReadBody,
+  gate2PublishListBody,
+  gate2PublishWriteBody,
+]
+  .reduce((rest, slice) => (slice === "" ? rest : rest.replace(slice, "")), gate2PublishSource)
+  // Comments are prose about the helpers, not a way to reach the filesystem; a doc line
+  // naming `readdir` must not read as a call site. Block comments go, then whole-line
+  // comments. A line carrying BOTH code and a comment that names a read stays, and fails.
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .split("\n")
+  .filter((line) => /^\s*(?:\/\/|\*)/.test(line) === false)
+  .join("\n");
+const gate2PublishReadOnlyInsideHelpers =
+  gate2PublishReadBody.includes("return readFile(resolved);") &&
+  gate2PublishListBody.includes("return readdir(resolved, { withFileTypes: true });") &&
+  gate2PublishReadBody.includes("await assertWalkableTo(base, relative, label)") &&
+  gate2PublishListBody.includes("await assertWalkableTo(base, relative, label)") &&
+  // ...and nowhere else, aliases included: the identifier itself may not appear outside.
+  /\b(?:readFile|readdir)\b/.test(gate2PublishOutsideHelpers) === false;
+const gate2PublishHasNoOtherReadSurface =
+  /\b(?:readFileSync|readdirSync|openSync|opendir|opendirSync|createReadStream|readv|fs\.[A-Za-z]|require\(|from "fs"|from "node:fs")/.test(
+    gate2PublishSource,
+  ) === false;
+const gate2PublishOpenIsExclusiveCreateOnly =
+  (gate2PublishSource.match(/\bopen\b/g) ?? []).length === 2 &&
+  gate2PublishWriteBody.includes('await open(temporary, "wx", 0o644)');
 const gate2RetrievalManifestSource = await readFile(
   "fixtures/evals/gate2/retrieval-manifest.v1.json",
   "utf8",
@@ -2644,27 +2716,17 @@ const assertions = {
     gate2LiveBenchmarkSource.includes("omittedReferences: retrieval.omittedReferences") &&
     gate2LiveBenchmarkSource.includes("excludedFiles: retrieval.excludedFiles"),
   gate2PublishedEvidenceReadsThroughOneCheckedHelper:
-    // Three findings in a row were one omission: a read whose path nobody walked -- the
-    // artifact records, then the fixture manifest and profile, then the task files, each
-    // found by a reviewer rather than by a test. The helper is the fix; this is what stops
-    // the next call site from bypassing it. A new `readFile(` or `readdir(` anywhere in
-    // that file fails here, so the omission is caught by the gate instead of by the fourth
-    // review. Exactly one of each, and each inside the helper that walks the path first.
-    (gate2PublishSource.match(/\breadFile\(/g) ?? []).length === 1 &&
-    (gate2PublishSource.match(/\breaddir\(/g) ?? []).length === 1 &&
-    gate2PublishSource.includes(
-      "async function readRegularFile(base, relative, label = relative) {",
-    ) &&
-    gate2PublishSource.includes("  return readFile(resolved);") &&
-    gate2PublishSource.includes("async function listDirectoryEntries(base, relative, label) {") &&
-    gate2PublishSource.includes("  return readdir(resolved, { withFileTypes: true });") &&
-    // The path is walked before either of them reads: containment, then every component.
-    gate2PublishSource.includes("async function assertWalkableTo(base, relative, label) {") &&
-    gate2PublishSource.includes(
-      "const resolved = await assertWalkableTo(base, relative, label);",
-    ) &&
-    gate2PublishSource.includes("!component.isSymbolicLink(),") &&
-    gate2PublishSource.includes("metadata.isFile() && metadata.nlink === 1,"),
+    // Three findings in a row were one omission: a read whose path nobody walked. The
+    // first version of this assertion counted the spellings `readFile(` and `readdir(`,
+    // which proved one spelling rather than one read capability -- an ordinary
+    // `import { readFile as uncheckedRead }` walked straight past it. It now resolves the
+    // file's ENTIRE filesystem surface: the import list must be exactly the allowed names,
+    // and every read-capable name must appear only inside the helper that walks the path
+    // first. An alias is caught because the aliased identifier is still the imported one.
+    gate2PublishFilesystemImportIsExact &&
+    gate2PublishReadOnlyInsideHelpers &&
+    gate2PublishHasNoOtherReadSurface &&
+    gate2PublishOpenIsExclusiveCreateOnly,
   gate2FrozenEvidenceFiguresRecomputeOfflineFromVerifiedBytes:
     // A figure nobody recomputes goes stale in place: the 2026-09-01 evaluation carried a
     // token total that survived a review because nothing derived it a second time, and its
