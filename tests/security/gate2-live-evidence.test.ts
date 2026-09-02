@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -323,7 +323,25 @@ describe("Gate 2 published live evidence", () => {
       );
     });
 
-    // (e) a listed record replaced by a symlink to byte-identical content outside the set:
+    // (e) a listed record hard-linked to a path outside the set: both refuse. The bytes,
+    // the digest and the entry type are all unchanged -- only the link count differs -- so
+    // nothing but an nlink check can catch it, and the manifest would otherwise vouch for
+    // bytes that another path can rewrite without touching the frozen directory.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const relative = "routed/explain-lantern-flow.json";
+      await link(
+        path.join(artifactDirectory, relative),
+        path.join(temporary, "outside-the-set.json"),
+      );
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([
+        `Gate 2 evidence freeze: ${relative} is hard-linked`,
+      ]);
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        `${relative} must be one non-linked regular file`,
+      );
+    });
+
+    // (f) a listed record replaced by a symlink to byte-identical content outside the set:
     // both refuse. The digests still agree, so only an entry-type check can catch it --
     // otherwise the manifest vouches for bytes the frozen directory does not own.
     await withFrozenCopy(async (temporary, artifactDirectory) => {
