@@ -201,6 +201,17 @@ export async function deriveRecordContract(root) {
 
 /** Returns the mismatched paths; an empty array means the manifest is true of the bytes. */
 export async function verifyFrozenEvidence(root) {
+  // Before any byte of the set is read. The root check already ran inside
+  // `computeFrozenEntries`, but the manifest read above it got there first, so a root that
+  // did not exist or was not a directory crashed with ENOENT/ENOTDIR at that read rather
+  // than returning this guard's verdict -- a fact about the directory reported as a fault
+  // (issue #88). A refusal here is a verdict like the walk's, not a throw.
+  try {
+    await assertRootIsReal(root);
+  } catch (error) {
+    if (!isFreezerRefusal(error)) throw error;
+    return [error.message];
+  }
   // The same strict parser the publisher and the benchmark use: a manifest with a
   // duplicated member is refused here as it is there, never read twice two ways.
   const manifest = parseStrictGate2Json(await readFile(path.join(root, MANIFEST), "utf8"));
@@ -293,6 +304,11 @@ export async function freezeLiveEvidence({
     filter: (source) => !path.basename(source).includes(".evidence-record-"),
   });
   formatInPlace(to);
+  // The destination is this function's own creation, but `to` is an operator-supplied path:
+  // a symlinked component means the set is written and then read back through a link. The
+  // freeze reads it from here on, so the check comes first (issue #88). A refusal throws on
+  // this path -- a freeze that cannot trust its destination has nothing to report about.
+  await assertRootIsReal(to);
   const preflightBytes = await readFile(path.join(to, PREFLIGHT), "utf8").catch(() => null);
   if (preflightBytes === null)
     fail(`${PREFLIGHT} is missing; a set without its preflight is not one run`);
