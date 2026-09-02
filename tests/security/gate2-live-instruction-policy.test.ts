@@ -139,7 +139,7 @@ describe("Gate 2 live instruction policy", () => {
     }
     expect(memberNames.has("files")).toBe(true);
     for (const memberName of memberNames) stems.delete(memberName);
-    const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const collisions: string[] = [];
     for (const [cls, kind] of [
       ["scaffold", "mutation"],
@@ -150,7 +150,7 @@ describe("Gate 2 live instruction policy", () => {
     ] as const) {
       const instructions = buildGate2LiveInstructions(cls, kind).toLowerCase();
       for (const [stem, cases] of stems) {
-        if (new RegExp(`(^|[^a-z0-9_-])${escape(stem)}($|[^a-z0-9_-])`).test(instructions)) {
+        if (new RegExp(`(^|[^a-z0-9_-])${escapeRegExp(stem)}($|[^a-z0-9_-])`).test(instructions)) {
           collisions.push(`${cls}: "${stem}" names ${[...cases].sort().join(", ")}`);
         }
       }
