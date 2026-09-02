@@ -103,6 +103,9 @@ async function listFiles(root) {
     )) {
       const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
       if (entry.isDirectory()) {
+        // A directory named like the manifest would be walked as a directory and never
+        // type-checked as the manifest, then surface as an EISDIR fault at the read.
+        if (relative === MANIFEST) fail(`${relative} is not a regular file`);
         await visit(path.join(directory, entry.name), relative);
         continue;
       }
