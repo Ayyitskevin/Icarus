@@ -276,13 +276,15 @@ const gate2PublishListBody = bodyOf(
   "async function listDirectoryEntries(base, relative, label) {",
 );
 const gate2PublishWriteBody = bodyOf(gate2PublishSource, "async function exclusiveWrite(");
-// The source with the import statement and the three owning bodies removed: whatever reads
-// out here does so without the walk in front of it.
+// The source with the import declarations and the TWO reading helpers removed: whatever
+// reads out here does so without the walk in front of it. The write helper is deliberately
+// NOT removed -- excluding it made a read inserted there exempt while this check claimed
+// otherwise, and no read belongs in a function that writes. If one is ever needed, it goes
+// through `readRegularFile` like every other read in the file.
 const gate2PublishOutsideHelpers = [
   ...gate2PublishFsImports.map((match) => match[0]),
   gate2PublishReadBody,
   gate2PublishListBody,
-  gate2PublishWriteBody,
 ]
   .reduce((rest, slice) => (slice === "" ? rest : rest.replace(slice, "")), gate2PublishSource)
   // Comments are prose about the helpers, not a way to reach the filesystem; a doc line
@@ -2751,11 +2753,12 @@ const assertions = {
     gate2LiveBenchmarkSource.includes("omittedReferences: retrieval.omittedReferences") &&
     gate2LiveBenchmarkSource.includes("excludedFiles: retrieval.excludedFiles"),
   gate2PublishedEvidenceReadSurfaceIsBounded:
-    // What this catches, exactly, after three rounds of it claiming more than it enforced:
-    // a filesystem read added anywhere outside the two helpers; an import from `node:fs`
-    // or `node:fs/promises` anywhere in the file that is not the exact allowed list,
-    // aliases and second declarations included; a second read inside a helper; and a read
-    // moved before the checks that make it safe.
+    // What this catches, exactly, after four rounds of it claiming more than it enforced:
+    // a filesystem read added anywhere in this file outside the bodies of the two reading
+    // helpers -- the write helper included, since no read belongs there; an import from
+    // `node:fs` or `node:fs/promises` anywhere in the file that is not the exact allowed
+    // list, aliases and second declarations included; a second read inside a reading
+    // helper; and a read moved before the checks that make it safe.
     //
     // What it does NOT catch, and is not claimed to: an author of this file acting with
     // intent -- a reordered check that still reads last, a dynamic `import()`, a raw
