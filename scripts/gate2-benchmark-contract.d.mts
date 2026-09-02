@@ -79,3 +79,6 @@ export function loadGate2BenchmarkContract(
   manifestSha256: string;
   predecessorManifestSha256: string | null;
 }>;
+export function describeNonStrictGate2Json(
+  source: unknown,
+): "not_text" | "empty" | "markdown_fenced" | "leading_prose" | "truncated" | "other";

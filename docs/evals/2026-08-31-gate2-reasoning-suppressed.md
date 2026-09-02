@@ -3,9 +3,12 @@
 > Rewritten 2026-09-01 against a fresh execution. The first version of this record
 > reported validity figures read from fields the runner computed but never serialized,
 > so "zero thinking characters" and "zero omitted matches" were absence, not
-> measurement. Record revision 5 serializes both; every figure below comes from a
-> recorded value in a genuinely fresh run (`reassessedFromEvidenceSha256: null` on all
-> 60 cases).
+> measurement. Record revision 5 serializes both, with one reading to carry: it wrote
+> an absent provider `thinking` member as `reasoningChars: 0`, so every zero in this set
+> means "no thinking member surfaced under think:false", never a measured zero. Revision
+> 6 (PR #80) records that absence as `null`, and the frozen set's manifest states which
+> encoding its bytes use. Every figure below comes from a recorded value in a genuinely
+> fresh run (`reassessedFromEvidenceSha256: null` on all 60 cases).
 
 ## Question
 
