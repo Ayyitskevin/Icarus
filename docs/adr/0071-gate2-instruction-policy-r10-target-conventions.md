@@ -91,14 +91,16 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   contract; a rule or a definition naming another case's finding is steering, and is
   refused. The snapshot takes its canonical templates as a parameter so the test proves
   the template validator runs on the snapshot path, not only when called directly.
-- The scan also runs over the prose **as assembled**, in its final order, per class: the
-  assembler joins rules with a space, and a twelfth review split `path-traversal` across
-  two adjacent rules — each clean on its own, the finding ID whole in the text the model
-  reads. The assembled prose (common, kind, and class rules, the class/kind line, and the
-  taxonomy definitions) is tokenised as one string, with the template and the taxonomy
-  IDs — builder-owned structure the contract exposes on purpose — replaced by neutral
-  markers, and scanned against every stem and, for read-only classes, every expected
-  finding ID. Nothing authored can be split across a boundary the model does not see.
+- The scan also runs over the text **as assembled**, in its final order, per class, with
+  every token tagged by the piece it came from: the assembler joins rules with a space,
+  and one review split `path-traversal` across two adjacent rules; another showed that
+  replacing structure with neutral markers before scanning hides a span across the
+  marker — a taxonomy key `expected` followed by a definition starting "finding" renders
+  the stem `expected_finding` whole. Nothing is substituted. A match is permitted only
+  when its entire span lies inside the template, builder-owned structure the contract
+  exposes on purpose, or — for a finding ID — when it is exactly one taxonomy ID's own
+  tokens. Everything else the model reads is authored or adjacent to authored text, and
+  a span through it is refused.
 - Every string the policy carries — rules, identifiers, definitions, templates, keys —
   is printable ASCII, asserted at load. The policy is English prose and JSON; a code point
   outside 0x20–0x7E has no honest use in it and one (U+200B) split a stem's tokens while

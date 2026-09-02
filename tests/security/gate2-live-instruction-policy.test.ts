@@ -135,10 +135,10 @@ describe("Gate 2 live instruction policy", () => {
         };
       }>;
     };
-    // Default-ignorable code points (zero-width space, joiners, soft hyphen, ...) are
-    // removed before splitting: an eighth review put U+200B inside "money" and the split
-    // saw "mo" and "ney" while the model read "money". The module refuses non-ASCII
-    // outright; this is the second layer.
+    // Format characters (Cf), nonspacing and enclosing marks (Mn, Me), and the soft hyphen
+    // (U+00AD) -- exactly those -- are removed before splitting: an eighth review put U+200B
+    // inside "money" and the split saw "mo" and "ney" while the model read "money". The
+    // module refuses non-ASCII outright; this is the second layer.
     const tokensOf = (text: string): string[] =>
       text
         .replace(/[\p{Cf}\p{Mn}\p{Me}\u00ad]/gu, "")
@@ -483,81 +483,180 @@ describe("Gate 2 live instruction policy", () => {
     for (const hidden of ["mo\u200bney", "mo\ufe0fney", "mo\u034fney", "mo\u00adney"]) {
       expect(tokensOf(hidden)).toEqual(["money"]);
     }
-    // The prose AS ASSEMBLED, in its final order: the assembler joins rules with a space,
-    // and an eleventh review split "path-traversal" across two adjacent security_review
-    // rules -- each clean on its own, the ID whole in the text the model reads. The
-    // template and the taxonomy IDs are builder-owned structure the contract exposes on
-    // purpose; they are replaced by neutral markers so nothing authored can hide a span
-    // across a boundary, and the rest is scanned as one string.
-    const assembledProseOf = (text: string, kind: "mutation" | "read_only"): string => {
-      let visible = text
-        .split(policy.templates[kind === "mutation" ? "mutation" : "readOnly"])
-        .join(" TEMPLATE ");
-      for (const id of Object.keys(policy.findingTaxonomy)) {
-        visible = visible.split(`${id} = `).join(" TAXONOMYID = ");
-      }
-      return visible;
-    };
-    const assembledCollisionsOf = (
+    // The text AS ASSEMBLED, in its final order, with every token tagged by the piece it
+    // came from. An eleventh review split "path-traversal" across two rules; a twelfth
+    // showed that replacing structure with neutral markers before scanning deletes
+    // authored tokens and hides a span across the marker: a taxonomy KEY "expected"
+    // followed by a definition starting "finding" renders "expected = finding ...", the
+    // stem expected_finding whole. Nothing is substituted now. A match is permitted only
+    // when its entire span lies inside the template -- builder-owned structure the
+    // contract exposes on purpose -- or, for a finding ID, when the span is exactly one
+    // taxonomy ID's own tokens. Everything else the model reads is authored or adjacent
+    // to authored text, and a span through it is a leak.
+    type TaggedToken = { token: string; origin: string };
+    const taggedTokensOf = (
+      source: typeof policy,
       cls: string,
       kind: "mutation" | "read_only",
-      text: string,
-    ): string[] => {
-      const tokens = tokensOf(assembledProseOf(text, kind));
-      const found: string[] = [];
-      for (const [stem, { parts, cases }] of stems) {
-        if (containsSequence(tokens, parts)) {
-          found.push(`assembled ${cls}: "${stem}" names ${[...cases].sort().join(", ")}`);
+    ): TaggedToken[] => {
+      const out: TaggedToken[] = [];
+      const push = (text: string, origin: string) => {
+        for (const token of tokensOf(text)) out.push({ token, origin });
+      };
+      for (const rule of source.common) push(rule, "common");
+      for (const rule of kind === "mutation" ? source.mutation : source.readOnly) push(rule, kind);
+      for (const rule of Object.hasOwn(source.classRules, cls)
+        ? (source.classRules[cls] ?? [])
+        : []) {
+        push(rule, `classRules.${cls}`);
+      }
+      push(`This task class is ${cls}; its answer kind is ${kind}.`, "builder");
+      push("Required shape:", "builder");
+      push(source.templates[kind === "mutation" ? "mutation" : "readOnly"], "template");
+      if (kind === "read_only") {
+        push("Finding taxonomy:", "builder");
+        for (const [id, definition] of Object.entries(source.findingTaxonomy).sort(([l], [r]) =>
+          l < r ? -1 : l > r ? 1 : 0,
+        )) {
+          push(id, `id:${id}`);
+          push(definition, `definition:${id}`);
         }
+      }
+      return out;
+    };
+    // The tagged stream is the assembled text's token stream, exactly.
+    for (const [cls, kind] of Object.entries(GATE2_LIVE_BENCHMARK_CLASS_KINDS) as Array<
+      [string, "mutation" | "read_only"]
+    >) {
+      expect(taggedTokensOf(policy, cls, kind).map(({ token }) => token)).toEqual(
+        tokensOf(buildGate2LiveInstructions(cls, kind)),
+      );
+    }
+    // A span wholly inside ONE taxonomy ID is the identifier channel, judged class-aware
+    // as above: the ID reaches only the receiving class, so it may contain a stem of some
+    // other class's case (unvalidated-config-shape carries "config", a refactor target) but
+    // not a stem of the receiving class's own cases. A finding ID inside its own ID tokens
+    // is the contract listing itself.
+    const spanAllowed = (span: TaggedToken[], ownStem: boolean, id?: string): boolean => {
+      if (span.every(({ origin }) => origin === "template")) return true;
+      const single = span[0]?.origin;
+      const withinOneId =
+        single !== undefined &&
+        single.startsWith("id:") &&
+        span.every(({ origin }) => origin === single);
+      if (id !== undefined) return withinOneId && single === `id:${id}`;
+      return withinOneId && !ownStem;
+    };
+    const assembledCollisionsOf = (
+      source: typeof policy,
+      cls: string,
+      kind: "mutation" | "read_only",
+    ): string[] => {
+      const stream = taggedTokensOf(source, cls, kind);
+      const ownStems = stemsOf(
+        manifest.cases.filter((benchmarkCase) => benchmarkCase.class === cls),
+      );
+      const found: string[] = [];
+      const scan = (needle: string[], label: string, ownStem: boolean, id?: string) => {
+        for (let index = 0; index + needle.length <= stream.length; index += 1) {
+          if (!needle.every((part, offset) => stream[index + offset]?.token === part)) continue;
+          const span = stream.slice(index, index + needle.length);
+          if (spanAllowed(span, ownStem, id)) continue;
+          const origins = [...new Set(span.map(({ origin }) => origin))].join("+");
+          found.push(`assembled ${cls}: ${label} across ${origins}`);
+        }
+      };
+      for (const [stem, { parts, cases }] of stems) {
+        scan(parts, `"${stem}" names ${[...cases].sort().join(", ")}`, ownStems.has(stem));
       }
       if (kind === "read_only") {
-        for (const [id, { parts, cases }] of findingIds) {
-          if (containsSequence(tokens, parts)) {
-            found.push(`assembled ${cls}: finding "${id}" names ${[...cases].sort().join(", ")}`);
-          }
+        for (const [fid, { parts, cases }] of findingIds) {
+          scan(parts, `finding "${fid}" names ${[...cases].sort().join(", ")}`, false, fid);
         }
       }
-      return found;
+      return [...new Set(found)];
     };
     for (const [cls, kind] of Object.entries(GATE2_LIVE_BENCHMARK_CLASS_KINDS) as Array<
       [string, "mutation" | "read_only"]
     >) {
-      expect(assembledCollisionsOf(cls, kind, buildGate2LiveInstructions(cls, kind))).toEqual([]);
+      expect(assembledCollisionsOf(policy, cls, kind)).toEqual([]);
     }
-    const splitPolicy = snapshotGate2LivePolicy({
-      ...policy,
-      classRules: {
-        ...policy.classRules,
-        security_review: [
-          ...(policy.classRules.security_review ?? []),
-          "Report path",
-          "traversal when runtime input escapes.",
-        ],
-      },
-    });
+    const asPolicy = (source: unknown) =>
+      snapshotGate2LivePolicy(source) as unknown as typeof policy;
+    // Eleventh review: a finding ID split across two adjacent rules.
     expect(
       assembledCollisionsOf(
+        asPolicy({
+          ...policy,
+          classRules: {
+            ...policy.classRules,
+            security_review: [
+              ...(policy.classRules.security_review ?? []),
+              "Report path",
+              "traversal when runtime input escapes.",
+            ],
+          },
+        }),
         "security_review",
         "read_only",
-        assembleGate2LiveInstructions(splitPolicy, "security_review", "read_only"),
       ),
     ).toEqual([
-      'assembled security_review: finding "path-traversal" names security-path-traversal',
+      'assembled security_review: finding "path-traversal" names security-path-traversal across classRules.security_review',
     ]);
-    const splitStemPolicy = snapshotGate2LivePolicy({
-      ...policy,
-      classRules: {
-        ...policy.classRules,
-        scaffold: [...(policy.classRules.scaffold ?? []), "Name the check test json", "output."],
-      },
-    });
+    // Twelfth review, three forms: a taxonomy key and its definition reconstruct a stem;
+    // definition -> key -> definition reconstruct one; adjacent rules whose text looks like
+    // taxonomy structure ("json = output.") reconstruct one.
     expect(
       assembledCollisionsOf(
+        asPolicy({
+          ...policy,
+          findingTaxonomy: {
+            ...policy.findingTaxonomy,
+            expected: "finding means a repository path named by the benchmark",
+          },
+        }),
+        "security_review",
+        "read_only",
+      ),
+    ).toEqual([
+      'assembled security_review: "expected_finding" names repair-public-path-containment, security-path-traversal across id:expected+definition:expected',
+    ]);
+    const [firstId, firstDefinition] = Object.entries(policy.findingTaxonomy).sort(([l], [r]) =>
+      l < r ? -1 : l > r ? 1 : 0,
+    )[0] as [string, string];
+    expect(
+      assembledCollisionsOf(
+        asPolicy({
+          ...policy,
+          findingTaxonomy: {
+            ...policy.findingTaxonomy,
+            [firstId]: `${firstDefinition} test`,
+            json: "output",
+          },
+        }),
+        "security_review",
+        "read_only",
+      ).some((line) => line.includes('"test_json_output"') && line.includes("definition:")),
+    ).toBe(true);
+    expect(
+      assembledCollisionsOf(
+        asPolicy({
+          ...policy,
+          classRules: {
+            ...policy.classRules,
+            scaffold: [
+              ...(policy.classRules.scaffold ?? []),
+              "Name the check test",
+              "json = output.",
+            ],
+          },
+        }),
         "scaffold",
         "mutation",
-        assembleGate2LiveInstructions(splitStemPolicy, "scaffold", "mutation"),
       ),
-    ).toEqual(['assembled scaffold: "test_json_output" names scaffold-lantern-json-output']);
+    ).toEqual([
+      'assembled scaffold: "test_json_output" names scaffold-lantern-json-output across classRules.scaffold',
+    ]);
     // Every policy string is printable ASCII, so a zero-width space cannot split a stem.
     expect(() =>
       snapshotGate2LivePolicy({
