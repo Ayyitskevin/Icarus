@@ -107,14 +107,19 @@ describe("Gate 2 frozen evidence verifier", () => {
   });
 
   it("fails on a listed file that is absent and on a present file that is unlisted", async () => {
+    // The directory is closed to every file, not only JSON: a stray text file at the top
+    // level and a stray note inside a record directory are both refused, the same way the
+    // publisher refuses them.
     const root = await frozenSet();
     await rm(path.join(root, "comparison.json"));
-    await writeFile(path.join(root, "stray.json"), "{}\n");
+    await writeFile(path.join(root, "stray.txt"), "not evidence\n");
+    await writeFile(path.join(root, "routed", "scratch.md"), "# notes\n");
     const problems = await verifyFrozenEvidence(root);
     expect(problems).toEqual(
       expect.arrayContaining([
         "comparison.json: listed but absent",
-        "stray.json: present but unlisted",
+        "stray.txt: present but unlisted",
+        "routed/scratch.md: present but unlisted",
       ]),
     );
   });

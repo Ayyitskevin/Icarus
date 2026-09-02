@@ -58,7 +58,11 @@ function distinct(values) {
   return [...seen.values()];
 }
 
-async function listJsonFiles(root) {
+// A frozen directory is closed: every entry that is not a directory is listed and digested,
+// whatever its name, so a stray file is refused rather than ignored. The publisher's walk
+// (scripts/gate2-live-evidence-publish.mjs) enumerates the same universe; a file one accepts
+// and the other refuses was the 2026-09-02 review finding this closes.
+async function listFiles(root) {
   const out = [];
   async function visit(directory, prefix) {
     for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) =>
@@ -66,19 +70,17 @@ async function listJsonFiles(root) {
     )) {
       const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
       if (entry.isDirectory()) await visit(path.join(directory, entry.name), relative);
-      else if (entry.isFile() && entry.name.endsWith(".json") && relative !== MANIFEST) {
-        out.push(relative);
-      }
+      else if (relative !== MANIFEST) out.push(relative);
     }
   }
   await visit(root, "");
   return out;
 }
 
-/** Digest every JSON file except the manifest, from the bytes on disk right now. */
+/** Digest every file except the manifest, from the bytes on disk right now. */
 export async function computeFrozenEntries(root) {
   const entries = [];
-  for (const relative of await listJsonFiles(root)) {
+  for (const relative of await listFiles(root)) {
     const bytes = await readFile(path.join(root, relative));
     entries.push({ path: relative, bytes: bytes.length, sha256: sha256(bytes) });
   }

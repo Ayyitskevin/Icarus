@@ -13,7 +13,7 @@ export interface FrozenRecordContract {
   /** Present only when every record reports the same value. */
   readonly everyRecordReasoningChars?: number | null;
 }
-/** Digests every JSON file under `root` except the manifest, from the bytes on disk now. */
+/** Digests every file under `root` except the manifest, from the bytes on disk now. */
 export function computeFrozenEntries(root: string): Promise<FrozenEvidenceEntry[]>;
 /** Derives the record contract from the case records; throws when the records disagree. */
 export function deriveRecordContract(root: string): Promise<FrozenRecordContract>;
