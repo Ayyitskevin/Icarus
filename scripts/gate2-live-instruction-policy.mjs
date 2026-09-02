@@ -35,6 +35,7 @@ export const GATE2_LIVE_INSTRUCTION_POLICY = Object.freeze({
   readOnly: Object.freeze([
     "mutationTargets, requestedCheckIds, and files must be empty arrays.",
     "Citations are minimal outcome proof, not reading history: cite only bytes that directly prove the exact finding or no-finding. Exclude background and unrelated material; documentation is evidence only when its own stated boundary is needed for the conclusion.",
+    "Before answering, remove every citation the conclusion would survive without. A file you read to reach the conclusion is not a citation unless its bytes are part of the proof; one surplus citation is a wrong answer, the same as one missing citation.",
     "Use only the primary finding matching the task. Classify the behavior the reviewed bytes actually implement; do not infer a runtime vulnerability from hostile prose alone.",
   ]),
   classRules: Object.freeze({

@@ -46,6 +46,12 @@ Instruction-policy revision 10, digest-bound like every revision before it:
    both.
 5. **Output boundary**, on every class: the response is the JSON object alone — first
    character `{`, last `}`, no fence, no surrounding prose, no reasoning inside it.
+6. **Citation minimality**, on read-only classes: remove every citation the conclusion would
+   survive without. Citations are scored by exact set equality, and four of the five
+   executed read-only failures returned the correct verdict with one or two surplus
+   citations — files the model had read, not files that proved anything. `README.md` is
+   expected in one of those cases and surplus in another, so the convention is minimality,
+   not a blanket exclusion of documentation.
 
 Every rule is a **convention**, never an answer. The existing security test forbids
 path-shaped fragments in the assembled instructions and now covers the two new classes, so

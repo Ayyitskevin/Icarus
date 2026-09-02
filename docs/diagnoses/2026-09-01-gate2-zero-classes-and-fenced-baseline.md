@@ -86,9 +86,14 @@ the scaffold miss that has guidance ignored it.
 - **Not capability, for six of the ten zero-class cases**: the model produced parseable,
   structurally valid candidates and lost on target selection — a convention question the
   policy can address without naming any answer.
-- **Capability or judgment, for the six executed failures**: five read-only cases whose
-  answer the evaluator rejected and one repair whose check failed. Those are out of scope
-  for a policy change and are the next diagnosis.
+- **Mostly precision, not judgment, for the six executed failures.** Read against the
+  expected citation sets, four of the five read-only cases returned the **correct**
+  verdict and every one of the five had zero missing citations and one or two surplus ones
+  — files the model read, not files that proved the conclusion. Citations are scored by
+  exact set equality, so one surplus zeroes a right answer. Only `security-config-trust`
+  (a missed taxonomy finding) and `repair-lantern-missing-config` (a failed check) are
+  judgment or capability. Revision 10 adds a citation-minimality rule for the read-only
+  kind.
 
 ## Proposed change
 

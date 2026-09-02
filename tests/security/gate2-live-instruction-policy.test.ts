@@ -65,6 +65,14 @@ describe("Gate 2 live instruction policy", () => {
     expect(buildGate2LiveInstructions("explanation", "read_only")).not.toContain(
       "creates that module as a new file",
     );
+    // Revision 10: four of the five read-only failures returned the correct verdict and
+    // were zeroed for one surplus citation. Citations are scored by exact set equality.
+    expect(buildGate2LiveInstructions("security_review", "read_only")).toContain(
+      "remove every citation the conclusion would survive without",
+    );
+    expect(buildGate2LiveInstructions("scaffold", "mutation")).not.toContain(
+      "remove every citation",
+    );
     // Output boundary, on every class: 27 of 30 baseline failures were a code fence.
     for (const [cls, kind] of [
       ["repair", "mutation"],
