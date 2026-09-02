@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { parseStrictGate2Json } from "../../scripts/gate2-benchmark-contract.mjs";
 import {
   assembleGate2LiveInstructions,
   buildGate2LiveCandidateInput,
@@ -254,6 +255,63 @@ describe("Gate 2 live instruction policy", () => {
         }
       }
     }
+    // Template VALUES are text the model sees; template KEYS are the answer contract. A
+    // sixth review kept a template valid and changed only answer.summary from "text" to
+    // "test-json-output", and every test stayed green. Each template's string leaves are
+    // scanned against the stems of the cases whose kind receives it; its top-level keys
+    // are exact and it parses under the strict parser (no duplicate members).
+    const templateLeaves = (value: unknown, out: string[] = []): string[] => {
+      if (typeof value === "string") out.push(value);
+      else if (Array.isArray(value)) for (const item of value) templateLeaves(item, out);
+      else if (value !== null && typeof value === "object") {
+        for (const item of Object.values(value)) templateLeaves(item, out);
+      }
+      return out;
+    };
+    const templateCollisionsOf = (templates: Readonly<Record<string, string>>): string[] => {
+      const found: string[] = [];
+      for (const [kind, template] of Object.entries(templates)) {
+        const parsed = parseStrictGate2Json(template) as Record<string, unknown>;
+        expect(Object.keys(parsed).sort()).toEqual([
+          "answer",
+          "plan",
+          "schemaVersion",
+          "selectedContextPaths",
+        ]);
+        const receivingKind = kind === "mutation" ? "mutation" : "read_only";
+        const visible = stemsOf(
+          manifest.cases.filter(
+            (benchmarkCase) => benchmarkCase.expectedOutcome?.kind === receivingKind,
+          ),
+        );
+        for (const leaf of templateLeaves(parsed)) {
+          const tokens = tokensOf(leaf);
+          for (const [stem, { parts, cases }] of visible) {
+            if (containsSequence(tokens, parts)) {
+              found.push(
+                `templates.${kind} value "${leaf}": "${stem}" names ${[...cases].sort().join(", ")}`,
+              );
+            }
+          }
+        }
+      }
+      return found;
+    };
+    expect(templateCollisionsOf(policy.templates)).toEqual([]);
+    const mutationTemplate = JSON.parse(policy.templates.mutation) as {
+      answer: Record<string, unknown>;
+    };
+    const plantedTemplate = JSON.stringify({
+      ...mutationTemplate,
+      answer: { ...mutationTemplate.answer, summary: "test-json-output" },
+    });
+    const withPlantedTemplate = snapshotGate2LivePolicy({
+      ...policy,
+      templates: { ...policy.templates, mutation: plantedTemplate },
+    }) as unknown as typeof policy;
+    expect(templateCollisionsOf(withPlantedTemplate.templates)).toEqual([
+      'templates.mutation value "test-json-output": "test_json_output" names scaffold-lantern-json-output',
+    ]);
     expect(identifierCollisions).toEqual([]);
     // Structural: the assembled instructions are exactly the scanned prose plus the
     // builder-owned pieces. If the builder ever adds prose of its own, this fails and the

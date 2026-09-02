@@ -10,7 +10,8 @@ export const GATE2_LIVE_BENCHMARK_CLASS_KINDS: Readonly<Record<string, "mutation
 export const GATE2_LIVE_BENCHMARK_CLASSES: readonly string[];
 /**
  * Turns a policy source into the plain data the digest, the leak scan, and the assembler read:
- * JSON round-trip (accessors evaluated once, non-JSON dropped), shape asserted, deep-frozen.
+ * JSON round-trip (every property access happens in that one pass; non-JSON dropped), shape
+ * asserted, deep-frozen. Later consumers read the snapshot, never the source.
  */
 export function snapshotGate2LivePolicy(source: unknown): typeof GATE2_LIVE_INSTRUCTION_POLICY;
 /** Pure assembly from a policy object; reads class rules as own properties only. */

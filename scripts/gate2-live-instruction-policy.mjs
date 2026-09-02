@@ -118,8 +118,10 @@ function assertStringArray(value, where) {
 
 /**
  * Turns a policy source into the plain data the digest, the leak scan, and the assembler
- * all read. A JSON round-trip evaluates every accessor exactly once, here, and drops
- * Symbol keys, functions, and anything that is not JSON; the shape is then asserted --
+ * all read. A JSON round-trip performs every property access during this one
+ * serialization pass (an accessor reachable by two paths is read twice, once per path)
+ * and drops Symbol keys, functions, and anything that is not JSON; the shape is then
+ * asserted --
  * string arrays, templates that are strings parsing to the required object, string
  * taxonomy definitions, class-rule keys among the benchmark classes -- and the result is
  * deep-frozen. A review planted a getter that returned the recorded rule on its first read

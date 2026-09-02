@@ -67,8 +67,13 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   rules and the finding-taxonomy definitions. Nothing is cut out of prose and no word is
   exempt; a finding ID written into a rule is scanned as the words it contains. The only
   unscanned text is what the builder owns structurally — the class/kind line, the JSON
-  template, and the taxonomy IDs as identifiers — and the test asserts the assembled
-  instructions contain nothing beyond those pieces. Three reviews shaped this: the first
+  template's keys, and the taxonomy IDs as identifiers — and the test asserts the assembled
+  instructions contain nothing beyond those pieces. The template's string values are text
+  the model sees and are scanned like identifiers, against the stems of the cases whose
+  answer kind receives that template; its top-level keys are exact and it parses under the
+  strict parser. A seventh review changed only `answer.summary` from "text" to
+  "test-json-output" in a valid template and every test stayed green; that plant is a
+  regression test now. Three reviews shaped this: the first
   planted "a new module named money" and the old gate stayed green; the second beat the
   first version with "test-json-output" and with the member name `files` used as prose;
   the third beat the second version by writing a finding ID into a rule so that the stem
@@ -88,8 +93,9 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   reached the model while the scan, the digest, and the structural check — all own-key
   walks — stayed unchanged. That plant is now a regression test.
 - The policy the model sees is **plain data by construction**. The module snapshots its
-  source through a JSON round-trip at load — every accessor is evaluated exactly once,
-  there; Symbol keys, functions, and non-JSON values do not survive — asserts the shape
+  source through a JSON round-trip at load — every property access happens during that
+  one serialization pass, and every later consumer reads the snapshot, never the source;
+  Symbol keys, functions, and non-JSON values do not survive — asserts the shape
   (string arrays; templates that are strings parsing to the required object; string
   taxonomy definitions; class-rule keys among the benchmark classes) and deep-freezes the
   result. The digest, the scan, and the assembler all read that one snapshot, so what is
@@ -102,9 +108,11 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   canonicalises key order — what is hashed is what is assembled, in the same order — and
   the shape assertion refuses ids that are not kebab-case identifiers, definitions that
   carry the line's own delimiters, a `generation` outside its ranges, and template keys
-  that are not answer kinds. What this does not cover, and says so: a policy module that is
-  itself adversarial code replacing the snapshot — that is held by review of the module,
-  not by this test.
+  that are not answer kinds. What this does not cover, and says so: code running in the
+  same process with authority over the module or the language's intrinsics — a policy
+  module that replaces the snapshot, or a patched `Array.prototype[Symbol.iterator]` that
+  injects text during assembly — is trusted; that boundary is held by review of the code
+  that runs, not by this test.
 
 Revision 10's text was revised during review — "verify" to "confirm", "files" to "paths",
 "file list", and "file set" — before any run carried it, so the number names two texts in
