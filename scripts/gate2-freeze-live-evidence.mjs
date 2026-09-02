@@ -15,7 +15,7 @@
 //   node scripts/gate2-freeze-live-evidence.mjs --verify <artifact-dir>
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -73,11 +73,17 @@ async function listFiles(root) {
       a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
     )) {
       const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-      if (entry.isDirectory()) await visit(path.join(directory, entry.name), relative);
-      else if (relative === MANIFEST) {
-        if (!entry.isFile()) fail(`${relative} is not a regular file`);
-      } else if (!entry.isFile()) fail(`${relative} is not a regular file`);
-      else out.push(relative);
+      if (entry.isDirectory()) {
+        await visit(path.join(directory, entry.name), relative);
+        continue;
+      }
+      if (!entry.isFile()) fail(`${relative} is not a regular file`);
+      // A hard link is a regular file whose bytes also live under another name, possibly
+      // outside the set; the publisher refuses it, and so does the freezer.
+      if ((await lstat(path.join(directory, entry.name))).nlink > 1) {
+        fail(`${relative} is hard-linked`);
+      }
+      if (relative !== MANIFEST) out.push(relative);
     }
   }
   await visit(root, "");
@@ -97,7 +103,13 @@ export async function computeFrozenEntries(root) {
 async function readRecords(root) {
   const records = [];
   for (const directory of RECORD_DIRECTORIES) {
-    const names = await readdir(path.join(root, directory)).catch(() => []);
+    // A record directory that does not exist holds no records; one that cannot be read is
+    // a fault, and a fault must not become "no records here" -- absence produced by an
+    // error and then reported as measurement is the defect this campaign exists to remove.
+    const names = await readdir(path.join(root, directory)).catch((error) => {
+      if (error?.code === "ENOENT") return [];
+      throw error;
+    });
     for (const name of names.sort()) {
       if (!name.endsWith(".json")) continue;
       const relative = `${directory}/${name}`;
@@ -167,8 +179,12 @@ export async function verifyFrozenEvidence(root) {
   try {
     entries = await computeFrozenEntries(root);
   } catch (error) {
-    // An entry that is not a regular file is a verdict about the directory, not a crash.
-    problems.push(error instanceof Error ? error.message : String(error));
+    // An entry the freezer itself refused is a verdict about the directory, not a crash;
+    // anything else (an I/O fault, a bug) is rethrown as itself.
+    if (!(error instanceof Error) || !error.message.startsWith("Gate 2 evidence freeze:")) {
+      throw error;
+    }
+    problems.push(error.message);
     return problems;
   }
   const actual = new Map(entries.map((e) => [e.path, e]));
