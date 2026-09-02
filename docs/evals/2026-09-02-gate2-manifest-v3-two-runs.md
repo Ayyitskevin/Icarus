@@ -17,7 +17,8 @@ are the model's to win or lose.
 | generation pins (from the policy) | `temperature: 0`, `maxTokens: 8192`, `think: false` |
 | evidence record revision | 6 (`requestedThink` recorded; absent thinking is `null`) |
 | execution profile | `03399661d250…`, identical for both runs; `code` = `qwen3.8:27b`, `code-fast` = `ornith-1.5:35b` |
-| host | mickey, Node 22.23.2, Docker-backed checks, commit `12f0568` for both runs |
+| host (run-log and operator provenance, not frozen) | mickey, Node 22.23.2, Docker-backed checks; the sets freeze no host, Node, or Docker marker |
+| commit (frozen) | `12f0568` for both runs |
 | arms | baseline (`code-fast`) then routed (`code`), 30 cases each, per run |
 | runs | two, predeclared before either was launched, run sequentially, each frozen as its own set |
 | frozen sets | `docs/evals/artifacts/gate2-r10v3-run1-20260902/`, `…/gate2-r10v3-run2-20260902/` |
@@ -31,7 +32,8 @@ against the revision-10 measurement on v2 (17/30), because three cases changed i
 One operational note, so the wall clock reads honestly: the chain script refused run 2 at
 19:30:12 because run 1's frozen set left the tree dirty (an untracked set under
 `docs/evals/artifacts/`), a case the single-run script had never met; the dirty check was
-narrowed to ignore that one directory and run 2 was relaunched by hand at 19:31:27. Nothing
+narrowed to ignore that one directory and run 2 was relaunched by hand at 19:31:27. That chain
+script is untracked, in the operator's home on mickey (`~/gate2-run-v3.sh`); nothing tracked
 under `scripts/` or `fixtures/` changed between the runs, and both sets bind commit `12f0568`.
 
 ## What this is not
@@ -39,8 +41,10 @@ under `scripts/` or `fixtures/` changed between the runs, and both sets bind com
 - Not a before-and-after against revision 10 on v2. Three cases are different cases.
 - Not evidence about sampling variance. Decoding is pinned at temperature 0 and the two runs
   are a replication, not two samples — see "Two runs" below.
-- Not a claim that the scaffold class's capability floors moved; v3 fixed the benchmark's two
-  defects, and one scaffold case now passes because its task finally entails its target set.
+- Not a claim that the scaffold class's capability floors moved, and not a causal claim about
+  the successor that passed: the bytes show two separate facts — the new task entails its
+  target set (ADR 0073's cold reading), and this run passed it — not that the first caused
+  the second.
 
 ## Results
 
@@ -82,16 +86,18 @@ truncated).
 ## Two runs: a replication, not two samples
 
 Across the 60 paired records, **59 `rawCandidate` values are byte-identical** between run 1
-and run 2, with identical input and output token counts; only `latencyMs` differs, on every
-record. The one exception is routed `security-schema-migration`: 764 versus 772 bytes, the
-same four selected context paths, the same three citations, the same `findings: null`, and
-the same outcome (plan accepted, read-only mismatch, failed) in both runs. The provider is
-therefore deterministic to within one small perturbation at `temperature: 0` on this host,
-and the second run confirms the first rather than sampling around it. The figures' exact
-agreement — down to a cost reduction of `0.128587463557` — is a property of the pins, and it
-says nothing about how the instrument would vary under sampling. A future "repeated runs"
-claim needs either a non-zero temperature declared as part of the instrument or a different
-seed per run, and must say which.
+and run 2, and those 59 carry identical input and output token counts; `latencyMs` differs on
+all 60. The one exception is routed `security-schema-migration`: 764 versus 772 bytes and 204
+versus 205 output tokens (input 931 in both; estimated cost `0.0008904075` versus
+`0.000891192`), with the same four selected context paths, the same three citations, the same
+`findingIds: []`, and the same outcome (plan accepted, read-only mismatch, failed) in both
+runs. Under this profile's pins (`temperature: 0`, `think: false`) the second run reproduced
+the first in 59 of 60 candidates and in every aggregate figure — down to a cost reduction of
+`0.128587463557`. Two observations do not prove the provider deterministic or that the pins
+caused the agreement; what they do establish is that these two runs are a replication of one
+sample, and that their agreement says nothing about how the instrument would vary under
+sampling. A future "repeated runs" claim needs either a non-zero temperature declared as
+part of the instrument or a different seed per run, and must say which.
 
 ## Failure buckets (routed, identical in both runs)
 
@@ -117,11 +123,14 @@ Baseline failures are dominated by markdown fences (20 of 27), as under revision
   `checks/`-only fixture (ADR 0073 deferred it); it also did not parse here.
 - The cost-reduction threshold (0.3) passed under revision 7 (0.5542, routed 16/30) and has
   failed on every instrument since reasoning was suppressed: 0.2176 (revision 9), 0.1400
-  (revision 10), 0.1286 (v3, both runs) — while the success ratio passes by a widening margin
-  (3.2 → 6.0 → 5.67 → 6.33). The routed arm buys its successes with more output than it did
-  under revision 7; whether 0.3 is the right bar for this pair of models is a question for the
-  threshold's owner, not for the next policy revision. (Values from each frozen set's
-  `comparison.json`.)
+  (revision 10), 0.1286 (v3, both runs) — while the success ratio passes on every instrument
+  (3.2 → 6.0 → 5.67 → 6.33). What moved is the within-instrument relation of the two arms'
+  output: under revision 7 the routed arm emitted less than its baseline (38,366 versus
+  91,780 output tokens over 30 cases); under v3 it emits more (7,547 / 7,548 versus 6,652),
+  because the suppressed-reasoning budget shrank the baseline's output far more than the
+  routed arm's. Whether 0.3 is the right bar for this pair of models is a question for the
+  threshold's owner, not for the next policy revision. (Ratios and reductions from each
+  frozen set's `comparison.json`; token totals summed from the records.)
 
 ## Verification commands
 

@@ -463,7 +463,8 @@ and routed `code` 19/30 with acceptance `0.8333`
 `evals/artifacts/gate2-r10v3-run1-20260902/` and `…-run2-20260902/`). The acceptance
 threshold is met on this instrument; the success threshold and the pair's cost-reduction
 threshold are not. Three cases changed identity, so this is a new measurement and never a
-delta against 17/30; the two runs agree exactly because decoding is pinned at temperature 0.
+delta against 17/30; the two runs agree in every figure, with 59 of 60 candidates
+byte-identical under the profile's temperature-0 pin — a replication, not a variance estimate.
 Routed class success under revision 8 was repair 7/10, refactor 4/5, explanation 3/5,
 security review 2/5, and scaffold 0/5; under revision 9 it was repair 7/10, refactor 0/5,
 explanation 3/5, security review 2/5, and scaffold 0/5; under revision 10 it is repair
@@ -487,7 +488,8 @@ authentication, multi-seed generalization, new runtime authority, or Gate 2
 completion. The current dated record is
 [`docs/evals/2026-09-02-gate2-manifest-v3-two-runs.md`](evals/2026-09-02-gate2-manifest-v3-two-runs.md);
 the revision-10-on-v2 record
-[`docs/evals/2026-09-02-gate2-revision-10.md`](evals/2026-09-02-gate2-revision-10.md);
+[`docs/evals/2026-09-02-gate2-revision-10.md`](evals/2026-09-02-gate2-revision-10.md)
+is superseded by it;
 the revision-8 record
 [`docs/evals/2026-08-28-gate2-target-discovery-profile.md`](evals/2026-08-28-gate2-target-discovery-profile.md)
 and the revision-9 record
