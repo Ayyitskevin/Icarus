@@ -538,21 +538,42 @@ describe("Gate 2 published live evidence", () => {
   });
 
   it("calls a directory named like a record a verdict, in the freezer's words, on both APIs", async () => {
-    // Sol's P2 fixture, and its answer changed underneath it. This used to reach the record
-    // read as an EISDIR fault, and the test asserted the fault. The freezer now lstat-checks
-    // each record before reading it, so a directory where a record belongs is a FACT about
-    // the evidence — which is the better answer, and the one both APIs must give.
+    // Sol's P2 fixture, on its third answer, each one a layer earlier than the last. It
+    // began as an EISDIR fault at the record read; then the record read lstat-checked each
+    // record and it became a verdict there; now the walk refuses it first, because an
+    // EMPTY directory holds no listed file (#100). Whichever layer speaks, the publisher
+    // must carry its wording and must not surface an I/O error for a question the freezer
+    // can answer about the directory.
     await withFrozenCopy(async (temporary, artifactDirectory) => {
       await mkdir(path.join(artifactDirectory, "routed", "fault.json"));
-      const wording = "Gate 2 evidence freeze: routed/fault.json is not a regular file";
-      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([`recordContract: ${wording}`]);
+      const wording = "Gate 2 evidence freeze: routed/fault.json holds no files";
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([wording]);
       const error = await verifyGate2PublishedEvidence(temporary, "reasoning-suppressed").then(
         () => null,
         (thrown: Error) => thrown,
       );
       expect(error?.message).toContain(wording);
-      // A fault is what this is not: the publisher must not surface an I/O error for a
-      // question the freezer can answer about the directory.
+      expect(error?.message).not.toMatch(/EISDIR/);
+    });
+  });
+
+  it("still refuses a NON-empty directory named like a record, from the record read", async () => {
+    // The empty-directory rule must not swallow the record read's own type check, and the
+    // publisher must carry that verdict too: give the directory a file and only the layer
+    // that expected a record can object.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const directory = path.join(artifactDirectory, "routed", "fault.json");
+      await mkdir(directory);
+      await writeFile(path.join(directory, "inner.json"), "{}\n");
+      const wording = "Gate 2 evidence freeze: routed/fault.json is not a regular file";
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual(
+        expect.arrayContaining([`recordContract: ${wording}`]),
+      );
+      const error = await verifyGate2PublishedEvidence(temporary, "reasoning-suppressed").then(
+        () => null,
+        (thrown: Error) => thrown,
+      );
+      expect(error?.message).toContain(wording);
       expect(error?.message).not.toMatch(/EISDIR/);
     });
   });
