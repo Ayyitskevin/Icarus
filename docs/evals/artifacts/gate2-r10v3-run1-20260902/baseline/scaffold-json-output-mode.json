@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "scaffold-json-output-mode",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-02T23:22:20.189Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "0816b915d21395ec58c6b162a7fb4d73bd611df1d121cd129cd1a2c7cc85daa4",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"src/main.py\",\n    \"src/greeting.py\",\n    \"config/app.json\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/main.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"json-output-mode\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/main.py\",\n        \"content\": \"import json\\nimport sys\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\n\\ndef main() -> None:\\n    config = json.loads(Path(\\\"config/app.json\\\").read_text())\\n    audience = config[\\\"audience\\\"]\\n\\n    if len(sys.argv) > 1 and sys.argv[1] == \\\"--json\\\":\\n        print(json.dumps({\\\"message\\\": greeting(audience)}))\\n        return\\n\\n    print(greeting(audience))\\n\\n\\nmain()\\n\"\n      },\n      {\n        \"path\": \"tests/test_json_output.py\",\n        \"content\": \"import json\\nimport subprocess\\nimport sys\\nfrom pathlib import Path\\n\\nREPO_ROOT = Path(__file__).resolve().parents[1]\\n\\n\\ndef test_json_output_mode() -> None:\\n    result = subprocess.run(\\n        [sys.executable, \\\"src/main.py\\\", \\\"--json\\\"],\\n        cwd=REPO_ROOT,\\n        capture_output=True,\\n        text=True,\\n    )\\n    assert result.returncode == 0, result.stderr\\n    payload = json.loads(result.stdout)\\n    assert \\\"message\\\" in payload\\n    assert payload[\\\"message\\\"].startswith(\\\"Welcome, \\\")\\n\\n\\ndef test_default_text_mode() -> None:\\n    result = subprocess.run(\\n        [sys.executable, \\\"src/main.py\\\"],\\n        cwd=REPO_ROOT,\\n        capture_output=True,\\n        text=True,\\n    )\\n    assert result.returncode == 0, result.stderr\\n    payload = json.loads(result.stdout)\\n    assert payload[\\\"message\\\"].startswith(\\\"Welcome, \\\")\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Added a dependency-free --json flag to src/main.py that prints a JSON object with the greeting message while keeping the default text mode. Included a new offline check in tests/test_json_output.py covering both modes.\"\n  }\n}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON (markdown_fenced)",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-json-output-mode",
+    "evaluatorId": "scaffold-json-output-mode-evaluator",
+    "candidateSha256": "73f62e9d501ef0ba510d038d1a4945cded2f192266b3c327b768af0cffbb9710",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-json-output-mode",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "33afcb78ed0cfa00578b7e707f77365f99336e190e166a45e2dc5e4b0c573d4f",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-json-output-mode-evaluator",
+    "scenarioEvidenceSha256": "896a74f0085ec3ac410798d489b67c5c91f7dea1e534124385cfab08d498c793",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 995,
+      "outputTokens": 573,
+      "estimatedCostUsd": 0.001568,
+      "actualBilledUsd": null,
+      "latencyMs": 11667
+    }
+  }
+}

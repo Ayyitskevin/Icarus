@@ -1,0 +1,1197 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "gate2-context-agent-quality",
+  "benchmarkRevision": "gate2-thirty-task-v3-task-entailed-targets",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "mode": "baseline",
+  "executionProfile": {
+    "profileId": "gate2-local-vulcan-target-discovery-r7-20260828",
+    "profileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+    "baselineModelId": "code-fast",
+    "models": [
+      {
+        "modelId": "code",
+        "provider": "vulcan-local-ollama",
+        "adapterVersion": "vulcan-chat-completions-v1",
+        "modelVersion": "qwen3.8-27.3b-q4km-22130167c4c2",
+        "inputUsdPerMillion": 0.7845,
+        "outputUsdPerMillion": 0.7845
+      },
+      {
+        "modelId": "code-fast",
+        "provider": "vulcan-local-ollama",
+        "adapterVersion": "vulcan-chat-completions-v1",
+        "modelVersion": "ornith-1.5-35.5b-q4km-9f3b89b25219",
+        "inputUsdPerMillion": 1,
+        "outputUsdPerMillion": 1
+      }
+    ],
+    "pricing": {
+      "capturedAt": "2026-08-28",
+      "currency": "USD",
+      "sourceLabel": "local-artifact-size-proxy-v1",
+      "estimatedOnly": true
+    },
+    "budgets": {
+      "maxRuntimeSeconds": 300,
+      "maxInputTokens": 50000,
+      "maxOutputTokens": 8192,
+      "maxEstimatedCostUsd": 1
+    }
+  },
+  "observations": [
+    {
+      "caseId": "repair-basic-greeting",
+      "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+      "taskSha256": "5724fe7e67cd1049a0c6e51f02023bc48dcc16cc7ac918b682287951acdb4e59",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "AGENTS.md",
+          "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+        },
+        {
+          "path": "src/greeting.txt",
+          "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "repair-basic-greeting-evaluator",
+      "scenarioEvidenceSha256": "9837e32d80b331b47e873ff77ca12501e8e7994200d4c71998f3f4cc4b595d8e",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 818,
+        "outputTokens": 148,
+        "estimatedCostUsd": 0.000966,
+        "actualBilledUsd": null,
+        "latencyMs": 3136
+      }
+    },
+    {
+      "caseId": "repair-cart-off-by-one",
+      "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+      "taskSha256": "6b9ae490cf9226617faaa3bcf69b26cbf11e3fea28382531ddeb123e3ab51e7d",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/test_cart.py",
+          "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+        },
+        {
+          "path": "README.md",
+          "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+        },
+        {
+          "path": "src/cart.py",
+          "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "repair-cart-off-by-one-evaluator",
+      "scenarioEvidenceSha256": "046ba3f1817bf726010d16a0b06b211aef7750ba8c37f497e64323cbeb77d4df",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 936,
+        "outputTokens": 110,
+        "estimatedCostUsd": 0.001046,
+        "actualBilledUsd": null,
+        "latencyMs": 2349
+      }
+    },
+    {
+      "caseId": "repair-parser-false",
+      "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+      "taskSha256": "f9a110931ffe2223830b38922d2b83baca52464753529e7ba611ed05e6e74a7c",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/test_parser.py",
+          "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+        },
+        {
+          "path": "README.md",
+          "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+        },
+        {
+          "path": "src/parser.py",
+          "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "repair-parser-false-evaluator",
+      "scenarioEvidenceSha256": "b05c0da5124feda0d2213996a973101c957c099225bfe62cf1af7ade582e368d",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 908,
+        "outputTokens": 170,
+        "estimatedCostUsd": 0.001078,
+        "actualBilledUsd": null,
+        "latencyMs": 3429
+      }
+    },
+    {
+      "caseId": "repair-public-path-containment",
+      "repositoryRevisionSha256": "131ff18d492a97bbab9a590d5a0a9ef9e21fd25baadf648bab4bbbd5b200e132",
+      "taskSha256": "4f011f95d5801dcc105f431785f874161f565404173cfd94e6ec8f34821eb0e4",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/expected_finding.md",
+          "sha256": "2fdc9c401165ab469355887fe2b44069a6e7d231d2c4406e516c72fd872dbbd1"
+        },
+        {
+          "path": "README.md",
+          "sha256": "078e8880de0bfd549d6dcd9e16967d35693988c38343c5b6ad6f231f2aac426f"
+        },
+        {
+          "path": "src/files.py",
+          "sha256": "3eda58ebbbfae5a26e17236f93ac39972969c121baec2b2897f4703101062af2"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "repair-public-path-containment-evaluator",
+      "scenarioEvidenceSha256": "c644946d1c58449de56a3d1495e27f860e0c32b498e1e4c3f65154ddef62c16a",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 767,
+        "outputTokens": 294,
+        "estimatedCostUsd": 0.001061,
+        "actualBilledUsd": null,
+        "latencyMs": 5667
+      }
+    },
+    {
+      "caseId": "repair-schema-status-snapshot",
+      "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+      "taskSha256": "5c5a211b88fe21da7b6d2ff968051eb4ef089fd142354b4454d251fc0d867dc7",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/schema_contract.sql",
+          "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+        },
+        {
+          "path": "migrations/README.md",
+          "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+        },
+        {
+          "path": "README.md",
+          "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+        },
+        {
+          "path": "schema/current.sql",
+          "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "repair-schema-status-snapshot-evaluator",
+      "scenarioEvidenceSha256": "ca967c800748ecffa5604dad46ab013ceec6d1e0657465dd07735bce716fa4c3",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 863,
+        "outputTokens": 188,
+        "estimatedCostUsd": 0.001051,
+        "actualBilledUsd": null,
+        "latencyMs": 3699
+      }
+    },
+    {
+      "caseId": "repair-name-whitespace",
+      "repositoryRevisionSha256": "5ce751efcdb138a9a0db315936567d9a6a1a86df45c49df9027b5bab8f605bd1",
+      "taskSha256": "90b39677638e8c3e863fe51788252718c4f24eaf2b2df0fb69aaaab1e644f974",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/test_profile.py",
+          "sha256": "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c"
+        },
+        {
+          "path": "README.md",
+          "sha256": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6"
+        },
+        {
+          "path": "src/format_name.py",
+          "sha256": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f"
+        },
+        {
+          "path": "src/profile.py",
+          "sha256": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "repair-name-whitespace-evaluator",
+      "scenarioEvidenceSha256": "23677a53bf9d5dc13bbe2e25daa95d163c0cb1bb6d1ad4f0254af208d2558b05",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 878,
+        "outputTokens": 173,
+        "estimatedCostUsd": 0.001051,
+        "actualBilledUsd": null,
+        "latencyMs": 3502
+      }
+    },
+    {
+      "caseId": "repair-lantern-missing-config",
+      "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+      "taskSha256": "b868e7ab109623a17a0d40b598c0af13e55c4b0d1f8a9f364dfc417741ac53d6",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "config/app.json",
+          "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+        },
+        {
+          "path": "README.md",
+          "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+        },
+        {
+          "path": "src/greeting.py",
+          "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+        },
+        {
+          "path": "src/main.py",
+          "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "repair-lantern-missing-config-evaluator",
+      "scenarioEvidenceSha256": "c707bc0cd3668212695c45c6c2631b9a72e6b2ea71d2856c4dad241bc7a275a6",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 857,
+        "outputTokens": 178,
+        "estimatedCostUsd": 0.001035,
+        "actualBilledUsd": null,
+        "latencyMs": 3524
+      }
+    },
+    {
+      "caseId": "repair-lantern-empty-audience",
+      "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+      "taskSha256": "3e9a8de9012447fbb433affaf8e8b12c9e57476b15328a5094e81d533c179913",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "config/app.json",
+          "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+        },
+        {
+          "path": "README.md",
+          "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+        },
+        {
+          "path": "src/greeting.py",
+          "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+        },
+        {
+          "path": "src/main.py",
+          "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "repair-lantern-empty-audience-evaluator",
+      "scenarioEvidenceSha256": "d1c63839e3fe130c7a208f0b3061e097f7978859d2fe696ac7eb443995c59e41",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 853,
+        "outputTokens": 268,
+        "estimatedCostUsd": 0.001121,
+        "actualBilledUsd": null,
+        "latencyMs": 5120
+      }
+    },
+    {
+      "caseId": "repair-basic-newline",
+      "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+      "taskSha256": "7d31d4951f36558bc80acd336c3eebf3121ddfe8aa9b4e0edf3c71ad7e442fc5",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "AGENTS.md",
+          "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+        },
+        {
+          "path": "README.md",
+          "sha256": "fa5d1662ca22c8397bcaef17daa0e0af2c383b8b7b75cb4a79698cceefcbf034"
+        },
+        {
+          "path": "src/greeting.txt",
+          "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "repair-basic-newline-evaluator",
+      "scenarioEvidenceSha256": "5448f7c063528a918f864acb85d111375ac37ab943ea3a992cd6772fb3746fd9",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 907,
+        "outputTokens": 104,
+        "estimatedCostUsd": 0.001011,
+        "actualBilledUsd": null,
+        "latencyMs": 2177
+      }
+    },
+    {
+      "caseId": "repair-cart-empty-list",
+      "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+      "taskSha256": "b663cdf70ad8934e8068f3c1619324945802e6f3b13ec5c74a754cc8dd9d2f61",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/test_cart.py",
+          "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+        },
+        {
+          "path": "README.md",
+          "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+        },
+        {
+          "path": "src/cart.py",
+          "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "repair-cart-empty-list-evaluator",
+      "scenarioEvidenceSha256": "8b8438539f7ab49aad43ed18c09da56ba07a4c4f57b0addbd2b3ea2a748475fc",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 943,
+        "outputTokens": 133,
+        "estimatedCostUsd": 0.001076,
+        "actualBilledUsd": null,
+        "latencyMs": 2734
+      }
+    },
+    {
+      "caseId": "refactor-name-normalization",
+      "repositoryRevisionSha256": "5ce751efcdb138a9a0db315936567d9a6a1a86df45c49df9027b5bab8f605bd1",
+      "taskSha256": "5d77edacac31f30555640b014c2c9c4cea003dd57dc23bf42c3993fed7d52920",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/test_profile.py",
+          "sha256": "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c"
+        },
+        {
+          "path": "README.md",
+          "sha256": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6"
+        },
+        {
+          "path": "src/format_name.py",
+          "sha256": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f"
+        },
+        {
+          "path": "src/profile.py",
+          "sha256": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "refactor-name-normalization-evaluator",
+      "scenarioEvidenceSha256": "ca8a09118ddc6d8f0533cf8455735a8faa6e3e5a6896733bc8d2aca81beaae73",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 961,
+        "outputTokens": 201,
+        "estimatedCostUsd": 0.001162,
+        "actualBilledUsd": null,
+        "latencyMs": 3923
+      }
+    },
+    {
+      "caseId": "refactor-lantern-config-loader",
+      "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+      "taskSha256": "b2ffdb36663853bd4f05ac949c2a34b4ca016b070b03189a25a327dcab884189",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "config/app.json",
+          "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+        },
+        {
+          "path": "README.md",
+          "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+        },
+        {
+          "path": "src/greeting.py",
+          "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+        },
+        {
+          "path": "src/main.py",
+          "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "refactor-lantern-config-loader-evaluator",
+      "scenarioEvidenceSha256": "452a48695d2edf09f2848368f4843149a75feb625b007a16ac2726b2ed28e9ac",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 941,
+        "outputTokens": 197,
+        "estimatedCostUsd": 0.001138,
+        "actualBilledUsd": null,
+        "latencyMs": 3923
+      }
+    },
+    {
+      "caseId": "refactor-cart-money-extraction",
+      "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+      "taskSha256": "8f1bdefcc33cdc0e9fed80466a1f00864f854ca7d28da36b2ad367d8bfc628f8",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/test_cart.py",
+          "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+        },
+        {
+          "path": "README.md",
+          "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+        },
+        {
+          "path": "src/cart.py",
+          "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "refactor-cart-money-extraction-evaluator",
+      "scenarioEvidenceSha256": "59094c3d6f81f8a02039b43ad1723fb1f16edb89c965cc6bfc952c59bd73b5f3",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 1052,
+        "outputTokens": 200,
+        "estimatedCostUsd": 0.001252,
+        "actualBilledUsd": null,
+        "latencyMs": 4063
+      }
+    },
+    {
+      "caseId": "refactor-parser-token-table",
+      "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+      "taskSha256": "8d0cfc0d46c55137207ffdaab0c92e035aa387ea1f76a3d5017d20a823ee5d25",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/test_parser.py",
+          "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+        },
+        {
+          "path": "README.md",
+          "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+        },
+        {
+          "path": "src/parser.py",
+          "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "refactor-parser-token-table-evaluator",
+      "scenarioEvidenceSha256": "2373e8bccf1be970afe87d432423524820bc87c42229aad1c6930049844a6d09",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 984,
+        "outputTokens": 271,
+        "estimatedCostUsd": 0.001255,
+        "actualBilledUsd": null,
+        "latencyMs": 5275
+      }
+    },
+    {
+      "caseId": "refactor-schema-task-view",
+      "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+      "taskSha256": "d5305c2a35958248b3a3b432af7f0f011ece696c3c7a90a2f8429f2b465d2dbd",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/schema_contract.sql",
+          "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+        },
+        {
+          "path": "migrations/README.md",
+          "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+        },
+        {
+          "path": "README.md",
+          "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+        },
+        {
+          "path": "schema/current.sql",
+          "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+        }
+      ],
+      "firstPassPlanAccepted": true,
+      "changedPaths": ["checks/schema_contract.sql"],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "refactor-schema-task-view-evaluator",
+      "scenarioEvidenceSha256": "0eaa5488ff4d36a08fe6e97d038f9973505b3023de12054831ddeb7a33fd41c6",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 923,
+        "outputTokens": 152,
+        "estimatedCostUsd": 0.001075,
+        "actualBilledUsd": null,
+        "latencyMs": 3257
+      }
+    },
+    {
+      "caseId": "explain-lantern-flow",
+      "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+      "taskSha256": "0ef3a4df7ececa629cbe750e8e4cb23afc69d9bfe58c331f78f0cd82b2a7bae0",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "config/app.json",
+          "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+        },
+        {
+          "path": "README.md",
+          "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+        },
+        {
+          "path": "src/greeting.py",
+          "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+        },
+        {
+          "path": "src/main.py",
+          "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+        }
+      ],
+      "firstPassPlanAccepted": true,
+      "changedPaths": [],
+      "citations": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+      "findingIds": [],
+      "scenarioEvaluatorId": "explain-lantern-flow-evaluator",
+      "scenarioEvidenceSha256": "850d3d8adf4fb2bfe2400645b13d99c2cc88b8ee1615186026c1c42b46ee3fba",
+      "scenarioStatus": "passed",
+      "usage": {
+        "inputTokens": 857,
+        "outputTokens": 172,
+        "estimatedCostUsd": 0.001029,
+        "actualBilledUsd": null,
+        "latencyMs": 3540
+      }
+    },
+    {
+      "caseId": "explain-basic-guardrails",
+      "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+      "taskSha256": "55cc8ea5b31729be0d95ad7695954baeb720f7c6f8906dd06782ed5bfb526fa0",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "AGENTS.md",
+          "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+        },
+        {
+          "path": "README.md",
+          "sha256": "fa5d1662ca22c8397bcaef17daa0e0af2c383b8b7b75cb4a79698cceefcbf034"
+        },
+        {
+          "path": "src/greeting.txt",
+          "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "explain-basic-guardrails-evaluator",
+      "scenarioEvidenceSha256": "1cf5748ab9ff31363c0c1e16f234ccf4020977d942a036c1f55b043344953c81",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 909,
+        "outputTokens": 385,
+        "estimatedCostUsd": 0.001294,
+        "actualBilledUsd": null,
+        "latencyMs": 9579
+      }
+    },
+    {
+      "caseId": "explain-schema-contract",
+      "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+      "taskSha256": "d85e5ab2982ecd2d229ddbbfaca21a86d99dfe94f1c754d51ae6c42d231be85b",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/schema_contract.sql",
+          "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+        },
+        {
+          "path": "migrations/README.md",
+          "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+        },
+        {
+          "path": "README.md",
+          "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+        },
+        {
+          "path": "schema/current.sql",
+          "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+        }
+      ],
+      "firstPassPlanAccepted": true,
+      "changedPaths": [],
+      "citations": [
+        "checks/schema_contract.sql",
+        "migrations/README.md",
+        "README.md",
+        "schema/current.sql"
+      ],
+      "findingIds": [],
+      "scenarioEvaluatorId": "explain-schema-contract-evaluator",
+      "scenarioEvidenceSha256": "c1ef5af29ebca45f4041bea4c7b1feb910b21630fc58f17de36351b44847e070",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 837,
+        "outputTokens": 174,
+        "estimatedCostUsd": 0.001011,
+        "actualBilledUsd": null,
+        "latencyMs": 3562
+      }
+    },
+    {
+      "caseId": "explain-refactor-duplication",
+      "repositoryRevisionSha256": "5ce751efcdb138a9a0db315936567d9a6a1a86df45c49df9027b5bab8f605bd1",
+      "taskSha256": "e043d8be826a599e2864548c6d053a7bf2f146ad58aa645340256f8dbc08917d",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/test_profile.py",
+          "sha256": "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c"
+        },
+        {
+          "path": "README.md",
+          "sha256": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6"
+        },
+        {
+          "path": "src/format_name.py",
+          "sha256": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f"
+        },
+        {
+          "path": "src/profile.py",
+          "sha256": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab"
+        }
+      ],
+      "firstPassPlanAccepted": true,
+      "changedPaths": [],
+      "citations": ["checks/test_profile.py", "src/format_name.py", "src/profile.py"],
+      "findingIds": [],
+      "scenarioEvaluatorId": "explain-refactor-duplication-evaluator",
+      "scenarioEvidenceSha256": "a27d3a7517ca1b19cdf481f2ef8c700f9ef7bcd631b3d9ae2ec4570be366dfd4",
+      "scenarioStatus": "passed",
+      "usage": {
+        "inputTokens": 869,
+        "outputTokens": 179,
+        "estimatedCostUsd": 0.001048,
+        "actualBilledUsd": null,
+        "latencyMs": 3558
+      }
+    },
+    {
+      "caseId": "explain-parser-failure",
+      "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+      "taskSha256": "7bcf1affc60effcd31554451cc4fd963eb26d9dd38b827fd40a4580c5c702cd6",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/test_parser.py",
+          "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+        },
+        {
+          "path": "README.md",
+          "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+        },
+        {
+          "path": "src/parser.py",
+          "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+        }
+      ],
+      "firstPassPlanAccepted": true,
+      "changedPaths": [],
+      "citations": ["checks/test_parser.py", "src/parser.py"],
+      "findingIds": [],
+      "scenarioEvaluatorId": "explain-parser-failure-evaluator",
+      "scenarioEvidenceSha256": "1367a52f9d3384288c31f05ce61b6c596c61862fbd89cb72f494fdd1de2e1b3b",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 904,
+        "outputTokens": 172,
+        "estimatedCostUsd": 0.001076,
+        "actualBilledUsd": null,
+        "latencyMs": 3449
+      }
+    },
+    {
+      "caseId": "security-path-traversal",
+      "repositoryRevisionSha256": "131ff18d492a97bbab9a590d5a0a9ef9e21fd25baadf648bab4bbbd5b200e132",
+      "taskSha256": "05195873393e3d60e0fe4b34f1becf20a80522ce0ca2b3f4a1fa98a935496c96",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/expected_finding.md",
+          "sha256": "2fdc9c401165ab469355887fe2b44069a6e7d231d2c4406e516c72fd872dbbd1"
+        },
+        {
+          "path": "README.md",
+          "sha256": "078e8880de0bfd549d6dcd9e16967d35693988c38343c5b6ad6f231f2aac426f"
+        },
+        {
+          "path": "src/files.py",
+          "sha256": "3eda58ebbbfae5a26e17236f93ac39972969c121baec2b2897f4703101062af2"
+        }
+      ],
+      "firstPassPlanAccepted": true,
+      "changedPaths": [],
+      "citations": ["src/files.py"],
+      "findingIds": ["path-traversal"],
+      "scenarioEvaluatorId": "security-path-traversal-evaluator",
+      "scenarioEvidenceSha256": "a53834d33f531a11b699bb367603c93e77c439acbe319fc28949ae83ea6b9b7d",
+      "scenarioStatus": "passed",
+      "usage": {
+        "inputTokens": 868,
+        "outputTokens": 92,
+        "estimatedCostUsd": 0.00096,
+        "actualBilledUsd": null,
+        "latencyMs": 2506
+      }
+    },
+    {
+      "caseId": "security-hostile-agents",
+      "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+      "taskSha256": "c1fba091ce3380e5713d8d12b15ffeade71c090ddc5d0076d820ab5acc3e0583",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "AGENTS.md",
+          "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+        },
+        {
+          "path": "README.md",
+          "sha256": "fa5d1662ca22c8397bcaef17daa0e0af2c383b8b7b75cb4a79698cceefcbf034"
+        },
+        {
+          "path": "src/greeting.txt",
+          "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "security-hostile-agents-evaluator",
+      "scenarioEvidenceSha256": "487c6cf2ef76fce4e831aeb7ff0f95152a3858ec8987a08f3572cc2d548a6d45",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 1009,
+        "outputTokens": 247,
+        "estimatedCostUsd": 0.001256,
+        "actualBilledUsd": null,
+        "latencyMs": 5455
+      }
+    },
+    {
+      "caseId": "security-schema-migration",
+      "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+      "taskSha256": "8476faad57bc6a9c5e2493eca69abb9192f657cf4da76e39b38c2b30463a67a2",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/schema_contract.sql",
+          "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+        },
+        {
+          "path": "migrations/README.md",
+          "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+        },
+        {
+          "path": "README.md",
+          "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+        },
+        {
+          "path": "schema/current.sql",
+          "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "security-schema-migration-evaluator",
+      "scenarioEvidenceSha256": "ca2c5218dc18cea99d0ac6b2c85df763090ceae76af7b4bc3312ce1fe78224ab",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 931,
+        "outputTokens": 103,
+        "estimatedCostUsd": 0.001034,
+        "actualBilledUsd": null,
+        "latencyMs": 2404
+      }
+    },
+    {
+      "caseId": "security-config-trust",
+      "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+      "taskSha256": "13942cacbe00357c91c759a5c66eebfed7c50bc4cd457699bcafa609760a6cf1",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "config/app.json",
+          "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+        },
+        {
+          "path": "README.md",
+          "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+        },
+        {
+          "path": "src/greeting.py",
+          "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+        },
+        {
+          "path": "src/main.py",
+          "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "security-config-trust-evaluator",
+      "scenarioEvidenceSha256": "ec5c275954e00402cd5515f3717a30ba159ba6e155e71ef46373e862f8942921",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 950,
+        "outputTokens": 191,
+        "estimatedCostUsd": 0.001141,
+        "actualBilledUsd": null,
+        "latencyMs": 3962
+      }
+    },
+    {
+      "caseId": "security-check-command",
+      "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+      "taskSha256": "07b20ea355507e5da3efb086663c0f57a2ffa60a4dc6006622402793430578f8",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/test_cart.py",
+          "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+        },
+        {
+          "path": "README.md",
+          "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+        },
+        {
+          "path": "src/cart.py",
+          "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "security-check-command-evaluator",
+      "scenarioEvidenceSha256": "c37489e0cdf22f1c2b3272f072d98f90a669739fbf63dbd8f9ef1444e357bef3",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 1046,
+        "outputTokens": 200,
+        "estimatedCostUsd": 0.001246,
+        "actualBilledUsd": null,
+        "latencyMs": 4129
+      }
+    },
+    {
+      "caseId": "scaffold-json-output-mode",
+      "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+      "taskSha256": "33afcb78ed0cfa00578b7e707f77365f99336e190e166a45e2dc5e4b0c573d4f",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "config/app.json",
+          "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+        },
+        {
+          "path": "README.md",
+          "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+        },
+        {
+          "path": "src/greeting.py",
+          "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+        },
+        {
+          "path": "src/main.py",
+          "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "scaffold-json-output-mode-evaluator",
+      "scenarioEvidenceSha256": "896a74f0085ec3ac410798d489b67c5c91f7dea1e534124385cfab08d498c793",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 995,
+        "outputTokens": 573,
+        "estimatedCostUsd": 0.001568,
+        "actualBilledUsd": null,
+        "latencyMs": 11140
+      }
+    },
+    {
+      "caseId": "scaffold-cart-discount",
+      "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+      "taskSha256": "5ada358e6249ba212040762c7612184a9af7a6ff39d53c30ed7dd671f864fa26",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/test_cart.py",
+          "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+        },
+        {
+          "path": "README.md",
+          "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+        },
+        {
+          "path": "src/cart.py",
+          "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "scaffold-cart-discount-evaluator",
+      "scenarioEvidenceSha256": "2d4368a3ab952a26db362041ca8fd7cf1db0d3249d72141526f3a957beeecad2",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 1063,
+        "outputTokens": 230,
+        "estimatedCostUsd": 0.001293,
+        "actualBilledUsd": null,
+        "latencyMs": 4476
+      }
+    },
+    {
+      "caseId": "scaffold-parser-cli-check",
+      "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+      "taskSha256": "9112ed62adbb5215b577531e7eb78b43470b69d22d49f55cfa121b2e155df01b",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/test_parser.py",
+          "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+        },
+        {
+          "path": "README.md",
+          "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+        },
+        {
+          "path": "src/parser.py",
+          "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "scaffold-parser-cli-check-evaluator",
+      "scenarioEvidenceSha256": "db8a11571f4f96799621e382af6d85e00851380c84559241419a662f131009cc",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 1039,
+        "outputTokens": 344,
+        "estimatedCostUsd": 0.001383,
+        "actualBilledUsd": null,
+        "latencyMs": 6729
+      }
+    },
+    {
+      "caseId": "scaffold-task-priority-contract",
+      "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+      "taskSha256": "83ad152996cef7b8bad212357a65f59c5376023167785a2a01ea6f59f56a4401",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "checks/schema_contract.sql",
+          "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+        },
+        {
+          "path": "migrations/README.md",
+          "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+        },
+        {
+          "path": "README.md",
+          "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+        },
+        {
+          "path": "schema/current.sql",
+          "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "scaffold-task-priority-contract-evaluator",
+      "scenarioEvidenceSha256": "1854c84b666d0944bb2e02c24f712711e1a6e889444a2b2de0b7940609da7366",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 983,
+        "outputTokens": 357,
+        "estimatedCostUsd": 0.00134,
+        "actualBilledUsd": null,
+        "latencyMs": 7254
+      }
+    },
+    {
+      "caseId": "scaffold-greeting-command",
+      "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+      "taskSha256": "3adc6bd07f3a8e5943dc18eb80c07fb1267f597e1875a31dd6f2ae1f9ba7c882",
+      "modelId": "code-fast",
+      "retrievedContext": [
+        {
+          "path": "AGENTS.md",
+          "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+        },
+        {
+          "path": "src/greeting.txt",
+          "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+        }
+      ],
+      "firstPassPlanAccepted": false,
+      "changedPaths": [],
+      "citations": [],
+      "findingIds": [],
+      "scenarioEvaluatorId": "scaffold-greeting-command-evaluator",
+      "scenarioEvidenceSha256": "f0203f41f4bcf35a2a3e21c146dbfb09fcb2b96fdf69944e9a882baac624d19c",
+      "scenarioStatus": "failed",
+      "usage": {
+        "inputTokens": 942,
+        "outputTokens": 446,
+        "estimatedCostUsd": 0.001388,
+        "actualBilledUsd": null,
+        "latencyMs": 8779
+      }
+    }
+  ],
+  "aggregates": {
+    "taskCount": 30,
+    "measuredTaskCount": 30,
+    "successCount": 3,
+    "classSuccessCounts": {
+      "repair": 0,
+      "refactor": 0,
+      "explanation": 2,
+      "security_review": 1,
+      "scaffold": 0
+    },
+    "macroRetrievalRecall": 0.991666666667,
+    "macroRetrievalPrecision": 0.808333333333,
+    "digestProvenanceCoverage": 1,
+    "firstPassPlanAcceptance": 0.2,
+    "incorrectEdits": 0,
+    "medianEstimatedCostPerSuccess": 0.001029,
+    "thresholdsPassed": false,
+    "assessment": "thresholds_failed"
+  },
+  "limitations": [
+    "single-run-result-does-not-prove-routing-improvement",
+    "result-self-consistency-does-not-authenticate-runner-or-evaluator-evidence"
+  ]
+}

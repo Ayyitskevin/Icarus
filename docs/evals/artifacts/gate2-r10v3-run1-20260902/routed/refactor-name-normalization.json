@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "refactor-name-normalization",
+  "modelId": "code",
+  "generatedAt": "2026-09-02T23:25:10.946Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "3c3bb16f72a899265802e94c5c6d5abb537bfc03",
+    "digestSha256": "c8dad6f05149714b4da8e077c96ebabfd08469395bdcf791d838272fbea53611",
+    "repositoryDigestSha256": "ba8451fe227e973c5c9e255880235e00488f9c204bbe8cd5fbca73e3c8d2f47f",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_profile.py\",\"src/format_name.py\",\"src/profile.py\"],\"plan\":{\"mutationTargets\":[\"src/format_name.py\",\"src/name_normalization.py\",\"src/profile.py\"],\"requestedCheckIds\":[\"profile-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/name_normalization.py\",\"content\":\"def normalize_name(value: str) -> str:\\n    return \\\" \\\".join(value.strip().split()).title()\\n\"},{\"path\":\"src/format_name.py\",\"content\":\"from src.name_normalization import normalize_name\\n\\n\\ndef format_name(value: str) -> str:\\n    return normalize_name(value)\\n\"},{\"path\":\"src/profile.py\",\"content\":\"from src.name_normalization import normalize_name\\n\\n\\ndef display_name(value: str) -> str:\\n    return normalize_name(value)\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Extracted the duplicated name normalization into a shared src/name_normalization.py module and updated both public functions to delegate to it, preserving observed behavior.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/test_profile.py",
+      "README.md",
+      "src/format_name.py",
+      "src/profile.py"
+    ],
+    "plan": {
+      "mutationTargets": ["src/format_name.py", "src/name_normalization.py", "src/profile.py"],
+      "requestedCheckIds": ["profile-contract"]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/format_name.py",
+          "content": "from src.name_normalization import normalize_name\n\n\ndef format_name(value: str) -> str:\n    return normalize_name(value)\n"
+        },
+        {
+          "path": "src/name_normalization.py",
+          "content": "def normalize_name(value: str) -> str:\n    return \" \".join(value.strip().split()).title()\n"
+        },
+        {
+          "path": "src/profile.py",
+          "content": "from src.name_normalization import normalize_name\n\n\ndef display_name(value: str) -> str:\n    return normalize_name(value)\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Extracted the duplicated name normalization into a shared src/name_normalization.py module and updated both public functions to delegate to it, preserving observed behavior."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "refactor-name-normalization",
+    "evaluatorId": "refactor-name-normalization-evaluator",
+    "candidateSha256": "6f60371bb86f0471ad2695113a97d0f422fac5dc1fbcc4606b5b297d1c24a58f",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["src/format_name.py", "src/name_normalization.py", "src/profile.py"],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "profile-contract",
+        "argv": ["python", "-m", "checks.test_profile"],
+        "exitCode": 0,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "refactor-name-normalization",
+    "repositoryRevisionSha256": "5ce751efcdb138a9a0db315936567d9a6a1a86df45c49df9027b5bab8f605bd1",
+    "taskSha256": "5d77edacac31f30555640b014c2c9c4cea003dd57dc23bf42c3993fed7d52920",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_profile.py",
+        "sha256": "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c"
+      },
+      {
+        "path": "README.md",
+        "sha256": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6"
+      },
+      {
+        "path": "src/format_name.py",
+        "sha256": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f"
+      },
+      {
+        "path": "src/profile.py",
+        "sha256": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["src/format_name.py", "src/name_normalization.py", "src/profile.py"],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "refactor-name-normalization-evaluator",
+    "scenarioEvidenceSha256": "aa74cadb0e8a61682d92b4aeed2ba4314f40bc0b63a1e0331cf17a08204be8f7",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 961,
+      "outputTokens": 219,
+      "estimatedCostUsd": 0.00092571,
+      "actualBilledUsd": null,
+      "latencyMs": 12395
+    }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "scaffold-task-priority-contract",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-02T23:22:39.707Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "ef0d0ebbc5b42e5bb30129357f84a3b4bd7ea961",
+    "digestSha256": "6b615f1ad0d42d51f8db07e92d5c20e2357ed167d43c5176521bedb7c153dd55",
+    "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"checks/schema_contract.sql\",\n    \"schema/current.sql\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"checks/priority_schema_contract.sql\",\n      \"schema/current.sql\"\n    ],\n    \"requestedCheckIds\": [\n      \"priority-schema-check\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"schema/current.sql\",\n        \"content\": \"CREATE TABLE tasks (\\n  id INTEGER PRIMARY KEY,\\n  title TEXT NOT NULL,\\n  priority TEXT NOT NULL DEFAULT 'normal'\\n);\\n\"\n      },\n      {\n        \"path\": \"checks/priority_schema_contract.sql\",\n        \"content\": \"-- Assert the tasks table exposes a non-null priority column with a safe default.\\nSELECT\\n  c.name AS column_name,\\n  c.notnull AS not_null,\\n  c.dflt_value AS default_value\\nFROM pragma_table_info('tasks') AS c\\nWHERE c.name = 'priority'\\n  AND c.notnull = 1\\n  AND c.dflt_value IS NOT NULL;\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Added a non-null priority column with a safe default to the offline schema snapshot and created a separate read-only contract query that verifies the column exists, is NOT NULL, and has a non-null default. No migration was created and no database state was mutated.\"\n  }\n}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON (markdown_fenced)",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-task-priority-contract",
+    "evaluatorId": "scaffold-task-priority-contract-evaluator",
+    "candidateSha256": "68737caf9fd9b797c5c2b1c1eba72451b5e58ac7c739e8bd058052e53c7900b7",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-task-priority-contract",
+    "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+    "taskSha256": "83ad152996cef7b8bad212357a65f59c5376023167785a2a01ea6f59f56a4401",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/schema_contract.sql",
+        "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+      },
+      {
+        "path": "migrations/README.md",
+        "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+      },
+      {
+        "path": "README.md",
+        "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+      },
+      {
+        "path": "schema/current.sql",
+        "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-task-priority-contract-evaluator",
+    "scenarioEvidenceSha256": "1854c84b666d0944bb2e02c24f712711e1a6e889444a2b2de0b7940609da7366",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 983,
+      "outputTokens": 357,
+      "estimatedCostUsd": 0.00134,
+      "actualBilledUsd": null,
+      "latencyMs": 7416
+    }
+  }
+}

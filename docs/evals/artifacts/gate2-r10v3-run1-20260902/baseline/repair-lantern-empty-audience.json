@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "repair-lantern-empty-audience",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-02T23:20:56.029Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "842617d54e66e9296f1d6b02e7f4910951aca8b24d4b70147ffd882d92e8348d",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\"schemaVersion\":1,\"selectedContextPaths\":[\"src/greeting.py\",\"src/main.py\",\"config/app.json\"],\"plan\":{\"mutationTargets\":[\"src/greeting.py\"],\"requestedCheckIds\":[\"lantern-empty-audience\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/greeting.py\",\"content\":\"import json\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\n\\ndef main() -> None:\\n    config = json.loads(Path(\\\"config/app.json\\\").read_text())\\n    audience = config.get(\\\"audience\\\", \\\"\\\")\\n    if not audience:\\n        raise SystemExit(\\\"audience must not be empty\\\")\\n    print(greeting(audience))\\n\\n\\nmain()\\n\"},{\"path\":\"src/main.py\",\"content\":\"def greeting(audience: str) -> str:\\n    if not audience:\\n        raise ValueError(\\\"audience must not be empty\\\")\\n    return f\\\"Welcome, {audience}.\\\"\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added validation in greeting() to reject an empty audience before constructing the greeting string, preserving the configured happy path. Updated main.py to load the audience from config and call greeting, so the empty-audience rejection is exercised.\"}}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON (markdown_fenced)",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-lantern-empty-audience",
+    "evaluatorId": "repair-lantern-empty-audience-evaluator",
+    "candidateSha256": "e372c69b83a9aab8ba8bc555c9fa6243beb375bf1d9d418a3d6c13f1f25c7101",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-lantern-empty-audience",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "3e9a8de9012447fbb433affaf8e8b12c9e57476b15328a5094e81d533c179913",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-lantern-empty-audience-evaluator",
+    "scenarioEvidenceSha256": "d1c63839e3fe130c7a208f0b3061e097f7978859d2fe696ac7eb443995c59e41",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 853,
+      "outputTokens": 268,
+      "estimatedCostUsd": 0.001121,
+      "actualBilledUsd": null,
+      "latencyMs": 5672
+    }
+  }
+}

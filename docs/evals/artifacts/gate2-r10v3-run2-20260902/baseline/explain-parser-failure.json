@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "explain-parser-failure",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-02T23:32:48.762Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "6980aad15d1a2fd1aa0669ee11249aa4e0150a19",
+    "digestSha256": "2439b62a66e4dfa4d50cbea991ff99b32f376dbe56fc191f490a46734a27c9a3",
+    "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2",
+    "matchedFiles": 3,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 3,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/test_parser.py\",\"src/parser.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"checks/test_parser.py\",\"src/parser.py\"],\"findingIds\":[],\"summary\":\"The explicit false case fails because src/parser.py implements parse_enabled as `return bool(value)` instead of comparing against the literal string \\\"false\\\". For the input \\\"false\\\", `bool(\\\"false\\\")` is True (any non-empty string is truthy), so the function returns True. checks/test_parser.py asserts `parse_enabled(\\\"false\\\") is False`, which is violated because the function returns True. The README confirms this is the declared regression: the parser should recognize explicit true and false values, and its registered check currently fails on the false case.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["checks/test_parser.py", "src/parser.py"],
+    "plan": {
+      "mutationTargets": [],
+      "requestedCheckIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": ["checks/test_parser.py", "src/parser.py"],
+      "findingIds": [],
+      "summary": "The explicit false case fails because src/parser.py implements parse_enabled as `return bool(value)` instead of comparing against the literal string \"false\". For the input \"false\", `bool(\"false\")` is True (any non-empty string is truthy), so the function returns True. checks/test_parser.py asserts `parse_enabled(\"false\") is False`, which is violated because the function returns True. The README confirms this is the declared regression: the parser should recognize explicit true and false values, and its registered check currently fails on the false case."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "explain-parser-failure",
+    "evaluatorId": "explain-parser-failure-evaluator",
+    "candidateSha256": "98603a7282da0fc0b6395ee9b95c888c2601cc7da114575099881999559d4fcd",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["checks/test_parser.py", "src/parser.py"],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "explain-parser-failure",
+    "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+    "taskSha256": "7bcf1affc60effcd31554451cc4fd963eb26d9dd38b827fd40a4580c5c702cd6",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_parser.py",
+        "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+      },
+      {
+        "path": "README.md",
+        "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+      },
+      {
+        "path": "src/parser.py",
+        "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["checks/test_parser.py", "src/parser.py"],
+    "findingIds": [],
+    "scenarioEvaluatorId": "explain-parser-failure-evaluator",
+    "scenarioEvidenceSha256": "1367a52f9d3384288c31f05ce61b6c596c61862fbd89cb72f494fdd1de2e1b3b",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 904,
+      "outputTokens": 172,
+      "estimatedCostUsd": 0.001076,
+      "actualBilledUsd": null,
+      "latencyMs": 3449
+    }
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "security-config-trust",
+  "modelId": "code",
+  "generatedAt": "2026-09-02T23:28:08.478Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "5e76cb9d03b207212c46e7eb4e83b514a5db192a910d9a8b7f12332e71e426fd",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff",
+    "matchedFiles": 3,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 3,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"config/app.json\",\n    \"src/greeting.py\",\n    \"src/main.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [],\n    \"requestedCheckIds\": []\n  },\n  \"answer\": {\n    \"kind\": \"read_only\",\n    \"files\": [],\n    \"citations\": [\n      \"config/app.json\",\n      \"src/greeting.py\",\n      \"src/main.py\"\n    ],\n    \"findingIds\": [],\n    \"summary\": \"No concrete trust-boundary risk is supported by the reviewed bytes. The configuration is a static JSON object with a single string field, and the code reads it from a fixed relative path, indexes the expected key, and interpolates the value into a greeting string. There is no network input, no filesystem path construction from configuration, no authority expansion, and no consumption of untrusted configuration shape beyond the single expected key. The only latent issue is a missing type check on the audience value, but the supplied configuration is a string and no external trust boundary is demonstrated, so no taxonomy finding applies.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["config/app.json", "src/greeting.py", "src/main.py"],
+    "plan": {
+      "mutationTargets": [],
+      "requestedCheckIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": ["config/app.json", "src/greeting.py", "src/main.py"],
+      "findingIds": [],
+      "summary": "No concrete trust-boundary risk is supported by the reviewed bytes. The configuration is a static JSON object with a single string field, and the code reads it from a fixed relative path, indexes the expected key, and interpolates the value into a greeting string. There is no network input, no filesystem path construction from configuration, no authority expansion, and no consumption of untrusted configuration shape beyond the single expected key. The only latent issue is a missing type check on the audience value, but the supplied configuration is a string and no external trust boundary is demonstrated, so no taxonomy finding applies."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "security-config-trust",
+    "evaluatorId": "security-config-trust-evaluator",
+    "candidateSha256": "ec87db27f8454cd1f95d66fc6bdc345a9a049144cab803810fe397a0da629078",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["config/app.json", "src/greeting.py", "src/main.py"],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "security-config-trust",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "13942cacbe00357c91c759a5c66eebfed7c50bc4cd457699bcafa609760a6cf1",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["config/app.json", "src/greeting.py", "src/main.py"],
+    "findingIds": [],
+    "scenarioEvaluatorId": "security-config-trust-evaluator",
+    "scenarioEvidenceSha256": "8bb38f27c395caadbecb2d3e9adce62736d8f643a9cfa91716eb068c10a24937",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 950,
+      "outputTokens": 257,
+      "estimatedCostUsd": 0.0009468915,
+      "actualBilledUsd": null,
+      "latencyMs": 19183
+    }
+  }
+}

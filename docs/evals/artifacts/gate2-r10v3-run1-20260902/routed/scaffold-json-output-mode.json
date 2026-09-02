@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "scaffold-json-output-mode",
+  "modelId": "code",
+  "generatedAt": "2026-09-02T23:28:53.532Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "0816b915d21395ec58c6b162a7fb4d73bd611df1d121cd129cd1a2c7cc85daa4",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"config/app.json\",\n    \"src/greeting.py\",\n    \"src/main.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/main.py\",\n      \"tests/test_json_output.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"json-output-mode\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/main.py\",\n        \"content\": \"import json\\nimport sys\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\n\\ndef main() -> None:\\n    audience = json.loads(Path(\\\"config/app.json\\\").read_text())[\\\"audience\\\"]\\n    if \\\"--json\\\" in sys.argv[1:]:\\n        print(json.dumps({\\\"message\\\": greeting(audience)}))\\n    else:\\n        print(greeting(audience))\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    main()\\n\"\n      },\n      {\n        \"path\": \"tests/test_json_output.py\",\n        \"content\": \"import json\\nimport subprocess\\nimport sys\\nfrom pathlib import Path\\n\\nROOT = Path(__file__).resolve().parents[1]\\n\\n\\ndef test_json_output_mode():\\n    result = subprocess.run(\\n        [sys.executable, \\\"src/main.py\\\", \\\"--json\\\"],\\n        cwd=ROOT,\\n        capture_output=True,\\n        text=True,\\n        check=True,\\n    )\\n    payload = json.loads(result.stdout)\\n    assert payload == {\\\"message\\\": \\\"Welcome, traveler.\\\"}\\n\\n\\ndef test_default_text_mode():\\n    result = subprocess.run(\\n        [sys.executable, \\\"src/main.py\\\"],\\n        cwd=ROOT,\\n        capture_output=True,\\n        text=True,\\n        check=True,\\n    )\\n    assert result.stdout == \\\"Welcome, traveler.\\\\n\\\"\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Added a dependency-free --json output mode to src/main.py while preserving the default text mode, and added an offline check in tests/test_json_output.py.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["config/app.json", "src/greeting.py", "src/main.py"],
+    "plan": {
+      "mutationTargets": ["src/main.py", "tests/test_json_output.py"],
+      "requestedCheckIds": ["json-output-mode"]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/main.py",
+          "content": "import json\nimport sys\nfrom pathlib import Path\n\nfrom src.greeting import greeting\n\n\ndef main() -> None:\n    audience = json.loads(Path(\"config/app.json\").read_text())[\"audience\"]\n    if \"--json\" in sys.argv[1:]:\n        print(json.dumps({\"message\": greeting(audience)}))\n    else:\n        print(greeting(audience))\n\n\nif __name__ == \"__main__\":\n    main()\n"
+        },
+        {
+          "path": "tests/test_json_output.py",
+          "content": "import json\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nROOT = Path(__file__).resolve().parents[1]\n\n\ndef test_json_output_mode():\n    result = subprocess.run(\n        [sys.executable, \"src/main.py\", \"--json\"],\n        cwd=ROOT,\n        capture_output=True,\n        text=True,\n        check=True,\n    )\n    payload = json.loads(result.stdout)\n    assert payload == {\"message\": \"Welcome, traveler.\"}\n\n\ndef test_default_text_mode():\n    result = subprocess.run(\n        [sys.executable, \"src/main.py\"],\n        cwd=ROOT,\n        capture_output=True,\n        text=True,\n        check=True,\n    )\n    assert result.stdout == \"Welcome, traveler.\\n\"\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Added a dependency-free --json output mode to src/main.py while preserving the default text mode, and added an offline check in tests/test_json_output.py."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-json-output-mode",
+    "evaluatorId": "scaffold-json-output-mode-evaluator",
+    "candidateSha256": "63b9fb1f99ee6f75df70fa9b9380f149d4baf23132e55640961ba3da71b6d7be",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["src/main.py", "tests/test_json_output.py"],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "json-output-mode",
+        "argv": ["python", "-m", "tests.test_json_output"],
+        "exitCode": 0,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-json-output-mode",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "33afcb78ed0cfa00578b7e707f77365f99336e190e166a45e2dc5e4b0c573d4f",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["src/main.py", "tests/test_json_output.py"],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-json-output-mode-evaluator",
+    "scenarioEvidenceSha256": "e8393061e31c451c19491baf7385100e64f75d0f8f74266858db60da94e21330",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 995,
+      "outputTokens": 520,
+      "estimatedCostUsd": 0.0011885175,
+      "actualBilledUsd": null,
+      "latencyMs": 28292
+    }
+  }
+}
