@@ -57,7 +57,7 @@ export function isFreezerRefusal(error) {
  * whole set living outside the path the verifier claims to verify. Entries below the root
  * are already refused unless they are directories or regular files.
  */
-async function assertRootIsReal(root) {
+export async function assertRootIsReal(root) {
   const given = path.resolve(root);
   const real = await realpath(given).catch((error) => {
     if (error?.code === "ENOENT") fail(`${root} does not exist`);

@@ -439,6 +439,62 @@ describe("Gate 2 published live evidence", () => {
     });
   });
 
+  it("refuses an unresolvable root before a conflicting failure underneath it can speak", async () => {
+    // Ordering, not just the eventual verdict. The set behind the link is intact except
+    // that its manifest.json is a DIRECTORY, so the read that would report it fails with
+    // EISDIR. Whichever check runs first decides what the operator is told, and "this root
+    // is not the directory it names" is the fact that explains the other one.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const sibling = path.join(temporary, "intact-set-beside-the-expected-path");
+      await rename(artifactDirectory, sibling);
+      await symlink(sibling, artifactDirectory);
+      await rm(path.join(sibling, "manifest.json"));
+      await mkdir(path.join(sibling, "manifest.json"));
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        /resolves through a symlink/,
+      );
+      await expect(
+        verifyGate2PublishedEvidence(temporary, "reasoning-suppressed"),
+      ).rejects.not.toThrow(/EISDIR/);
+      // The freezer answers the same way, from its own entry point.
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([
+        expect.stringMatching(/resolves through a symlink/),
+      ]);
+    });
+  });
+
+  it("refuses an unresolvable repository root before the fixtures it would read", async () => {
+    // The benchmark manifest and the execution profile are read from the caller's root
+    // before the artifact directory is even named. A fixture manifest that is a directory
+    // threw a raw EISDIR from that read while the link that made it reachable went
+    // unmentioned; the root is asserted before the first read that trusts it.
+    await withFrozenCopy(async (temporary) => {
+      const alias = path.join(temporary, "alias-to-the-checkout");
+      await symlink(temporary, alias);
+      const fixtureManifest = path.join(temporary, "fixtures/evals/gate2/manifest.v2.json");
+      await rm(fixtureManifest);
+      await mkdir(fixtureManifest);
+      await expect(verifyGate2PublishedEvidence(alias, "reasoning-suppressed")).rejects.toThrow(
+        /resolves through a symlink/,
+      );
+      await expect(verifyGate2PublishedEvidence(alias, "reasoning-suppressed")).rejects.not.toThrow(
+        /EISDIR/,
+      );
+    });
+  });
+
+  it("rethrows a second-pass fault through the publisher, not only through the freezer", async () => {
+    // Sol's P2. A directory named like a record passes the digest walk -- it holds no
+    // files -- and fails the record read with EISDIR. That is a fault, and the publisher
+    // must surface it as one rather than turn it into a verdict about the evidence.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      await mkdir(path.join(artifactDirectory, "routed", "fault.json"));
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        /EISDIR/,
+      );
+    });
+  });
+
   it("requires conservative declared-budget accounting for a retained timeout", () => {
     const profile = {
       budgets: { maxInputTokens: 50_000, maxOutputTokens: 8192, maxRuntimeSeconds: 300 },

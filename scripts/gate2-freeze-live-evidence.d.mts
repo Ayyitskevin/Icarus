@@ -13,6 +13,8 @@ export interface FrozenRecordContract {
   /** Present only when every record reports the same value. */
   readonly everyRecordReasoningChars?: number | null;
 }
+/** Refuses a root that does not exist, is not a directory, or resolves through a symlink at any component. */
+export function assertRootIsReal(root: string): Promise<void>;
 /** True for the freezer's own refusals (verdicts about the evidence) and nothing else. */
 export function isFreezerRefusal(error: unknown): boolean;
 /** Digests every file under `root` except the manifest, from the bytes on disk now. Refuses a root that resolves through a symlink. */

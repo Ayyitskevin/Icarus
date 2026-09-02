@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { findSecretSpans } from "../packages/core/dist/context.js";
 import { loadGate2BenchmarkContract, parseStrictGate2Json } from "./gate2-benchmark-contract.mjs";
-import { verifyFrozenEvidence } from "./gate2-freeze-live-evidence.mjs";
+import { assertRootIsReal, verifyFrozenEvidence } from "./gate2-freeze-live-evidence.mjs";
 import {
   compareGate2BenchmarkResults,
   computeGate2ExecutionProfileDigest,
@@ -141,35 +141,21 @@ function safeJoin(base, relative) {
 }
 
 /**
- * A published set is addressed by a path, and every check below reads bytes THROUGH that
- * path: the manifest, the 60 records, the results, the secret screen, and the freezer's
- * walk. A link at any component means all of them describe a tree outside the path the
- * verifier claims to verify, and each check individually passes -- an intact set moved to
- * a sibling and reached through a directory symlink verified as 64 bound files. Resolved
- * here, once, before a byte is read.
+ * Every read below is rooted at a caller-supplied path: the benchmark manifest and the
+ * execution profile under `fixtures/`, then the manifest, the 60 records, the results and
+ * the secret screen under the artifact directory. A link at any component means all of
+ * them describe a tree outside the path the verifier claims to verify, and each check
+ * individually passes -- an intact set moved to a sibling and reached through a directory
+ * symlink verified as 64 bound files.
  *
- * The rule is the freezer's, deliberately: `assertRootIsReal` in
- * `gate2-freeze-live-evidence.mjs` refuses a root that resolves through a symlink at ANY
- * component, including one above the repository. An earlier version of this function
- * resolved the repository root first and tolerated an aliased ancestor, which made the two
- * verifiers disagree on exactly that input -- and a published set the two verifiers
- * disagree about is the thing the equivalence test exists to prevent. One rule, both sides.
+ * The rule is the freezer's, and now so is the implementation: `assertRootIsReal` is
+ * imported rather than restated, so the two verifiers cannot drift into disagreeing about
+ * what a root is. Two roots are asserted, in read order -- the repository root before the
+ * fixtures are read, the artifact directory before the set is -- because a conflicting
+ * failure below an unresolvable root would otherwise surface first: a fixture manifest
+ * that is a directory threw a raw EISDIR while the root that made it reachable went
+ * unmentioned.
  */
-async function assertCanonicalSetRoot(destination) {
-  const given = path.resolve(destination);
-  const real = await realpath(given).catch((error) => {
-    assertCondition(error?.code !== "ENOENT", `published evidence root ${given} does not exist`);
-    throw error;
-  });
-  assertCondition(
-    real === given,
-    `published evidence root ${given} resolves through a symlink to ${real}`,
-  );
-  assertCondition(
-    (await lstat(given)).isDirectory(),
-    `published evidence root ${given} is not a directory`,
-  );
-}
 
 async function regularBytes(filePath, label) {
   const metadata = await lstat(filePath);
@@ -388,6 +374,8 @@ export async function verifyGate2PublishedEvidence(
 ) {
   const config = LIVE_EVIDENCE_CONFIGS[profileVersion];
   assertCondition(config !== undefined, "published profile version is invalid");
+  // Before the fixtures, which are read from this same root.
+  await assertRootIsReal(repositoryRoot);
   const loaded = await loadGate2BenchmarkContract(
     path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v2.json"),
     repositoryRoot,
@@ -404,7 +392,7 @@ export async function verifyGate2PublishedEvidence(
     "docs/evals/artifacts",
     config.artifactDirectory ?? profile.profileId,
   );
-  await assertCanonicalSetRoot(destination);
+  await assertRootIsReal(destination);
   const validated = await validateEvidenceSet(destination, loaded, profile, config);
   if (config.manifestSchema === undefined) {
     await assertNoUnlistedFile(destination, validated.relativePaths, config);
