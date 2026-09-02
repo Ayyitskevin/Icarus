@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "repair-lantern-missing-config",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-01T03:25:12.596Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "261ac288dceaaef455234f3aec930879ce9dad2d1f443fdb597fe9a5a9b0908f",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"src/main.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/main.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"lantern-missing-config\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/main.py\",\n        \"content\": \"import json\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\nconfig_path = Path(\\\"config/app.json\\\")\\nif not config_path.exists():\\n    raise SystemExit(f\\\"configuration error: {config_path} not found\\\")\\n\\nprint(greeting(json.loads(config_path.read_text())[\\\"audience\\\"]))\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Guard the config load in src/main.py so a missing config/app.json raises a bounded SystemExit configuration error instead of a raw FileNotFoundError from read_text.\"\n  }\n}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-lantern-missing-config",
+    "evaluatorId": "repair-lantern-missing-config-evaluator",
+    "candidateSha256": "21d48c398cc559e6bf8792c3850de4abedaf3788786546c483fe3325e2b71a94",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-lantern-missing-config",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "b868e7ab109623a17a0d40b598c0af13e55c4b0d1f8a9f364dfc417741ac53d6",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-lantern-missing-config-evaluator",
+    "scenarioEvidenceSha256": "b0596efe00157e6b382dd4897bc3ca3007c9510382d17b13064bb400c12071e2",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 715,
+      "outputTokens": 253,
+      "estimatedCostUsd": 0.000968,
+      "actualBilledUsd": null,
+      "latencyMs": 5119
+    }
+  }
+}

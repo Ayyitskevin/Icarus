@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "security-check-command",
+  "modelId": "code",
+  "generatedAt": "2026-09-01T03:31:56.886Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "26e6c9e619d753db6c83ea2b5c4f3b71865fad5edaeb550e3a2e8291e4b8fc06",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"checks/test_cart.py\",\n    \"checks/verify.py\",\n    \"src/cart.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [],\n    \"requestedCheckIds\": []\n  },\n  \"answer\": {\n    \"kind\": \"read_only\",\n    \"files\": [],\n    \"citations\": [\n      \"checks/test_cart.py\",\n      \"checks/verify.py\",\n      \"src/cart.py\"\n    ],\n    \"findingIds\": [],\n    \"summary\": \"No command execution or path-escape risk is present in the reviewed verification code. `checks/verify.py` executes a fixed, relative path (`checks/test_cart.py`) with no user-controlled input, and `checks/test_cart.py` only imports `src.cart` and asserts a numeric result. `src/cart.py` performs a pure arithmetic operation on a list of integers. None of the supplied sources implement or expose a mechanism for arbitrary command execution or filesystem path traversal.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["checks/test_cart.py", "checks/verify.py", "src/cart.py"],
+    "plan": {
+      "mutationTargets": [],
+      "requestedCheckIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": ["checks/test_cart.py", "checks/verify.py", "src/cart.py"],
+      "findingIds": [],
+      "summary": "No command execution or path-escape risk is present in the reviewed verification code. `checks/verify.py` executes a fixed, relative path (`checks/test_cart.py`) with no user-controlled input, and `checks/test_cart.py` only imports `src.cart` and asserts a numeric result. `src/cart.py` performs a pure arithmetic operation on a list of integers. None of the supplied sources implement or expose a mechanism for arbitrary command execution or filesystem path traversal."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "security-check-command",
+    "evaluatorId": "security-check-command-evaluator",
+    "candidateSha256": "199bd3853d21031df72b729af0bea92ed38f71d7fc298c4eeb9796155d1401ab",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["checks/test_cart.py", "checks/verify.py", "src/cart.py"],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "security-check-command",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "07b20ea355507e5da3efb086663c0f57a2ffa60a4dc6006622402793430578f8",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["checks/test_cart.py", "checks/verify.py", "src/cart.py"],
+    "findingIds": [],
+    "scenarioEvaluatorId": "security-check-command-evaluator",
+    "scenarioEvidenceSha256": "ea132d5946c100cb81fe3483e8e1950d8d7e85ed90d5d91e510b812f423d7b94",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 953,
+      "outputTokens": 235,
+      "estimatedCostUsd": 0.000931986,
+      "actualBilledUsd": null,
+      "latencyMs": 13781
+    }
+  }
+}

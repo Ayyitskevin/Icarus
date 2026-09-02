@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "repair-lantern-empty-audience",
+  "modelId": "code",
+  "generatedAt": "2026-09-01T03:28:46.711Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "842617d54e66e9296f1d6b02e7f4910951aca8b24d4b70147ffd882d92e8348d",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"config/app.json\",\"src/greeting.py\",\"src/main.py\"],\"plan\":{\"mutationTargets\":[\"src/greeting.py\"],\"requestedCheckIds\":[\"lantern-empty-audience\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/greeting.py\",\"content\":\"def greeting(audience: str) -> str:\\n    if not audience:\\n        raise ValueError(\\\"audience must not be empty\\\")\\n    return f\\\"Welcome, {audience}.\\\"\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Reject an empty audience in greeting before constructing the message while preserving the configured happy path.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["config/app.json", "src/greeting.py", "src/main.py"],
+    "plan": {
+      "mutationTargets": ["src/greeting.py"],
+      "requestedCheckIds": ["lantern-empty-audience"]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/greeting.py",
+          "content": "def greeting(audience: str) -> str:\n    if not audience:\n        raise ValueError(\"audience must not be empty\")\n    return f\"Welcome, {audience}.\"\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Reject an empty audience in greeting before constructing the message while preserving the configured happy path."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-lantern-empty-audience",
+    "evaluatorId": "repair-lantern-empty-audience-evaluator",
+    "candidateSha256": "b585c67ab7030b292e33e67fdef025dc8386a7d4d126a1e8ef22f3ac8a8d9eb4",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["src/greeting.py"],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "lantern-empty-audience",
+        "argv": [
+          "python",
+          "-c",
+          "import subprocess,sys; happy=subprocess.run([sys.executable,\"-c\",\"from src.greeting import greeting; assert greeting(\\\"traveler\\\") == \\\"Welcome, traveler.\\\"\"],capture_output=True,text=True); empty=subprocess.run([sys.executable,\"-c\",\"from src.greeting import greeting; greeting(\\\"\\\")\"],capture_output=True,text=True); assert happy.returncode == 0 and happy.stdout == \"\" and happy.stderr == \"\"; assert empty.returncode == 1 and empty.stdout == \"\" and \"audience must not be empty\" in empty.stderr"
+        ],
+        "exitCode": 0,
+        "signal": null,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-lantern-empty-audience",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "3e9a8de9012447fbb433affaf8e8b12c9e57476b15328a5094e81d533c179913",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["src/greeting.py"],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-lantern-empty-audience-evaluator",
+    "scenarioEvidenceSha256": "398905c2def26b64fdc85ff88cee036a87a46cc72b49dad92ffee7050b3ce323",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 711,
+      "outputTokens": 136,
+      "estimatedCostUsd": 0.0006644715,
+      "actualBilledUsd": null,
+      "latencyMs": 7580
+    }
+  }
+}

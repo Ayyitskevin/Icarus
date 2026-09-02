@@ -93,6 +93,23 @@ The two 5/30 results are also not a repeated measurement — they were produced
 under a different instruction policy and a different plan schema, so their
 agreement is a coincidence of disjoint error mechanisms. Baseline scaffold is
 censored rather than measured. See the amendment in ADR 0067.
+Superseded as the current measurement 2026-09-01: ADR 0070 bound `think: false` into
+instruction-policy revision 9, making `maxTokens` a content budget in fact rather than a
+combined reasoning-plus-content budget with an unobservable split. On that honest budget,
+fixed `code-fast` measured 2/30 and routed `code` measured 12/30 with first-plan
+acceptance 0.60, retrieval recall 0.9917 / precision 0.8083, zero incorrect edits, 60/60
+clean stops, and zero surfaced thinking characters on every case under a request that sent `think: false`
+([evaluation](evals/2026-08-31-gate2-reasoning-suppressed.md)). Those figures are a new
+baseline, NOT a before-and-after against the 5/30 and 16/30 above, which were taken under
+the combined budget. Suppressing reasoning produced LOWER scores while empty candidates fell
+from 8 to 1. That identifies no cause: with no paired reasoning-enabled arm under the
+observable protocol, and the two figure sets taken under different budget contracts,
+whether reasoning improves answers and whether displacement explained the zero-yield cases
+both remain open. ADR 0069's omission evidence, recorded for the
+first time in this run, shows no query match excluded by a file or byte ceiling in any
+case — which rules out selection-ceiling truncation as the explanation for `refactor` 0/5
+and `scaffold` 0/5 without ruling out other retrieval mechanisms, since macro recall is
+0.9917 rather than 1.0.
 Gate 2 remains open for
 stable success of at least 24/30 and plan acceptance of at least 0.80. The
 separate Gate 2 contract now pins seven fixture repositories, 30 task documents

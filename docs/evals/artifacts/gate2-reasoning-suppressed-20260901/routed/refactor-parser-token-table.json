@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "refactor-parser-token-table",
+  "modelId": "code",
+  "generatedAt": "2026-09-01T03:29:45.017Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "6980aad15d1a2fd1aa0669ee11249aa4e0150a19",
+    "digestSha256": "a31a53edcc595fb3e4a32bb125261835a99e688c037015365227f8ecd801657a",
+    "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_parser.py\",\"checks/verify.py\",\"src/parser.py\"],\"plan\":{\"mutationTargets\":[\"src/parser.py\"],\"requestedCheckIds\":[\"parser-contract\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/parser.py\",\"content\":\"_TRUE_TOKENS = frozenset({\\\"true\\\"})\\n_FALSE_TOKENS = frozenset({\\\"false\\\"})\\n\\n\\ndef parse_enabled(value: str) -> bool:\\n    if value in _TRUE_TOKENS:\\n        return True\\n    if value in _FALSE_TOKENS:\\n        return False\\n    raise ValueError(f\\\"unrecognized boolean token: {value!r}\\\")\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Represent accepted boolean tokens as immutable frozensets and map them to True/False without accepting new tokens.\"}",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "refactor-parser-token-table",
+    "evaluatorId": "refactor-parser-token-table-evaluator",
+    "candidateSha256": "11364742531e59d1ad951cea74ae926b0ceb218078193a146a29ee50dbe0a958",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "refactor-parser-token-table",
+    "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+    "taskSha256": "8d0cfc0d46c55137207ffdaab0c92e035aa387ea1f76a3d5017d20a823ee5d25",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_parser.py",
+        "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+      },
+      {
+        "path": "README.md",
+        "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+      },
+      {
+        "path": "src/parser.py",
+        "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "refactor-parser-token-table-evaluator",
+    "scenarioEvidenceSha256": "8f418ab449718fc296ba808a6b0e0dad30f7e047d46be93b5b83092a96fda0b5",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 758,
+      "outputTokens": 184,
+      "estimatedCostUsd": 0.000738999,
+      "actualBilledUsd": null,
+      "latencyMs": 10211
+    }
+  }
+}

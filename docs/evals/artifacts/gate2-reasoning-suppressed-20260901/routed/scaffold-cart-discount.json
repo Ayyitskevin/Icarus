@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 5,
+  "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "scaffold-cart-discount",
+  "modelId": "code",
+  "generatedAt": "2026-09-01T03:32:33.020Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": 0,
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "2d010282b415aa4f58947ed5dc3003b62593deee6fcaee1d6709937aeb9b57cc",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"README.md\",\"checks/test_cart.py\",\"checks/verify.py\",\"src/cart.py\"],\"plan\":{\"mutationTargets\":[\"src/cart.py\",\"checks/test_cart.py\"],\"requestedCheckIds\":[\"cart-discount\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/cart.py\",\"content\":\"def subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the cart subtotal in cents.\\\"\\\"\\\"\\n    return sum(cents) - 1\\n\\n\\ndef discount(cents: list[int], amount: int) -> int:\\n    \\\"\\\"\\\"Return the discounted total in integer cents.\\n\\n    The discount is applied to the cart subtotal and the result is clamped to\\n    the explicit bounds [0, subtotal].\\n    \\\"\\\"\\\"\\n    if not isinstance(amount, int) or isinstance(amount, bool):\\n        raise TypeError(\\\"amount must be an integer\\\")\\n    if amount < 0:\\n        raise ValueError(\\\"amount must be non-negative\\\")\\n    base = subtotal(cents)\\n    if base < 0:\\n        raise ValueError(\\\"subtotal must be non-negative\\\")\\n    return max(0, min(base, base - amount))\\n\"},{\"path\":\"checks/test_cart.py\",\"content\":\"from src.cart import subtotal, discount\\n\\nassert subtotal([100, 200]) == 300\\n\\n# Discount helper: integer-cents with explicit bounds.\\nassert discount([100, 200], 50) == 250\\nassert discount([100, 200], 0) == 300\\nassert discount([100, 200], 300) == 0\\nassert discount([100, 200], 500) == 0\\nassert discount([], 10) == 0\\nassert discount([100, 200], 1) == 299\\n\\n# Bounds are explicit: negative discount is rejected.\\ntry:\\n    discount([100, 200], -1)\\nexcept ValueError:\\n    pass\\nelse:\\n    raise AssertionError(\\\"negative discount should raise ValueError\\\")\\n\\n# Non-integer discount is rejected.\\ntry:\\n    discount([100, 200], 1.5)\\nexcept TypeError:\\n    pass\\nelse:\\n    raise AssertionError(\\\"non-integer discount should raise TypeError\\\")\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Added an integer-cents discount helper with explicit bounds (clamped to [0, subtotal], rejecting negative and non-integer amounts) and tests, without changing the existing subtotal API.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["checks/test_cart.py", "checks/verify.py", "README.md", "src/cart.py"],
+    "plan": {
+      "mutationTargets": ["checks/test_cart.py", "src/cart.py"],
+      "requestedCheckIds": ["cart-discount"]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "checks/test_cart.py",
+          "content": "from src.cart import subtotal, discount\n\nassert subtotal([100, 200]) == 300\n\n# Discount helper: integer-cents with explicit bounds.\nassert discount([100, 200], 50) == 250\nassert discount([100, 200], 0) == 300\nassert discount([100, 200], 300) == 0\nassert discount([100, 200], 500) == 0\nassert discount([], 10) == 0\nassert discount([100, 200], 1) == 299\n\n# Bounds are explicit: negative discount is rejected.\ntry:\n    discount([100, 200], -1)\nexcept ValueError:\n    pass\nelse:\n    raise AssertionError(\"negative discount should raise ValueError\")\n\n# Non-integer discount is rejected.\ntry:\n    discount([100, 200], 1.5)\nexcept TypeError:\n    pass\nelse:\n    raise AssertionError(\"non-integer discount should raise TypeError\")\n"
+        },
+        {
+          "path": "src/cart.py",
+          "content": "def subtotal(cents: list[int]) -> int:\n    \"\"\"Return the cart subtotal in cents.\"\"\"\n    return sum(cents) - 1\n\n\ndef discount(cents: list[int], amount: int) -> int:\n    \"\"\"Return the discounted total in integer cents.\n\n    The discount is applied to the cart subtotal and the result is clamped to\n    the explicit bounds [0, subtotal].\n    \"\"\"\n    if not isinstance(amount, int) or isinstance(amount, bool):\n        raise TypeError(\"amount must be an integer\")\n    if amount < 0:\n        raise ValueError(\"amount must be non-negative\")\n    base = subtotal(cents)\n    if base < 0:\n        raise ValueError(\"subtotal must be non-negative\")\n    return max(0, min(base, base - amount))\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Added an integer-cents discount helper with explicit bounds (clamped to [0, subtotal], rejecting negative and non-integer amounts) and tests, without changing the existing subtotal API."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-cart-discount",
+    "evaluatorId": "scaffold-cart-discount-evaluator",
+    "candidateSha256": "af2bcfb3ba9a3659c6d472565530b1b6f9bab1d05b7a3a7bc2bb4659091c472e",
+    "instructionPolicySha256": "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-cart-discount",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "5ada358e6249ba212040762c7612184a9af7a6ff39d53c30ed7dd671f864fa26",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-cart-discount-evaluator",
+    "scenarioEvidenceSha256": "67d0569d59c649c2d6a404eac90b661c4a43b3f422a83c2a8003053a070c0cda",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 974,
+      "outputTokens": 583,
+      "estimatedCostUsd": 0.0012214665,
+      "actualBilledUsd": null,
+      "latencyMs": 28607
+    }
+  }
+}
