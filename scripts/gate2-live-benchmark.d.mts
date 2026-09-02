@@ -43,3 +43,25 @@ export function describeGate2CandidateFailure(
   reason: string,
   generated: Gate2GeneratedCandidate,
 ): string;
+
+/** The evidence record revision this writer produces and will reuse. */
+export const LIVE_EVIDENCE_RECORD_REVISION: 6;
+
+/**
+ * One independently violable rule of the revision-6 closed shape. Exported as data so a
+ * test can rebuild the validator without a given rule and prove that rule is load-bearing.
+ */
+export interface Gate2EvidenceRecordRule {
+  readonly id: string;
+  readonly holds: (record: unknown) => boolean;
+}
+
+export const GATE2_EVIDENCE_RECORD_RULES: readonly Gate2EvidenceRecordRule[];
+
+/**
+ * True only for a record satisfying every revision-6 rule. Field existence is not
+ * enough: the requested reasoning mode must equal the pinned policy's, counts must be
+ * non-negative safe integers, omissions must be well-formed, disjoint from the selected
+ * paths, and reconcile against the recorded query-match count.
+ */
+export function hasCurrentEvidenceShape(record: unknown): boolean;

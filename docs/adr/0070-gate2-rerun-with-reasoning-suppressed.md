@@ -96,14 +96,17 @@ with `stop`, 60/60 usage is provider-reported, and empty candidates fell from 8 
 a request that sent `think: false`** — not "no reasoning was consumed". Vulcan omits the
 member when reasoning is suppressed and the decode that produced this set mapped absence
 to `0`. The runner now records `null` for an absent member and pairs it with the requested
-mode; this frozen set predates that and cannot support the stronger reading.
+mode; this frozen set predates that and cannot support the stronger reading. Amended
+2026-09-02: that difference is now a difference in the record's declared revision rather
+than a caveat a reader has to remember — see the revision-6 amendment below.
 
 An earlier attempt to record this outcome reported those validity figures from fields the
 runner computed but **never serialized** — absence read as measurement, which is the
 defect class this campaign exists to close, committed in the validation of the run meant
 to demonstrate it was closed. Evidence record revision 5 serializes both the reasoning
 size and the retrieval coverage, and every figure here comes from a recorded value in a
-run where all 60 cases carry `reassessedFromEvidenceSha256: null`.
+run where all 60 cases carry `reassessedFromEvidenceSha256: null`. Amended 2026-09-02:
+revision 5 was then made to name two incompatible shapes — see below.
 
 This ADR also claimed that removing the setting would fail the security suite. It would
 not have: the policy value was bound, its transmission was not, and deleting the request
@@ -162,5 +165,54 @@ mis-stated 30 of 64 digests, so the integrity layer added to make stale figures
 mechanically catchable was not verifiable on the committed tree. Regenerated after
 formatting and verified against the committed bytes. Note what did NOT catch it: no
 executable consumer reads this directory, so a 357-assertion security gate stayed green
-over a false manifest. Wiring it into the publication validator and its secret screen is
-open work, not a claim this ADR can make.
+over a false manifest. That wiring is done as of 2026-09-02 — see below.
+
+## Amendment 2026-09-02: revision 6, and what this set's zeros mean
+
+**Revision 5 named two incompatible shapes.** The frozen records above declare revision 5,
+omit `requestedThink`, and encode an absent provider `thinking` member as `reasoningChars: 0`.
+The writer that shipped alongside them also declared revision 5 while requiring
+`requestedThink` and encoding that same absence as `null` — and its reuse predicate
+rejected the very records bearing the revision it claimed to support. An unchanged version
+string over a changed wire is the defect this campaign exists to remove, and it was
+committed inside the fix for it.
+
+The writer is now at **evidence record revision 6**, and revision 6 is a closed shape:
+`requestedThink` is required and must equal the pinned policy's value, `reasoningChars` is
+a non-negative count **or null**, the retrieval coverage members are required, and a new
+`selectedQueryMatches` member records how many selected files actually matched the query.
+That last member is not decoration: `selectedFiles` counts reference-hop entries that never
+matched, so in 10 of the 60 records above `selectedFiles` exceeds `matchedFiles`, and no
+arithmetic over the members revision 5 recorded can check that a record's coverage claim
+reconciles with its own omissions. Revision 6 can.
+
+**The frozen set is not rewritten.** It is a historical record and rewriting it would
+falsify it. Instead its manifest now declares, in a machine-checked `recordContract`, the
+contract that produced it: revision 5, `requestedThink` absent, absence-of-thinking encoded
+as `0`, every record reading `0`, written 2026-09-01. The publication validator checks that
+declaration against the bytes, so it is falsifiable rather than prose. **A zero in this set
+therefore means "no `thinking` member surfaced under a request that sent `think: false`". A
+zero in a revision-6 record means the opposite: a reasoning size the provider reported.**
+The manifest schema moved to `icarus.gate2-frozen-evidence.v2` with that member, for the
+same reason the record revision moved.
+
+**The directory now has an executable consumer.** `verifyGate2PublishedEvidenceSet` verifies
+this set alongside the ADR 0066 v1 and ADR 0067 v2 cohorts: it recomputes both 30-case
+results and their comparison, binds all 60 case records, compares the manifest against the
+committed bytes, refuses any file in the directory the manifest never listed, and applies
+the same `assertNoUnknownSecretShape` screen the earlier cohorts pass. Every identity for
+this set is pinned by value, so it stays valid when the live policies move.
+
+**One secret-shaped span was adjudicated, not waved through.** The screen finds exactly one
+match in this set outside the three tokens earlier cohorts already cleared, at
+`routed/refactor-parser-token-table.json`. The model's candidate answer contains the Python
+line `raise ValueError(f"unrecognized boolean token: {value!r}")`; the assignment scanner
+reads `token` as a credential key and takes the rest of the line as its value. The captured
+span is an f-string interpolation of the rejected input plus its JSON escaping — generated
+source, carrying no credential. It is recorded as an exact-span entry in the publisher's
+false-positive set, the way earlier cohorts recorded theirs, so the screen is not widened by
+a pattern and a later addition still requires a stated reason.
+
+**One correction to the record above.** This section is dated 2026-08-31 in places; every
+one of the 60 records carries a `generatedAt` on **2026-09-01** UTC, and the preflight is
+`2026-09-01T03:27:20.098Z`. The manifest's `writtenOn` states the date the bytes support.

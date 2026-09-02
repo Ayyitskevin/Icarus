@@ -219,6 +219,116 @@ const gate2FrozenFiguresSource = await readFile(
   "scripts/gate2-frozen-evidence-figures.mjs",
   "utf8",
 );
+const gate2PublishSource = await readFile("scripts/gate2-live-evidence-publish.mjs", "utf8");
+/**
+ * The publisher's filesystem surface, resolved rather than counted.
+ *
+ * `bodyOf` slices a function from its declaration to the brace that closes it. It counts
+ * braces without parsing, which is sound for these two helpers -- their only braces are
+ * balanced object literals and template placeholders -- and fails CLOSED if it ever is not,
+ * because a mis-sliced body will not contain the call the assertions below require.
+ */
+function bodyOf(source, declaration) {
+  const start = source.indexOf(declaration);
+  if (start === -1) return "";
+  let depth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    else if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  return "";
+}
+const GATE2_PUBLISH_ALLOWED_FS_IMPORTS =
+  "lstat, mkdir, open, readdir, readFile, realpath, rename, unlink";
+// EVERY declaration, not the first: a second `import { readFile as x } from "node:fs/promises"`
+// lower in the file evaded a check that stopped at one match. Names are compared verbatim,
+// so an alias (`readFile as x`) is not the allowed `readFile` and the union fails.
+const gate2PublishFsImports = [
+  ...gate2PublishSource.matchAll(/import\s*\{([^}]*)\}\s*from\s*"node:fs(?:\/promises)?";/g),
+];
+const gate2PublishFsImportedNames = [
+  ...new Set(
+    gate2PublishFsImports.flatMap((match) =>
+      match[1]
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean),
+    ),
+  ),
+].sort();
+const gate2PublishFilesystemImportIsExact =
+  gate2PublishFsImports.length > 0 &&
+  gate2PublishFsImportedNames.join(", ") ===
+    GATE2_PUBLISH_ALLOWED_FS_IMPORTS.split(", ").sort().join(", ") &&
+  // A namespace or default import of the promises module has no brace list to check, so
+  // the braced declarations must account for every mention of the module.
+  (gate2PublishSource.match(/from "node:fs(?:\/promises)?"/g) ?? []).length ===
+    gate2PublishFsImports.length;
+const gate2PublishReadBody = bodyOf(
+  gate2PublishSource,
+  "async function readRegularFile(base, relative, label = relative) {",
+);
+const gate2PublishListBody = bodyOf(
+  gate2PublishSource,
+  "async function listDirectoryEntries(base, relative, label) {",
+);
+const gate2PublishWriteBody = bodyOf(gate2PublishSource, "async function exclusiveWrite(");
+// The source with the import declarations and the TWO reading helpers removed: whatever
+// reads out here does so without the walk in front of it. The write helper is deliberately
+// NOT removed -- excluding it made a read inserted there exempt while this check claimed
+// otherwise, and no read belongs in a function that writes. If one is ever needed, it goes
+// through `readRegularFile` like every other read in the file.
+const gate2PublishOutsideHelpers = [
+  ...gate2PublishFsImports.map((match) => match[0]),
+  gate2PublishReadBody,
+  gate2PublishListBody,
+]
+  .reduce((rest, slice) => (slice === "" ? rest : rest.replace(slice, "")), gate2PublishSource)
+  // Comments are prose about the helpers, not a way to reach the filesystem; a doc line
+  // naming `readdir` must not read as a call site. Block comments go, then whole-line
+  // comments. A line carrying BOTH code and a comment that names a read stays, and fails.
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .split("\n")
+  .filter((line) => /^\s*(?:\/\/|\*)/.test(line) === false)
+  .join("\n");
+/**
+ * The read must be the LAST thing the helper does. Containing the checks is not the same
+ * as running them first: a read inserted at the top of the body passed a check that only
+ * asked whether the strings were present. One call, after every check, by index.
+ */
+function readsOnlyAfterItsChecks(body, call, checks) {
+  const at = body.indexOf(call);
+  if (at === -1 || body.indexOf(call, at + 1) !== -1) return false;
+  return checks.every((check) => {
+    const checkAt = body.indexOf(check);
+    return checkAt !== -1 && checkAt < at;
+  });
+}
+const gate2PublishReadOnlyInsideHelpers =
+  readsOnlyAfterItsChecks(gate2PublishReadBody, "readFile(", [
+    "await assertWalkableTo(base, relative, label)",
+    "await lstat(resolved)",
+    "metadata.isFile() && metadata.nlink === 1",
+  ]) &&
+  readsOnlyAfterItsChecks(gate2PublishListBody, "readdir(", [
+    "await assertWalkableTo(base, relative, label)",
+    "await lstat(resolved)",
+    "metadata.isDirectory()",
+  ]) &&
+  gate2PublishReadBody.includes("return readFile(resolved);") &&
+  gate2PublishListBody.includes("return readdir(resolved, { withFileTypes: true });") &&
+  // ...and nowhere else, aliases included: the identifier itself may not appear outside.
+  /\b(?:readFile|readdir)\b/.test(gate2PublishOutsideHelpers) === false;
+const gate2PublishHasNoOtherReadSurface =
+  /\b(?:readFileSync|readdirSync|openSync|opendir|opendirSync|createReadStream|readv|fs\.[A-Za-z]|require\(|from "fs"|from "node:fs")/.test(
+    gate2PublishSource,
+  ) === false;
+const gate2PublishOpenIsExclusiveCreateOnly =
+  (gate2PublishSource.match(/\bopen\b/g) ?? []).length === 2 &&
+  gate2PublishWriteBody.includes('await open(temporary, "wx", 0o644)');
 const gate2RetrievalManifestSource = await readFile(
   "fixtures/evals/gate2/retrieval-manifest.v1.json",
   "utf8",
@@ -2642,6 +2752,32 @@ const assertions = {
     gate2LiveBenchmarkSource.includes("omittedMatches: retrieval.omittedMatches") &&
     gate2LiveBenchmarkSource.includes("omittedReferences: retrieval.omittedReferences") &&
     gate2LiveBenchmarkSource.includes("excludedFiles: retrieval.excludedFiles"),
+  gate2PublishedEvidenceDirectReadSurfaceIsBounded:
+    // This binds DIRECT filesystem reads in `scripts/gate2-live-evidence-publish.mjs` to
+    // the two checked helpers, and nothing wider. It is a source scan of one file, so that
+    // is the most it can see. Exactly: a direct read added anywhere in that file outside
+    // the bodies of the two reading helpers -- the write helper included, since no read
+    // belongs there; an import from `node:fs` or `node:fs/promises` anywhere in the file
+    // that is not the exact allowed list, aliases and second declarations included; a
+    // second read inside a reading helper; and a read moved before the checks that make
+    // it safe.
+    //
+    // Reads the publisher CAUSES in other modules are outside it. `loadGate2BenchmarkContract`
+    // reads the benchmark manifest, its predecessor, all 30 tasks and the seven fixture
+    // repository trees from `scripts/gate2-benchmark-contract.mjs`, and a scan of the
+    // publisher's source cannot see them. Those are covered instead by the fixture-tree
+    // pre-validation walk the publisher runs before calling the loader; a change to that
+    // loader is held by review.
+    //
+    // Nor does it catch an author of this file acting with intent -- a reordered check
+    // that still reads last, a dynamic `import()`, a raw binding. That is same-process
+    // code authority, held by review, the boundary ADR 0071 already draws for the
+    // instruction policy. The gate is here so an ORDINARY omission fails a check instead
+    // of a fifth review; it is not a sandbox.
+    gate2PublishFilesystemImportIsExact &&
+    gate2PublishReadOnlyInsideHelpers &&
+    gate2PublishHasNoOtherReadSurface &&
+    gate2PublishOpenIsExclusiveCreateOnly,
   gate2FrozenEvidenceFiguresRecomputeOfflineFromVerifiedBytes:
     // A figure nobody recomputes goes stale in place: the 2026-09-01 evaluation carried a
     // token total that survived a review because nothing derived it a second time, and its
