@@ -27,6 +27,8 @@ describe("Gate 2 live instruction policy", () => {
     );
     const combined = [
       buildGate2LiveInstructions("scaffold", "mutation"),
+      buildGate2LiveInstructions("refactor", "mutation"),
+      buildGate2LiveInstructions("repair", "mutation"),
       buildGate2LiveInstructions("security_review", "read_only"),
     ].join("\n");
     for (const benchmarkShapedFragment of [
@@ -52,6 +54,24 @@ describe("Gate 2 live instruction policy", () => {
       "Follow only the implemented data or control flow relevant to the task",
     );
     expect(buildGate2LiveInstructions("scaffold", "mutation")).not.toContain('"steps"');
+    // Revision 10: the two classes that scored 0/5 in both revision-9 arms had no class
+    // guidance at all; six of their ten misses were target selection, not capability.
+    expect(buildGate2LiveInstructions("refactor", "mutation")).toContain(
+      "creates that module as a new file",
+    );
+    expect(buildGate2LiveInstructions("repair", "mutation")).toContain(
+      "the deliverable is the check that proves it",
+    );
+    expect(buildGate2LiveInstructions("explanation", "read_only")).not.toContain(
+      "creates that module as a new file",
+    );
+    // Output boundary, on every class: 27 of 30 baseline failures were a code fence.
+    for (const [cls, kind] of [
+      ["repair", "mutation"],
+      ["security_review", "read_only"],
+    ] as const) {
+      expect(buildGate2LiveInstructions(cls, kind)).toContain("its first character is {");
+    }
   });
 
   it("gives the model the complete repository inventory without expected outcomes", () => {
