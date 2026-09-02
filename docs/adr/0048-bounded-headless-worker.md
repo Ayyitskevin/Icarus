@@ -57,10 +57,15 @@ The CLI command is:
 ```text
 icarus run approve-headless RUN \
   --plan-sha SHA --actor ACTOR \
-  --profile-json JSON --provider-catalog-json JSON
+  (--profile-json JSON | --profile-file FILE) \
+  (--provider-catalog-json JSON | --provider-catalog-file FILE)
 ```
 
-Both JSON arguments are bounded and contain no credentials. The command emits
+Each JSON argument requires exactly one inline or file transport. File inputs
+use the existing bounded, no-follow, owned, stable-file reader; both transports
+use strict duplicate-member-rejecting JSON and reach the same profile/catalog
+decoders and digest path. Files do not become approval or provider authority and
+contain no credentials. The command emits
 the existing checksum-terminated `icarus.headless.history.v1` JSONL trajectory
 (**superseded 2026-08-31**: now `icarus.headless.history.v2` per ADR 0068),
 including the two worker lifecycle events, and returns:

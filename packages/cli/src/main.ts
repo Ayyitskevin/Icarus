@@ -6,12 +6,14 @@ import {
   closeSync,
   constants,
   fstatSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
-  readFileSync,
+  readSync,
   realpathSync,
   rmSync,
+  type BigIntStats,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -172,16 +174,39 @@ function optional(options: ParsedOptions, name: string): string | undefined {
   return values[0];
 }
 
-function boundedJsonOption(options: ParsedOptions, name: string, maximumBytes: number): unknown {
-  const value = required(options, name);
+function parseBoundedJson(value: string, name: string, maximumBytes: number): unknown {
   if (Buffer.byteLength(value, "utf8") > maximumBytes) {
     fail("INVALID_ARGUMENT", `${name} exceeds its byte ceiling`);
   }
   try {
-    return JSON.parse(value) as unknown;
+    return parseStrictJson(value);
   } catch {
-    fail("INVALID_ARGUMENT", `${name} must be valid JSON`);
+    fail("INVALID_ARGUMENT", `${name} must be strict JSON without duplicate object members`);
   }
+}
+
+function boundedJsonInput(
+  options: ParsedOptions,
+  jsonName: string,
+  fileName: string,
+  maximumBytes: number,
+): unknown {
+  const inline = optional(options, jsonName);
+  const file = optional(options, fileName);
+  if ((inline === undefined) === (file === undefined)) {
+    fail("INVALID_ARGUMENT", `Exactly one of ${jsonName} or ${fileName} must be provided`);
+  }
+  if (inline !== undefined) return parseBoundedJson(inline, jsonName, maximumBytes);
+  if (file === undefined) fail("INVALID_ARGUMENT", `${fileName} must be provided exactly once`);
+
+  const bytes = readStableOwnedInput(file, true, maximumBytes, "INVALID_HEADLESS_INPUT_FILE");
+  let source: string;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    fail("INVALID_HEADLESS_INPUT_FILE", `${fileName} must contain valid UTF-8`);
+  }
+  return parseBoundedJson(source, fileName, maximumBytes);
 }
 
 function numberOption(options: ParsedOptions, name: string): number | undefined {
@@ -334,7 +359,9 @@ function landlockReexecDecision(args: readonly string[]): LandlockReexecDecision
           "--plan-sha",
           "--actor",
           "--profile-json",
+          "--profile-file",
           "--provider-catalog-json",
+          "--provider-catalog-file",
           "--output-format",
           "--sandbox-profile",
           "--max-turns",
@@ -733,39 +760,95 @@ function dispatchFileOnlyHandoff(args: readonly string[]): boolean {
 
 const LIVE_EVIDENCE_INPUT_MAX_BYTES = 2 * 1024 * 1024;
 
-function readStableOwnedInput(input: string, requireNonSharedWrite = true): Buffer {
+function assertNoSymlinkedInputComponents(absolute: string, errorCode: string): void {
+  const parsed = path.parse(absolute);
+  const parts = absolute.slice(parsed.root.length).split(path.sep).filter(Boolean);
+  let current = parsed.root;
+  for (const [index, part] of parts.entries()) {
+    current = path.join(current, part);
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink()) {
+      fail(errorCode, "Input path must not contain symbolic links");
+    }
+    if (index < parts.length - 1 && !stat.isDirectory()) {
+      fail(errorCode, "Input path has a non-directory ancestor");
+    }
+  }
+}
+
+function readStableOwnedInput(
+  input: string,
+  requireNonSharedWrite = true,
+  maximumBytes = LIVE_EVIDENCE_INPUT_MAX_BYTES,
+  errorCode = "INVALID_LIVE_EVIDENCE_FILE",
+): Buffer {
   const absolute = path.resolve(input);
   let descriptor: number;
+  let requested: BigIntStats;
   try {
+    assertNoSymlinkedInputComponents(absolute, errorCode);
+    if (realpathSync(absolute) !== absolute) {
+      fail(errorCode, "Input path must not contain symbolic links");
+    }
+    requested = lstatSync(absolute, { bigint: true });
     descriptor = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch {
-    fail("INVALID_LIVE_EVIDENCE_FILE", `Cannot safely open ${absolute}`);
+  } catch (error) {
+    if (error instanceof IcarusError) throw error;
+    fail(errorCode, "Cannot safely open the input file");
   }
   try {
-    const before = fstatSync(descriptor);
+    const before = fstatSync(descriptor, { bigint: true });
     const uid = process.getuid?.();
-    if (!before.isFile() || before.nlink !== 1 || (uid !== undefined && before.uid !== uid)) {
-      fail(
-        "INVALID_LIVE_EVIDENCE_FILE",
-        "Input must be a regular, singly linked, operator-owned file",
-      );
-    }
-    if (requireNonSharedWrite && (before.mode & 0o022) !== 0) {
-      fail("INVALID_LIVE_EVIDENCE_FILE", "Input must not be group- or world-writable");
-    }
-    if (before.size > LIVE_EVIDENCE_INPUT_MAX_BYTES) {
-      fail("INVALID_LIVE_EVIDENCE_FILE", "Input exceeds the live-evidence file-size ceiling");
-    }
-    const bytes = readFileSync(descriptor);
-    const after = fstatSync(descriptor);
     if (
-      before.size !== after.size ||
-      before.mtimeMs !== after.mtimeMs ||
-      bytes.length !== after.size
+      !before.isFile() ||
+      before.nlink !== 1n ||
+      (uid !== undefined && before.uid !== BigInt(uid)) ||
+      before.dev !== requested.dev ||
+      before.ino !== requested.ino
     ) {
-      fail("INVALID_LIVE_EVIDENCE_FILE", "Input changed while it was being read");
+      fail(errorCode, "Input must be a regular, singly linked, operator-owned file");
+    }
+    if (requireNonSharedWrite && (before.mode & 0o022n) !== 0n) {
+      fail(errorCode, "Input must not be group- or world-writable");
+    }
+    if (before.size > BigInt(maximumBytes)) {
+      fail(errorCode, "Input exceeds its file-size ceiling");
+    }
+
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (total <= maximumBytes) {
+      const chunk = Buffer.alloc(Math.min(64 * 1024, maximumBytes + 1 - total));
+      const bytesRead = readSync(descriptor, chunk, 0, chunk.length, null);
+      if (bytesRead === 0) break;
+      chunks.push(chunk.subarray(0, bytesRead));
+      total += bytesRead;
+    }
+    if (total > maximumBytes) fail(errorCode, "Input exceeds its file-size ceiling");
+
+    const bytes = Buffer.concat(chunks, total);
+    const after = fstatSync(descriptor, { bigint: true });
+    const current = lstatSync(absolute, { bigint: true });
+    if (
+      before.dev !== after.dev ||
+      before.ino !== after.ino ||
+      before.mode !== after.mode ||
+      before.nlink !== after.nlink ||
+      before.uid !== after.uid ||
+      before.size !== after.size ||
+      before.mtimeNs !== after.mtimeNs ||
+      before.ctimeNs !== after.ctimeNs ||
+      after.dev !== current.dev ||
+      after.ino !== current.ino ||
+      realpathSync(absolute) !== absolute ||
+      bytes.length !== Number(after.size)
+    ) {
+      fail(errorCode, "Input changed while it was being read");
     }
     return bytes;
+  } catch (error) {
+    if (error instanceof IcarusError) throw error;
+    fail(errorCode, "Input changed while it was being read");
   } finally {
     closeSync(descriptor);
   }
@@ -896,7 +979,7 @@ function usage(): never {
       "icarus run plan --project NAME --task TEXT --target PATH [--target PATH ...] --provider ollama|openai|anthropic|vulcan --model MODEL [provider options]",
       "icarus run approve-egress RUN --context-sha SHA --actor ACTOR",
       "icarus run approve RUN --plan-sha SHA --actor ACTOR",
-      "icarus run approve-headless RUN --plan-sha SHA --actor ACTOR --profile-json JSON --provider-catalog-json JSON [--max-turns N] [--max-budget-usd USD] [--output-format history|stream-json] [--sandbox-profile workspace|read-only|strict|off]",
+      "icarus run approve-headless RUN --plan-sha SHA --actor ACTOR (--profile-json JSON | --profile-file FILE) (--provider-catalog-json JSON | --provider-catalog-file FILE) [--max-turns N] [--max-budget-usd USD] [--output-format history|stream-json] [--sandbox-profile workspace|read-only|strict|off]",
       "icarus run apply-headless RUN --patchset-sha SHA --actor ACTOR [--max-turns N] [--max-budget-usd USD] [--output-format history|stream-json] [--sandbox-profile workspace|read-only|strict|off]",
       "icarus run reconcile-headless RUN [--output-format history|stream-json]",
       "icarus run reconstruct-headless RUN",
@@ -1336,15 +1419,22 @@ async function dispatch(
       "--plan-sha",
       "--actor",
       "--profile-json",
+      "--profile-file",
       "--provider-catalog-json",
+      "--provider-catalog-file",
       "--output-format",
       "--sandbox-profile",
       "--max-turns",
       "--max-budget-usd",
     ]);
-    const providerCatalog = boundedJsonOption(options, "--provider-catalog-json", 256 * 1024);
+    const providerCatalog = boundedJsonInput(
+      options,
+      "--provider-catalog-json",
+      "--provider-catalog-file",
+      256 * 1024,
+    );
     if (!Array.isArray(providerCatalog)) {
-      fail("INVALID_ARGUMENT", "--provider-catalog-json must be a JSON array");
+      fail("INVALID_ARGUMENT", "The provider catalog input must decode to a JSON array");
     }
     // An invalid output format is an argument error and must fail before any
     // execution effect, never after the worker has settled.
@@ -1353,7 +1443,7 @@ async function dispatch(
       oneRunId(options),
       required(options, "--plan-sha"),
       required(options, "--actor"),
-      boundedJsonOption(options, "--profile-json", 256 * 1024),
+      boundedJsonInput(options, "--profile-json", "--profile-file", 256 * 1024),
       providerCatalog as readonly HeadlessHostProviderProfileV1[],
       signal,
       headlessEnvelope(options),

@@ -140,4 +140,27 @@ describe("headless worker security contract", () => {
       command.indexOf("approveHeadlessPlan("),
     );
   });
+
+  test("file-backed headless inputs retain bounded no-follow stable-read guards", () => {
+    const reader = body(
+      cli,
+      "function assertNoSymlinkedInputComponents(",
+      "function parseLiveEvidenceJson(",
+    );
+    expect(reader).toContain("constants.O_NOFOLLOW");
+    expect(reader).toContain("before.nlink !== 1n");
+    expect(reader).toContain("before.uid !== BigInt(uid)");
+    expect(reader).toContain("before.mtimeNs !== after.mtimeNs");
+    expect(reader).toContain("before.ctimeNs !== after.ctimeNs");
+    expect(reader).toContain("after.dev !== current.dev");
+    expect(reader).toContain("after.ino !== current.ino");
+    expect(reader.match(/realpathSync\(absolute\) !== absolute/g)).toHaveLength(2);
+    expect(reader).toContain("total > maximumBytes");
+
+    const dispatch = body(cli, 'if (action === "approve-headless")', 'if (action === "status")');
+    expect(dispatch).toContain('"--profile-file"');
+    expect(dispatch).toContain('"--provider-catalog-file"');
+    expect(dispatch).toContain("boundedJsonInput(");
+    expect(dispatch).not.toContain("readFileSync(");
+  });
 });
