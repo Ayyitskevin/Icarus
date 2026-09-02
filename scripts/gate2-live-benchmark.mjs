@@ -64,10 +64,13 @@ const VULCAN_CONFIG_PATH = "/home/kevin-lee/deploy/vulcan-data/vulcan.toml";
 const PYTHON_IMAGE =
   "python:3.12-slim@sha256:c3d81d25b3154142b0b42eb1e61300024426268edeb5b5a26dd7ddf64d9daf28";
 const MAX_CONTEXT_FILES = 8;
-// 5 adds reasoningChars and the retrieval coverage. Revision 4 computed both and
-// serialized neither, so a reader of a v4 record cannot distinguish "measured zero"
-// from "never recorded" -- and the first Gate 2 run to carry ADR 0069's evidence
-// reported omission counts that were absence, not measurement.
+// Revision 5 added reasoningChars and the retrieval coverage, which revision 4 computed
+// and serialized neither, so a reader of a v4 record cannot distinguish "measured zero"
+// from "never recorded". Revision 6 closes the shape that revision 5 only named: the
+// records frozen under 5 omit `requestedThink` entirely and encode an absent provider
+// `thinking` member as 0, while this writer requires the member and encodes that same
+// absence as null. One revision number over two wire shapes is the defect this campaign
+// exists to remove, so the number moves with the shape.
 /**
  * The exact request body sent to Vulcan. Extracted and exported so a test can assert
  * what is TRANSMITTED, not merely that a source file contains a string. A static
@@ -92,32 +95,194 @@ export function buildGate2ChatRequestBody({ modelId, instructions, input, genera
   };
 }
 
-const LIVE_EVIDENCE_RECORD_REVISION = 5;
+export const LIVE_EVIDENCE_RECORD_REVISION = 6;
+
+const OMISSION_REASONS = Object.freeze(["byte_ceiling", "file_ceiling"]);
+
+function isCount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+/** Total accessors: every rule below must be evaluable on a malformed record. */
+function retrievalOf(record) {
+  const retrieval = record?.retrieval;
+  return retrieval !== null && typeof retrieval === "object" && !Array.isArray(retrieval)
+    ? retrieval
+    : null;
+}
+
+function omissionListOf(record, key) {
+  const list = retrievalOf(record)?.[key];
+  return Array.isArray(list) ? list : [];
+}
+
+function omissionsOf(record) {
+  return [
+    ...omissionListOf(record, "omittedMatches"),
+    ...omissionListOf(record, "omittedReferences"),
+  ];
+}
 
 /**
- * The closed shape a revision-5 record must have before it may be reused as current
- * evidence. `reasoningChars` is deliberately allowed to be null -- absence is a real
- * reading -- but the MEMBER must be present, because a record that never carried it
- * cannot be distinguished later from one that reported nothing.
+ * The selected paths live in the observation, not the retrieval block, so the
+ * "selected" half of the selected/omitted disjointness is read from there.
  */
-function hasCurrentEvidenceShape(record) {
-  if (record === null || typeof record !== "object") return false;
-  if (!("reasoningChars" in record)) return false;
-  if (!(record.reasoningChars === null || Number.isSafeInteger(record.reasoningChars))) {
-    return false;
-  }
-  if (!("requestedThink" in record)) return false;
-  const retrieval = record.retrieval;
-  if (retrieval === null || typeof retrieval !== "object") return false;
-  if (!Number.isSafeInteger(retrieval.matchedFiles)) return false;
-  if (!Number.isSafeInteger(retrieval.selectedFiles)) return false;
-  if (!Array.isArray(retrieval.omittedMatches)) return false;
-  if (!Array.isArray(retrieval.omittedReferences)) return false;
-  const excluded = retrieval.excludedFiles;
-  if (excluded === null || typeof excluded !== "object") return false;
-  return ["byPolicy", "nonText", "secretShaped", "unsupportedEntry"].every((key) =>
-    Number.isSafeInteger(excluded[key]),
+function selectedPathsOf(record) {
+  const context = record?.observation?.retrievedContext;
+  if (!Array.isArray(context)) return null;
+  const paths = context.map((entry) => entry?.path);
+  return paths.every((entry) => typeof entry === "string") ? paths : null;
+}
+
+function isRepositoryRelativePath(value) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    !value.startsWith("/") &&
+    !value.includes("\\") &&
+    !value.split("/").some((part) => part === "" || part === "." || part === "..")
   );
+}
+
+/**
+ * Revision 6's closed shape, one independently violable rule per line, so a test can
+ * delete a rule and watch a record that violates only that rule become acceptable.
+ * A single `&&` chain cannot be mutation-tested that way: every deletion is invisible
+ * unless a record exists that the remaining conjuncts accept.
+ *
+ * `hasCurrentEvidenceShape` used to check that members EXIST. Existence is not a
+ * contract: `requestedThink: "no"`, `matchedFiles: -1`, an omission naming `../etc`,
+ * and coverage counts that contradict their own entry list all passed it.
+ */
+export const GATE2_EVIDENCE_RECORD_RULES = Object.freeze(
+  [
+    {
+      id: "revision-is-current",
+      holds: (record) => record?.evidenceRecordRevision === LIVE_EVIDENCE_RECORD_REVISION,
+    },
+    {
+      // Not "is a boolean" and not "is present": the recorded mode must be the mode the
+      // pinned policy actually requests, or a record measured under the other setting
+      // reads as though it were measured under this one.
+      id: "requested-think-equals-policy",
+      holds: (record) => record?.requestedThink === GATE2_LIVE_INSTRUCTION_POLICY.generation.think,
+    },
+    {
+      // null is the honest reading for an absent provider `thinking` member. Revision 5
+      // wrote 0 for that absence, which is why a v5 zero cannot be read as a measurement.
+      id: "reasoning-chars-null-or-count",
+      holds: (record) => record?.reasoningChars === null || isCount(record?.reasoningChars),
+    },
+    {
+      id: "coverage-counts-are-counts",
+      holds: (record) => {
+        const retrieval = retrievalOf(record);
+        return (
+          retrieval !== null &&
+          isCount(retrieval.matchedFiles) &&
+          isCount(retrieval.selectedQueryMatches)
+        );
+      },
+    },
+    {
+      id: "excluded-file-counts-are-counts",
+      holds: (record) => {
+        const excluded = retrievalOf(record)?.excludedFiles;
+        return (
+          excluded !== null &&
+          typeof excluded === "object" &&
+          !Array.isArray(excluded) &&
+          ["byPolicy", "nonText", "secretShaped", "unsupportedEntry"].every((key) =>
+            isCount(excluded[key]),
+          )
+        );
+      },
+    },
+    {
+      id: "omission-lists-are-arrays",
+      holds: (record) => {
+        const retrieval = retrievalOf(record);
+        return (
+          retrieval !== null &&
+          Array.isArray(retrieval.omittedMatches) &&
+          Array.isArray(retrieval.omittedReferences)
+        );
+      },
+    },
+    {
+      // Binds the count to the list it counts, and so also proves it is a count.
+      id: "selected-count-matches-selected-paths",
+      holds: (record) => {
+        const selected = selectedPathsOf(record);
+        return selected !== null && retrievalOf(record)?.selectedFiles === selected.length;
+      },
+    },
+    {
+      // Count-ness is `coverage-counts-are-counts`' job; this rule owns the bound alone,
+      // so each can be shown to be load-bearing on its own. Without the bound the new
+      // member is free: any value that closes the reconciliation below would pass.
+      id: "selected-query-matches-within-selection",
+      holds: (record) => {
+        const retrieval = retrievalOf(record);
+        return retrieval !== null && retrieval.selectedQueryMatches <= retrieval.selectedFiles;
+      },
+    },
+    {
+      id: "omission-entries-are-valid",
+      holds: (record) =>
+        omissionsOf(record).every(
+          (omission) =>
+            omission !== null &&
+            typeof omission === "object" &&
+            !Array.isArray(omission) &&
+            isRepositoryRelativePath(omission.path) &&
+            isCount(omission.bytes) &&
+            OMISSION_REASONS.includes(omission.reason),
+        ),
+    },
+    {
+      id: "omission-paths-are-unique",
+      holds: (record) => {
+        const paths = omissionsOf(record).map((omission) => omission?.path);
+        return new Set(paths).size === paths.length;
+      },
+    },
+    {
+      // A path cannot be both returned and withheld; a record claiming both describes a
+      // retrieval that never happened.
+      id: "no-path-both-selected-and-omitted",
+      holds: (record) => {
+        const selected = new Set(selectedPathsOf(record) ?? []);
+        return omissionsOf(record).every((omission) => !selected.has(omission?.path));
+      },
+    },
+    {
+      // The reconciliation `packages/core` enforces on a live receipt
+      // (`retrievalOmissionEvidenceProblem`), restated over the persisted record.
+      // Revision 5 could not carry it: it recorded `selectedFiles`, which counts
+      // reference-hop entries that never matched the query, so 10 of the 60 frozen
+      // records have `selectedFiles > matchedFiles` and no arithmetic over the
+      // recorded members can close. Revision 6 records `selectedQueryMatches`.
+      id: "coverage-reconciles-with-omissions",
+      holds: (record) => {
+        const retrieval = retrievalOf(record);
+        return (
+          retrieval !== null &&
+          retrieval.matchedFiles ===
+            retrieval.selectedQueryMatches + omissionListOf(record, "omittedMatches").length
+        );
+      },
+    },
+  ].map((rule) => Object.freeze(rule)),
+);
+
+/**
+ * The closed shape a revision-6 record must have before it may be reused as current
+ * evidence. A record failing any rule is re-scored rather than trusted.
+ */
+export function hasCurrentEvidenceShape(record) {
+  if (record === null || typeof record !== "object" || Array.isArray(record)) return false;
+  return GATE2_EVIDENCE_RECORD_RULES.every((rule) => rule.holds(record));
 }
 const MODEL_PINS = Object.freeze({
   code: {
@@ -546,9 +711,10 @@ async function evaluateCase({ benchmarkCase, repository, oracle, mode, profile, 
     if (
       parsed.candidateContractRevision === GATE2_LIVE_CANDIDATE_CONTRACT_REVISION &&
       parsed.evidenceRecordRevision === LIVE_EVIDENCE_RECORD_REVISION &&
-      // A revision number is a label, not a shape. Without this a v4-shaped record
-      // relabelled 5 is reused as current evidence and the aggregate silently rests on
-      // members that were never written.
+      // A revision number is a label, not a shape. Without this a v5-shaped record
+      // relabelled 6 is reused as current evidence and the aggregate silently rests on
+      // members that were never written -- and revision 5 is exactly that hazard, since
+      // the records frozen under it and the writer that claimed it disagree on the wire.
       hasCurrentEvidenceShape(parsed) &&
       parsed.instructionPolicySha256 === GATE2_LIVE_INSTRUCTION_POLICY_SHA256 &&
       parsed.routingPolicySha256 === GATE2_LIVE_ROUTING_POLICY_SHA256 &&
@@ -751,6 +917,11 @@ async function evaluateCase({ benchmarkCase, repository, oracle, mode, profile, 
         repositoryDigestSha256: retrieval.repositoryDigestSha256,
         matchedFiles: retrieval.matchedFiles,
         selectedFiles: retrieval.entries.length,
+        // Revision 6. `selectedFiles` counts reference-hop entries that never matched
+        // the query, so it cannot close `matchedFiles = selected matches + omitted
+        // matches`; without this member the record's own coverage claim is unverifiable.
+        selectedQueryMatches: retrieval.entries.filter((entry) => entry.matchedTerms.length > 0)
+          .length,
         omittedMatches: retrieval.omittedMatches,
         omittedReferences: retrieval.omittedReferences,
         excludedFiles: retrieval.excludedFiles,
