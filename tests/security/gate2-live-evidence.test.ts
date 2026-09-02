@@ -628,6 +628,57 @@ describe("Gate 2 published live evidence", () => {
     );
   });
 
+  it("refuses a symlinked execution profile before parsing a byte of it", async () => {
+    // Sol's P1. The fixture reads were never component-checked, so a byte-identical target
+    // behind a symlinked profile path was read and accepted -- the publisher verifying a
+    // set against a profile it did not own. The target is byte-identical on purpose: no
+    // digest, no parser, and no contract check can tell the difference. Only the walk can.
+    await withFrozenCopy(async (temporary) => {
+      const relative = "fixtures/evals/gate2/live-profile.v2.json";
+      const outside = path.join(temporary, "profile-outside-the-repository.json");
+      await writeFile(outside, await readFile(path.join(temporary, relative)));
+      await rm(path.join(temporary, relative));
+      await symlink(outside, path.join(temporary, relative));
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        /live-profile\.v2\.json is reached through a link at/,
+      );
+    });
+  });
+
+  it("refuses a symlinked benchmark manifest without naming what was planted in it", async () => {
+    // The same omission, on the other fixture read, and with a defect planted outside so
+    // the failure mode is visible: the strict parser would report the duplicate, which is
+    // an answer about a file outside the repository. The component check speaks first and
+    // the planted bytes are never parsed.
+    await withFrozenCopy(async (temporary) => {
+      const relative = "fixtures/evals/gate2/manifest.v2.json";
+      const outside = path.join(temporary, "manifest-outside-the-repository.json");
+      const text = await readFile(path.join(temporary, relative), "utf8");
+      await writeFile(outside, text.replace(/^\{/, '{\n  "schemaVersion": 2,'));
+      await rm(path.join(temporary, relative));
+      await symlink(outside, path.join(temporary, relative));
+      const error = await verifyGate2PublishedEvidence(temporary, "reasoning-suppressed").then(
+        () => null,
+        (thrown: Error) => thrown,
+      );
+      expect(error?.message).toMatch(/manifest\.v2\.json is reached through a link at/);
+      expect(error?.message).not.toMatch(/duplicate JSON object members/);
+    });
+  });
+
+  it("refuses a link inside a fixture repository the contract loader will read", async () => {
+    // The loader also reads every task and walks all seven fixture repositories. A helper
+    // in this file cannot intercept those reads, so every path the loader will touch is
+    // walked before it is called -- including the trees, entry by entry.
+    await withFrozenCopy(async (temporary) => {
+      const inside = path.join(temporary, "fixtures/evals/repos/buggy/src/planted-link.py");
+      await symlink(path.join(temporary, "fixtures/evals/repos/buggy/src/cart.py"), inside);
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        /fixture .* holds a link at/,
+      );
+    });
+  });
+
   it("requires conservative declared-budget accounting for a retained timeout", () => {
     const profile = {
       budgets: { maxInputTokens: 50_000, maxOutputTokens: 8192, maxRuntimeSeconds: 300 },

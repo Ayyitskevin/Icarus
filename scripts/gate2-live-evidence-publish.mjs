@@ -158,33 +158,75 @@ function safeJoin(base, relative) {
  */
 
 /**
+ * The ONE read in this publisher. Every byte it consumes -- the benchmark manifest and its
+ * declared predecessor, the execution profile, the artifact manifest, the 60 records, the
+ * results -- arrives through here, and nothing is parsed before it has.
+ *
  * AGENTS.md: paths are "checked component-by-component for symlinks before reads and
  * writes". `lstat` on the file alone is not that check -- it describes the last component
- * and says nothing about the directories walked to reach it. A record directory replaced
- * by a symlink to a tree outside the set therefore passed: each listed record resolved
- * through the link to a real, non-linked regular file, and the publisher read and reported
- * bytes from outside the root it was verifying.
+ * and says nothing about the directories walked to reach it. Two findings came from
+ * checking less than this. A record directory replaced by a symlink to a tree outside the
+ * set passed, because each listed record resolved through the link to a real, non-linked
+ * regular file. Then the FIXTURE reads -- the benchmark manifest and the profile -- turned
+ * out never to be component-checked at all, so a byte-identical target behind a symlinked
+ * fixture path was read and accepted. Both are one omission: a read whose path nobody
+ * walked. There is one helper now so there is one place to get it right.
  */
-async function assertNoLinkedComponent(base, filePath, label) {
-  let current = base;
-  for (const part of path.relative(base, filePath).split(path.sep)) {
+async function assertWalkableTo(base, relative, label) {
+  // Normalised, because callers pass roots with and without a trailing separator and a
+  // prefix test on the raw string is wrong for both.
+  const root = path.resolve(base);
+  const resolved = path.resolve(root, relative);
+  assertCondition(
+    resolved === root || resolved.startsWith(`${root}${path.sep}`),
+    `${label} escapes ${root}`,
+  );
+  let current = root;
+  for (const part of path.relative(root, resolved).split(path.sep)) {
+    if (part === "") continue;
     current = path.join(current, part);
-    const metadata = await lstat(current);
+    const component = await lstat(current);
     assertCondition(
-      !metadata.isSymbolicLink(),
-      `${label} is reached through a link at ${path.relative(base, current)}`,
+      !component.isSymbolicLink(),
+      `${label} is reached through a link at ${path.relative(root, current)}`,
     );
   }
+  return resolved;
 }
 
-async function regularBytes(filePath, label, base) {
-  if (base !== undefined) await assertNoLinkedComponent(base, filePath, label);
-  const metadata = await lstat(filePath);
+async function readRegularFile(base, relative, label = relative) {
+  const resolved = await assertWalkableTo(base, relative, label);
+  const metadata = await lstat(resolved);
   assertCondition(
-    metadata.isFile() && !metadata.isSymbolicLink() && metadata.nlink === 1,
+    metadata.isFile() && metadata.nlink === 1,
     `${label} must be one non-linked regular file`,
   );
-  return readFile(filePath);
+  return readFile(resolved);
+}
+
+/**
+ * Option (a) of sol's two: the loader's reads stay in the module that owns them, and this
+ * publisher refuses to call it until every path it will touch has been walked. A directory
+ * is walked entry by entry -- the fixture repositories are trees, and `snapshotFixture`
+ * reads all of them.
+ */
+async function assertUnlinkedTree(base, relative, label) {
+  const resolved = await assertWalkableTo(base, relative, label);
+  const metadata = await lstat(resolved);
+  if (metadata.isDirectory()) {
+    for (const entry of await readdir(resolved, { withFileTypes: true })) {
+      assertCondition(
+        !entry.isSymbolicLink(),
+        `${label} holds a link at ${path.join(path.relative(base, resolved), entry.name)}`,
+      );
+      await assertUnlinkedTree(base, path.join(resolved, entry.name), label);
+    }
+    return;
+  }
+  assertCondition(
+    metadata.isFile() && metadata.nlink === 1,
+    `${label} must hold only non-linked regular files`,
+  );
 }
 
 async function exclusiveWrite(filePath, bytes) {
@@ -327,11 +369,7 @@ async function validateEvidenceSet(evidenceDirectory, loaded, profile, config) {
   const files = [];
   const bytesByPath = new Map();
   for (const relative of relativePaths) {
-    const bytes = await regularBytes(
-      safeJoin(evidenceDirectory, relative),
-      relative,
-      evidenceDirectory,
-    );
+    const bytes = await readRegularFile(evidenceDirectory, relative);
     assertNoUnknownSecretShape(bytes, relative);
     bytesByPath.set(relative, bytes);
     files.push({ path: relative, bytes: bytes.length, sha256: sha256(bytes) });
@@ -393,55 +431,89 @@ async function validateEvidenceSet(evidenceDirectory, loaded, profile, config) {
   return { relativePaths, files, bytesByPath, baseline, routed, comparison };
 }
 
+/**
+ * `loadGate2BenchmarkContract` reads the benchmark manifest AND the predecessor that
+ * manifest declares, from a module this publisher does not own. Both paths are walked here
+ * first, through the one helper, so the loader cannot be the first thing to follow a link.
+ * It then re-reads the same bytes: a duplicate read is the price of not reaching into a
+ * shared module, and it buys that no path it touches went unchecked.
+ */
+async function loadBenchmarkContractThroughCheckedPaths(repositoryRoot) {
+  const relative = "fixtures/evals/gate2/manifest.v2.json";
+  const declared = parseStrictGate2Json(
+    (await readRegularFile(repositoryRoot, relative)).toString("utf8"),
+  );
+  // Every path the loader will read, from the manifest's own declarations. They are
+  // attacker-influenced text used as paths, so each is refused if it escapes the
+  // repository root or passes through a link.
+  const predecessor = declared.supersedes?.manifestPath;
+  if (typeof predecessor === "string") {
+    await readRegularFile(repositoryRoot, predecessor, "predecessor manifest");
+  }
+  for (const benchmarkCase of declared.cases ?? []) {
+    const taskPath = benchmarkCase?.task?.path;
+    if (typeof taskPath === "string") {
+      await assertWalkableTo(repositoryRoot, taskPath, `task ${benchmarkCase.id}`);
+    }
+  }
+  for (const repository of declared.repositories ?? []) {
+    if (typeof repository?.fixturePath === "string") {
+      await assertUnlinkedTree(repositoryRoot, repository.fixturePath, `fixture ${repository.id}`);
+    }
+  }
+  return loadGate2BenchmarkContract(path.join(repositoryRoot, relative), repositoryRoot);
+}
+
 export async function verifyGate2PublishedEvidence(
   repositoryRoot = root,
   profileVersion = DEFAULT_PROFILE_VERSION,
 ) {
   const config = LIVE_EVIDENCE_CONFIGS[profileVersion];
   assertCondition(config !== undefined, "published profile version is invalid");
-  // Before the fixtures, which are read from this same root.
+  // Order, and the reason for it. The repository root first, because every path below is
+  // resolved from it. Then, where the config PINS the artifact directory, its root and the
+  // freezer's closed-tree verdict -- a pinned directory needs nothing from the fixtures to
+  // locate, so nothing is read from the fixture tree until the set itself has been judged.
+  // Everything after reads paths some manifest lists; until the freezer has said the
+  // directory holds exactly those files and no entry in it is a link, "the manifest lists
+  // it" is not a statement about this directory. A record directory replaced by a symlink
+  // to a tree outside the set used to be read through, and a duplicate planted out there
+  // was reported as though it were the evidence.
   await assertRootIsReal(repositoryRoot);
-  const loaded = await loadGate2BenchmarkContract(
-    path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v2.json"),
-    repositoryRoot,
-  );
-  const profile = parseStrictGate2Json(
-    await readFile(path.join(repositoryRoot, "fixtures/evals/gate2", config.profileFile), "utf8"),
-  );
-  assertCondition(
-    computeGate2ExecutionProfileDigest(profile) === profile.profileDigestSha256,
-    "published profile digest is invalid",
-  );
-  const destination = path.join(
-    repositoryRoot,
-    "docs/evals/artifacts",
-    config.artifactDirectory ?? profile.profileId,
-  );
-  await assertRootIsReal(destination);
-  // The closed-tree verdict comes first, before a byte of the set is read. Everything
-  // below reads paths the manifest lists; until the freezer has said the directory holds
-  // exactly those files, and no entry in it is a link, "the manifest lists it" is not a
-  // statement about this directory. A record directory replaced by a symlink to a tree
-  // outside the set used to be read through, and a duplicate planted out there was
-  // reported as though it were the evidence -- an answer about the wrong bytes, delivered
-  // before the verdict that the tree was not closed.
-  if (config.manifestSchema !== undefined) {
+  let destination =
+    config.artifactDirectory === undefined
+      ? null
+      : path.join(repositoryRoot, "docs/evals/artifacts", config.artifactDirectory);
+  if (destination !== null) {
+    await assertRootIsReal(destination);
     const problems = await verifyFrozenEvidence(destination);
     assertCondition(
       problems.length === 0,
       `frozen evidence manifest is invalid: ${problems.join("; ")}`,
     );
   }
+  const loaded = await loadBenchmarkContractThroughCheckedPaths(repositoryRoot);
+  const profile = parseStrictGate2Json(
+    (await readRegularFile(repositoryRoot, `fixtures/evals/gate2/${config.profileFile}`)).toString(
+      "utf8",
+    ),
+  );
+  assertCondition(
+    computeGate2ExecutionProfileDigest(profile) === profile.profileDigestSha256,
+    "published profile digest is invalid",
+  );
+  if (destination === null) {
+    // v1 and v2 name their directory through the profile, so this root can only be checked
+    // once the profile has been read -- itself read through the one helper.
+    destination = path.join(repositoryRoot, "docs/evals/artifacts", profile.profileId);
+    await assertRootIsReal(destination);
+  }
   const validated = await validateEvidenceSet(destination, loaded, profile, config);
   if (config.manifestSchema === undefined) {
     await assertNoUnlistedFile(destination, validated.relativePaths, config);
   }
   const manifestFile = config.manifestFile ?? "artifact-manifest.json";
-  const manifestBytes = await regularBytes(
-    path.join(destination, manifestFile),
-    manifestFile,
-    destination,
-  );
+  const manifestBytes = await readRegularFile(destination, manifestFile);
   assertNoUnknownSecretShape(manifestBytes, manifestFile);
   const manifest = parseStrictGate2Json(manifestBytes.toString("utf8"));
   if (config.manifestSchema === undefined) {
@@ -504,9 +576,9 @@ export async function verifyGate2PublishedEvidenceSet(repositoryRoot = root) {
 async function publish() {
   assertCondition((await realpath(root)) === root, "repository root must be canonical");
   const config = LIVE_EVIDENCE_CONFIGS[DEFAULT_PROFILE_VERSION];
-  const loaded = await loadGate2BenchmarkContract(manifestPath, root);
+  const loaded = await loadBenchmarkContractThroughCheckedPaths(root);
   const profile = parseStrictGate2Json(
-    await readFile(path.join(root, "fixtures/evals/gate2", config.profileFile), "utf8"),
+    (await readRegularFile(root, `fixtures/evals/gate2/${config.profileFile}`)).toString("utf8"),
   );
   assertCondition(
     computeGate2ExecutionProfileDigest(profile) === profile.profileDigestSha256,
