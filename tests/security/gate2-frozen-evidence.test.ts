@@ -8,6 +8,7 @@ import {
   computeFrozenEntries,
   deriveRecordContract,
   GATE2_FROZEN_EVIDENCE_SCHEMA,
+  isFreezerRefusal,
   verifyFrozenEvidence,
 } from "../../scripts/gate2-freeze-live-evidence.mjs";
 
@@ -288,4 +289,52 @@ describe("Gate 2 frozen evidence: hard links and the catch boundary", () => {
       }
     },
   );
+});
+
+describe("Gate 2 frozen evidence: the root and the second pass", () => {
+  it("refuses a set root that resolves through a symlink, from both entry points", async () => {
+    // Leaf symlinks were refused; a symlinked ROOT still let both verifiers vouch for a
+    // whole set living outside the path they claimed to verify.
+    const root = await frozenSet();
+    const alias = path.join(await mkdtemp(path.join(os.tmpdir(), "icarus-frozen-alias-")), "set");
+    roots.push(path.dirname(alias));
+    await symlink(root, alias, "dir");
+    const problems = await verifyFrozenEvidence(alias);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/resolves through a symlink to /);
+    await expect(deriveRecordContract(alias)).rejects.toThrow(/resolves through a symlink/);
+  });
+
+  it("reports a record the strict parser refuses as a verdict", async () => {
+    const root = await frozenSet();
+    const target = path.join(root, "routed", "case-a.json");
+    const text = await readFile(target, "utf8");
+    await writeFile(target, text.replace(/^\{/, '{\n  "caseId": "case-a",'));
+    const problems = await verifyFrozenEvidence(root);
+    expect(problems).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^routed\/case-a\.json: manifest/),
+        expect.stringMatching(/^recordContract: Gate 2 benchmark contract: .*duplicate/),
+      ]),
+    );
+  });
+
+  it("rethrows a fault met in the second pass instead of reporting it as evidence", async () => {
+    // A directory named like a record passes the digest walk (it holds no files) and then
+    // fails the record read with EISDIR -- a fault, reaching the catch after the walk.
+    const root = await frozenSet();
+    await mkdir(path.join(root, "routed", "fault.json"));
+    await expect(verifyFrozenEvidence(root)).rejects.toThrow(/EISDIR/);
+  });
+
+  it("classifies only deliberate refusals as verdicts", () => {
+    expect(isFreezerRefusal(new Error("Gate 2 evidence freeze: x is hard-linked"))).toBe(true);
+    expect(
+      isFreezerRefusal(new Error("Gate 2 benchmark contract: manifest must be strict JSON")),
+    ).toBe(true);
+    expect(isFreezerRefusal(Object.assign(new Error("EIO: i/o error"), { code: "EIO" }))).toBe(
+      false,
+    );
+    expect(isFreezerRefusal("not an error")).toBe(false);
+  });
 });
