@@ -820,6 +820,46 @@ describe("Gate 2 published live evidence", () => {
     });
   });
 
+  it("agrees with the freezer on the same bytes, verdict for verdict", async () => {
+    // Review of PR #78 found the two verifiers accepting different inputs: the freezer
+    // walked only *.json, so a stray text file passed it while this publisher refused it.
+    // Both now read the same universe, and the point of this test is that neither verdict
+    // is read alone -- each case asserts what BOTH say, so a future divergence fails here
+    // rather than being discovered when a published set disagrees with its own manifest.
+    const frozenDirectory = path.join(repositoryRoot, FROZEN_ARTIFACT_RELATIVE);
+
+    // (a) the untouched committed set: both accept.
+    expect(await verifyFrozenEvidence(frozenDirectory)).toEqual([]);
+    expect(
+      (await verifyGate2PublishedEvidence(repositoryRoot, "reasoning-suppressed")).files,
+    ).toHaveLength(64);
+
+    // (b) a non-JSON stray: both refuse, and name the same file.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      await writeFile(path.join(artifactDirectory, "stray.txt"), "not evidence\n");
+      expect(await verifyFrozenEvidence(artifactDirectory)).toContain(
+        "stray.txt: present but unlisted",
+      );
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        "stray.txt: present but unlisted",
+      );
+    });
+
+    // (c) one listed file's bytes corrupted, manifest untouched: both refuse, and name it.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const relative = "routed/repair-parser-false.json";
+      const recordPath = path.join(artifactDirectory, relative);
+      const record = JSON.parse(await readFile(recordPath, "utf8"));
+      record.generatedAt = "2026-09-01T23:59:59.999Z";
+      await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+      const problems = await verifyFrozenEvidence(artifactDirectory);
+      expect(problems.some((problem: string) => problem.startsWith(`${relative}:`))).toBe(true);
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        relative,
+      );
+    });
+  });
+
   it("requires conservative declared-budget accounting for a retained timeout", () => {
     const profile = {
       budgets: { maxInputTokens: 50_000, maxOutputTokens: 8192, maxRuntimeSeconds: 300 },
