@@ -59,13 +59,18 @@ sentence claims exactly what they enforce:
 - The security test forbids twelve path-shaped fragments (`src/`, `tests/`, `.py`, …) in
   the assembled instructions of every class.
 - The same test derives the stem of every expected changed, cited, and context path from
-  `fixtures/evals/gate2/manifest.v2.json` and refuses any class's instructions that contain
-  one as a word. The answer contract's own member names (`files`, `citations`, …) are
-  exempt, derived from the policy's answer-shape examples, because they are identical for
-  every case and can carry no answer; a hyphenated identifier such as a finding ID counts
-  as one word. Review of this revision planted "a new module named money" and the gate
-  stayed green; this check fails on that plant, and it failed on the first draft of these
-  rules for the word "verify", which is also the stem of `checks/verify.py`.
+  `fixtures/evals/gate2/manifest.v2.json`, splits each stem on its separators, and refuses
+  any class's instructions in which those words appear consecutively — however they are
+  separated, so `test_json_output`, `test-json-output`, and "test json output" are the same
+  name. Nothing is exempt by word. The policy's JSON templates and finding IDs are removed
+  from the scanned text instead, because they are fixed contract vocabulary a model sees
+  identically for every case; prose that reuses one of their words is scanned like any
+  other prose. Review of this revision planted "a new module named money" and the old gate
+  stayed green; a second review beat the first version of this check with
+  "test-json-output" and with the member name `files` used as prose. All three fail now,
+  and the check failed this revision's own rules twice: for "verify" (the stem of
+  `checks/verify.py`, reworded to "confirm") and for "files" in three common rules
+  (reworded to "paths", "file list", and "file set").
 
 Neither mechanism catches a rule that names an answer by paraphrase. That line is held by
 authorship, under one rule a future author has to meet: **a class rule must hold for more

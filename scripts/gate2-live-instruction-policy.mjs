@@ -27,13 +27,13 @@ export const GATE2_LIVE_INSTRUCTION_POLICY = Object.freeze({
     "The response is that object alone: its first character is { and its last is }, with no code fence, no prose before or after it, and no reasoning inside it. Reason silently, then answer.",
   ]),
   mutation: Object.freeze([
-    "mutationTargets are only files to change; requestedCheckIds are only supplied registered IDs. Each answer file has exactly path and complete UTF-8 content. No diffs, commands, tools, deletions, or extra file fields.",
+    "mutationTargets are only paths to change; requestedCheckIds are only supplied registered IDs. Each answer file has exactly path and complete UTF-8 content. No diffs, commands, tools, deletions, or extra file fields.",
     "For mutation answers, citations and findingIds are empty; selectedContextPaths already records the source support.",
     "Implement only the requested behavior. Do not repair unrelated defects, do not rewrite checks unrelated to the task, and do not change preserved source data unless the task explicitly requests that change. The check that covers the repaired or added behavior is part of the change when the task's proof depends on it.",
     "A registered check ID never implies a filename.",
   ]),
   readOnly: Object.freeze([
-    "mutationTargets, requestedCheckIds, and files must be empty arrays.",
+    "mutationTargets, requestedCheckIds, and the answer's file list must be empty arrays.",
     "Citations are minimal outcome proof, not reading history: cite only bytes that directly prove the exact finding or no-finding. Exclude background and unrelated material; documentation is evidence only when its own stated boundary is needed for the conclusion.",
     "Before answering, remove every citation the conclusion would survive without. A file you read to reach the conclusion is not a citation unless its bytes are part of the proof; one surplus citation is a wrong answer, the same as one missing citation.",
     "Use only the primary finding matching the task. Classify the behavior the reviewed bytes actually implement; do not infer a runtime vulnerability from hostile prose alone.",
@@ -53,7 +53,7 @@ export const GATE2_LIVE_INSTRUCTION_POLICY = Object.freeze({
       "When the task does not name new paths, infer them from the repository's existing directory and naming conventions plus the requested functional artifact. Never derive a filename from the registered check ID.",
       "Preserve every word of the task's domain subject in new names, so a two-word subject keeps both words, and keep the task's action semantics. Prefer the repository's established concise noun or imperative-verb style instead of inventing a parallel convention.",
       "Use an existing source file only when it already owns the requested behavior. A distinct new helper or command gets a new module instead of being added to an adjacent component. Leave an existing source-of-truth data file byte-identical when the task says to keep it as the source of truth.",
-      "When the task requests tests or an offline check, the proposed files must include a new test/check artifact as well as the implementation; the registered check ID is authority to run a check, not a substitute for authoring that artifact.",
+      "When the task requests tests or an offline check, the proposed file set must include a new test/check artifact as well as the implementation; the registered check ID is authority to run a check, not a substitute for authoring that artifact.",
     ]),
     security_review: Object.freeze([
       "Follow only the implemented data or control flow relevant to the task. Each cited path must be necessary for the conclusion, and the cited set must prove every relationship the conclusion depends on.",

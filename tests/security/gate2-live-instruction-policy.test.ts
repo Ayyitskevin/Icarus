@@ -89,11 +89,20 @@ describe("Gate 2 live instruction policy", () => {
     // Review of revision 10 (2026-09-02) planted a rule naming three expected module
     // stems in prose -- "a new module named money" -- and the whole security gate stayed
     // green, because the fragment list above forbids path SHAPES, not the benchmark's
-    // nouns. This binds the sentence ADR 0071 makes: the stem of every expected changed,
-    // cited, or context path, taken from the manifest rather than a hand-kept list, may
-    // not appear as a word in the instructions of any class. A convention speaks in
-    // roles ("the extracted module"); an answer speaks in names. A hyphenated identifier
-    // such as a finding ID counts as one word.
+    // nouns. A second review then beat the first version of this guard twice: a stem
+    // spelled with a different separator ("test-json-output" for test_json_output) and
+    // an answer-contract member name used as prose ("the module noun is files"), which a
+    // global exemption for member names had made invisible.
+    //
+    // So the guard matches TOKEN SEQUENCES: every expected changed, cited, or context
+    // path's stem, taken from the manifest rather than a hand-kept list, split on its
+    // separators, may not appear as consecutive words in any class's instructions,
+    // however they are separated. Nothing is exempt by name. The policy's JSON templates
+    // and finding IDs are removed from the scanned text instead, because they are fixed
+    // contract vocabulary a model sees identically for every case; prose that reuses one
+    // of their words is scanned like any other prose. A convention speaks in roles
+    // ("the extracted module"); an answer speaks in names. Paraphrase is not caught here
+    // and is held by the authoring rule in ADR 0071.
     const repositoryRoot = decodeURIComponent(new URL("../../", import.meta.url).pathname);
     const manifest = JSON.parse(
       readFileSync(path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v2.json"), "utf8"),
@@ -104,7 +113,12 @@ describe("Gate 2 live instruction policy", () => {
         expectedOutcome?: { expectedChangedPaths?: string[]; expectedCitationPaths?: string[] };
       }>;
     };
-    const stems = new Map<string, Set<string>>();
+    const tokensOf = (text: string): string[] =>
+      text
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((token) => token.length > 0);
+    const stems = new Map<string, { parts: string[]; cases: Set<string> }>();
     for (const benchmarkCase of manifest.cases) {
       for (const expectedPath of [
         ...(benchmarkCase.expectedOutcome?.expectedChangedPaths ?? []),
@@ -115,31 +129,22 @@ describe("Gate 2 live instruction policy", () => {
           .basename(expectedPath)
           .replace(/\.[^.]+$/, "")
           .toLowerCase();
-        stems.set(stem, (stems.get(stem) ?? new Set()).add(benchmarkCase.id));
+        const entry = stems.get(stem) ?? { parts: tokensOf(stem), cases: new Set<string>() };
+        entry.cases.add(benchmarkCase.id);
+        stems.set(stem, entry);
       }
     }
     expect(stems.size).toBeGreaterThan(20);
-    // The answer contract's member names are identical for every case and can carry no
-    // answer, so they are exempt -- derived from the policy's own templates, never listed
-    // by hand. ("files" is both the answer's file list and the stem of src/files.py.)
-    const memberNames = new Set<string>();
-    const collectKeys = (value: unknown): void => {
-      if (Array.isArray(value)) for (const item of value) collectKeys(item);
-      else if (value !== null && typeof value === "object") {
-        for (const [key, item] of Object.entries(value)) {
-          memberNames.add(key.toLowerCase());
-          collectKeys(item);
-        }
-      }
-    };
-    for (const template of Object.values(
-      GATE2_LIVE_INSTRUCTION_POLICY.templates as Record<string, string>,
-    )) {
-      collectKeys(JSON.parse(template));
-    }
-    expect(memberNames.has("files")).toBe(true);
-    for (const memberName of memberNames) stems.delete(memberName);
-    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    expect(stems.get("files")?.parts).toEqual(["files"]);
+    expect(stems.get("test_json_output")?.parts).toEqual(["test", "json", "output"]);
+    const contractVocabulary = [
+      ...Object.values(GATE2_LIVE_INSTRUCTION_POLICY.templates as Record<string, string>),
+      ...Object.keys(GATE2_LIVE_INSTRUCTION_POLICY.findingTaxonomy as Record<string, string>),
+    ];
+    const containsSequence = (haystack: string[], needle: string[]): boolean =>
+      haystack.some((_, index) =>
+        needle.every((part, offset) => haystack[index + offset] === part),
+      );
     const collisions: string[] = [];
     for (const [cls, kind] of [
       ["scaffold", "mutation"],
@@ -148,9 +153,11 @@ describe("Gate 2 live instruction policy", () => {
       ["security_review", "read_only"],
       ["explanation", "read_only"],
     ] as const) {
-      const instructions = buildGate2LiveInstructions(cls, kind).toLowerCase();
-      for (const [stem, cases] of stems) {
-        if (new RegExp(`(^|[^a-z0-9_-])${escapeRegExp(stem)}($|[^a-z0-9_-])`).test(instructions)) {
+      let scanned = buildGate2LiveInstructions(cls, kind);
+      for (const fixed of contractVocabulary) scanned = scanned.split(fixed).join(" ");
+      const tokens = tokensOf(scanned);
+      for (const [stem, { parts, cases }] of stems) {
+        if (containsSequence(tokens, parts)) {
           collisions.push(`${cls}: "${stem}" names ${[...cases].sort().join(", ")}`);
         }
       }
