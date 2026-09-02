@@ -379,21 +379,13 @@ try {
   // The named assertion below reports benchmark authority drift.
 }
 try {
-  validateGate2BenchmarkSuccessor(
-    gate2BenchmarkSuccessorManifest,
-    gate2BenchmarkManifest,
-    sha256Raw(gate2BenchmarkManifestSource),
-  );
+  validateGate2BenchmarkSuccessor(gate2BenchmarkSuccessorManifest, gate2BenchmarkManifestSource);
   gate2BenchmarkSuccessorManifestValid = true;
 } catch {
   // The named assertion below reports successor-lineage or host-policy drift.
 }
 try {
-  validateGate2BenchmarkSuccessor(
-    gate2BenchmarkV3Manifest,
-    gate2BenchmarkSuccessorManifest,
-    sha256Raw(gate2BenchmarkSuccessorManifestSource),
-  );
+  validateGate2BenchmarkSuccessor(gate2BenchmarkV3Manifest, gate2BenchmarkSuccessorManifestSource);
   gate2BenchmarkV3ManifestValid =
     sha256Raw(gate2BenchmarkV3ManifestSource) === GATE2_V3_MANIFEST_SHA256;
 } catch {

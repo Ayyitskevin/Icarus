@@ -52,7 +52,12 @@ if (parserCliCheckFiles.filter((file) => file.path === "checks/test_cli.py").len
 
 export const GATE2_V3_SUCCESSOR_ORACLES = deepFreeze([
   successorOf(cartMoney, "refactor-cart-money-extraction"),
-  successorOf(lanternJson, "scaffold-json-output-mode"),
+  // The predecessor's check id said "lantern", the very title word that left its check name
+  // underdetermined; the successor's id names the mode instead. Rule 1 forbids deriving a
+  // filename from a check id either way, but a signal pointing at the rejected name goes.
+  successorOf(lanternJson, "scaffold-json-output-mode", {
+    check: { ...lanternJson.check, id: "json-output-mode", name: "Text and JSON output modes" },
+  }),
   successorOf(parserCli, "scaffold-parser-cli-check", {
     check: { ...parserCli.check, argv: ["python", "-m", "checks.test_cli"] },
     approvedFiles: parserCliCheckFiles,

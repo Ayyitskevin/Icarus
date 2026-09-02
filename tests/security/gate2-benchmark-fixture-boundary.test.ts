@@ -1,4 +1,14 @@
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  cp,
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -143,5 +153,70 @@ describe("Gate 2 fixture boundary, manifest v3", () => {
     await expect(
       loadGate2BenchmarkContract(path.join(root, "fixtures/evals/gate2/manifest.v3.json"), root),
     ).rejects.toThrow("task digest for scaffold-parser-cli-check");
+  });
+});
+
+describe("Gate 2 fixture boundary, the read boundary and the registered digest", () => {
+  const manifestV3Relative = "fixtures/evals/gate2/manifest.v3.json";
+
+  it("refuses a whitespace-only edit of the current manifest: the bytes are not registered", async () => {
+    const root = await fixtureCopy();
+    const target = path.join(root, manifestV3Relative);
+    await writeFile(target, `${await readFile(target, "utf8")} `, "utf8");
+    await expect(loadGate2BenchmarkContract(target, root)).rejects.toThrow(
+      "registered manifest digest for gate2-thirty-task-v3-task-entailed-targets",
+    );
+  });
+
+  it("refuses a byte-identical symlink two links down the lineage", async () => {
+    const root = await fixtureCopy();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "icarus-gate2-outside-"));
+    temporaryRoots.push(outside);
+    const origin = path.join(root, "fixtures/evals/gate2/manifest.v1.json");
+    const moved = path.join(outside, "manifest.v1.json");
+    await rename(origin, moved);
+    await symlink(moved, origin);
+    await expect(
+      loadGate2BenchmarkContract(path.join(root, manifestV3Relative), root),
+    ).rejects.toThrow(
+      "predecessor manifest: fixtures/evals/gate2/manifest.v1.json passes through a symlink",
+    );
+  });
+
+  it("refuses a symlinked task and a hard-linked task, even with the right bytes", async () => {
+    const root = await fixtureCopy();
+    const task = path.join(root, "fixtures/evals/gate2/tasks/scaffold-parser-cli-check.md");
+    const aside = path.join(root, "fixtures/evals/gate2/tasks/aside.md");
+    await rename(task, aside);
+    await symlink(aside, task);
+    await expect(
+      loadGate2BenchmarkContract(path.join(root, manifestV3Relative), root),
+    ).rejects.toThrow(
+      "task scaffold-parser-cli-check: fixtures/evals/gate2/tasks/scaffold-parser-cli-check.md passes through a symlink",
+    );
+
+    await rm(task);
+    await link(aside, task);
+    await expect(
+      loadGate2BenchmarkContract(path.join(root, manifestV3Relative), root),
+    ).rejects.toThrow("is hard-linked");
+  });
+
+  it("refuses a manifest path outside the repository root and a symlinked directory component", async () => {
+    const root = await fixtureCopy();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "icarus-gate2-outside-"));
+    temporaryRoots.push(outside);
+    await cp(path.join(root, manifestV3Relative), path.join(outside, "manifest.v3.json"));
+    await expect(
+      loadGate2BenchmarkContract(path.join(outside, "manifest.v3.json"), root),
+    ).rejects.toThrow("escapes the repository root");
+
+    const tasks = path.join(root, "fixtures/evals/gate2/tasks");
+    const movedTasks = path.join(root, "fixtures/evals/gate2/tasks-real");
+    await rename(tasks, movedTasks);
+    await symlink(movedTasks, tasks);
+    await expect(
+      loadGate2BenchmarkContract(path.join(root, manifestV3Relative), root),
+    ).rejects.toThrow("passes through a symlink");
   });
 });

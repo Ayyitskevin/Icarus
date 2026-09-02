@@ -121,6 +121,7 @@ async function main() {
   const context = {
     predecessorManifest: predecessor.manifest,
     predecessorManifestSha256: predecessor.manifestSha256,
+    predecessorManifestSource: await readRegularSource("fixtures/evals/gate2/manifest.v1.json"),
     successorManifest: successor.manifest,
     successorManifestSha256: successor.manifestSha256,
     sourceReports,

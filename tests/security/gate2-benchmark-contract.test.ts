@@ -11,6 +11,7 @@ import {
   GATE2_CURRENT_BENCHMARK_REVISION,
   GATE2_CURRENT_MANIFEST_PATH,
   GATE2_MANIFEST_PATHS_BY_SHA256,
+  GATE2_MANIFEST_SHA256_BY_REVISION,
   GATE2_V2_MANIFEST_SHA256,
   GATE2_V3_MANIFEST_SHA256,
   MAX_GATE2_JSON_BYTES,
@@ -43,17 +44,14 @@ describe("Gate 2 benchmark manifest contract", () => {
   });
 
   it("accepts the immutable v2 successor only against the exact v1 bytes", async () => {
-    const [predecessor, successor, predecessorBytes] = await Promise.all([
-      loadManifest(manifestV1Url),
+    const [successor, predecessorBytes] = await Promise.all([
       loadManifest(manifestV2Url),
       readFile(manifestV1Url),
     ]);
     const predecessorSha256 = sha256Raw(predecessorBytes);
 
     expect(validateGate2BenchmarkManifest(successor)).toBe(successor);
-    expect(validateGate2BenchmarkSuccessor(successor, predecessor, predecessorSha256)).toBe(
-      successor,
-    );
+    expect(validateGate2BenchmarkSuccessor(successor, predecessorBytes)).toBe(successor);
     expect(successor.cases.map((entry: Record<string, unknown>) => entry.id)).toEqual(
       GATE2_CASE_IDS_BY_REVISION["gate2-thirty-task-v2-host-policy-compatible"],
     );
@@ -66,18 +64,16 @@ describe("Gate 2 benchmark manifest contract", () => {
   });
 
   it("rejects successor lineage drift and protected replacement targets", async () => {
-    const [predecessor, source, predecessorBytes] = await Promise.all([
-      loadManifest(manifestV1Url),
+    const [source, predecessorBytes] = await Promise.all([
       loadManifest(manifestV2Url),
       readFile(manifestV1Url),
     ]);
-    const predecessorSha256 = sha256Raw(predecessorBytes);
 
     const inheritedDrift = copy(source);
     inheritedDrift.cases[0].expectedContextPaths = ["AGENTS.md", "src/greeting.txt"];
-    expect(() =>
-      validateGate2BenchmarkSuccessor(inheritedDrift, predecessor, predecessorSha256),
-    ).toThrow("28 unchanged cases");
+    expect(() => validateGate2BenchmarkSuccessor(inheritedDrift, predecessorBytes)).toThrow(
+      "28 unchanged cases",
+    );
 
     const lineageDrift = copy(source);
     lineageDrift.replacements[0].predecessorCaseId = "repair-basic-greeting";
@@ -94,9 +90,9 @@ describe("Gate 2 benchmark manifest contract", () => {
     const replacementScopeDrift = copy(source);
     replacementScopeDrift.cases[4].repositoryId = "basic";
     replacementScopeDrift.cases[4].expectedContextPaths = ["AGENTS.md"];
-    expect(() =>
-      validateGate2BenchmarkSuccessor(replacementScopeDrift, predecessor, predecessorSha256),
-    ).toThrow("replacement case drifted");
+    expect(() => validateGate2BenchmarkSuccessor(replacementScopeDrift, predecessorBytes)).toThrow(
+      "replacement case drifted",
+    );
   });
 
   it("rejects extra and missing members at every authority boundary", async () => {
@@ -267,8 +263,7 @@ describe("Gate 2 benchmark manifest v3 lineage", () => {
   const manifestV3Url = new URL("../../fixtures/evals/gate2/manifest.v3.json", import.meta.url);
 
   it("accepts the immutable v3 successor only against the exact v2 bytes", async () => {
-    const [predecessor, successor, predecessorBytes, successorBytes] = await Promise.all([
-      loadManifest(manifestV2Url),
+    const [successor, predecessorBytes, successorBytes] = await Promise.all([
       loadManifest(manifestV3Url),
       readFile(manifestV2Url),
       readFile(manifestV3Url),
@@ -280,9 +275,7 @@ describe("Gate 2 benchmark manifest v3 lineage", () => {
     expect(GATE2_CURRENT_BENCHMARK_REVISION).toBe(successor.benchmarkRevision);
     expect(GATE2_CURRENT_MANIFEST_PATH).toBe("fixtures/evals/gate2/manifest.v3.json");
     expect(validateGate2BenchmarkManifest(successor)).toBe(successor);
-    expect(validateGate2BenchmarkSuccessor(successor, predecessor, predecessorSha256)).toBe(
-      successor,
-    );
+    expect(validateGate2BenchmarkSuccessor(successor, predecessorBytes)).toBe(successor);
     expect(successor.cases.map((entry: Record<string, unknown>) => entry.id)).toEqual(
       GATE2_CASE_IDS_BY_REVISION["gate2-thirty-task-v3-task-entailed-targets"],
     );
@@ -299,10 +292,33 @@ describe("Gate 2 benchmark manifest v3 lineage", () => {
       }
     }
     // v1 bytes are not v3's predecessor, even though they are a valid manifest.
-    const v1 = await loadManifest(manifestV1Url);
-    const v1Sha256 = sha256Raw(await readFile(manifestV1Url));
-    expect(() => validateGate2BenchmarkSuccessor(successor, v1, v1Sha256)).toThrow(
+    const v1Bytes = await readFile(manifestV1Url);
+    expect(() => validateGate2BenchmarkSuccessor(successor, v1Bytes)).toThrow(
       "predecessor benchmarkRevision",
+    );
+  });
+
+  it("digests the predecessor itself: an object cannot ride the real digest", async () => {
+    const [successor, predecessorBytes] = await Promise.all([
+      loadManifest(manifestV3Url),
+      readFile(manifestV2Url),
+    ]);
+    const forgedObject = JSON.parse(predecessorBytes.toString("utf8"));
+    forgedObject.cases.find(
+      (entry: Record<string, unknown>) => entry.id === "refactor-cart-money-module",
+    ).expectedOutcome.expectedChangedPaths = ["src/cart.py"];
+    expect(() => validateGate2BenchmarkSuccessor(successor, forgedObject)).toThrow(
+      "raw manifest bytes",
+    );
+    // The same forgery as bytes changes the digest, and the digest is what the lineage pins.
+    const forgedBytes = predecessorBytes
+      .toString("utf8")
+      .replace('["src/cart.py", "src/money.py"]', '["src/cart.py"]');
+    expect(() => validateGate2BenchmarkSuccessor(successor, forgedBytes)).toThrow(
+      "predecessor manifest digest",
+    );
+    expect(GATE2_MANIFEST_SHA256_BY_REVISION[successor.benchmarkRevision]).toBe(
+      GATE2_V3_MANIFEST_SHA256,
     );
   });
 
@@ -321,7 +337,6 @@ describe("Gate 2 benchmark manifest v3 lineage", () => {
       loadManifest(manifestV3Url),
       readFile(manifestV2Url),
     ]);
-    const predecessorSha256 = sha256Raw(predecessorBytes);
 
     const unregistered = copy(source);
     unregistered.benchmarkRevision = "gate2-thirty-task-v4-unregistered";
@@ -331,9 +346,9 @@ describe("Gate 2 benchmark manifest v3 lineage", () => {
 
     const inheritedDrift = copy(source);
     inheritedDrift.cases[0].expectedContextPaths = ["AGENTS.md", "src/greeting.txt"];
-    expect(() =>
-      validateGate2BenchmarkSuccessor(inheritedDrift, predecessor, predecessorSha256),
-    ).toThrow("27 unchanged cases");
+    expect(() => validateGate2BenchmarkSuccessor(inheritedDrift, predecessorBytes)).toThrow(
+      "27 unchanged cases",
+    );
 
     const lineageDrift = copy(source);
     lineageDrift.replacements[2].reason = "cosmetic";
@@ -362,8 +377,8 @@ describe("Gate 2 benchmark manifest v3 lineage", () => {
 
     const successorDrift = copy(source);
     successorDrift.cases[cartIndex].expectedOutcome.expectedChangedPaths = ["src/cart.py"];
-    expect(() =>
-      validateGate2BenchmarkSuccessor(successorDrift, predecessor, predecessorSha256),
-    ).toThrow("replacement case drifted at refactor-cart-money-extraction");
+    expect(() => validateGate2BenchmarkSuccessor(successorDrift, predecessorBytes)).toThrow(
+      "replacement case drifted at refactor-cart-money-extraction",
+    );
   });
 });

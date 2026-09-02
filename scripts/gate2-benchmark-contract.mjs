@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -163,7 +163,7 @@ export const GATE2_V2_MANIFEST_SHA256 =
   "0eca6348be7848bac44922bcf426defdbd581af8ef790515e28c231b5fbc69c5";
 // Pinned from the committed bytes; a change to manifest.v3.json is a new revision, not an edit.
 export const GATE2_V3_MANIFEST_SHA256 =
-  "4d41eb673de92e5194946f3cc4560cc7e06326bb4a89d44e6a10f0ea7528da51";
+  "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134";
 const GATE2_V3_CASE_IDS = Object.freeze(
   GATE2_V2_CASE_IDS.map((caseId) => {
     if (caseId === "refactor-cart-money-module") return "refactor-cart-money-extraction";
@@ -184,6 +184,13 @@ export const GATE2_MANIFEST_PATHS_BY_SHA256 = Object.freeze({
   [GATE2_V1_MANIFEST_SHA256]: "fixtures/evals/gate2/manifest.v1.json",
   [GATE2_V2_MANIFEST_SHA256]: "fixtures/evals/gate2/manifest.v2.json",
   [GATE2_V3_MANIFEST_SHA256]: GATE2_CURRENT_MANIFEST_PATH,
+});
+// The bytes a revision may be loaded from. A manifest is refused unless its digest is the one
+// registered for the revision it claims; a valid-JSON edit is a new revision, never an edit.
+export const GATE2_MANIFEST_SHA256_BY_REVISION = Object.freeze({
+  "gate2-thirty-task-v1": GATE2_V1_MANIFEST_SHA256,
+  "gate2-thirty-task-v2-host-policy-compatible": GATE2_V2_MANIFEST_SHA256,
+  "gate2-thirty-task-v3-task-entailed-targets": GATE2_V3_MANIFEST_SHA256,
 });
 
 const GATE2_V2_REPLACEMENTS = Object.freeze([
@@ -292,7 +299,7 @@ const GATE2_V3_SUCCESSOR_CASES = Object.freeze([
     repositoryId: "unfamiliar",
     task: Object.freeze({
       path: "fixtures/evals/gate2/tasks/scaffold-json-output-mode.md",
-      sha256: "d8bc9f334d938437a64db4a149a718e71e606024be91b6b8144ed00a5937518b",
+      sha256: "33afcb78ed0cfa00578b7e707f77365f99336e190e166a45e2dc5e4b0c573d4f",
     }),
     expectedContextPaths: Object.freeze([
       "config/app.json",
@@ -750,12 +757,22 @@ export function validateGate2BenchmarkManifest(value) {
   return manifest;
 }
 
-export function validateGate2BenchmarkSuccessor(
-  successorInput,
-  predecessorInput,
-  predecessorManifestSha256,
-) {
-  const predecessor = validateGate2BenchmarkManifest(predecessorInput);
+/**
+ * Validate a successor against its predecessor's raw bytes. The predecessor is digested and
+ * strict-parsed here, so the object the lineage is checked against cannot diverge from the
+ * digest the lineage pins: a review forged a v2 object and handed it in beside the real v2
+ * digest, and the old object-plus-digest signature accepted the pair.
+ */
+export function validateGate2BenchmarkSuccessor(successorInput, predecessorBytes) {
+  if (typeof predecessorBytes !== "string" && !(predecessorBytes instanceof Uint8Array)) {
+    fail("predecessor must be raw manifest bytes");
+  }
+  const predecessorManifestSha256 = sha256Raw(predecessorBytes);
+  const predecessorText =
+    typeof predecessorBytes === "string"
+      ? predecessorBytes
+      : Buffer.from(predecessorBytes).toString("utf8");
+  const predecessor = validateGate2BenchmarkManifest(parseStrictGate2Json(predecessorText));
   const successor = validateGate2BenchmarkManifest(successorInput);
   assertLiteral(successor.schemaVersion, 2, "successor schemaVersion");
   const lineage = lineageOf(successor.benchmarkRevision);
@@ -1023,6 +1040,45 @@ export function parseStrictGate2Json(source) {
   }
 }
 
+/**
+ * Read one repository file through the path boundary: the root is a real directory, the
+ * path is inside it, and every component below the root is checked with lstat -- directories
+ * that are not symlinks on the way down, an ordinary single-link regular file at the end --
+ * before any bytes are read. A review reached the lineage through a byte-identical symlink
+ * to a file outside the repository: the digest authenticated the content while the path said
+ * nothing about where it came from.
+ */
+async function readRepositoryFile(repositoryRoot, target, label) {
+  const root = path.resolve(repositoryRoot);
+  const real = await realpath(root).catch((error) => {
+    if (error?.code === "ENOENT") fail(`${label}: repository root does not exist`);
+    throw error;
+  });
+  if (real !== root) fail(`${label}: repository root resolves through a symlink`);
+  const absolute = path.resolve(root, target);
+  const relative = path.relative(root, absolute);
+  if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`)) {
+    fail(`${label}: path escapes the repository root`);
+  }
+  const components = relative.split(path.sep);
+  let current = root;
+  for (const [index, component] of components.entries()) {
+    current = path.join(current, component);
+    const status = await lstat(current).catch((error) => {
+      if (error?.code === "ENOENT") fail(`${label}: ${relative} does not exist`);
+      throw error;
+    });
+    if (status.isSymbolicLink()) fail(`${label}: ${relative} passes through a symlink`);
+    if (index < components.length - 1) {
+      if (!status.isDirectory()) fail(`${label}: ${relative} passes through a non-directory`);
+    } else {
+      if (!status.isFile()) fail(`${label}: ${relative} is not a regular file`);
+      if (status.nlink !== 1) fail(`${label}: ${relative} is hard-linked`);
+    }
+  }
+  return readFile(absolute);
+}
+
 async function snapshotFixture(root) {
   const files = [];
   async function visit(directory, prefix = "") {
@@ -1050,24 +1106,41 @@ async function snapshotFixture(root) {
  * read-only and deliberately has no provider, Git, credential, or network seam.
  */
 export async function loadGate2BenchmarkContract(manifestPath, repositoryRoot) {
-  const raw = await readFile(manifestPath);
+  const givenPath = manifestPath instanceof URL ? fileURLToPath(manifestPath) : manifestPath;
+  const raw = await readRepositoryFile(repositoryRoot, givenPath, "manifest");
   const manifest = validateGate2BenchmarkManifest(parseStrictGate2Json(raw.toString("utf8")));
+  const manifestSha256 = sha256Raw(raw);
+  // The bytes must be the registered bytes for the revision they claim. A valid-JSON edit
+  // (a review appended one space) would otherwise run under a digest nothing can resolve.
+  assertLiteral(
+    manifestSha256,
+    GATE2_MANIFEST_SHA256_BY_REVISION[manifest.benchmarkRevision],
+    `registered manifest digest for ${manifest.benchmarkRevision}`,
+  );
   let predecessorManifestSha256 = null;
   // Walk the whole lineage against committed bytes: v3 binds v2's digest, v2 binds v1's.
   // A predecessor edited anywhere in the chain refuses every manifest above it.
   let successor = manifest;
   while (successor.schemaVersion === 2) {
-    const predecessorPath = path.resolve(repositoryRoot, successor.supersedes.manifestPath);
-    const predecessorRaw = await readFile(predecessorPath);
+    const predecessorRaw = await readRepositoryFile(
+      repositoryRoot,
+      successor.supersedes.manifestPath,
+      "predecessor manifest",
+    );
     const digest = sha256Raw(predecessorRaw);
     assertLiteral(digest, successor.supersedes.manifestSha256, "predecessor manifest digest");
-    const predecessor = parseStrictGate2Json(predecessorRaw.toString("utf8"));
-    validateGate2BenchmarkSuccessor(successor, predecessor, digest);
+    validateGate2BenchmarkSuccessor(successor, predecessorRaw);
     if (predecessorManifestSha256 === null) predecessorManifestSha256 = digest;
-    successor = validateGate2BenchmarkManifest(predecessor);
+    successor = validateGate2BenchmarkManifest(
+      parseStrictGate2Json(predecessorRaw.toString("utf8")),
+    );
   }
   for (const benchmarkCase of manifest.cases) {
-    const taskBytes = await readFile(path.resolve(repositoryRoot, benchmarkCase.task.path));
+    const taskBytes = await readRepositoryFile(
+      repositoryRoot,
+      benchmarkCase.task.path,
+      `task ${benchmarkCase.id}`,
+    );
     assertLiteral(
       sha256Raw(taskBytes),
       benchmarkCase.task.sha256,
@@ -1087,7 +1160,7 @@ export async function loadGate2BenchmarkContract(manifestPath, repositoryRoot) {
   }
   return {
     manifest,
-    manifestSha256: sha256Raw(raw),
+    manifestSha256,
     predecessorManifestSha256,
   };
 }

@@ -704,7 +704,7 @@
       "repositoryId": "unfamiliar",
       "task": {
         "path": "fixtures/evals/gate2/tasks/scaffold-json-output-mode.md",
-        "sha256": "d8bc9f334d938437a64db4a149a718e71e606024be91b6b8144ed00a5937518b"
+        "sha256": "33afcb78ed0cfa00578b7e707f77365f99336e190e166a45e2dc5e4b0c573d4f"
       },
       "expectedContextPaths": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
       "expectedOutcome": {

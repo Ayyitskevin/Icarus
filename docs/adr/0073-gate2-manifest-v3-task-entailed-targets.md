@@ -58,14 +58,29 @@ Mechanism, so that a fourth revision is a registration and not a rewrite:
   any registered pair, and `loadGate2BenchmarkContract` walks the whole chain against
   committed bytes — an edited v1 refuses v3.
 - The v3 digest is pinned in code (`GATE2_V3_MANIFEST_SHA256`) and asserted against the
-  bytes by test and by `security-check.mjs`; a change to the file is a new revision.
+  bytes by test and by `security-check.mjs`; a change to the file is a new revision. The
+  loader binds this at runtime too: `GATE2_MANIFEST_SHA256_BY_REVISION` is the registered
+  digest for each revision, and `loadGate2BenchmarkContract` refuses bytes whose digest is
+  not the one registered for the revision they claim — a valid-JSON edit (the first review
+  appended one space) cannot produce a run under a digest nothing can resolve.
+- `validateGate2BenchmarkSuccessor` takes the predecessor's **raw bytes**, digests and
+  strict-parses them itself. The earlier object-plus-digest signature accepted a forged v2
+  object handed in beside the real v2 digest; there is now no object to hand in.
+- Every manifest, predecessor, and task read in the loader goes through one repository-rooted
+  read boundary: a real root, a path inside it, every component lstat-checked on the way down
+  (no symlink, directories until the last), an ordinary single-link regular file at the end,
+  and only then bytes. The first review reached the lineage through a byte-identical symlink
+  to a file outside the repository; the digest authenticated the content while the path said
+  nothing about where it came from.
 - `GATE2_MANIFEST_PATHS_BY_SHA256` is the only place a digest becomes a path. The figures
   script resolves a frozen set's benchmark from the digest its own result files carry, so
   every earlier set (v2-era r9, r10, reasoning-suppressed) recomputes with no flag and no
   default that silently drifts.
 - The runner reads `GATE2_CURRENT_MANIFEST_PATH`. Its mutation-oracle registry gains three
-  successor oracles derived from the v2 entries they replace (same registered check, same
-  approved bytes; only `scaffold-parser-cli-check` relocates its check file and its argv). A
+  successor oracles derived from the v2 entries they replace (same approved bytes;
+  `scaffold-parser-cli-check` relocates its check file and argv, and
+  `scaffold-json-output-mode` takes the check id `json-output-mode` — the inherited id said
+  `lantern`, the very title word that had left its check name underdetermined). A
   test pins every v3 mutation case to exactly one oracle whose approved paths equal the
   manifest's expected set — the coupling the runner scores by.
 
@@ -82,11 +97,22 @@ Mechanism, so that a fourth revision is a registration and not a rewrite:
   untouched; publishing a v3-era set is a separate change.
 - Deterministic cohorts (`GATE2_SCAFFOLD_A_ORACLES`, `GATE2_REFACTOR_ORACLES`) and their
   frozen replay reports are untouched: the successor oracles live beside them, not in them.
+- `scaffold-greeting-command` was considered and deferred. It expects `tests/test_greet.py`
+  in a fixture that has only `checks/`, from a task that names no path — the same shape as
+  the parser-CLI defect — but it has never produced a parseable answer under any revision,
+  so its ambiguity has never decided its score. The moment it parses, it will; the next
+  manifest revision should carry it. v3 therefore holds two `tests/` expectations against
+  seven `checks/`.
+- The three successor task texts were read cold by the Opus seat against only what the model
+  sees (fixture inventory, retrieved context, revision-10 rules, registered check id); the
+  first draft of the JSON-output task named the directory but not the file and was held for
+  it — under rule 2 a model keeps "mode", and with no existing check to imitate the `test_`
+  prefix had no anchor. The task now names `test_json_output.py`.
 
 ## Verification
 
     node scripts/gate2-benchmark-contract.mjs
-      -> validatedManifests: v1 43159d8a…, v2 0eca6348…, v3 4d41eb67…; validatedCases 30
+      -> validatedManifests: v1 43159d8a…, v2 0eca6348…, v3 e1411ab9…; validatedCases 30
     node scripts/gate2-frozen-evidence-figures.mjs --set docs/evals/artifacts/gate2-r10-20260902
       -> Benchmark manifest: manifest.v2.json (0eca6348be78), resolved by digest; every figure agrees
     pnpm exec vitest run tests/security/gate2-live-instruction-policy.test.ts
