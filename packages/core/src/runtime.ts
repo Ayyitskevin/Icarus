@@ -6,6 +6,7 @@ import {
   readdir,
   readFile,
   realpath,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -103,7 +104,7 @@ async function canonicalProspectivePath(requestedPath: string): Promise<string> 
 
 async function gitMarkerExists(directory: string): Promise<boolean> {
   const markerPath = path.join(directory, ".git");
-  const markerStat = await lstat(markerPath).catch((error: unknown) => {
+  let markerStat = await lstat(markerPath).catch((error: unknown) => {
     if (
       typeof error === "object" &&
       error !== null &&
@@ -115,6 +116,21 @@ async function gitMarkerExists(directory: string): Promise<boolean> {
     throw error;
   });
   if (markerStat === null) return false;
+
+  if (markerStat.isSymbolicLink()) {
+    markerStat = await stat(markerPath).catch((error: unknown) => {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+      ) {
+        return null;
+      }
+      throw error;
+    });
+    if (markerStat === null) return false;
+  }
 
   if (markerStat.isDirectory()) {
     try {

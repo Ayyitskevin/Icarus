@@ -25,15 +25,17 @@ operation choosing a state root beneath `/tmp` would receive the same refusal.
 
 ## Decision
 
-An ancestor carries a Git worktree marker only when its `.git` entry has one of
-Git's two documented worktree forms:
+An ancestor carries a Git worktree marker only when its `.git` entry, or the
+target of a `.git` symlink, has one of Git's two documented worktree forms:
 
 - a `.git` directory containing a `HEAD` entry; or
 - a regular `.git` file whose first bytes are exactly `gitdir:`.
 
-The gitfile read is limited to that fixed prefix. A missing marker, an empty
-`.git` directory, a nonmatching regular file, or a special filesystem entry is
-not repository evidence. Unexpected metadata, open, and read errors still
+Marker symlinks are followed because Git follows them; a symlink resolving to
+either form is repository evidence. The gitfile read is limited to that fixed
+prefix. A missing marker, an empty `.git` directory, a nonmatching regular file,
+a dangling `.git` symlink, or another special filesystem entry is not repository
+evidence. Unexpected metadata, symlink-resolution, open, and read errors still
 propagate, so an unreadable candidate is not silently treated as safe.
 
 This changes only ancestor worktree discovery. The lexical and canonical walk,
@@ -67,8 +69,10 @@ unrelated empty filesystem junk as a repository does not provide one.
 
 ## Consequences and verification
 
-An empty `.git` ancestor is accepted and the state marker can be created below
-it. A repository-directory ancestor with `.git/HEAD` and a linked-worktree
-`gitdir:` file are both refused before state-root creation. Reconsider this
-decision if state roots become supported beneath hostile shared ancestors or if
-Git introduces another worktree marker form.
+An empty `.git` ancestor, a nonmatching regular `.git` file, and a dangling
+`.git` symlink are accepted and the state marker can be created below them. A
+repository-directory ancestor with `.git/HEAD`, a `.git` symlink resolving to
+such a directory, and a linked-worktree `gitdir:` file are refused before
+state-root creation. Reconsider this decision if state roots become supported
+beneath hostile shared ancestors or if Git introduces another worktree marker
+form.
