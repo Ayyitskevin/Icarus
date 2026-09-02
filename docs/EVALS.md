@@ -563,7 +563,7 @@ is fixed at ten repairs, five refactors, five explanations, five security
 reviews, and five scaffolds. Unknown, missing, duplicate, reordered, reclassified,
 unpinned, or byte-drifted input fails validation.
 
-`pnpm benchmark:gate2:contract` strict-parses and validates both revisions and
+`pnpm benchmark:gate2:contract` strict-parses and validates all three registered revisions (v1, v2, v3) and
 their lineage offline. `pnpm eval` includes the same command. A successful
 command reports the latest 30 validated cases, zero executed cases, and
 `contract_validated_gate2_execution_not_run`.
