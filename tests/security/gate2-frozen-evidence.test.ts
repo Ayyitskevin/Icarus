@@ -259,14 +259,33 @@ describe("Gate 2 frozen evidence: hard links and the catch boundary", () => {
     ]);
   });
 
-  it("reports only its own refusals as verdicts and rethrows anything else", async () => {
-    // A directory the walk cannot read is a fault, not a finding about the evidence.
-    const root = await frozenSet();
-    await chmod(path.join(root, "routed"), 0o000);
-    try {
-      await expect(verifyFrozenEvidence(root)).rejects.toThrow(/EACCES|EPERM/);
-    } finally {
-      await chmod(path.join(root, "routed"), 0o700);
-    }
-  });
+  it.skipIf(process.getuid?.() === 0)(
+    "reports only its own refusals as verdicts and rethrows anything else",
+    async () => {
+      // A directory the walk cannot read is a fault, not a finding about the evidence.
+      // (Root ignores mode bits, so the condition cannot be staged there; skipped, not red.)
+      const root = await frozenSet();
+      await chmod(path.join(root, "routed"), 0o000);
+      try {
+        await expect(verifyFrozenEvidence(root)).rejects.toThrow(/EACCES|EPERM/);
+      } finally {
+        await chmod(path.join(root, "routed"), 0o700);
+      }
+    },
+  );
+
+  it.skipIf(process.getuid?.() === 0)(
+    "derives no contract from half a set: an unreadable arm is a fault, not an absence",
+    async () => {
+      // readRecords once read an unreadable directory as "no records here" and derived the
+      // contract from the other arm alone. Only a missing directory is an absence.
+      const root = await frozenSet();
+      await chmod(path.join(root, "routed"), 0o000);
+      try {
+        await expect(deriveRecordContract(root)).rejects.toThrow(/EACCES|EPERM/);
+      } finally {
+        await chmod(path.join(root, "routed"), 0o700);
+      }
+    },
+  );
 });

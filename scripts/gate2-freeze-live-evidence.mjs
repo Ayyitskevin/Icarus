@@ -103,7 +103,13 @@ export async function computeFrozenEntries(root) {
 async function readRecords(root) {
   const records = [];
   for (const directory of RECORD_DIRECTORIES) {
-    const names = await readdir(path.join(root, directory)).catch(() => []);
+    // A record directory that does not exist holds no records; one that cannot be read is
+    // a fault, and a fault must not become "no records here" -- absence produced by an
+    // error and then reported as measurement is the defect this campaign exists to remove.
+    const names = await readdir(path.join(root, directory)).catch((error) => {
+      if (error?.code === "ENOENT") return [];
+      throw error;
+    });
     for (const name of names.sort()) {
       if (!name.endsWith(".json")) continue;
       const relative = `${directory}/${name}`;
