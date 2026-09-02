@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -245,5 +245,28 @@ describe("Gate 2 frozen evidence: one parser, regular files only", () => {
     await symlink(path.join(outside, "case-a.json"), target);
     const problems = await verifyFrozenEvidence(root);
     expect(problems).toEqual(["Gate 2 evidence freeze: routed/case-a.json is not a regular file"]);
+  });
+});
+
+describe("Gate 2 frozen evidence: hard links and the catch boundary", () => {
+  it("refuses a listed record that is hard-linked, as the publisher does", async () => {
+    const root = await frozenSet();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "icarus-frozen-outside-"));
+    roots.push(outside);
+    await link(path.join(root, "routed", "case-a.json"), path.join(outside, "case-a.json"));
+    expect(await verifyFrozenEvidence(root)).toEqual([
+      "Gate 2 evidence freeze: routed/case-a.json is hard-linked",
+    ]);
+  });
+
+  it("reports only its own refusals as verdicts and rethrows anything else", async () => {
+    // A directory the walk cannot read is a fault, not a finding about the evidence.
+    const root = await frozenSet();
+    await chmod(path.join(root, "routed"), 0o000);
+    try {
+      await expect(verifyFrozenEvidence(root)).rejects.toThrow(/EACCES|EPERM/);
+    } finally {
+      await chmod(path.join(root, "routed"), 0o700);
+    }
   });
 });
