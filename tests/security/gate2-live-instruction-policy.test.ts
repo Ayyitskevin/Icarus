@@ -33,6 +33,7 @@ describe("Gate 2 live instruction policy", () => {
       buildGate2LiveInstructions("refactor", "mutation"),
       buildGate2LiveInstructions("repair", "mutation"),
       buildGate2LiveInstructions("security_review", "read_only"),
+      buildGate2LiveInstructions("explanation", "read_only"),
     ].join("\n");
     for (const benchmarkShapedFragment of [
       "../outside",
@@ -94,15 +95,21 @@ describe("Gate 2 live instruction policy", () => {
     // an answer-contract member name used as prose ("the module noun is files"), which a
     // global exemption for member names had made invisible.
     //
-    // So the guard matches TOKEN SEQUENCES: every expected changed, cited, or context
-    // path's stem, taken from the manifest rather than a hand-kept list, split on its
-    // separators, may not appear as consecutive words in any class's instructions,
-    // however they are separated. Nothing is exempt by name. The policy's JSON templates
-    // and finding IDs are removed from the scanned text instead, because they are fixed
-    // contract vocabulary a model sees identically for every case; prose that reuses one
-    // of their words is scanned like any other prose. A convention speaks in roles
-    // ("the extracted module"); an answer speaks in names. Paraphrase is not caught here
-    // and is held by the authoring rule in ADR 0071.
+    // A third review then beat the second version: it cut the JSON templates and finding
+    // IDs out of the assembled text before scanning, so a rule that wrote a finding ID
+    // into its prose ("the middle word of unvalidated-config-shape") had the stem inside
+    // the ID erased before the scan while the model still read it.
+    //
+    // So the guard scans the policy's PROSE STRINGS themselves -- common, kind, and class
+    // rules, and the taxonomy definitions -- as token sequences: every expected changed,
+    // cited, or context path's stem, taken from the manifest rather than a hand-kept
+    // list, split on its separators, may not appear as consecutive words in any of them,
+    // however separated. Nothing is cut out of prose and no word is exempt. The only text
+    // not scanned is what the builder owns structurally: the class/kind line, the JSON
+    // template, and the taxonomy IDs as identifiers -- and a structural check below
+    // asserts the assembled instructions contain nothing beyond those pieces. A
+    // convention speaks in roles ("the extracted module"); an answer speaks in names.
+    // Paraphrase is not caught here and is held by the authoring rule in ADR 0071.
     const repositoryRoot = decodeURIComponent(new URL("../../", import.meta.url).pathname);
     const manifest = JSON.parse(
       readFileSync(path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v2.json"), "utf8"),
@@ -137,15 +144,45 @@ describe("Gate 2 live instruction policy", () => {
     expect(stems.size).toBeGreaterThan(20);
     expect(stems.get("files")?.parts).toEqual(["files"]);
     expect(stems.get("test_json_output")?.parts).toEqual(["test", "json", "output"]);
-    const contractVocabulary = [
-      ...Object.values(GATE2_LIVE_INSTRUCTION_POLICY.templates as Record<string, string>),
-      ...Object.keys(GATE2_LIVE_INSTRUCTION_POLICY.findingTaxonomy as Record<string, string>),
-    ];
+    expect(stems.get("config")?.parts).toEqual(["config"]);
+    const policy = GATE2_LIVE_INSTRUCTION_POLICY as unknown as {
+      common: readonly string[];
+      mutation: readonly string[];
+      readOnly: readonly string[];
+      classRules: Readonly<Record<string, readonly string[]>>;
+      templates: Readonly<Record<"mutation" | "readOnly", string>>;
+      findingTaxonomy: Readonly<Record<string, string>>;
+    };
+    const prose: Array<{ where: string; text: string }> = [];
+    for (const [where, list] of [
+      ["common", policy.common],
+      ["mutation", policy.mutation],
+      ["readOnly", policy.readOnly],
+      ...Object.entries(policy.classRules).map(([cls, list]) => [`classRules.${cls}`, list]),
+    ] as Array<[string, readonly string[]]>) {
+      for (const text of list) prose.push({ where, text });
+    }
+    for (const [id, definition] of Object.entries(policy.findingTaxonomy)) {
+      prose.push({ where: `findingTaxonomy.${id}`, text: definition });
+    }
+    expect(prose.length).toBeGreaterThan(10);
     const containsSequence = (haystack: string[], needle: string[]): boolean =>
       haystack.some((_, index) =>
         needle.every((part, offset) => haystack[index + offset] === part),
       );
     const collisions: string[] = [];
+    for (const { where, text } of prose) {
+      const tokens = tokensOf(text);
+      for (const [stem, { parts, cases }] of stems) {
+        if (containsSequence(tokens, parts)) {
+          collisions.push(`${where}: "${stem}" names ${[...cases].sort().join(", ")}`);
+        }
+      }
+    }
+    expect(collisions).toEqual([]);
+    // Structural: the assembled instructions are exactly the scanned prose plus the
+    // builder-owned pieces. If the builder ever adds prose of its own, this fails and the
+    // scan above has to learn about it.
     for (const [cls, kind] of [
       ["scaffold", "mutation"],
       ["refactor", "mutation"],
@@ -153,16 +190,22 @@ describe("Gate 2 live instruction policy", () => {
       ["security_review", "read_only"],
       ["explanation", "read_only"],
     ] as const) {
-      let scanned = buildGate2LiveInstructions(cls, kind);
-      for (const fixed of contractVocabulary) scanned = scanned.split(fixed).join(" ");
-      const tokens = tokensOf(scanned);
-      for (const [stem, { parts, cases }] of stems) {
-        if (containsSequence(tokens, parts)) {
-          collisions.push(`${cls}: "${stem}" names ${[...cases].sort().join(", ")}`);
-        }
-      }
+      const expected = [
+        ...policy.common,
+        ...(kind === "mutation" ? policy.mutation : policy.readOnly),
+        ...(policy.classRules[cls] ?? []),
+        `This task class is ${cls}; its answer kind is ${kind}.`,
+        `Required shape: ${policy.templates[kind === "mutation" ? "mutation" : "readOnly"]}`,
+        ...(kind === "read_only"
+          ? [
+              `Finding taxonomy: ${Object.entries(policy.findingTaxonomy)
+                .map(([id, definition]) => `${id} = ${definition}`)
+                .join("; ")}.`,
+            ]
+          : []),
+      ].join(" ");
+      expect(buildGate2LiveInstructions(cls, kind)).toBe(expected);
     }
-    expect(collisions).toEqual([]);
   });
 
   it("gives the model the complete repository inventory without expected outcomes", () => {

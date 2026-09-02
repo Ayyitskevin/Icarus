@@ -57,20 +57,24 @@ Every rule is a **convention**, never an answer. Two mechanisms hold that line, 
 sentence claims exactly what they enforce:
 
 - The security test forbids twelve path-shaped fragments (`src/`, `tests/`, `.py`, …) in
-  the assembled instructions of every class.
+  the assembled instructions of all five classes.
 - The same test derives the stem of every expected changed, cited, and context path from
   `fixtures/evals/gate2/manifest.v2.json`, splits each stem on its separators, and refuses
-  any class's instructions in which those words appear consecutively — however they are
-  separated, so `test_json_output`, `test-json-output`, and "test json output" are the same
-  name. Nothing is exempt by word. The policy's JSON templates and finding IDs are removed
-  from the scanned text instead, because they are fixed contract vocabulary a model sees
-  identically for every case; prose that reuses one of their words is scanned like any
-  other prose. Review of this revision planted "a new module named money" and the old gate
-  stayed green; a second review beat the first version of this check with
-  "test-json-output" and with the member name `files` used as prose. All three fail now,
-  and the check failed this revision's own rules twice: for "verify" (the stem of
-  `checks/verify.py`, reworded to "confirm") and for "files" in three common rules
-  (reworded to "paths", "file list", and "file set").
+  any policy prose in which those words appear consecutively — however they are separated,
+  so `test_json_output`, `test-json-output`, and "test json output" are the same name. The
+  prose it scans is every instruction string the policy holds: the common, kind, and class
+  rules and the finding-taxonomy definitions. Nothing is cut out of prose and no word is
+  exempt; a finding ID written into a rule is scanned as the words it contains. The only
+  unscanned text is what the builder owns structurally — the class/kind line, the JSON
+  template, and the taxonomy IDs as identifiers — and the test asserts the assembled
+  instructions contain nothing beyond those pieces. Three reviews shaped this: the first
+  planted "a new module named money" and the old gate stayed green; the second beat the
+  first version with "test-json-output" and with the member name `files` used as prose;
+  the third beat the second version by writing a finding ID into a rule so that the stem
+  inside it was cut out before the scan. All of those fail now. The check also failed this
+  revision's own rules twice: for "verify" (the stem of `checks/verify.py`, reworded to
+  "confirm") and for "files" in three common rules (reworded to "paths", "file list", and
+  "file set").
 
 Neither mechanism catches a rule that names an answer by paraphrase. That line is held by
 authorship, under one rule a future author has to meet: **a class rule must hold for more
