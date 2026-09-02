@@ -19,6 +19,8 @@ import { cp, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { parseStrictGate2Json } from "./gate2-benchmark-contract.mjs";
+
 export const GATE2_FROZEN_EVIDENCE_SCHEMA = "icarus.gate2-frozen-evidence.v2";
 const MANIFEST = "manifest.json";
 const PREFLIGHT = "preflight.json";
@@ -61,7 +63,9 @@ function distinct(values) {
 // A frozen directory is closed: every entry that is not a directory is listed and digested,
 // whatever its name, so a stray file is refused rather than ignored. The publisher's walk
 // (scripts/gate2-live-evidence-publish.mjs) enumerates the same universe; a file one accepts
-// and the other refuses was the 2026-09-02 review finding this closes.
+// and the other refuses was the 2026-09-02 review finding this closes. Every listed entry
+// must be a regular file: a symlink would let the manifest vouch for bytes outside the
+// frozen root, so it is refused rather than followed -- the second finding of that review.
 async function listFiles(root) {
   const out = [];
   async function visit(directory, prefix) {
@@ -70,7 +74,10 @@ async function listFiles(root) {
     )) {
       const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
       if (entry.isDirectory()) await visit(path.join(directory, entry.name), relative);
-      else if (relative !== MANIFEST) out.push(relative);
+      else if (relative === MANIFEST) {
+        if (!entry.isFile()) fail(`${relative} is not a regular file`);
+      } else if (!entry.isFile()) fail(`${relative} is not a regular file`);
+      else out.push(relative);
     }
   }
   await visit(root, "");
@@ -94,7 +101,7 @@ async function readRecords(root) {
     for (const name of names.sort()) {
       if (!name.endsWith(".json")) continue;
       const relative = `${directory}/${name}`;
-      const record = JSON.parse(await readFile(path.join(root, relative), "utf8"));
+      const record = parseStrictGate2Json(await readFile(path.join(root, relative), "utf8"));
       if (
         !Number.isSafeInteger(record?.evidenceRecordRevision) ||
         typeof record.generatedAt !== "string"
@@ -151,10 +158,20 @@ export async function deriveRecordContract(root) {
 
 /** Returns the mismatched paths; an empty array means the manifest is true of the bytes. */
 export async function verifyFrozenEvidence(root) {
-  const manifest = JSON.parse(await readFile(path.join(root, MANIFEST), "utf8"));
+  // The same strict parser the publisher and the benchmark use: a manifest with a
+  // duplicated member is refused here as it is there, never read twice two ways.
+  const manifest = parseStrictGate2Json(await readFile(path.join(root, MANIFEST), "utf8"));
   if (manifest.schema !== GATE2_FROZEN_EVIDENCE_SCHEMA) fail("manifest schema is not recognised");
-  const actual = new Map((await computeFrozenEntries(root)).map((e) => [e.path, e]));
   const problems = [];
+  let entries;
+  try {
+    entries = await computeFrozenEntries(root);
+  } catch (error) {
+    // An entry that is not a regular file is a verdict about the directory, not a crash.
+    problems.push(error instanceof Error ? error.message : String(error));
+    return problems;
+  }
+  const actual = new Map(entries.map((e) => [e.path, e]));
   for (const claimed of manifest.files) {
     const found = actual.get(claimed.path);
     if (found === undefined) problems.push(`${claimed.path}: listed but absent`);
@@ -230,7 +247,7 @@ export async function freezeLiveEvidence({
   const preflightBytes = await readFile(path.join(to, PREFLIGHT), "utf8").catch(() => null);
   if (preflightBytes === null)
     fail(`${PREFLIGHT} is missing; a set without its preflight is not one run`);
-  const preflight = JSON.parse(preflightBytes);
+  const preflight = parseStrictGate2Json(preflightBytes);
   const { instructionPolicySha256, executionProfileDigestSha256 } = preflight;
   if (
     typeof instructionPolicySha256 !== "string" ||

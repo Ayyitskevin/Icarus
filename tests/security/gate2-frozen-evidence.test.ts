@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -217,5 +217,33 @@ describe("Gate 2 frozen evidence on the committed bytes", () => {
       writtenOn: "2026-09-01",
       everyRecordReasoningChars: 0,
     });
+  });
+});
+
+describe("Gate 2 frozen evidence: one parser, regular files only", () => {
+  it("refuses a manifest with a duplicated member, as the publisher does", async () => {
+    // Native JSON.parse keeps the last duplicate silently; the publisher's strict parser
+    // refuses it. Two verifiers reading one manifest two ways was a review finding.
+    const root = await frozenSet();
+    const manifestPath = path.join(root, "manifest.json");
+    const text = await readFile(manifestPath, "utf8");
+    await writeFile(
+      manifestPath,
+      text.replace(/^\{/, '{\n  "schema": "icarus.gate2-frozen-evidence.v2",'),
+    );
+    await expect(verifyFrozenEvidence(root)).rejects.toThrow(/duplicate JSON object members/);
+  });
+
+  it("refuses a listed record that is a symlink, even to byte-identical content", async () => {
+    // A followed symlink would let the manifest vouch for bytes outside the frozen root.
+    const root = await frozenSet();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "icarus-frozen-outside-"));
+    roots.push(outside);
+    const target = path.join(root, "routed", "case-a.json");
+    await writeFile(path.join(outside, "case-a.json"), await readFile(target));
+    await rm(target);
+    await symlink(path.join(outside, "case-a.json"), target);
+    const problems = await verifyFrozenEvidence(root);
+    expect(problems).toEqual(["Gate 2 evidence freeze: routed/case-a.json is not a regular file"]);
   });
 });
