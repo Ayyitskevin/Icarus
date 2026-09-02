@@ -141,28 +141,33 @@ function safeJoin(base, relative) {
 }
 
 /**
- * A published set is addressed by a repository-relative path, and every check below reads
- * bytes THROUGH that path: the manifest, the 60 records, the results, the secret screen,
- * and the freezer's walk. A link anywhere between the repository root and the directory
- * means all of them describe a tree outside the repository while the path says otherwise,
- * and each one individually passes -- an intact set moved to a sibling and reached through
- * a directory symlink verified as 64 bound files. Resolved here, once, before a byte is
- * read. The repository root itself is resolved first, so a checkout that legitimately
- * lives under a link is not refused; nothing below it may be one.
+ * A published set is addressed by a path, and every check below reads bytes THROUGH that
+ * path: the manifest, the 60 records, the results, the secret screen, and the freezer's
+ * walk. A link at any component means all of them describe a tree outside the path the
+ * verifier claims to verify, and each check individually passes -- an intact set moved to
+ * a sibling and reached through a directory symlink verified as 64 bound files. Resolved
+ * here, once, before a byte is read.
+ *
+ * The rule is the freezer's, deliberately: `assertRootIsReal` in
+ * `gate2-freeze-live-evidence.mjs` refuses a root that resolves through a symlink at ANY
+ * component, including one above the repository. An earlier version of this function
+ * resolved the repository root first and tolerated an aliased ancestor, which made the two
+ * verifiers disagree on exactly that input -- and a published set the two verifiers
+ * disagree about is the thing the equivalence test exists to prevent. One rule, both sides.
  */
-async function assertCanonicalSetRoot(repositoryRoot, destination) {
-  const metadata = await lstat(destination).catch(() => null);
+async function assertCanonicalSetRoot(destination) {
+  const given = path.resolve(destination);
+  const real = await realpath(given).catch((error) => {
+    assertCondition(error?.code !== "ENOENT", `published evidence root ${given} does not exist`);
+    throw error;
+  });
   assertCondition(
-    metadata !== null && metadata.isDirectory() && !metadata.isSymbolicLink(),
-    "published evidence root must be a directory, not a link",
-  );
-  const expected = path.join(
-    await realpath(repositoryRoot),
-    path.relative(repositoryRoot, destination),
+    real === given,
+    `published evidence root ${given} resolves through a symlink to ${real}`,
   );
   assertCondition(
-    (await realpath(destination)) === expected,
-    "published evidence root must not resolve through a link",
+    (await lstat(given)).isDirectory(),
+    `published evidence root ${given} is not a directory`,
   );
 }
 
@@ -399,7 +404,7 @@ export async function verifyGate2PublishedEvidence(
     "docs/evals/artifacts",
     config.artifactDirectory ?? profile.profileId,
   );
-  await assertCanonicalSetRoot(repositoryRoot, destination);
+  await assertCanonicalSetRoot(destination);
   const validated = await validateEvidenceSet(destination, loaded, profile, config);
   if (config.manifestSchema === undefined) {
     await assertNoUnlistedFile(destination, validated.relativePaths, config);

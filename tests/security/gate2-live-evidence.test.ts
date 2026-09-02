@@ -24,18 +24,6 @@ import {
 const repositoryRoot = decodeURIComponent(new URL("../../", import.meta.url).pathname);
 const FROZEN_ARTIFACT_RELATIVE = "docs/evals/artifacts/gate2-reasoning-suppressed-20260901";
 
-/**
- * Accepted or refused, whichever way the freezer expresses it. Used only where the exact
- * message is not this repository's to pin -- everywhere else the string is asserted.
- */
-async function freezerVerdict(directory: string): Promise<"accepted" | "refused"> {
-  try {
-    return (await verifyFrozenEvidence(directory)).length === 0 ? "accepted" : "refused";
-  } catch {
-    return "refused";
-  }
-}
-
 /** A disposable copy of the frozen set, so a tamper test never writes the real one. */
 async function withFrozenCopy(
   body: (temporary: string, artifactDirectory: string) => Promise<void>,
@@ -372,12 +360,35 @@ describe("Gate 2 published live evidence", () => {
       const sibling = path.join(temporary, "intact-set-beside-the-expected-path");
       await rename(artifactDirectory, sibling);
       await symlink(sibling, artifactDirectory);
-      // The freezer's verdict is asserted, not its wording: the refusal is fable's to
-      // word, and it may arrive as a problem or as a throw.
-      expect(await freezerVerdict(artifactDirectory)).toBe("refused");
+      // Both name the same thing now, because both apply the same rule.
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([
+        expect.stringMatching(/resolves through a symlink/),
+      ]);
       await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
-        "published evidence root must",
+        /resolves through a symlink/,
       );
+    });
+
+    // (h) the set is intact and every component below the checkout is real, but the
+    // checkout itself is reached through a symlink. The freezer refuses a link at ANY
+    // component; this publisher adopted that rule rather than resolving the repository
+    // root first, because a published set the two verifiers disagree about is exactly what
+    // this test exists to prevent -- and they disagreed on this input alone.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const alias = path.join(temporary, "alias-to-the-checkout");
+      await symlink(temporary, alias);
+      expect(await verifyFrozenEvidence(path.join(alias, FROZEN_ARTIFACT_RELATIVE))).toEqual([
+        expect.stringMatching(/resolves through a symlink/),
+      ]);
+      await expect(verifyGate2PublishedEvidence(alias, "reasoning-suppressed")).rejects.toThrow(
+        /resolves through a symlink/,
+      );
+      // The same set by its real path is accepted, so the refusal is about the link and
+      // not about the copy.
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([]);
+      expect(
+        (await verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).files,
+      ).toHaveLength(64);
     });
 
     // (f) a listed record replaced by a symlink to byte-identical content outside the set:
