@@ -338,3 +338,35 @@ describe("Gate 2 frozen evidence: the root and the second pass", () => {
     expect(isFreezerRefusal("not an error")).toBe(false);
   });
 });
+
+describe("Gate 2 frozen evidence: the root check runs before the manifest read", () => {
+  it("reports a root that does not exist as a verdict, not an ENOENT crash", async () => {
+    // The guard already existed, inside `computeFrozenEntries`; the manifest read reached
+    // ENOENT first, so a fact about the directory surfaced as a fault (issue #88).
+    const parent = await mkdtemp(path.join(os.tmpdir(), "icarus-frozen-absent-"));
+    roots.push(parent);
+    const absent = path.join(parent, "no-such-set");
+    expect(await verifyFrozenEvidence(absent)).toEqual([
+      `Gate 2 evidence freeze: ${absent} does not exist`,
+    ]);
+  });
+
+  it("reports a regular file given as a root as a verdict", async () => {
+    const parent = await mkdtemp(path.join(os.tmpdir(), "icarus-frozen-file-"));
+    roots.push(parent);
+    const file = path.join(parent, "not-a-directory");
+    await writeFile(file, "{}\n");
+    expect(await verifyFrozenEvidence(file)).toEqual([
+      `Gate 2 evidence freeze: ${file} is not a directory`,
+    ]);
+  });
+
+  it("still verifies the repository's committed set", async () => {
+    const repositoryRoot = decodeURIComponent(new URL("../../", import.meta.url).pathname);
+    expect(
+      await verifyFrozenEvidence(
+        path.join(repositoryRoot, "docs/evals/artifacts/gate2-reasoning-suppressed-20260901"),
+      ),
+    ).toEqual([]);
+  });
+});
