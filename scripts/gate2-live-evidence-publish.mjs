@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, realpath, rename, unlink } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readFile, realpath, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,10 +23,22 @@ const scriptPath = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(scriptPath), "..");
 const manifestPath = path.join(root, "fixtures/evals/gate2/manifest.v2.json");
 const publishedRoot = path.join(root, "docs/evals/artifacts");
+// Exact span text, never a prefix or a pattern: an adjudication covers the one string a
+// reviewer looked at, so widening the screen requires a new entry and a new reason.
 const ALLOWED_FALSE_POSITIVE_SECRET_TOKENS = new Set([
   "sk-priority-contract",
   "sk-priority-contract-evaluator",
   "sk-v2-host-policy-compatible",
+  // Adjudicated 2026-09-02 for the 2026-09-01 frozen set, the only span in it outside
+  // the three above. In `routed/refactor-parser-token-table.json` the model's candidate
+  // answer contains the Python line
+  //   raise ValueError(f"unrecognized boolean token: {value!r}")
+  // and the assignment scanner reads the word before the colon as the key `token`, then
+  // takes the rest of the line as its value. The captured span is an f-string
+  // interpolation of the rejected input plus the JSON escaping around it -- a literal
+  // fragment of generated source, carrying no credential and no repository secret. The
+  // detector is right to be blunt here; this set is where the blunt hit is answered.
+  '{value!r}\\\\\\")\\\\n\\"}]',
 ]);
 const LEGACY_V1_ROUTING_POLICY = Object.freeze({
   schemaVersion: 1,
@@ -35,6 +47,11 @@ const LEGACY_V1_ROUTING_POLICY = Object.freeze({
     defaultModelId: "code",
     overrides: Object.freeze({ security_review: "code-fast" }),
   }),
+});
+const REASONING_SUPPRESSED_ROUTING_POLICY = Object.freeze({
+  schemaVersion: 1,
+  baseline: Object.freeze({ defaultModelId: "code-fast", overrides: Object.freeze({}) }),
+  routed: Object.freeze({ defaultModelId: "code", overrides: Object.freeze({}) }),
 });
 const LIVE_EVIDENCE_CONFIGS = Object.freeze({
   v1: Object.freeze({
@@ -59,6 +76,36 @@ const LIVE_EVIDENCE_CONFIGS = Object.freeze({
     instructionPolicySha256: "5b299c7c27cd38d3f070d4c673c0234eaf257761d3cc294e49a1fbbbf023270d",
     routingPolicy: GATE2_LIVE_ROUTING_POLICY,
     routingPolicySha256: GATE2_LIVE_ROUTING_POLICY_SHA256,
+  }),
+  // ADR 0070's frozen 2026-09-01 set. It shares v2's execution profile, so it cannot be
+  // addressed by `profileId`, and it was published by hand with a per-file digest
+  // manifest rather than by `publish()` below -- which is why nothing executable read it
+  // and a manifest wrong for 30 of 64 files sat under a green 357-assertion gate.
+  // Every identity here is pinned BY VALUE. A frozen set is validated against the
+  // contract that produced it; validating it against today's constants would make it
+  // valid only while the code is unchanged, which is not a binding at all.
+  "reasoning-suppressed": Object.freeze({
+    profileFile: "live-profile.v2.json",
+    localDirectory: ".local/gate2-live-v2",
+    artifactDirectory: "gate2-reasoning-suppressed-20260901",
+    manifestFile: "manifest.json",
+    manifestSchema: "icarus.gate2-frozen-evidence.v2",
+    candidateContractRevision: 5,
+    evidenceRecordRevision: 5,
+    instructionPolicySha256: "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+    routingPolicy: REASONING_SUPPRESSED_ROUTING_POLICY,
+    routingPolicySha256: sha256(stableJson(REASONING_SUPPRESSED_ROUTING_POLICY)),
+    // What the bytes encode, asserted rather than only written down beside them. This
+    // set predates `requestedThink` and mapped an ABSENT provider `thinking` member to
+    // 0, so a zero here means "no thinking member surfaced under a think:false request"
+    // and never "measured zero". Revision 6 records that absence as null, so a v6 zero
+    // is the opposite reading; this is what lets a reader tell the two apart.
+    recordContract: Object.freeze({
+      requestedThinkMemberPresent: false,
+      absentThinkingEncodedAs: 0,
+      everyRecordReasoningChars: 0,
+      writtenOn: "2026-09-01",
+    }),
   }),
 });
 const DEFAULT_PROFILE_VERSION = "v2";
@@ -126,6 +173,43 @@ function assertNoUnknownSecretShape(bytes, relative) {
   assertCondition(unknown.length === 0, `${relative} contains an unknown secret-shaped span`);
 }
 
+function byPath(files) {
+  return Array.isArray(files)
+    ? [...files].sort((left, right) => String(left?.path).localeCompare(String(right?.path)))
+    : files;
+}
+
+/** The declaration a frozen manifest must carry, rebuilt from the pinned config. */
+function frozenRecordContract(config) {
+  return {
+    evidenceRecordRevision: config.evidenceRecordRevision,
+    ...config.recordContract,
+  };
+}
+
+/**
+ * A file present in the directory but absent from the validated list was screened by
+ * nothing -- not the digest comparison, not the secret scan. The published sets are
+ * closed directories, so enumerate rather than trust the manifest's own file list.
+ */
+async function assertNoUnlistedFile(directory, relativePaths, config) {
+  const expected = new Set([...relativePaths, config.manifestFile ?? "artifact-manifest.json"]);
+  const found = [];
+  const walk = async (current, prefix) => {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) await walk(path.join(current, entry.name), relative);
+      else found.push(relative);
+    }
+  };
+  await walk(directory, "");
+  const unlisted = found.filter((relative) => !expected.has(relative)).sort();
+  assertCondition(
+    unlisted.length === 0,
+    `published evidence directory holds unlisted files: ${unlisted.join(", ")}`,
+  );
+}
+
 function sourceRelativePaths(manifest) {
   return [
     "preflight.json",
@@ -151,6 +235,22 @@ function routingPolicyBound(record, config) {
     typeof record === "object" &&
     !Array.isArray(record) &&
     record.routingPolicySha256 === config.routingPolicySha256
+  );
+}
+
+/**
+ * Checks a frozen set's declared record contract against its own bytes, so the label
+ * saying how an absent `thinking` member was encoded is falsifiable rather than prose.
+ * Configs without a declared contract are unaffected.
+ */
+function recordContractBound(record, config) {
+  const contract = config.recordContract;
+  if (contract === undefined) return true;
+  return (
+    "requestedThink" in record === contract.requestedThinkMemberPresent &&
+    record.reasoningChars === contract.everyRecordReasoningChars &&
+    typeof record.generatedAt === "string" &&
+    record.generatedAt.startsWith(`${contract.writtenOn}T`)
   );
 }
 
@@ -240,6 +340,7 @@ async function validateEvidenceSet(evidenceDirectory, loaded, profile, config) {
           record.evaluatorEvidence.scenarioStatus === record.observation.scenarioStatus &&
           (providerOutputComplete || record.observation.scenarioStatus === "failed") &&
           stableJson(record.observation) === stableJson(result.observations[index]) &&
+          recordContractBound(record, config) &&
           record.evaluatorEvidence.candidateSha256 === sha256(record.rawCandidate) &&
           record.observation.scenarioEvidenceSha256 ===
             sha256(stableJson(record.evaluatorEvidence)),
@@ -267,28 +368,53 @@ export async function verifyGate2PublishedEvidence(
     computeGate2ExecutionProfileDigest(profile) === profile.profileDigestSha256,
     "published profile digest is invalid",
   );
-  const destination = path.join(repositoryRoot, "docs/evals/artifacts", profile.profileId);
+  const destination = path.join(
+    repositoryRoot,
+    "docs/evals/artifacts",
+    config.artifactDirectory ?? profile.profileId,
+  );
   const validated = await validateEvidenceSet(destination, loaded, profile, config);
-  const manifest = parseStrictGate2Json(
-    await readFile(path.join(destination, "artifact-manifest.json"), "utf8"),
-  );
-  assertCondition(
-    manifest.schemaVersion === 1 &&
-      manifest.benchmarkManifestSha256 === loaded.manifestSha256 &&
-      manifest.executionProfileDigestSha256 === profile.profileDigestSha256 &&
-      routingPolicyBound(manifest, config) &&
-      instructionPolicyBound(manifest, config) &&
-      stableJson(manifest.files) === stableJson(validated.files) &&
-      manifest.filesDigestSha256 === sha256(stableJson(validated.files)),
-    "published artifact manifest is invalid",
-  );
+  await assertNoUnlistedFile(destination, validated.relativePaths, config);
+  const manifestFile = config.manifestFile ?? "artifact-manifest.json";
+  const manifestBytes = await regularBytes(path.join(destination, manifestFile), manifestFile);
+  assertNoUnknownSecretShape(manifestBytes, manifestFile);
+  const manifest = parseStrictGate2Json(manifestBytes.toString("utf8"));
+  if (config.manifestSchema === undefined) {
+    assertCondition(
+      manifest.schemaVersion === 1 &&
+        manifest.benchmarkManifestSha256 === loaded.manifestSha256 &&
+        manifest.executionProfileDigestSha256 === profile.profileDigestSha256 &&
+        routingPolicyBound(manifest, config) &&
+        instructionPolicyBound(manifest, config) &&
+        stableJson(manifest.files) === stableJson(validated.files) &&
+        manifest.filesDigestSha256 === sha256(stableJson(validated.files)),
+      "published artifact manifest is invalid",
+    );
+  } else {
+    assertCondition(
+      manifest.schema === config.manifestSchema &&
+        manifest.evidenceRecordRevision === config.evidenceRecordRevision &&
+        manifest.executionProfileDigestSha256 === profile.profileDigestSha256 &&
+        instructionPolicyBound(manifest, config) &&
+        manifest.recordContract?.evidenceRecordRevision === config.evidenceRecordRevision &&
+        stableJson(manifest.recordContract) === stableJson(frozenRecordContract(config)) &&
+        // The frozen manifest lists its files in path order and excludes itself; the
+        // validated list is in read order. Compare as sets of the same triples.
+        stableJson(byPath(manifest.files)) === stableJson(byPath(validated.files)),
+      "frozen evidence manifest is invalid",
+    );
+  }
   return { destination, manifest, ...validated };
 }
 
 export async function verifyGate2PublishedEvidenceSet(repositoryRoot = root) {
   const v1 = await verifyGate2PublishedEvidence(repositoryRoot, "v1");
   const v2 = await verifyGate2PublishedEvidence(repositoryRoot, "v2");
-  return { v1, v2 };
+  const reasoningSuppressed = await verifyGate2PublishedEvidence(
+    repositoryRoot,
+    "reasoning-suppressed",
+  );
+  return { v1, v2, reasoningSuppressed };
 }
 
 async function publish() {

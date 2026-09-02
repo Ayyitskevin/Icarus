@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +10,28 @@ import {
 } from "../../scripts/gate2-live-evidence-publish.mjs";
 
 const repositoryRoot = decodeURIComponent(new URL("../../", import.meta.url).pathname);
+const FROZEN_ARTIFACT_RELATIVE = "docs/evals/artifacts/gate2-reasoning-suppressed-20260901";
+
+/** A disposable copy of the frozen set, so a tamper test never writes the real one. */
+async function withFrozenCopy(
+  body: (temporary: string, artifactDirectory: string) => Promise<void>,
+): Promise<void> {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "icarus-gate2-frozen-"));
+  try {
+    await cp(path.join(repositoryRoot, "fixtures"), path.join(temporary, "fixtures"), {
+      recursive: true,
+    });
+    await mkdir(path.join(temporary, "docs/evals/artifacts"), { recursive: true });
+    await cp(
+      path.join(repositoryRoot, FROZEN_ARTIFACT_RELATIVE),
+      path.join(temporary, FROZEN_ARTIFACT_RELATIVE),
+      { recursive: true },
+    );
+    await body(temporary, path.join(temporary, FROZEN_ARTIFACT_RELATIVE));
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
 
 describe("Gate 2 published live evidence", () => {
   it("recomputes both 30-case results, their comparison, and every retained evidence digest", async () => {
@@ -35,10 +58,11 @@ describe("Gate 2 published live evidence", () => {
     });
   });
 
-  it("revalidates both published evidence versions as one publication set", async () => {
+  it("revalidates every published evidence version as one publication set", async () => {
     const verified = await verifyGate2PublishedEvidenceSet(repositoryRoot);
     expect(verified.v1.files).toHaveLength(64);
     expect(verified.v2.files).toHaveLength(64);
+    expect(verified.reasoningSuppressed.files).toHaveLength(64);
   });
 
   it("recomputes leak-free target-discovery evidence", async () => {
@@ -71,6 +95,104 @@ describe("Gate 2 published live evidence", () => {
       successCountRatio: 3.2,
       costReduction: 0.554217121588,
       passed: false,
+    });
+  });
+
+  it("recomputes the frozen reasoning-suppressed set against its committed bytes", async () => {
+    const verified = await verifyGate2PublishedEvidence(repositoryRoot, "reasoning-suppressed");
+    expect(verified.files).toHaveLength(64);
+    expect(verified.manifest).toMatchObject({
+      schema: "icarus.gate2-frozen-evidence.v2",
+      evidenceRecordRevision: 5,
+      executionProfileDigestSha256:
+        "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+      instructionPolicySha256: "e6fb3111f6d2b9fe5d267117f705e1043ac7755fc14cca3ad499693094c6de57",
+      // The declaration that lets a reader tell this set's zeros from a revision-6 zero.
+      recordContract: {
+        absentThinkingEncodedAs: 0,
+        everyRecordReasoningChars: 0,
+        evidenceRecordRevision: 5,
+        requestedThinkMemberPresent: false,
+        writtenOn: "2026-09-01",
+      },
+    });
+    // The figures ADR 0070 reports, recomputed from the committed records rather than
+    // read back from the prose beside them.
+    expect(verified.baseline.aggregates).toMatchObject({
+      taskCount: 30,
+      measuredTaskCount: 30,
+      successCount: 2,
+      firstPassPlanAcceptance: 0.066666666667,
+      incorrectEdits: 0,
+      thresholdsPassed: false,
+    });
+    expect(verified.routed.aggregates).toMatchObject({
+      taskCount: 30,
+      measuredTaskCount: 30,
+      successCount: 12,
+      firstPassPlanAcceptance: 0.6,
+      incorrectEdits: 0,
+      thresholdsPassed: false,
+    });
+  });
+
+  it("refuses a frozen record whose bytes drifted from the manifest", async () => {
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const recordPath = path.join(artifactDirectory, "baseline/explain-basic-guardrails.json");
+      const record = JSON.parse(await readFile(recordPath, "utf8"));
+      record.generatedAt = "2026-09-01T23:59:59.999Z";
+      await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        "frozen evidence manifest is invalid",
+      );
+    });
+  });
+
+  it("refuses a file the frozen manifest never listed", async () => {
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      // An unlisted file is screened by nothing: not the digest comparison it is absent
+      // from, and not the secret scan that only walks the listed paths.
+      await writeFile(path.join(artifactDirectory, "extra.json"), "{}\n");
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        "published evidence directory holds unlisted files: extra.json",
+      );
+    });
+  });
+
+  it("screens the frozen set for secret shapes rather than trusting its age", async () => {
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const recordPath = path.join(artifactDirectory, "routed/explain-lantern-flow.json");
+      const record = JSON.parse(await readFile(recordPath, "utf8"));
+      record.password = "correct-horse-battery-staple";
+      await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        "routed/explain-lantern-flow.json contains an unknown secret-shaped span",
+      );
+    });
+  });
+
+  it("refuses a frozen record that contradicts the contract its manifest declares", async () => {
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      // The digest is repaired so only the declared record contract can catch this: a
+      // nonzero reading in a set whose manifest says every reading is an encoded absence.
+      const relative = "routed/explain-lantern-flow.json";
+      const recordPath = path.join(artifactDirectory, relative);
+      const record = JSON.parse(await readFile(recordPath, "utf8"));
+      record.reasoningChars = 5;
+      const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`);
+      await writeFile(recordPath, bytes);
+      const manifestPath = path.join(artifactDirectory, "manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      const entry = manifest.files.find((file: { path: string }) => file.path === relative) as {
+        bytes: number;
+        sha256: string;
+      };
+      entry.bytes = bytes.length;
+      entry.sha256 = createHash("sha256").update(bytes).digest("hex");
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        `published case record is not bound: ${relative}`,
+      );
     });
   });
 
