@@ -210,11 +210,22 @@ async function readRegularFile(base, relative, label = relative) {
  * is walked entry by entry -- the fixture repositories are trees, and `snapshotFixture`
  * reads all of them.
  */
+/**
+ * The ONE directory listing, for the same reason there is one read: a caller that reaches
+ * for `readdir` itself is a caller whose path nobody walked.
+ */
+async function listDirectoryEntries(base, relative, label) {
+  const resolved = await assertWalkableTo(base, relative, label);
+  const metadata = await lstat(resolved);
+  assertCondition(metadata.isDirectory(), `${label} must be a directory`);
+  return readdir(resolved, { withFileTypes: true });
+}
+
 async function assertUnlinkedTree(base, relative, label) {
   const resolved = await assertWalkableTo(base, relative, label);
   const metadata = await lstat(resolved);
   if (metadata.isDirectory()) {
-    for (const entry of await readdir(resolved, { withFileTypes: true })) {
+    for (const entry of await listDirectoryEntries(base, resolved, label)) {
       assertCondition(
         !entry.isSymbolicLink(),
         `${label} holds a link at ${path.join(path.relative(base, resolved), entry.name)}`,
@@ -271,7 +282,7 @@ async function assertNoUnlistedFile(directory, relativePaths, config) {
   const expected = new Set([...relativePaths, config.manifestFile ?? "artifact-manifest.json"]);
   const found = [];
   const walk = async (current, prefix) => {
-    for (const entry of await readdir(current, { withFileTypes: true })) {
+    for (const entry of await listDirectoryEntries(directory, current, "published evidence")) {
       const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
       if (entry.isDirectory()) await walk(path.join(current, entry.name), relative);
       else found.push(relative);
@@ -453,7 +464,12 @@ async function loadBenchmarkContractThroughCheckedPaths(repositoryRoot) {
   for (const benchmarkCase of declared.cases ?? []) {
     const taskPath = benchmarkCase?.task?.path;
     if (typeof taskPath === "string") {
-      await assertWalkableTo(repositoryRoot, taskPath, `task ${benchmarkCase.id}`);
+      // Through the full helper, not merely the component walk. `assertWalkableTo` says
+      // nothing about the final entry, so a task hard-linked to a byte-identical file
+      // outside the repository passed it and the loader read bytes this publisher does
+      // not exclusively own -- while the comment above claimed every byte reaches the
+      // regular-file check. It does now.
+      await readRegularFile(repositoryRoot, taskPath, `task ${benchmarkCase.id}`);
     }
   }
   for (const repository of declared.repositories ?? []) {

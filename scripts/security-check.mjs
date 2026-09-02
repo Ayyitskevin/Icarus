@@ -219,6 +219,7 @@ const gate2FrozenFiguresSource = await readFile(
   "scripts/gate2-frozen-evidence-figures.mjs",
   "utf8",
 );
+const gate2PublishSource = await readFile("scripts/gate2-live-evidence-publish.mjs", "utf8");
 const gate2RetrievalManifestSource = await readFile(
   "fixtures/evals/gate2/retrieval-manifest.v1.json",
   "utf8",
@@ -2642,6 +2643,28 @@ const assertions = {
     gate2LiveBenchmarkSource.includes("omittedMatches: retrieval.omittedMatches") &&
     gate2LiveBenchmarkSource.includes("omittedReferences: retrieval.omittedReferences") &&
     gate2LiveBenchmarkSource.includes("excludedFiles: retrieval.excludedFiles"),
+  gate2PublishedEvidenceReadsThroughOneCheckedHelper:
+    // Three findings in a row were one omission: a read whose path nobody walked -- the
+    // artifact records, then the fixture manifest and profile, then the task files, each
+    // found by a reviewer rather than by a test. The helper is the fix; this is what stops
+    // the next call site from bypassing it. A new `readFile(` or `readdir(` anywhere in
+    // that file fails here, so the omission is caught by the gate instead of by the fourth
+    // review. Exactly one of each, and each inside the helper that walks the path first.
+    (gate2PublishSource.match(/\breadFile\(/g) ?? []).length === 1 &&
+    (gate2PublishSource.match(/\breaddir\(/g) ?? []).length === 1 &&
+    gate2PublishSource.includes(
+      "async function readRegularFile(base, relative, label = relative) {",
+    ) &&
+    gate2PublishSource.includes("  return readFile(resolved);") &&
+    gate2PublishSource.includes("async function listDirectoryEntries(base, relative, label) {") &&
+    gate2PublishSource.includes("  return readdir(resolved, { withFileTypes: true });") &&
+    // The path is walked before either of them reads: containment, then every component.
+    gate2PublishSource.includes("async function assertWalkableTo(base, relative, label) {") &&
+    gate2PublishSource.includes(
+      "const resolved = await assertWalkableTo(base, relative, label);",
+    ) &&
+    gate2PublishSource.includes("!component.isSymbolicLink(),") &&
+    gate2PublishSource.includes("metadata.isFile() && metadata.nlink === 1,"),
   gate2FrozenEvidenceFiguresRecomputeOfflineFromVerifiedBytes:
     // A figure nobody recomputes goes stale in place: the 2026-09-01 evaluation carried a
     // token total that survived a review because nothing derived it a second time, and its

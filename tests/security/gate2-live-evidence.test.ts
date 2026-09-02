@@ -666,6 +666,37 @@ describe("Gate 2 published live evidence", () => {
     });
   });
 
+  it("refuses a task file this publisher does not exclusively own", async () => {
+    // Sol's probe, reproduced. The task keeps the manifest's expected digest byte for byte
+    // and every component of its path is real, so containment, the digest and the contract
+    // all pass; only the final entry's link count says the bytes live somewhere else too.
+    // The component walk alone accepted it, which is why the tasks now go through the same
+    // helper as everything else rather than a weaker cousin.
+    await withFrozenCopy(async (temporary) => {
+      const relative = "fixtures/evals/gate2/tasks/repair-basic-greeting.md";
+      const outside = path.join(temporary, "task-outside-the-repository.md");
+      await writeFile(outside, await readFile(path.join(temporary, relative)));
+      await rm(path.join(temporary, relative));
+      await link(outside, path.join(temporary, relative));
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        /task repair-basic-greeting must be one non-linked regular file/,
+      );
+    });
+  });
+
+  it("refuses a symlinked task file before parsing a byte of it", async () => {
+    await withFrozenCopy(async (temporary) => {
+      const relative = "fixtures/evals/gate2/tasks/repair-basic-greeting.md";
+      const outside = path.join(temporary, "task-behind-a-link.md");
+      await writeFile(outside, await readFile(path.join(temporary, relative)));
+      await rm(path.join(temporary, relative));
+      await symlink(outside, path.join(temporary, relative));
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        /task repair-basic-greeting is reached through a link at/,
+      );
+    });
+  });
+
   it("refuses a link inside a fixture repository the contract loader will read", async () => {
     // The loader also reads every task and walks all seven fixture repositories. A helper
     // in this file cannot intercept those reads, so every path the loader will touch is
