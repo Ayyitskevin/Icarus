@@ -4,6 +4,7 @@ import {
   link,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rename,
   rm,
@@ -23,6 +24,39 @@ import {
 
 const repositoryRoot = decodeURIComponent(new URL("../../", import.meta.url).pathname);
 const FROZEN_ARTIFACT_RELATIVE = "docs/evals/artifacts/gate2-reasoning-suppressed-20260901";
+
+/** Rewrites the manifest's digests so only a check other than the digest can object. */
+async function repairManifest(artifactDirectory: string): Promise<void> {
+  const manifestPath = path.join(artifactDirectory, "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  for (const entry of manifest.files as Array<{ path: string; bytes: number; sha256: string }>) {
+    const bytes = await readFile(path.join(artifactDirectory, entry.path));
+    entry.bytes = bytes.length;
+    entry.sha256 = createHash("sha256").update(bytes).digest("hex");
+  }
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+/** A disposable copy of any published set, for a tamper case outside the frozen branch. */
+async function withPublishedCopy(
+  directory: string,
+  body: (temporary: string, artifactDirectory: string) => Promise<void>,
+): Promise<void> {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "icarus-gate2-published-copy-"));
+  try {
+    await cp(path.join(repositoryRoot, "fixtures"), path.join(temporary, "fixtures"), {
+      recursive: true,
+    });
+    const relative = path.join("docs/evals/artifacts", directory);
+    await mkdir(path.join(temporary, "docs/evals/artifacts"), { recursive: true });
+    await cp(path.join(repositoryRoot, relative), path.join(temporary, relative), {
+      recursive: true,
+    });
+    await body(temporary, path.join(temporary, relative));
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
 
 /** A disposable copy of the frozen set, so a tamper test never writes the real one. */
 async function withFrozenCopy(
@@ -178,33 +212,62 @@ describe("Gate 2 published live evidence", () => {
       const record = JSON.parse(await readFile(recordPath, "utf8"));
       record.password = "correct-horse-battery-staple";
       await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+      // The manifest is repaired so the digest cannot object: a secret-shaped span is
+      // exactly what a true manifest cannot see, and the screen is the only layer left.
+      await repairManifest(artifactDirectory);
       await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
         "routed/explain-lantern-flow.json contains an unknown secret-shaped span",
       );
     });
   });
 
-  it("refuses a frozen record that contradicts the contract its manifest declares", async () => {
+  it("refuses a set whose declared contract is internally true but not the reviewed one", async () => {
+    // After the reorder the freezer speaks first, and it re-derives the record contract
+    // from the records -- so a manifest that merely disagrees with its own bytes never
+    // reaches this publisher. What remains this publisher's alone is the REVIEWED pin: a
+    // set frozen honestly under a different contract is internally true and still not the
+    // one whose figures were reviewed. Every record is rewritten so the derivation agrees.
     await withFrozenCopy(async (temporary, artifactDirectory) => {
-      // The digest is repaired so only the declared record contract can catch this: a
-      // nonzero reading in a set whose manifest says every reading is an encoded absence.
+      for (const mode of ["baseline", "routed"]) {
+        const directory = path.join(artifactDirectory, mode);
+        for (const name of await readdir(directory)) {
+          const recordPath = path.join(directory, name);
+          const record = JSON.parse(await readFile(recordPath, "utf8"));
+          record.reasoningChars = 5;
+          await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+        }
+      }
+      const manifestPath = path.join(artifactDirectory, "manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      manifest.recordContract.everyRecordReasoningChars = 5;
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      await repairManifest(artifactDirectory);
+      // The freezer is satisfied: the manifest now describes its own bytes exactly.
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([]);
+      // The publisher is not, and `recordContractBound` is what refuses it -- per record,
+      // inside the read pass, before the manifest-versus-config pin further down gets a
+      // turn. Both are this publisher's; the freezer cannot make either judgement, because
+      // "internally true" is all it can see.
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        /published case record is not bound:/,
+      );
+    });
+  });
+
+  it("refuses one drifted record, and names the layer that caught it", async () => {
+    // One record disagreeing with the other 59 makes the derived contract drop
+    // `everyRecordReasoningChars`, so the manifest's declaration no longer matches the
+    // bytes. That is the freezer's verdict now, one layer earlier than before, and the
+    // message must say so rather than blaming the publisher's own binding.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
       const relative = "routed/explain-lantern-flow.json";
       const recordPath = path.join(artifactDirectory, relative);
       const record = JSON.parse(await readFile(recordPath, "utf8"));
-      record.reasoningChars = 5;
-      const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`);
-      await writeFile(recordPath, bytes);
-      const manifestPath = path.join(artifactDirectory, "manifest.json");
-      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-      const entry = manifest.files.find((file: { path: string }) => file.path === relative) as {
-        bytes: number;
-        sha256: string;
-      };
-      entry.bytes = bytes.length;
-      entry.sha256 = createHash("sha256").update(bytes).digest("hex");
-      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      record.reasoningChars = 41;
+      await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+      await repairManifest(artifactDirectory);
       await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
-        `published case record is not bound: ${relative}`,
+        /frozen evidence manifest is invalid: recordContract:/,
       );
     });
   });
@@ -249,30 +312,17 @@ describe("Gate 2 published live evidence", () => {
     expect(recordContractBound(record(41), {})).toBe(true);
   });
 
-  it("still binds every frozen record against the contract its manifest declares", async () => {
-    // The published 2026-09-01 config DOES carry the member, so the relaxation above must
-    // not have loosened the real set: all 60 records are checked against `0`.
+  it("keeps the reviewed record contract on the real published set", async () => {
+    // The committed set's manifest declares the contract the reviewed figures rest on, and
+    // it is the one this publisher pins. Asserted directly, because the tamper cases above
+    // now exercise the freezer's derivation rather than this pin.
     const verified = await verifyGate2PublishedEvidence(repositoryRoot, "reasoning-suppressed");
-    expect(verified.manifest.recordContract).toMatchObject({ everyRecordReasoningChars: 0 });
-    await withFrozenCopy(async (temporary, artifactDirectory) => {
-      const relative = "baseline/repair-cart-off-by-one.json";
-      const recordPath = path.join(artifactDirectory, relative);
-      const record = JSON.parse(await readFile(recordPath, "utf8"));
-      record.reasoningChars = 41;
-      const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`);
-      await writeFile(recordPath, bytes);
-      const manifestPath = path.join(artifactDirectory, "manifest.json");
-      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-      const entry = manifest.files.find((file: { path: string }) => file.path === relative) as {
-        bytes: number;
-        sha256: string;
-      };
-      entry.bytes = bytes.length;
-      entry.sha256 = createHash("sha256").update(bytes).digest("hex");
-      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
-        `published case record is not bound: ${relative}`,
-      );
+    expect(verified.manifest.recordContract).toEqual({
+      absentThinkingEncodedAs: 0,
+      everyRecordReasoningChars: 0,
+      evidenceRecordRevision: 5,
+      requestedThinkMemberPresent: false,
+      writtenOn: "2026-09-01",
     });
   });
 
@@ -346,8 +396,10 @@ describe("Gate 2 published live evidence", () => {
       expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([
         `Gate 2 evidence freeze: ${relative} is hard-linked`,
       ]);
+      // The publisher carries the freezer's wording now: the closed-tree verdict runs
+      // before any read of the set, so it is what an operator is told.
       await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
-        `${relative} must be one non-linked regular file`,
+        `${relative} is hard-linked`,
       );
     });
 
@@ -404,8 +456,10 @@ describe("Gate 2 published live evidence", () => {
       expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([
         `Gate 2 evidence freeze: ${relative} is not a regular file`,
       ]);
+      // The publisher carries the freezer's wording now: the closed-tree verdict runs
+      // before any read of the set, so it is what an operator is told.
       await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
-        `${relative} must be one non-linked regular file`,
+        `${relative} is not a regular file`,
       );
     });
   });
@@ -493,6 +547,51 @@ describe("Gate 2 published live evidence", () => {
         /EISDIR/,
       );
     });
+  });
+
+  it("refuses a symlinked record directory without reading a byte through it", async () => {
+    // Sol's P1. `routed/` becomes a link to a tree outside the set holding a byte-identical
+    // copy plus one planted defect. Every listed record then resolves, through that link,
+    // to a real non-linked regular file -- so a per-file check passes and the publisher
+    // used to read and report the planted defect from outside the root it was verifying.
+    // The closed-tree verdict runs first, so what an operator is told is that the tree is
+    // not closed, and the planted bytes are never read.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const outside = path.join(temporary, "records-outside-the-set");
+      await cp(path.join(artifactDirectory, "routed"), outside, { recursive: true });
+      await rm(path.join(artifactDirectory, "routed"), { recursive: true });
+      await symlink(outside, path.join(artifactDirectory, "routed"));
+      const planted = path.join(outside, "explain-lantern-flow.json");
+      const text = await readFile(planted, "utf8");
+      await writeFile(planted, text.replace(/^\{/, '{\n  "caseId": "planted-from-outside",'));
+
+      const error = await verifyGate2PublishedEvidence(temporary, "reasoning-suppressed").then(
+        () => null,
+        (thrown: Error) => thrown,
+      );
+      expect(error?.message).toMatch(/routed is not a regular file/);
+      // The defect planted outside the root is never what the operator hears about.
+      expect(error?.message).not.toMatch(/duplicate JSON object members/);
+      expect(error?.message).not.toMatch(/planted-from-outside/);
+    });
+  });
+
+  it("refuses a link on the path to a record even where no frozen manifest is read", async () => {
+    // The belt, isolated: the v2 set has no frozen manifest, so the closed-tree verdict
+    // above never runs for it. AGENTS.md requires paths checked component-by-component
+    // before reads, and `lstat` on the file alone is not that check.
+    await withPublishedCopy(
+      "gate2-local-vulcan-target-discovery-r7-20260828",
+      async (temporary, artifactDirectory) => {
+        const outside = path.join(temporary, "records-outside-the-set");
+        await cp(path.join(artifactDirectory, "routed"), outside, { recursive: true });
+        await rm(path.join(artifactDirectory, "routed"), { recursive: true });
+        await symlink(outside, path.join(artifactDirectory, "routed"));
+        await expect(verifyGate2PublishedEvidence(temporary, "v2")).rejects.toThrow(
+          /is reached through a link at routed/,
+        );
+      },
+    );
   });
 
   it("requires conservative declared-budget accounting for a retained timeout", () => {

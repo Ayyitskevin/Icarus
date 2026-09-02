@@ -157,7 +157,28 @@ function safeJoin(base, relative) {
  * unmentioned.
  */
 
-async function regularBytes(filePath, label) {
+/**
+ * AGENTS.md: paths are "checked component-by-component for symlinks before reads and
+ * writes". `lstat` on the file alone is not that check -- it describes the last component
+ * and says nothing about the directories walked to reach it. A record directory replaced
+ * by a symlink to a tree outside the set therefore passed: each listed record resolved
+ * through the link to a real, non-linked regular file, and the publisher read and reported
+ * bytes from outside the root it was verifying.
+ */
+async function assertNoLinkedComponent(base, filePath, label) {
+  let current = base;
+  for (const part of path.relative(base, filePath).split(path.sep)) {
+    current = path.join(current, part);
+    const metadata = await lstat(current);
+    assertCondition(
+      !metadata.isSymbolicLink(),
+      `${label} is reached through a link at ${path.relative(base, current)}`,
+    );
+  }
+}
+
+async function regularBytes(filePath, label, base) {
+  if (base !== undefined) await assertNoLinkedComponent(base, filePath, label);
   const metadata = await lstat(filePath);
   assertCondition(
     metadata.isFile() && !metadata.isSymbolicLink() && metadata.nlink === 1,
@@ -306,7 +327,11 @@ async function validateEvidenceSet(evidenceDirectory, loaded, profile, config) {
   const files = [];
   const bytesByPath = new Map();
   for (const relative of relativePaths) {
-    const bytes = await regularBytes(safeJoin(evidenceDirectory, relative), relative);
+    const bytes = await regularBytes(
+      safeJoin(evidenceDirectory, relative),
+      relative,
+      evidenceDirectory,
+    );
     assertNoUnknownSecretShape(bytes, relative);
     bytesByPath.set(relative, bytes);
     files.push({ path: relative, bytes: bytes.length, sha256: sha256(bytes) });
@@ -393,12 +418,30 @@ export async function verifyGate2PublishedEvidence(
     config.artifactDirectory ?? profile.profileId,
   );
   await assertRootIsReal(destination);
+  // The closed-tree verdict comes first, before a byte of the set is read. Everything
+  // below reads paths the manifest lists; until the freezer has said the directory holds
+  // exactly those files, and no entry in it is a link, "the manifest lists it" is not a
+  // statement about this directory. A record directory replaced by a symlink to a tree
+  // outside the set used to be read through, and a duplicate planted out there was
+  // reported as though it were the evidence -- an answer about the wrong bytes, delivered
+  // before the verdict that the tree was not closed.
+  if (config.manifestSchema !== undefined) {
+    const problems = await verifyFrozenEvidence(destination);
+    assertCondition(
+      problems.length === 0,
+      `frozen evidence manifest is invalid: ${problems.join("; ")}`,
+    );
+  }
   const validated = await validateEvidenceSet(destination, loaded, profile, config);
   if (config.manifestSchema === undefined) {
     await assertNoUnlistedFile(destination, validated.relativePaths, config);
   }
   const manifestFile = config.manifestFile ?? "artifact-manifest.json";
-  const manifestBytes = await regularBytes(path.join(destination, manifestFile), manifestFile);
+  const manifestBytes = await regularBytes(
+    path.join(destination, manifestFile),
+    manifestFile,
+    destination,
+  );
   assertNoUnknownSecretShape(manifestBytes, manifestFile);
   const manifest = parseStrictGate2Json(manifestBytes.toString("utf8"));
   if (config.manifestSchema === undefined) {
@@ -426,20 +469,13 @@ export async function verifyGate2PublishedEvidence(
         stableJson(manifest.recordContract) === stableJson(frozenRecordContract(config)),
       "frozen evidence manifest is invalid",
     );
-    // One directory-ENUMERATING digest walk, which is not the same as one read pass and
-    // was described as if it were. `validateEvidenceSet` above has already read and hashed
-    // the 64 contract paths for its own binding and its secret screen; the freezer then
-    // re-reads every entry it enumerates. Two passes over the same bytes at two instants:
-    // a file replaced between them shows each pass something different, and neither
-    // notices, because each is internally consistent. What was removed was the second
-    // ENUMERATION of the directory, so the two verifiers can no longer disagree about
-    // which files exist. The freezer owns manifest-versus-bytes, the closed-directory
-    // refusal, and re-deriving the record contract from the records.
-    const problems = await verifyFrozenEvidence(destination);
-    assertCondition(
-      problems.length === 0,
-      `frozen evidence manifest is invalid: ${problems.join("; ")}`,
-    );
+    // `verifyFrozenEvidence` ran above, before any read: the freezer owns
+    // manifest-versus-bytes, the closed-directory refusal, and re-deriving the record
+    // contract. One directory-ENUMERATING digest walk, which is not the same as one read
+    // pass -- `validateEvidenceSet` reads the 64 contract paths for its own binding and
+    // its secret screen, after the freezer has read every entry it enumerates. Two passes
+    // over the same bytes at two instants: a file replaced between them shows each pass
+    // something different and neither notices, each being internally consistent.
     // `verifyFrozenEvidence` returned no problem, so the directory holds exactly what
     // `manifest.files` lists and every listed digest matches its bytes. The list is
     // therefore the directory, and reading the present paths from it rather than walking
