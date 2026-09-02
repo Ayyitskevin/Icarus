@@ -15,7 +15,7 @@
 //   node scripts/gate2-freeze-live-evidence.mjs --verify <artifact-dir>
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, lstat, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,6 +36,35 @@ const ABSENT_THINKING_ENCODING = new Map([
 
 function fail(message) {
   throw new Error(`Gate 2 evidence freeze: ${message}`);
+}
+
+/**
+ * True for deliberate validation refusals -- the freezer's own and the strict parser's --
+ * which are verdicts about the evidence; false for everything else (an I/O fault, a bug),
+ * which must be rethrown as itself rather than reported as invalid evidence.
+ */
+export function isFreezerRefusal(error) {
+  return (
+    error instanceof Error &&
+    (error.message.startsWith("Gate 2 evidence freeze:") ||
+      error.message.startsWith("Gate 2 benchmark contract:"))
+  );
+}
+
+/**
+ * The set root must be the directory it names: a root that resolves through a symlink --
+ * at the root or at any component of the given path -- would let a manifest vouch for a
+ * whole set living outside the path the verifier claims to verify. Entries below the root
+ * are already refused unless they are directories or regular files.
+ */
+async function assertRootIsReal(root) {
+  const given = path.resolve(root);
+  const real = await realpath(given).catch((error) => {
+    if (error?.code === "ENOENT") fail(`${root} does not exist`);
+    throw error;
+  });
+  if (real !== given) fail(`${root} resolves through a symlink to ${real}`);
+  if (!(await lstat(given)).isDirectory()) fail(`${root} is not a directory`);
 }
 
 function sha256(bytes) {
@@ -92,6 +121,7 @@ async function listFiles(root) {
 
 /** Digest every file except the manifest, from the bytes on disk right now. */
 export async function computeFrozenEntries(root) {
+  await assertRootIsReal(root);
   const entries = [];
   for (const relative of await listFiles(root)) {
     const bytes = await readFile(path.join(root, relative));
@@ -101,6 +131,7 @@ export async function computeFrozenEntries(root) {
 }
 
 async function readRecords(root) {
+  await assertRootIsReal(root);
   const records = [];
   for (const directory of RECORD_DIRECTORIES) {
     // A record directory that does not exist holds no records; one that cannot be read is
@@ -181,9 +212,7 @@ export async function verifyFrozenEvidence(root) {
   } catch (error) {
     // An entry the freezer itself refused is a verdict about the directory, not a crash;
     // anything else (an I/O fault, a bug) is rethrown as itself.
-    if (!(error instanceof Error) || !error.message.startsWith("Gate 2 evidence freeze:")) {
-      throw error;
-    }
+    if (!isFreezerRefusal(error)) throw error;
     problems.push(error.message);
     return problems;
   }
@@ -213,7 +242,11 @@ export async function verifyFrozenEvidence(root) {
       );
     }
   } catch (error) {
-    problems.push(`recordContract: ${error instanceof Error ? error.message : String(error)}`);
+    // Same boundary as the walk above: a refusal is a verdict, a fault is rethrown. The
+    // first version of this catch wrapped everything, so an I/O error during the second
+    // read was reported as invalid evidence.
+    if (!isFreezerRefusal(error)) throw error;
+    problems.push(`recordContract: ${error.message}`);
   }
   return problems;
 }
