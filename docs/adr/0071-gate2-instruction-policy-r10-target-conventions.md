@@ -61,14 +61,16 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   the assembled instructions of all five classes.
 - The same test derives the stem of every expected changed, cited, and context path from
   `fixtures/evals/gate2/manifest.v2.json`, splits each stem on its separators, and refuses
-  any policy prose in which those words appear consecutively — however they are separated,
-  so `test_json_output`, `test-json-output`, and "test json output" are the same name. The
+  any policy prose in which those letters appear as the concatenation of consecutive
+  tokens — so `test_json_output`, `test-json-output`, "test json output", `testJsonOutput`,
+  `TestJsonOutput`, and `testjsonoutput` are the same name, and so is any other split. The
   prose it scans is every instruction string the policy holds: the common, kind, and class
   rules and the finding-taxonomy definitions. Nothing is cut out of prose and no word is
-  exempt; a finding ID written into a rule is scanned as the words it contains. The only
-  unscanned text is what the builder owns structurally — the class/kind line, the JSON
-  template's keys, and the taxonomy IDs as identifiers — and the test asserts the assembled
-  instructions contain nothing beyond those pieces. The two templates are canonical
+  exempt; a finding ID written into a rule is scanned as the words it contains. What the
+  builder owns structurally — the class/kind line, the JSON template, and the taxonomy IDs
+  as identifiers — is scanned too, with its origin tagged, and is exempt only as a whole
+  span (the template; one ID's own tokens, judged class-aware); the test asserts the
+  assembled instructions contain nothing beyond those pieces. The two templates are canonical
   constants in the module, and the policy's template strings must equal their
   serialisation byte for byte — no parser sits between them, so no duplicate member,
   whitespace, hidden code point, changed literal, or foreign key can reach the model

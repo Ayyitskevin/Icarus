@@ -145,7 +145,29 @@ describe("Gate 2 live instruction policy", () => {
         .toLowerCase()
         .split(/[^a-z0-9]+/)
         .filter((token) => token.length > 0);
-    type Stems = Map<string, { parts: string[]; cases: Set<string> }>;
+    // A name is matched as the concatenation of consecutive tokens, not as a token sequence:
+    // a thirteenth review wrote testJsonOutput and pathTraversal, which lowercase to one
+    // token each and matched nothing while the model read the names whole. Under this
+    // rule test_json_output, test-json-output, "test json output", testJsonOutput,
+    // TestJsonOutput and testjsonoutput are one name, and so is any other split.
+    type Stems = Map<string, { parts: string[]; glued: string; cases: Set<string> }>;
+    const runsOf = (haystack: string[], glued: string): Array<[number, number]> => {
+      const runs: Array<[number, number]> = [];
+      for (let start = 0; start < haystack.length; start += 1) {
+        let joined = "";
+        for (let end = start; end < haystack.length; end += 1) {
+          joined += haystack[end];
+          if (joined === glued) {
+            runs.push([start, end + 1]);
+            break;
+          }
+          if (!glued.startsWith(joined)) break;
+        }
+      }
+      return runs;
+    };
+    const containsName = (haystack: string[], glued: string): boolean =>
+      runsOf(haystack, glued).length > 0;
     const stemsOf = (cases: typeof manifest.cases): Stems => {
       const out: Stems = new Map();
       for (const benchmarkCase of cases) {
@@ -158,7 +180,11 @@ describe("Gate 2 live instruction policy", () => {
             .basename(expectedPath)
             .replace(/\.[^.]+$/, "")
             .toLowerCase();
-          const entry = out.get(stem) ?? { parts: tokensOf(stem), cases: new Set<string>() };
+          const entry = out.get(stem) ?? {
+            parts: tokensOf(stem),
+            glued: tokensOf(stem).join(""),
+            cases: new Set<string>(),
+          };
           entry.cases.add(benchmarkCase.id);
           out.set(stem, entry);
         }
@@ -192,15 +218,11 @@ describe("Gate 2 live instruction policy", () => {
       prose.push({ where: `findingTaxonomy.${id}`, text: definition });
     }
     expect(prose.length).toBeGreaterThan(10);
-    const containsSequence = (haystack: string[], needle: string[]): boolean =>
-      haystack.some((_, index) =>
-        needle.every((part, offset) => haystack[index + offset] === part),
-      );
     const collisions: string[] = [];
     for (const { where, text } of prose) {
       const tokens = tokensOf(text);
-      for (const [stem, { parts, cases }] of stems) {
-        if (containsSequence(tokens, parts)) {
+      for (const [stem, { glued, cases }] of stems) {
+        if (containsName(tokens, glued)) {
           collisions.push(`${where}: "${stem}" names ${[...cases].sort().join(", ")}`);
         }
       }
@@ -246,8 +268,8 @@ describe("Gate 2 live instruction policy", () => {
     expect(readOnlyStems.has("files")).toBe(true);
     for (const id of Object.keys(policy.findingTaxonomy)) {
       const tokens = tokensOf(id);
-      for (const [stem, { parts, cases }] of readOnlyStems) {
-        if (containsSequence(tokens, parts)) {
+      for (const [stem, { glued, cases }] of readOnlyStems) {
+        if (containsName(tokens, glued)) {
           identifierCollisions.push(
             `finding ID "${id}": "${stem}" names ${[...cases].sort().join(", ")}`,
           );
@@ -257,8 +279,8 @@ describe("Gate 2 live instruction policy", () => {
     for (const cls of manifestClasses) {
       const own = stemsOf(manifest.cases.filter((benchmarkCase) => benchmarkCase.class === cls));
       const tokens = tokensOf(cls);
-      for (const [stem, { parts, cases }] of own) {
-        if (containsSequence(tokens, parts)) {
+      for (const [stem, { glued, cases }] of own) {
+        if (containsName(tokens, glued)) {
           identifierCollisions.push(
             `class name "${cls}": "${stem}" names ${[...cases].sort().join(", ")}`,
           );
@@ -296,8 +318,8 @@ describe("Gate 2 live instruction policy", () => {
         );
         for (const leaf of templateLeaves(parsed)) {
           const tokens = tokensOf(leaf);
-          for (const [stem, { parts, cases }] of visible) {
-            if (containsSequence(tokens, parts)) {
+          for (const [stem, { glued, cases }] of visible) {
+            if (containsName(tokens, glued)) {
               found.push(
                 `templates.${kind} value "${leaf}": "${stem}" names ${[...cases].sort().join(", ")}`,
               );
@@ -387,7 +409,11 @@ describe("Gate 2 live instruction policy", () => {
     const findingIds: Stems = new Map();
     for (const benchmarkCase of manifest.cases) {
       for (const id of benchmarkCase.expectedOutcome?.expectedFindingIds ?? []) {
-        const entry = findingIds.get(id) ?? { parts: tokensOf(id), cases: new Set<string>() };
+        const entry = findingIds.get(id) ?? {
+          parts: tokensOf(id),
+          glued: tokensOf(id).join(""),
+          cases: new Set<string>(),
+        };
         entry.cases.add(benchmarkCase.id);
         findingIds.set(id, entry);
       }
@@ -399,9 +425,9 @@ describe("Gate 2 live instruction policy", () => {
       const found: string[] = [];
       for (const { where, text } of strings) {
         const tokens = tokensOf(text);
-        for (const [id, { parts, cases }] of findingIds) {
+        for (const [id, { glued, cases }] of findingIds) {
           if (where === `findingTaxonomy.${id}`) continue;
-          if (containsSequence(tokens, parts)) {
+          if (containsName(tokens, glued)) {
             found.push(`${where}: finding "${id}" names ${[...cases].sort().join(", ")}`);
           }
         }
@@ -557,21 +583,21 @@ describe("Gate 2 live instruction policy", () => {
         manifest.cases.filter((benchmarkCase) => benchmarkCase.class === cls),
       );
       const found: string[] = [];
-      const scan = (needle: string[], label: string, ownStem: boolean, id?: string) => {
-        for (let index = 0; index + needle.length <= stream.length; index += 1) {
-          if (!needle.every((part, offset) => stream[index + offset]?.token === part)) continue;
-          const span = stream.slice(index, index + needle.length);
+      const tokens = stream.map(({ token }) => token);
+      const scan = (glued: string, label: string, ownStem: boolean, id?: string) => {
+        for (const [start, end] of runsOf(tokens, glued)) {
+          const span = stream.slice(start, end);
           if (spanAllowed(span, ownStem, id)) continue;
           const origins = [...new Set(span.map(({ origin }) => origin))].join("+");
           found.push(`assembled ${cls}: ${label} across ${origins}`);
         }
       };
-      for (const [stem, { parts, cases }] of stems) {
-        scan(parts, `"${stem}" names ${[...cases].sort().join(", ")}`, ownStems.has(stem));
+      for (const [stem, { glued, cases }] of stems) {
+        scan(glued, `"${stem}" names ${[...cases].sort().join(", ")}`, ownStems.has(stem));
       }
       if (kind === "read_only") {
-        for (const [fid, { parts, cases }] of findingIds) {
-          scan(parts, `finding "${fid}" names ${[...cases].sort().join(", ")}`, false, fid);
+        for (const [fid, { glued, cases }] of findingIds) {
+          scan(glued, `finding "${fid}" names ${[...cases].sort().join(", ")}`, false, fid);
         }
       }
       return [...new Set(found)];
@@ -656,6 +682,50 @@ describe("Gate 2 live instruction policy", () => {
       ),
     ).toEqual([
       'assembled scaffold: "test_json_output" names scaffold-lantern-json-output across classRules.scaffold',
+    ]);
+    // Thirteenth review: identifier spellings. Every one is the same name.
+    for (const spelling of [
+      "testJsonOutput",
+      "TestJsonOutput",
+      "testjsonoutput",
+      "TEST_JSON_OUTPUT",
+    ]) {
+      expect(
+        assembledCollisionsOf(
+          asPolicy({
+            ...policy,
+            classRules: {
+              ...policy.classRules,
+              scaffold: [
+                ...(policy.classRules.scaffold ?? []),
+                `Name the new check module ${spelling}.`,
+              ],
+            },
+          }),
+          "scaffold",
+          "mutation",
+        ),
+      ).toEqual([
+        'assembled scaffold: "test_json_output" names scaffold-lantern-json-output across classRules.scaffold',
+      ]);
+    }
+    expect(
+      assembledCollisionsOf(
+        asPolicy({
+          ...policy,
+          classRules: {
+            ...policy.classRules,
+            security_review: [
+              ...(policy.classRules.security_review ?? []),
+              "Report pathTraversal when runtime input escapes.",
+            ],
+          },
+        }),
+        "security_review",
+        "read_only",
+      ),
+    ).toEqual([
+      'assembled security_review: finding "path-traversal" names security-path-traversal across classRules.security_review',
     ]);
     // Every policy string is printable ASCII, so a zero-width space cannot split a stem.
     expect(() =>
