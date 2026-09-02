@@ -537,15 +537,49 @@ describe("Gate 2 published live evidence", () => {
     });
   });
 
-  it("rethrows a second-pass fault through the publisher, not only through the freezer", async () => {
-    // Sol's P2. A directory named like a record passes the digest walk -- it holds no
-    // files -- and fails the record read with EISDIR. That is a fault, and the publisher
-    // must surface it as one rather than turn it into a verdict about the evidence.
+  it("calls a directory named like a record a verdict, in the freezer's words, on both APIs", async () => {
+    // Sol's P2 fixture, and its answer changed underneath it. This used to reach the record
+    // read as an EISDIR fault, and the test asserted the fault. The freezer now lstat-checks
+    // each record before reading it, so a directory where a record belongs is a FACT about
+    // the evidence — which is the better answer, and the one both APIs must give.
     await withFrozenCopy(async (temporary, artifactDirectory) => {
       await mkdir(path.join(artifactDirectory, "routed", "fault.json"));
-      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
-        /EISDIR/,
+      const wording = "Gate 2 evidence freeze: routed/fault.json is not a regular file";
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([`recordContract: ${wording}`]);
+      const error = await verifyGate2PublishedEvidence(temporary, "reasoning-suppressed").then(
+        () => null,
+        (thrown: Error) => thrown,
       );
+      expect(error?.message).toContain(wording);
+      // A fault is what this is not: the publisher must not surface an I/O error for a
+      // question the freezer can answer about the directory.
+      expect(error?.message).not.toMatch(/EISDIR/);
+    });
+  });
+
+  it("refuses a symlinked manifest in the freezer's words, without reading the planted bytes", async () => {
+    // The manifest moved outside the set behind a symlink, with a duplicate member planted
+    // in the outside copy. The strict parser would report the planted bytes; the closed-tree
+    // walk reports that the set contains a link. The second is the true statement about this
+    // directory, and it has to be the one that speaks.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const outside = path.join(temporary, "manifest-outside-the-set.json");
+      const text = await readFile(path.join(artifactDirectory, "manifest.json"), "utf8");
+      await writeFile(
+        outside,
+        text.replace(/^\{/, '{\n  "schema": "icarus.gate2-frozen-evidence.v2",'),
+      );
+      await rm(path.join(artifactDirectory, "manifest.json"));
+      await symlink(outside, path.join(artifactDirectory, "manifest.json"));
+
+      const wording = "Gate 2 evidence freeze: manifest.json is not a regular file";
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([wording]);
+      const error = await verifyGate2PublishedEvidence(temporary, "reasoning-suppressed").then(
+        () => null,
+        (thrown: Error) => thrown,
+      );
+      expect(error?.message).toContain(wording);
+      expect(error?.message).not.toMatch(/duplicate JSON object members/);
     });
   });
 
