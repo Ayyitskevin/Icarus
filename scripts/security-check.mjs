@@ -10,6 +10,7 @@ import { validateGate1BenchmarkManifest } from "./gate1-benchmark-contract.mjs";
 import {
   GATE2_V2_MANIFEST_SHA256,
   GATE2_V3_MANIFEST_SHA256,
+  GATE2_V4_MANIFEST_SHA256,
   parseStrictGate2Json,
   sha256Raw,
   validateGate2BenchmarkManifest,
@@ -347,6 +348,10 @@ const gate2BenchmarkV3ManifestSource = await readFile(
   "fixtures/evals/gate2/manifest.v3.json",
   "utf8",
 );
+const gate2BenchmarkV4ManifestSource = await readFile(
+  "fixtures/evals/gate2/manifest.v4.json",
+  "utf8",
+);
 const inheritedWorkflowSource = await readFile(".github/workflows/opencode.yml", "utf8");
 const packageSource = await readFile("package.json", "utf8");
 const packageJson = JSON.parse(packageSource);
@@ -355,11 +360,13 @@ const gate2RetrievalManifest = parseStrictJson(gate2RetrievalManifestSource);
 const gate2BenchmarkManifest = parseStrictGate2Json(gate2BenchmarkManifestSource);
 const gate2BenchmarkSuccessorManifest = parseStrictGate2Json(gate2BenchmarkSuccessorManifestSource);
 const gate2BenchmarkV3Manifest = parseStrictGate2Json(gate2BenchmarkV3ManifestSource);
+const gate2BenchmarkV4Manifest = parseStrictGate2Json(gate2BenchmarkV4ManifestSource);
 let gate1BenchmarkManifestValid = false;
 let gate2RetrievalManifestValid = false;
 let gate2BenchmarkManifestValid = false;
 let gate2BenchmarkSuccessorManifestValid = false;
 let gate2BenchmarkV3ManifestValid = false;
+let gate2BenchmarkV4ManifestValid = false;
 try {
   validateGate1BenchmarkManifest(gate1BenchmarkManifest);
   gate1BenchmarkManifestValid = true;
@@ -390,6 +397,13 @@ try {
     sha256Raw(gate2BenchmarkV3ManifestSource) === GATE2_V3_MANIFEST_SHA256;
 } catch {
   // The named assertion below reports v3 lineage drift.
+}
+try {
+  validateGate2BenchmarkSuccessor(gate2BenchmarkV4Manifest, gate2BenchmarkV3ManifestSource);
+  gate2BenchmarkV4ManifestValid =
+    sha256Raw(gate2BenchmarkV4ManifestSource) === GATE2_V4_MANIFEST_SHA256;
+} catch {
+  // The named assertion below reports v4 lineage drift.
 }
 const ciWorkflowSource = await readFile(".github/workflows/ci.yml", "utf8");
 const gitAttributesSource = await readFile(".gitattributes", "utf8");
@@ -2842,6 +2856,9 @@ const assertions = {
     gate2BenchmarkV3ManifestValid &&
     gate2BenchmarkV3Manifest.supersedes?.manifestSha256 === GATE2_V2_MANIFEST_SHA256 &&
     gate2BenchmarkV3Manifest.replacements?.length === 3 &&
+    gate2BenchmarkV4ManifestValid &&
+    gate2BenchmarkV4Manifest.supersedes?.manifestSha256 === GATE2_V3_MANIFEST_SHA256 &&
+    gate2BenchmarkV4Manifest.replacements?.length === 3 &&
     gate2BenchmarkManifest.executionBoundary?.contractValidation === "offline-read-only" &&
     gate2BenchmarkManifest.executionBoundary?.credentialReads === 0 &&
     gate2BenchmarkManifest.executionBoundary?.externalNetworkRequests === 0 &&

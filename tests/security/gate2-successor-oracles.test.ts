@@ -14,11 +14,12 @@ import { GATE2_REPAIR_B_ORACLES } from "../../scripts/gate2-repair-cohort-b-cont
 import { GATE2_SCAFFOLD_A_ORACLES } from "../../scripts/gate2-scaffold-cohort-a-contract.mjs";
 import { GATE2_SCHEMA_SUCCESSOR_ORACLES } from "../../scripts/gate2-schema-successor-cohort-contract.mjs";
 import { GATE2_V3_SUCCESSOR_ORACLES } from "../../scripts/gate2-v3-successor-oracles.mjs";
+import { GATE2_V4_SUCCESSOR_ORACLES } from "../../scripts/gate2-v4-successor-oracles.mjs";
 
 const manifestUrl = new URL(`../../${GATE2_CURRENT_MANIFEST_PATH}`, import.meta.url);
 
 // The live runner resolves a mutation case's registered check and approved targets by case
-// id from these six lists. A v3 successor whose oracle disagreed with its manifest entry
+// id from these seven lists. A successor whose oracle disagreed with its manifest entry
 // would run the wrong check or fence the wrong targets, and score a benchmark defect as a
 // model miss -- the very thing v3 exists to stop.
 describe("Gate 2 manifest v3 successor oracles", () => {
@@ -34,9 +35,10 @@ describe("Gate 2 manifest v3 successor oracles", () => {
         ...GATE2_SCAFFOLD_A_ORACLES,
         ...GATE2_SCHEMA_SUCCESSOR_ORACLES,
         ...GATE2_V3_SUCCESSOR_ORACLES,
+        ...GATE2_V4_SUCCESSOR_ORACLES,
       ].map((entry) => [entry.caseId, entry] as const),
     );
-    expect(registry.size).toBe(23);
+    expect(registry.size).toBe(25);
     for (const benchmarkCase of manifest.cases) {
       const oracle = registry.get(benchmarkCase.id);
       expect((benchmarkCase.expectedOutcome.kind === "mutation") === (oracle !== undefined)).toBe(
@@ -92,5 +94,32 @@ describe("Gate 2 manifest v3 successor oracles", () => {
     const v2 = GATE2_SCAFFOLD_A_ORACLES.find((entry) => entry.caseId === "scaffold-parser-cli");
     expect(v2?.check.argv).toEqual(["python", "-m", "tests.test_cli"]);
     expect(v2?.approvedFiles.map((file) => file.path)).toEqual(["src/cli.py", "tests/test_cli.py"]);
+  });
+});
+
+describe("Gate 2 manifest v4 successor oracles", () => {
+  it("re-keys the two mutation successors and relocates only the greeting check", () => {
+    expect(GATE2_V4_SUCCESSOR_ORACLES.map((entry) => entry.caseId)).toEqual([
+      "repair-lantern-config-contract",
+      "scaffold-greeting-command-check",
+    ]);
+    for (const oracle of GATE2_V4_SUCCESSOR_ORACLES) {
+      expect(Object.isFrozen(oracle)).toBe(true);
+      for (const file of oracle.approvedFiles) expect(sha256Raw(file.content)).toBe(file.sha256);
+    }
+    const lantern = GATE2_V4_SUCCESSOR_ORACLES[0];
+    const greeting = GATE2_V4_SUCCESSOR_ORACLES[1];
+    expect(lantern?.check.id).toBe("lantern-missing-config");
+    expect(lantern?.approvedFiles.map((file) => file.path)).toEqual(["src/main.py"]);
+    expect(greeting?.check).toEqual({
+      id: "greeting-command",
+      name: "Greeting source-of-truth command",
+      argv: ["python", "-m", "checks.test_greet"],
+    });
+    expect(greeting?.approvedFiles.map((file) => file.path)).toEqual([
+      "src/greet.py",
+      "checks/test_greet.py",
+    ]);
+    expect(JSON.stringify(GATE2_V4_SUCCESSOR_ORACLES)).not.toContain("tests/test_greet");
   });
 });

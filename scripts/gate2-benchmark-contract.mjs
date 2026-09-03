@@ -164,6 +164,9 @@ export const GATE2_V2_MANIFEST_SHA256 =
 // Pinned from the committed bytes; a change to manifest.v3.json is a new revision, not an edit.
 export const GATE2_V3_MANIFEST_SHA256 =
   "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134";
+// Pinned from the committed bytes; a change to manifest.v4.json is a new revision, not an edit.
+export const GATE2_V4_MANIFEST_SHA256 =
+  "da1f9e0b71ed1cc91cc66c1908920efdab51be325d6e1637188e6daa93924dfb";
 const GATE2_V3_CASE_IDS = Object.freeze(
   GATE2_V2_CASE_IDS.map((caseId) => {
     if (caseId === "refactor-cart-money-module") return "refactor-cart-money-extraction";
@@ -172,18 +175,28 @@ const GATE2_V3_CASE_IDS = Object.freeze(
     return caseId;
   }),
 );
+const GATE2_V4_CASE_IDS = Object.freeze(
+  GATE2_V3_CASE_IDS.map((caseId) => {
+    if (caseId === "repair-lantern-missing-config") return "repair-lantern-config-contract";
+    if (caseId === "scaffold-greeting-command") return "scaffold-greeting-command-check";
+    if (caseId === "explain-schema-contract") return "explain-task-schema-contract";
+    return caseId;
+  }),
+);
 export const GATE2_CASE_IDS_BY_REVISION = Object.freeze({
   "gate2-thirty-task-v1": GATE2_CASE_IDS,
   "gate2-thirty-task-v2-host-policy-compatible": GATE2_V2_CASE_IDS,
   "gate2-thirty-task-v3-task-entailed-targets": GATE2_V3_CASE_IDS,
+  "gate2-thirty-task-v4-stated-contracts": GATE2_V4_CASE_IDS,
 });
-export const GATE2_CURRENT_BENCHMARK_REVISION = "gate2-thirty-task-v3-task-entailed-targets";
-export const GATE2_CURRENT_MANIFEST_PATH = "fixtures/evals/gate2/manifest.v3.json";
+export const GATE2_CURRENT_BENCHMARK_REVISION = "gate2-thirty-task-v4-stated-contracts";
+export const GATE2_CURRENT_MANIFEST_PATH = "fixtures/evals/gate2/manifest.v4.json";
 // A frozen set names its benchmark by digest; this is the only place a digest becomes a path.
 export const GATE2_MANIFEST_PATHS_BY_SHA256 = Object.freeze({
   [GATE2_V1_MANIFEST_SHA256]: "fixtures/evals/gate2/manifest.v1.json",
   [GATE2_V2_MANIFEST_SHA256]: "fixtures/evals/gate2/manifest.v2.json",
-  [GATE2_V3_MANIFEST_SHA256]: GATE2_CURRENT_MANIFEST_PATH,
+  [GATE2_V3_MANIFEST_SHA256]: "fixtures/evals/gate2/manifest.v3.json",
+  [GATE2_V4_MANIFEST_SHA256]: GATE2_CURRENT_MANIFEST_PATH,
 });
 // The bytes a revision may be loaded from. A manifest is refused unless its digest is the one
 // registered for the revision it claims; a valid-JSON edit is a new revision, never an edit.
@@ -191,6 +204,7 @@ export const GATE2_MANIFEST_SHA256_BY_REVISION = Object.freeze({
   "gate2-thirty-task-v1": GATE2_V1_MANIFEST_SHA256,
   "gate2-thirty-task-v2-host-policy-compatible": GATE2_V2_MANIFEST_SHA256,
   "gate2-thirty-task-v3-task-entailed-targets": GATE2_V3_MANIFEST_SHA256,
+  "gate2-thirty-task-v4-stated-contracts": GATE2_V4_MANIFEST_SHA256,
 });
 
 const GATE2_V2_REPLACEMENTS = Object.freeze([
@@ -336,6 +350,94 @@ const GATE2_V3_SUCCESSOR_CASES = Object.freeze([
   }),
 ]);
 
+const GATE2_V4_REPLACEMENTS = Object.freeze([
+  Object.freeze({
+    predecessorCaseId: "repair-lantern-missing-config",
+    successorCaseId: "repair-lantern-config-contract",
+    reason: "check-demanded-an-exact-message-the-task-text-never-stated",
+  }),
+  Object.freeze({
+    predecessorCaseId: "scaffold-greeting-command",
+    successorCaseId: "scaffold-greeting-command-check",
+    reason: "expected-check-path-contradicted-the-fixture-check-directory-convention",
+  }),
+  Object.freeze({
+    predecessorCaseId: "explain-schema-contract",
+    successorCaseId: "explain-task-schema-contract",
+    reason: "task-text-named-two-documentation-files-where-the-expected-set-holds-one",
+  }),
+]);
+
+const GATE2_V4_SUCCESSOR_CASES = Object.freeze([
+  Object.freeze({
+    id: "repair-lantern-config-contract",
+    class: "repair",
+    repositoryId: "unfamiliar",
+    task: Object.freeze({
+      path: "fixtures/evals/gate2/tasks/repair-lantern-config-contract.md",
+      sha256: "2b8a52633b0550cc642036e181fb422d1d65470b562ba9b0b7e4700add95afe8",
+    }),
+    expectedContextPaths: Object.freeze(["config/app.json", "README.md", "src/main.py"]),
+    expectedOutcome: Object.freeze({
+      kind: "mutation",
+      expectedChangedPaths: Object.freeze(["src/main.py"]),
+      expectedCitationPaths: Object.freeze([]),
+      expectedFindingIds: Object.freeze([]),
+      allowNoFinding: false,
+      scenarioEvaluatorId: "repair-lantern-config-contract-evaluator",
+    }),
+  }),
+  Object.freeze({
+    id: "explain-task-schema-contract",
+    class: "explanation",
+    repositoryId: "schema",
+    task: Object.freeze({
+      path: "fixtures/evals/gate2/tasks/explain-task-schema-contract.md",
+      sha256: "a00de70ffd192d6c1d7b0e15becab54536aa533310cb101e48b38e4c01f15a9f",
+    }),
+    expectedContextPaths: Object.freeze([
+      "checks/schema_contract.sql",
+      "README.md",
+      "schema/current.sql",
+    ]),
+    expectedOutcome: Object.freeze({
+      kind: "read_only",
+      expectedChangedPaths: Object.freeze([]),
+      expectedCitationPaths: Object.freeze([
+        "checks/schema_contract.sql",
+        "README.md",
+        "schema/current.sql",
+      ]),
+      expectedFindingIds: Object.freeze([]),
+      allowNoFinding: false,
+      scenarioEvaluatorId: "explain-task-schema-contract-evaluator",
+    }),
+  }),
+  Object.freeze({
+    id: "scaffold-greeting-command-check",
+    class: "scaffold",
+    repositoryId: "basic",
+    task: Object.freeze({
+      path: "fixtures/evals/gate2/tasks/scaffold-greeting-command-check.md",
+      sha256: "bd0274ef7b42e3ad5ba5ececc69c33fde5203b535c3fe21a1d1efb5dd6a558eb",
+    }),
+    expectedContextPaths: Object.freeze([
+      "AGENTS.md",
+      "checks/verify.py",
+      "README.md",
+      "src/greeting.txt",
+    ]),
+    expectedOutcome: Object.freeze({
+      kind: "mutation",
+      expectedChangedPaths: Object.freeze(["checks/test_greet.py", "src/greet.py"]),
+      expectedCitationPaths: Object.freeze([]),
+      expectedFindingIds: Object.freeze([]),
+      allowNoFinding: false,
+      scenarioEvaluatorId: "scaffold-greeting-command-check-evaluator",
+    }),
+  }),
+]);
+
 // Every schema-2 revision is registered here by lineage: which manifest it supersedes (by
 // digest), which cases it replaces, and the successor cases by exact value. A manifest whose
 // benchmarkRevision is not registered is refused; nothing about a lineage is read from the
@@ -358,6 +460,15 @@ const GATE2_LINEAGE = Object.freeze({
     }),
     replacements: GATE2_V3_REPLACEMENTS,
     successorCases: GATE2_V3_SUCCESSOR_CASES,
+  }),
+  "gate2-thirty-task-v4-stated-contracts": Object.freeze({
+    predecessor: Object.freeze({
+      benchmarkRevision: "gate2-thirty-task-v3-task-entailed-targets",
+      manifestPath: "fixtures/evals/gate2/manifest.v3.json",
+      manifestSha256: GATE2_V3_MANIFEST_SHA256,
+    }),
+    replacements: GATE2_V4_REPLACEMENTS,
+    successorCases: GATE2_V4_SUCCESSOR_CASES,
   }),
 });
 
@@ -1191,12 +1302,13 @@ async function main() {
   const manifestPaths = [
     path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v1.json"),
     path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v2.json"),
+    path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v3.json"),
     path.join(repositoryRoot, GATE2_CURRENT_MANIFEST_PATH),
   ];
   const loadedContracts = await Promise.all(
     manifestPaths.map((manifestPath) => loadGate2BenchmarkContract(manifestPath, repositoryRoot)),
   );
-  const loaded = loadedContracts[2];
+  const loaded = loadedContracts[3];
   process.stdout.write(
     `${JSON.stringify({
       benchmarkId: loaded.manifest.benchmarkId,

@@ -1,0 +1,792 @@
+{
+  "schemaVersion": 2,
+  "benchmarkId": "gate2-context-agent-quality",
+  "benchmarkRevision": "gate2-thirty-task-v4-stated-contracts",
+  "supersedes": {
+    "benchmarkRevision": "gate2-thirty-task-v3-task-entailed-targets",
+    "manifestPath": "fixtures/evals/gate2/manifest.v3.json",
+    "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134"
+  },
+  "replacements": [
+    {
+      "predecessorCaseId": "repair-lantern-missing-config",
+      "successorCaseId": "repair-lantern-config-contract",
+      "reason": "check-demanded-an-exact-message-the-task-text-never-stated"
+    },
+    {
+      "predecessorCaseId": "scaffold-greeting-command",
+      "successorCaseId": "scaffold-greeting-command-check",
+      "reason": "expected-check-path-contradicted-the-fixture-check-directory-convention"
+    },
+    {
+      "predecessorCaseId": "explain-schema-contract",
+      "successorCaseId": "explain-task-schema-contract",
+      "reason": "task-text-named-two-documentation-files-where-the-expected-set-holds-one"
+    }
+  ],
+  "digestEncoding": "raw-bytes-sha256-lowercase-hex",
+  "resultSchemaVersion": 1,
+  "executionBoundary": {
+    "contractValidation": "offline-read-only",
+    "credentialReads": 0,
+    "externalNetworkRequests": 0,
+    "remoteMutations": 0,
+    "sourceCheckoutMutations": 0,
+    "mockedEvidenceCompletesGate": false
+  },
+  "thresholds": {
+    "taskCount": 30,
+    "classCounts": {
+      "repair": 10,
+      "refactor": 5,
+      "explanation": 5,
+      "security_review": 5,
+      "scaffold": 5
+    },
+    "minimumSuccessfulTasks": 24,
+    "minimumMacroRetrievalRecall": 0.9,
+    "minimumMacroRetrievalPrecision": 0.6,
+    "minimumDigestProvenanceCoverage": 1,
+    "minimumFirstPassPlanAcceptance": 0.8,
+    "maximumIncorrectEditsPerSuccess": 0,
+    "minimumRoutedCostReduction": 0.3,
+    "minimumRoutedSuccessCountRatio": 1
+  },
+  "measurementDefinitions": {
+    "retrievalUnit": "unique-repository-path",
+    "recall": "per-task expected paths retrieved divided by expected path count; macro mean across all tasks",
+    "precision": "per-task retrieved expected paths divided by retrieved path count; macro mean across all tasks",
+    "digestProvenanceCoverage": "retrieved paths with manifest-matching raw-byte sha256 divided by retrieved path count",
+    "firstPassPlanAcceptance": "accepted first submitted plan divided by all tasks",
+    "incorrectEdits": "changed paths outside the exact expected set; any read-only change is incorrect",
+    "taskSuccess": "scenario evaluator passes and incorrectEdits equals zero",
+    "costPerSuccess": "median estimated provider cost over successful tasks; actual billed cost is never inferred",
+    "routingComparison": "paired baseline and routed results use the same execution-profile digest, task set, revisions, models, and captured price table"
+  },
+  "repositories": [
+    {
+      "id": "basic",
+      "stack": "plaintext-python-check",
+      "fixturePath": "fixtures/evals/repos/basic",
+      "revisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+      "files": [
+        {
+          "path": ".gitignore",
+          "sha256": "d20841c8729e8e17bba1e703e825b0c07f01af6454110b455c636563ad49c17b"
+        },
+        {
+          "path": "AGENTS.md",
+          "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+        },
+        {
+          "path": "README.md",
+          "sha256": "fa5d1662ca22c8397bcaef17daa0e0af2c383b8b7b75cb4a79698cceefcbf034"
+        },
+        {
+          "path": "src/greeting.txt",
+          "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+        }
+      ]
+    },
+    {
+      "id": "buggy",
+      "stack": "python",
+      "fixturePath": "fixtures/evals/repos/buggy",
+      "revisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+      "files": [
+        {
+          "path": "checks/test_cart.py",
+          "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+        },
+        {
+          "path": "README.md",
+          "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+        },
+        {
+          "path": "src/cart.py",
+          "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+        }
+      ]
+    },
+    {
+      "id": "failing",
+      "stack": "python",
+      "fixturePath": "fixtures/evals/repos/failing",
+      "revisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+      "files": [
+        {
+          "path": "checks/test_parser.py",
+          "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+        },
+        {
+          "path": "checks/verify.py",
+          "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+        },
+        {
+          "path": "README.md",
+          "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+        },
+        {
+          "path": "src/parser.py",
+          "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+        }
+      ]
+    },
+    {
+      "id": "refactor",
+      "stack": "python",
+      "fixturePath": "fixtures/evals/repos/refactor",
+      "revisionSha256": "5ce751efcdb138a9a0db315936567d9a6a1a86df45c49df9027b5bab8f605bd1",
+      "files": [
+        {
+          "path": "checks/test_profile.py",
+          "sha256": "fa05d342300f27d06db8780fca5d559168727aa67bd892519939a1b3e1c7135c"
+        },
+        {
+          "path": "README.md",
+          "sha256": "b30b545ab04a3cb4d3d152dedf7f02b8b2c07c93f80e015c94dc2494eb236ed6"
+        },
+        {
+          "path": "src/format_name.py",
+          "sha256": "a13b379da43d90338fcb947bb2c312016a828acab7e82d5750dda03ffa80cd5f"
+        },
+        {
+          "path": "src/profile.py",
+          "sha256": "7d40d23861b65172ce6b0ec9d9d6b502fe3dc3cea46dd93ad4bade022f01ceab"
+        }
+      ]
+    },
+    {
+      "id": "schema",
+      "stack": "sql",
+      "fixturePath": "fixtures/evals/repos/schema",
+      "revisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+      "files": [
+        {
+          "path": "checks/schema_contract.sql",
+          "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+        },
+        {
+          "path": "migrations/README.md",
+          "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+        },
+        {
+          "path": "README.md",
+          "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+        },
+        {
+          "path": "schema/current.sql",
+          "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+        }
+      ]
+    },
+    {
+      "id": "security",
+      "stack": "python",
+      "fixturePath": "fixtures/evals/repos/security",
+      "revisionSha256": "131ff18d492a97bbab9a590d5a0a9ef9e21fd25baadf648bab4bbbd5b200e132",
+      "files": [
+        {
+          "path": "checks/expected_finding.md",
+          "sha256": "2fdc9c401165ab469355887fe2b44069a6e7d231d2c4406e516c72fd872dbbd1"
+        },
+        {
+          "path": "README.md",
+          "sha256": "078e8880de0bfd549d6dcd9e16967d35693988c38343c5b6ad6f231f2aac426f"
+        },
+        {
+          "path": "src/files.py",
+          "sha256": "3eda58ebbbfae5a26e17236f93ac39972969c121baec2b2897f4703101062af2"
+        }
+      ]
+    },
+    {
+      "id": "unfamiliar",
+      "stack": "python-cli",
+      "fixturePath": "fixtures/evals/repos/unfamiliar",
+      "revisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+      "files": [
+        {
+          "path": "config/app.json",
+          "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+        },
+        {
+          "path": "README.md",
+          "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+        },
+        {
+          "path": "src/greeting.py",
+          "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+        },
+        {
+          "path": "src/main.py",
+          "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "repair-basic-greeting",
+      "class": "repair",
+      "repositoryId": "basic",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/repair-basic-greeting.md",
+        "sha256": "5724fe7e67cd1049a0c6e51f02023bc48dcc16cc7ac918b682287951acdb4e59"
+      },
+      "expectedContextPaths": ["AGENTS.md", "checks/verify.py", "src/greeting.txt"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["src/greeting.txt"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "repair-basic-greeting-evaluator"
+      }
+    },
+    {
+      "id": "repair-cart-off-by-one",
+      "class": "repair",
+      "repositoryId": "buggy",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/repair-cart-off-by-one.md",
+        "sha256": "6b9ae490cf9226617faaa3bcf69b26cbf11e3fea28382531ddeb123e3ab51e7d"
+      },
+      "expectedContextPaths": ["checks/test_cart.py", "README.md", "src/cart.py"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["src/cart.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "repair-cart-off-by-one-evaluator"
+      }
+    },
+    {
+      "id": "repair-parser-false",
+      "class": "repair",
+      "repositoryId": "failing",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/repair-parser-false.md",
+        "sha256": "f9a110931ffe2223830b38922d2b83baca52464753529e7ba611ed05e6e74a7c"
+      },
+      "expectedContextPaths": ["checks/test_parser.py", "README.md", "src/parser.py"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["src/parser.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "repair-parser-false-evaluator"
+      }
+    },
+    {
+      "id": "repair-public-path-containment",
+      "class": "repair",
+      "repositoryId": "security",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/repair-public-path-containment.md",
+        "sha256": "4f011f95d5801dcc105f431785f874161f565404173cfd94e6ec8f34821eb0e4"
+      },
+      "expectedContextPaths": ["checks/expected_finding.md", "README.md", "src/files.py"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["src/files.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "repair-public-path-containment-evaluator"
+      }
+    },
+    {
+      "id": "repair-schema-status-snapshot",
+      "class": "repair",
+      "repositoryId": "schema",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/repair-schema-status-snapshot.md",
+        "sha256": "5c5a211b88fe21da7b6d2ff968051eb4ef089fd142354b4454d251fc0d867dc7"
+      },
+      "expectedContextPaths": ["checks/schema_contract.sql", "README.md", "schema/current.sql"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["checks/schema_contract.sql", "schema/current.sql"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "repair-schema-status-snapshot-evaluator"
+      }
+    },
+    {
+      "id": "repair-name-whitespace",
+      "class": "repair",
+      "repositoryId": "refactor",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/repair-name-whitespace.md",
+        "sha256": "90b39677638e8c3e863fe51788252718c4f24eaf2b2df0fb69aaaab1e644f974"
+      },
+      "expectedContextPaths": [
+        "checks/test_profile.py",
+        "README.md",
+        "src/format_name.py",
+        "src/profile.py"
+      ],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["checks/test_profile.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "repair-name-whitespace-evaluator"
+      }
+    },
+    {
+      "id": "repair-lantern-config-contract",
+      "class": "repair",
+      "repositoryId": "unfamiliar",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/repair-lantern-config-contract.md",
+        "sha256": "2b8a52633b0550cc642036e181fb422d1d65470b562ba9b0b7e4700add95afe8"
+      },
+      "expectedContextPaths": ["config/app.json", "README.md", "src/main.py"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["src/main.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "repair-lantern-config-contract-evaluator"
+      }
+    },
+    {
+      "id": "repair-lantern-empty-audience",
+      "class": "repair",
+      "repositoryId": "unfamiliar",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/repair-lantern-empty-audience.md",
+        "sha256": "3e9a8de9012447fbb433affaf8e8b12c9e57476b15328a5094e81d533c179913"
+      },
+      "expectedContextPaths": ["config/app.json", "src/greeting.py", "src/main.py"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["src/greeting.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "repair-lantern-empty-audience-evaluator"
+      }
+    },
+    {
+      "id": "repair-basic-newline",
+      "class": "repair",
+      "repositoryId": "basic",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/repair-basic-newline.md",
+        "sha256": "7d31d4951f36558bc80acd336c3eebf3121ddfe8aa9b4e0edf3c71ad7e442fc5"
+      },
+      "expectedContextPaths": ["AGENTS.md", "checks/verify.py", "src/greeting.txt"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["src/greeting.txt"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "repair-basic-newline-evaluator"
+      }
+    },
+    {
+      "id": "repair-cart-empty-list",
+      "class": "repair",
+      "repositoryId": "buggy",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/repair-cart-empty-list.md",
+        "sha256": "b663cdf70ad8934e8068f3c1619324945802e6f3b13ec5c74a754cc8dd9d2f61"
+      },
+      "expectedContextPaths": ["checks/test_cart.py", "README.md", "src/cart.py"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["checks/test_cart.py", "src/cart.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "repair-cart-empty-list-evaluator"
+      }
+    },
+    {
+      "id": "refactor-name-normalization",
+      "class": "refactor",
+      "repositoryId": "refactor",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/refactor-name-normalization.md",
+        "sha256": "5d77edacac31f30555640b014c2c9c4cea003dd57dc23bf42c3993fed7d52920"
+      },
+      "expectedContextPaths": [
+        "checks/test_profile.py",
+        "README.md",
+        "src/format_name.py",
+        "src/profile.py"
+      ],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": [
+          "src/format_name.py",
+          "src/name_normalization.py",
+          "src/profile.py"
+        ],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "refactor-name-normalization-evaluator"
+      }
+    },
+    {
+      "id": "refactor-lantern-config-loader",
+      "class": "refactor",
+      "repositoryId": "unfamiliar",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/refactor-lantern-config-loader.md",
+        "sha256": "b2ffdb36663853bd4f05ac949c2a34b4ca016b070b03189a25a327dcab884189"
+      },
+      "expectedContextPaths": ["config/app.json", "README.md", "src/main.py"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["src/config.py", "src/main.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "refactor-lantern-config-loader-evaluator"
+      }
+    },
+    {
+      "id": "refactor-cart-money-extraction",
+      "class": "refactor",
+      "repositoryId": "buggy",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/refactor-cart-money-extraction.md",
+        "sha256": "8f1bdefcc33cdc0e9fed80466a1f00864f854ca7d28da36b2ad367d8bfc628f8"
+      },
+      "expectedContextPaths": ["checks/test_cart.py", "README.md", "src/cart.py"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["src/cart.py", "src/money.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "refactor-cart-money-extraction-evaluator"
+      }
+    },
+    {
+      "id": "refactor-parser-token-table",
+      "class": "refactor",
+      "repositoryId": "failing",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/refactor-parser-token-table.md",
+        "sha256": "8d0cfc0d46c55137207ffdaab0c92e035aa387ea1f76a3d5017d20a823ee5d25"
+      },
+      "expectedContextPaths": ["checks/test_parser.py", "README.md", "src/parser.py"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["src/parser.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "refactor-parser-token-table-evaluator"
+      }
+    },
+    {
+      "id": "refactor-schema-task-view",
+      "class": "refactor",
+      "repositoryId": "schema",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/refactor-schema-task-view.md",
+        "sha256": "d5305c2a35958248b3a3b432af7f0f011ece696c3c7a90a2f8429f2b465d2dbd"
+      },
+      "expectedContextPaths": ["checks/schema_contract.sql", "README.md", "schema/current.sql"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["checks/schema_contract.sql"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "refactor-schema-task-view-evaluator"
+      }
+    },
+    {
+      "id": "explain-lantern-flow",
+      "class": "explanation",
+      "repositoryId": "unfamiliar",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/explain-lantern-flow.md",
+        "sha256": "0ef3a4df7ececa629cbe750e8e4cb23afc69d9bfe58c331f78f0cd82b2a7bae0"
+      },
+      "expectedContextPaths": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+      "expectedOutcome": {
+        "kind": "read_only",
+        "expectedChangedPaths": [],
+        "expectedCitationPaths": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "explain-lantern-flow-evaluator"
+      }
+    },
+    {
+      "id": "explain-basic-guardrails",
+      "class": "explanation",
+      "repositoryId": "basic",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/explain-basic-guardrails.md",
+        "sha256": "55cc8ea5b31729be0d95ad7695954baeb720f7c6f8906dd06782ed5bfb526fa0"
+      },
+      "expectedContextPaths": ["AGENTS.md", "checks/verify.py", "src/greeting.txt"],
+      "expectedOutcome": {
+        "kind": "read_only",
+        "expectedChangedPaths": [],
+        "expectedCitationPaths": ["AGENTS.md", "checks/verify.py", "src/greeting.txt"],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "explain-basic-guardrails-evaluator"
+      }
+    },
+    {
+      "id": "explain-task-schema-contract",
+      "class": "explanation",
+      "repositoryId": "schema",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/explain-task-schema-contract.md",
+        "sha256": "a00de70ffd192d6c1d7b0e15becab54536aa533310cb101e48b38e4c01f15a9f"
+      },
+      "expectedContextPaths": ["checks/schema_contract.sql", "README.md", "schema/current.sql"],
+      "expectedOutcome": {
+        "kind": "read_only",
+        "expectedChangedPaths": [],
+        "expectedCitationPaths": ["checks/schema_contract.sql", "README.md", "schema/current.sql"],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "explain-task-schema-contract-evaluator"
+      }
+    },
+    {
+      "id": "explain-refactor-duplication",
+      "class": "explanation",
+      "repositoryId": "refactor",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/explain-refactor-duplication.md",
+        "sha256": "e043d8be826a599e2864548c6d053a7bf2f146ad58aa645340256f8dbc08917d"
+      },
+      "expectedContextPaths": ["checks/test_profile.py", "src/format_name.py", "src/profile.py"],
+      "expectedOutcome": {
+        "kind": "read_only",
+        "expectedChangedPaths": [],
+        "expectedCitationPaths": ["checks/test_profile.py", "src/format_name.py", "src/profile.py"],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "explain-refactor-duplication-evaluator"
+      }
+    },
+    {
+      "id": "explain-parser-failure",
+      "class": "explanation",
+      "repositoryId": "failing",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/explain-parser-failure.md",
+        "sha256": "7bcf1affc60effcd31554451cc4fd963eb26d9dd38b827fd40a4580c5c702cd6"
+      },
+      "expectedContextPaths": ["checks/test_parser.py", "README.md", "src/parser.py"],
+      "expectedOutcome": {
+        "kind": "read_only",
+        "expectedChangedPaths": [],
+        "expectedCitationPaths": ["checks/test_parser.py", "README.md", "src/parser.py"],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "explain-parser-failure-evaluator"
+      }
+    },
+    {
+      "id": "security-path-traversal",
+      "class": "security_review",
+      "repositoryId": "security",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/security-path-traversal.md",
+        "sha256": "05195873393e3d60e0fe4b34f1becf20a80522ce0ca2b3f4a1fa98a935496c96"
+      },
+      "expectedContextPaths": ["checks/expected_finding.md", "README.md", "src/files.py"],
+      "expectedOutcome": {
+        "kind": "read_only",
+        "expectedChangedPaths": [],
+        "expectedCitationPaths": ["src/files.py"],
+        "expectedFindingIds": ["path-traversal"],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "security-path-traversal-evaluator"
+      }
+    },
+    {
+      "id": "security-hostile-agents",
+      "class": "security_review",
+      "repositoryId": "basic",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/security-hostile-agents.md",
+        "sha256": "c1fba091ce3380e5713d8d12b15ffeade71c090ddc5d0076d820ab5acc3e0583"
+      },
+      "expectedContextPaths": ["AGENTS.md", "README.md"],
+      "expectedOutcome": {
+        "kind": "read_only",
+        "expectedChangedPaths": [],
+        "expectedCitationPaths": ["AGENTS.md"],
+        "expectedFindingIds": ["authority-widening-instruction"],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "security-hostile-agents-evaluator"
+      }
+    },
+    {
+      "id": "security-schema-migration",
+      "class": "security_review",
+      "repositoryId": "schema",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/security-schema-migration.md",
+        "sha256": "8476faad57bc6a9c5e2493eca69abb9192f657cf4da76e39b38c2b30463a67a2"
+      },
+      "expectedContextPaths": ["migrations/README.md", "README.md", "schema/current.sql"],
+      "expectedOutcome": {
+        "kind": "read_only",
+        "expectedChangedPaths": [],
+        "expectedCitationPaths": ["README.md", "schema/current.sql"],
+        "expectedFindingIds": [],
+        "allowNoFinding": true,
+        "scenarioEvaluatorId": "security-schema-migration-evaluator"
+      }
+    },
+    {
+      "id": "security-config-trust",
+      "class": "security_review",
+      "repositoryId": "unfamiliar",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/security-config-trust.md",
+        "sha256": "13942cacbe00357c91c759a5c66eebfed7c50bc4cd457699bcafa609760a6cf1"
+      },
+      "expectedContextPaths": ["config/app.json", "README.md", "src/main.py"],
+      "expectedOutcome": {
+        "kind": "read_only",
+        "expectedChangedPaths": [],
+        "expectedCitationPaths": ["config/app.json", "src/main.py"],
+        "expectedFindingIds": ["unvalidated-config-shape"],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "security-config-trust-evaluator"
+      }
+    },
+    {
+      "id": "security-check-command",
+      "class": "security_review",
+      "repositoryId": "buggy",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/security-check-command.md",
+        "sha256": "07b20ea355507e5da3efb086663c0f57a2ffa60a4dc6006622402793430578f8"
+      },
+      "expectedContextPaths": ["checks/test_cart.py", "checks/verify.py", "README.md"],
+      "expectedOutcome": {
+        "kind": "read_only",
+        "expectedChangedPaths": [],
+        "expectedCitationPaths": ["checks/test_cart.py", "checks/verify.py"],
+        "expectedFindingIds": [],
+        "allowNoFinding": true,
+        "scenarioEvaluatorId": "security-check-command-evaluator"
+      }
+    },
+    {
+      "id": "scaffold-json-output-mode",
+      "class": "scaffold",
+      "repositoryId": "unfamiliar",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/scaffold-json-output-mode.md",
+        "sha256": "33afcb78ed0cfa00578b7e707f77365f99336e190e166a45e2dc5e4b0c573d4f"
+      },
+      "expectedContextPaths": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["src/main.py", "tests/test_json_output.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "scaffold-json-output-mode-evaluator"
+      }
+    },
+    {
+      "id": "scaffold-cart-discount",
+      "class": "scaffold",
+      "repositoryId": "buggy",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/scaffold-cart-discount.md",
+        "sha256": "5ada358e6249ba212040762c7612184a9af7a6ff39d53c30ed7dd671f864fa26"
+      },
+      "expectedContextPaths": ["checks/test_cart.py", "README.md", "src/cart.py"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["checks/test_discount.py", "src/discount.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "scaffold-cart-discount-evaluator"
+      }
+    },
+    {
+      "id": "scaffold-parser-cli-check",
+      "class": "scaffold",
+      "repositoryId": "failing",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/scaffold-parser-cli-check.md",
+        "sha256": "9112ed62adbb5215b577531e7eb78b43470b69d22d49f55cfa121b2e155df01b"
+      },
+      "expectedContextPaths": ["checks/test_parser.py", "README.md", "src/parser.py"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["checks/test_cli.py", "src/cli.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "scaffold-parser-cli-check-evaluator"
+      }
+    },
+    {
+      "id": "scaffold-task-priority-contract",
+      "class": "scaffold",
+      "repositoryId": "schema",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/scaffold-task-priority-contract.md",
+        "sha256": "83ad152996cef7b8bad212357a65f59c5376023167785a2a01ea6f59f56a4401"
+      },
+      "expectedContextPaths": ["checks/schema_contract.sql", "README.md", "schema/current.sql"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["checks/task_priority_contract.sql", "schema/current.sql"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "scaffold-task-priority-contract-evaluator"
+      }
+    },
+    {
+      "id": "scaffold-greeting-command-check",
+      "class": "scaffold",
+      "repositoryId": "basic",
+      "task": {
+        "path": "fixtures/evals/gate2/tasks/scaffold-greeting-command-check.md",
+        "sha256": "bd0274ef7b42e3ad5ba5ececc69c33fde5203b535c3fe21a1d1efb5dd6a558eb"
+      },
+      "expectedContextPaths": ["AGENTS.md", "checks/verify.py", "README.md", "src/greeting.txt"],
+      "expectedOutcome": {
+        "kind": "mutation",
+        "expectedChangedPaths": ["checks/test_greet.py", "src/greet.py"],
+        "expectedCitationPaths": [],
+        "expectedFindingIds": [],
+        "allowNoFinding": false,
+        "scenarioEvaluatorId": "scaffold-greeting-command-check-evaluator"
+      }
+    }
+  ]
+}
