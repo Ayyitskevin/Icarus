@@ -133,9 +133,11 @@ Baseline failures are dominated by markdown fences (20 of 27), as under revision
   revision 9 → 10 step changed policy, evidence record and writer (record revision 5 → 6),
   and freezer while retaining manifest v2; the revision 10 → v3 step retained the policy
   digest `116168c9…`, evidence-record revision 6, and the freezer's schema and source, while
-  changing the manifest and task inputs and the live runner's manifest resolution and
-  oracle registry (`scripts/gate2-live-benchmark.mjs`, 14 additions and 3 deletions between
-  the producing commits `96d88ee` and `12f0568`). No step was paired with a
+  changing the manifest and task inputs, the live runner's manifest resolution and oracle
+  registry (`scripts/gate2-live-benchmark.mjs`, 14 additions and 3 deletions between the
+  producing commits `96d88ee` and `12f0568`), and the contract module that resolves and
+  validates the manifest (`scripts/gate2-benchmark-contract.mjs`, +283/−49, plus the new
+  `scripts/gate2-v3-successor-oracles.mjs`). No step was paired with a
   reasoning-enabled arm, so the bytes do not establish why (ADR 0070 makes the same point
   about suppression).
   Whether 0.3 is the right bar for this pair of models is a question for the
