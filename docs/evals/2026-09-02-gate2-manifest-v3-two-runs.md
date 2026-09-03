@@ -129,9 +129,10 @@ Baseline failures are dominated by markdown fences (20 of 27), as under revision
   output: under revision 7 the routed arm emitted less than its baseline (38,366 versus
   91,780 output tokens over 30 cases); under every reasoning-suppressed instrument since it
   emits more (revision 9: 7,807 / 9,390; revision 10: 6,517 / 7,474; v3: 6,652 / 7,547 and
-  7,548). Across those instruments baseline output is lower by more than routed output; the
-  instruments changed policy and manifest together, so the bytes do not establish why (ADR
-  0070 makes the same point about suppression without a paired reasoning-enabled arm).
+  7,548). Across those instruments baseline output is lower by more than routed output. The
+  series changed one thing per step — policy revision 9 → 10 on manifest v2, then manifest
+  v2 → v3 under revision 10 — and no step was paired with a reasoning-enabled arm, so the
+  bytes do not establish why (ADR 0070 makes the same point about suppression).
   Whether 0.3 is the right bar for this pair of models is a question for the
   threshold's owner, not for the next policy revision. (Ratios and reductions from each
   frozen set's `comparison.json`; token totals summed from the records.)
