@@ -194,11 +194,11 @@ describe("Gate 2 frozen evidence record contract", () => {
 
   it("refuses a revision whose absence encoding it does not know rather than guess one", async () => {
     const root = await liveSet({
-      "baseline/case-a.json": record("case-a", { evidenceRecordRevision: 7 }),
-      "routed/case-a.json": record("case-a", { evidenceRecordRevision: 7 }),
+      "baseline/case-a.json": record("case-a", { evidenceRecordRevision: 8 }),
+      "routed/case-a.json": record("case-a", { evidenceRecordRevision: 8 }),
     });
     await expect(deriveRecordContract(root)).rejects.toThrow(
-      /no absent-thinking encoding is known for evidence record revision 7/,
+      /no absent-thinking encoding is known for evidence record revision 8/,
     );
   });
 
