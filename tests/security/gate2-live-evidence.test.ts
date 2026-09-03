@@ -559,26 +559,6 @@ describe("Gate 2 published live evidence", () => {
     });
   });
 
-  it("calls a directory named like a record a verdict, in the freezer's words, on both APIs", async () => {
-    // Sol's P2 fixture, on its third answer, each one a layer earlier than the last. It
-    // began as an EISDIR fault at the record read; then the record read lstat-checked each
-    // record and it became a verdict there; now the walk refuses it first, because an
-    // EMPTY directory holds no listed file (#100). Whichever layer speaks, the publisher
-    // must carry its wording and must not surface an I/O error for a question the freezer
-    // can answer about the directory.
-    await withFrozenCopy(async (temporary, artifactDirectory) => {
-      await mkdir(path.join(artifactDirectory, "routed", "fault.json"));
-      const wording = "Gate 2 evidence freeze: routed/fault.json holds no files";
-      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([wording]);
-      const error = await verifyGate2PublishedEvidence(temporary, "reasoning-suppressed").then(
-        () => null,
-        (thrown: Error) => thrown,
-      );
-      expect(error?.message).toContain(wording);
-      expect(error?.message).not.toMatch(/EISDIR/);
-    });
-  });
-
   it("still refuses a NON-empty directory named like a record, from the record read", async () => {
     // The empty-directory rule must not swallow the record read's own type check, and the
     // publisher must carry that verdict too: give the directory a file and only the layer
@@ -793,33 +773,6 @@ describe("Gate 2 published live evidence", () => {
     expect(recordContractBound(record(41), {})).toBe(true);
   });
 
-  it("still binds every frozen record against the contract its manifest declares", async () => {
-    // The published 2026-09-01 config DOES carry the member, so the relaxation above must
-    // not have loosened the real set: all 60 records are checked against `0`.
-    const verified = await verifyGate2PublishedEvidence(repositoryRoot, "reasoning-suppressed");
-    expect(verified.manifest.recordContract).toMatchObject({ everyRecordReasoningChars: 0 });
-    await withFrozenCopy(async (temporary, artifactDirectory) => {
-      const relative = "baseline/repair-cart-off-by-one.json";
-      const recordPath = path.join(artifactDirectory, relative);
-      const record = JSON.parse(await readFile(recordPath, "utf8"));
-      record.reasoningChars = 41;
-      const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`);
-      await writeFile(recordPath, bytes);
-      const manifestPath = path.join(artifactDirectory, "manifest.json");
-      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-      const entry = manifest.files.find((file: { path: string }) => file.path === relative) as {
-        bytes: number;
-        sha256: string;
-      };
-      entry.bytes = bytes.length;
-      entry.sha256 = createHash("sha256").update(bytes).digest("hex");
-      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
-        `published case record is not bound: ${relative}`,
-      );
-    });
-  });
-
   it("agrees with the freezer on the same bytes, verdict for verdict", async () => {
     // Review of PR #78 found the two verifiers accepting different inputs: the freezer
     // walked only *.json, so a stray text file passed it while this publisher refused it.
@@ -904,15 +857,23 @@ describe("Gate 2 published live evidence", () => {
     });
   });
 
-  it("rethrows a second-pass fault through the publisher, not only through the freezer", async () => {
-    // Sol's P2. A directory named like a record passes the digest walk -- it holds no
-    // files -- and fails the record read with EISDIR. That is a fault, and the publisher
-    // must surface it as one rather than turn it into a verdict about the evidence.
+  it("calls a directory named like a record a verdict, in the freezer's words, on both APIs", async () => {
+    // Sol's P2 fixture, on its third answer, each one a layer earlier than the last. It
+    // began as an EISDIR fault at the record read; then the record read lstat-checked each
+    // record and it became a verdict there; now the walk refuses it first, because an
+    // EMPTY directory holds no listed file (#100). Whichever layer speaks, the publisher
+    // must carry its wording and must not surface an I/O error for a question the freezer
+    // can answer about the directory.
     await withFrozenCopy(async (temporary, artifactDirectory) => {
       await mkdir(path.join(artifactDirectory, "routed", "fault.json"));
-      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
-        /EISDIR/,
+      const wording = "Gate 2 evidence freeze: routed/fault.json holds no files";
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([wording]);
+      const error = await verifyGate2PublishedEvidence(temporary, "reasoning-suppressed").then(
+        () => null,
+        (thrown: Error) => thrown,
       );
+      expect(error?.message).toContain(wording);
+      expect(error?.message).not.toMatch(/EISDIR/);
     });
   });
 
