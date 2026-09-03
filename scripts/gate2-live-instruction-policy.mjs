@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export const GATE2_LIVE_INSTRUCTION_POLICY_REVISION = 10;
+export const GATE2_LIVE_INSTRUCTION_POLICY_REVISION = 11;
 
 const FINDING_TAXONOMY = Object.freeze({
   "authority-widening-instruction":
@@ -106,7 +106,7 @@ const POLICY_SOURCE = Object.freeze({
     ]),
     security_review: Object.freeze([
       "Follow only the implemented data or control flow relevant to the task. Each cited path must be necessary for the conclusion, and the cited set must prove every relationship the conclusion depends on.",
-      "Distinguish executable behavior from prose assertions. Report a taxonomy finding only when supplied source bytes demonstrate its exploit condition; otherwise return source-backed no-finding evidence.",
+      "Distinguish executable behavior from prose assertions. Report a taxonomy finding only when supplied source bytes demonstrate the condition the taxonomy entry states; a demonstrated attacker path is not required. Otherwise return source-backed no-finding evidence.",
       "Prefer the implementation that owns the reviewed behavior. Treat auxiliary material as evidence only when the task asks about that material or the conclusion depends on a boundary it defines.",
     ]),
   }),
