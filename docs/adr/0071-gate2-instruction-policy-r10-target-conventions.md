@@ -90,10 +90,12 @@ enforce; for paraphrase and one-case steering, an authoring rule holds it, state
   the common and read-only rules, the read-only class rules, and every taxonomy
   definition (each against every expected ID except the one it defines) — and the
   read-only template's values are scanned against the read-only cases' expected finding
-  IDs as token sequences. The taxonomy line lists every ID for every case and is the
-  contract; a rule or a definition naming another case's finding is steering, and is
-  refused. The snapshot takes its canonical templates as a parameter so the test proves
-  the template validator runs on the snapshot path, not only when called directly.
+  IDs as any consecutive run of tokens whose concatenation equals the ID's letters — the
+  same separator-, split-, glue-, and case-insensitive rule used for stems above. The
+  taxonomy line lists every ID for every case and is the contract; a rule or a definition
+  naming another case's finding is steering, and is refused. The snapshot takes its
+  canonical templates as a parameter so the test proves the template validator runs on
+  the snapshot path, not only when called directly.
 - The scan also runs over the text **as assembled**, in its final order, per class, with
   every token tagged by the piece it came from: the assembler joins rules with a space,
   and one review split `path-traversal` across two adjacent rules; another showed that
