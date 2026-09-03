@@ -468,17 +468,27 @@ node packages/cli/dist/main.js run annotations <run-id>
 ```
 
 To approve and execute exactly one task through the bounded H2b headless path,
-pass a strict source profile and host provider catalog as bounded JSON. Neither
-record may contain credentials; provider secrets remain in the normal host
-environment:
+pass a strict source profile and host provider catalog as bounded JSON. Each
+input accepts exactly one transport: inline JSON, or an operator-owned file for
+commands that need stable, reviewable inputs. File inputs are capped at 256 KiB,
+must be single-link regular files without symlinked path components or shared
+write permissions, and are checked for identity/content changes while read.
+Neither record may contain credentials; provider secrets remain in the normal
+host environment:
 
 ```text
 node packages/cli/dist/main.js run approve-headless <run-id> \
   --plan-sha <displayed-digest> \
   --actor kevin \
-  --profile-json '<strict HeadlessProfileV1 JSON>' \
-  --provider-catalog-json '<host provider profile array JSON>'
+  --profile-file ./headless-profile.json \
+  --provider-catalog-file ./headless-provider-catalog.json
 ```
+
+Use `--profile-json '<strict HeadlessProfileV1 JSON>'` and
+`--provider-catalog-json '<host provider profile array JSON>'` for the equivalent
+inline form. Mixing a file and inline form for the same input is refused. The
+transport changes no profile, provider, approval, or execution authority; both
+forms reach the same strict decoders and canonical digest path.
 
 The command holds the existing Linux run lease from approval through
 quiescence, reconstructs the persisted authority binding before the first

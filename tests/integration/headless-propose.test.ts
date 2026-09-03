@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
@@ -168,6 +168,10 @@ describe("headless propose-only default and digest-bound apply", () => {
         outputUsdPerMillionTokens: null,
       },
     ];
+    const profilePath = path.join(fixture.root, "headless-profile.json");
+    const catalogPath = path.join(fixture.root, "headless-provider-catalog.json");
+    await writeFile(profilePath, JSON.stringify(PROFILE), { mode: 0o600 });
+    await writeFile(catalogPath, JSON.stringify(catalog), { mode: 0o600 });
     const approveArgs = [
       "run",
       "approve-headless",
@@ -176,10 +180,10 @@ describe("headless propose-only default and digest-bound apply", () => {
       planned.planSha256 ?? "",
       "--actor",
       "integration-test",
-      "--profile-json",
-      JSON.stringify(PROFILE),
-      "--provider-catalog-json",
-      JSON.stringify(catalog),
+      "--profile-file",
+      profilePath,
+      "--provider-catalog-file",
+      catalogPath,
     ] as const;
 
     // The default is propose-only: clean stop, exit 10, nothing materialized.
