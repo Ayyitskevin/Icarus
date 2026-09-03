@@ -1,4 +1,4 @@
-export const GATE2_LIVE_INSTRUCTION_POLICY_REVISION: 10;
+export const GATE2_LIVE_INSTRUCTION_POLICY_REVISION: 11;
 export const GATE2_LIVE_INSTRUCTION_POLICY: Readonly<{
   generation: Readonly<{ temperature: number; maxTokens: number; think: boolean }>;
 }> &

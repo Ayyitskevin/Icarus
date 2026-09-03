@@ -7,6 +7,8 @@ import {
   validateWorkflowAttributes,
 } from "./ci-workflow-policy.mjs";
 import { validateGate1BenchmarkManifest } from "./gate1-benchmark-contract.mjs";
+import { GATE2_LIVE_INSTRUCTION_POLICY_REVISION } from "./gate2-live-instruction-policy.mjs";
+import ts from "typescript";
 import {
   GATE2_V2_MANIFEST_SHA256,
   GATE2_V3_MANIFEST_SHA256,
@@ -353,6 +355,45 @@ const gate2BenchmarkV4ManifestSource = await readFile(
   "utf8",
 );
 const inheritedWorkflowSource = await readFile(".github/workflows/opencode.yml", "utf8");
+// A review found the policy's runtime revision at 11 while its .d.mts still declared the
+// literal type 10; pnpm typecheck cannot see that split. Two reviews then defeated text
+// parsing with decoys (a commented copy; a block comment plus `export declare const`). So the
+// declaration is read the way tsc reads it: the TypeScript compiler parses the .d.mts and the
+// check requires exactly one exported variable declaration of that name whose type is a
+// numeric literal, equal to the runtime export. Comments are not statements to the parser.
+const gate2PolicyDeclarationSource = await readFile(
+  "scripts/gate2-live-instruction-policy.d.mts",
+  "utf8",
+);
+const gate2PolicyDeclaredRevisions = [];
+{
+  const sourceFile = ts.createSourceFile(
+    "gate2-live-instruction-policy.d.mts",
+    gate2PolicyDeclarationSource,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    const exported = (statement.modifiers ?? []).some(
+      (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+    );
+    if (!exported) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name)) continue;
+      if (declaration.name.text !== "GATE2_LIVE_INSTRUCTION_POLICY_REVISION") continue;
+      const type = declaration.type;
+      gate2PolicyDeclaredRevisions.push(
+        type !== undefined && ts.isLiteralTypeNode(type) && ts.isNumericLiteral(type.literal)
+          ? Number(type.literal.text)
+          : Number.NaN,
+      );
+    }
+  }
+}
+const gate2PolicyDeclaredRevision =
+  gate2PolicyDeclaredRevisions.length === 1 ? gate2PolicyDeclaredRevisions[0] : Number.NaN;
 const packageSource = await readFile("package.json", "utf8");
 const packageJson = JSON.parse(packageSource);
 const gate1BenchmarkManifest = parseStrictJson(gate1BenchmarkManifestSource);
@@ -2847,6 +2888,9 @@ const assertions = {
     !/(?:node:http|node:https|fetch\(|api\.github\.com|process\.env\.(?:GH|GITHUB))/.test(
       gate2RetrievalRunnerSource,
     ),
+  gate2InstructionPolicyDeclarationMatchesRuntimeRevision:
+    Number.isSafeInteger(gate2PolicyDeclaredRevision) &&
+    gate2PolicyDeclaredRevision === GATE2_LIVE_INSTRUCTION_POLICY_REVISION,
   gate2BenchmarkContractOfflineAndIntegrated:
     packageJson.scripts["benchmark:gate2:contract"] ===
       "node scripts/gate2-benchmark-contract.mjs" &&
