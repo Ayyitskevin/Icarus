@@ -38,6 +38,15 @@ guard passes against the current manifest's stems with the new clause; the words
 ("condition", "taxonomy", "entry", "states", "demonstrated", "attacker", "path", "required")
 are no expected path's stem and no finding id.
 
+## Outcome (2026-09-03)
+
+Same run ([record](../evals/2026-09-03-gate2-v4-r11-reference-run.md)): `security-config-trust`
+returned `unvalidated-config-shape` for the first time, with a summary naming the unvalidated
+audience field — the clause did what it was written to do — and still missed on citations
+(`src/main.py` alone against `config/app.json` + `src/main.py`). One unchanged case,
+`repair-cart-empty-list`, fenced its output under the revision-11 prompt after passing under
+revision 10; recorded, not attributed. Routed 21/30 at 0.8333; a new measurement.
+
 ## Consequences
 
 - A new instrument: figures under revision 11 are a new measurement, never a delta against
