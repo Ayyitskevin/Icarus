@@ -116,7 +116,7 @@ remain open.
       thresholds. The leak-free r7 routed run reached 16/30, including security
       review 2/5 and scaffold 0/5, but did not pass Gate 2.
 - [ ] Raise stable routed quality from 21/30 (manifest v4, revision 11, 2026-09-03) to at least 24/30 while
-      holding first-plan acceptance at or above 0.80 (0.8333 on v3) across predeclared repeated runs
+      holding first-plan acceptance at or above 0.80 (0.8333 on v4) across predeclared repeated runs
       that predeclare the factor they vary (a declared temperature or seed): the two
       temperature-zero v3 runs were one observed replication pair and estimate no variance,
       without losing retrieval/provenance gates, introducing incorrect edits,

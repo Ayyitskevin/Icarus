@@ -143,9 +143,11 @@ reference run measured fixed `code-fast` 3/30 and routed `code` **21/30 at accep
 — acceptance met, the 24/30 success threshold and the 0.3 cost-reduction threshold not —
 retrieval 0.9917 / 0.8083, zero incorrect edits
 ([evaluation](evals/2026-09-03-gate2-v4-r11-reference-run.md), evidence frozen at
-`evals/artifacts/gate2-r11v4-run1-20260903/`). All three v4 successors passed; revision 11's
-clause produced the expected finding on `security-config-trust`, which still misses on one
-citation. Three instruments moved at once: a new measurement, never a delta against 19/30.
+`evals/artifacts/gate2-r11v4-run1-20260903/`). All three v4 successors passed; this run's
+`security-config-trust` record returns the expected finding (as the revision-7 record had and
+the revision-9 and revision-10 records had not) and still misses on one citation. Three
+instruments moved at once: a new measurement, never a delta against 19/30, and no per-case
+difference attributed to any of them.
 Gate 2 remains open for
 stable success of at least 24/30 and plan acceptance of at least 0.80. The
 separate Gate 2 contract now pins seven fixture repositories, 30 task documents

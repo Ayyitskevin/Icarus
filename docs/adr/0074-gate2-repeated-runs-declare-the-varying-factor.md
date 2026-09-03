@@ -285,10 +285,13 @@ starts a new measurement series.
 ## Integration note (lead, 2026-09-03)
 
 The draft above is the Codex seat's investigation and recommendation, integrated as written
-with two edits: the status line, and the record revision it proposes (8, because revision 7
-became the check-output record in ADR 0075 the same morning). The verification section is the
+with three edits: the status line; the record revision it proposes (8, because revision 7
+became the check-output record in ADR 0075 the same morning); and the Related line, whose
+references were turned into links and which gained ADR 0075 with that explanation. The verification section is the
 seat's own; the live probe was read-only and is not a determinism or variance claim. The
 decision this ADR waits on is the Vulcan seed path — a change to a different repository and a
 deployed service — which the standing delegation for this repository does not cover. Until
-then, single temperature-0 runs remain the deterministic reference instrument (the v3 pair
-replicated), and no "stable across repeated runs" claim is made.
+then, single temperature-0 runs remain the reference instrument by predeclaration: the v3 pair
+agreed in every aggregate figure with 59 of 60 candidates byte-identical, which is an
+observation about that pair and not a determinism claim, and no "stable across repeated
+runs" claim is made.

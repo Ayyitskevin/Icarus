@@ -40,10 +40,13 @@ are no expected path's stem and no finding id.
 
 ## Outcome (2026-09-03)
 
-Same run ([record](../evals/2026-09-03-gate2-v4-r11-reference-run.md)): `security-config-trust`
-returned `unvalidated-config-shape` for the first time, with a summary naming the unvalidated
-audience field — the clause did what it was written to do — and still missed on citations
-(`src/main.py` alone against `config/app.json` + `src/main.py`). One unchanged case,
+Same run ([record](../evals/2026-09-03-gate2-v4-r11-reference-run.md)): the
+`security-config-trust` record returns `unvalidated-config-shape`, with a summary naming the
+unvalidated audience field, and still misses on citations (`src/main.py` alone against
+`config/app.json` + `src/main.py`). For the history: the revision-7 record also returned that
+finding; the revision-9 and revision-10 records (four sets) did not. Whether this clause is why
+is the hypothesis it was written on, not a result this unpaired run proves — three instruments
+moved at once. One unchanged case,
 `repair-cart-empty-list`, fenced its output under the revision-11 prompt after passing under
 revision 10; recorded, not attributed. Routed 21/30 at 0.8333; a new measurement.
 

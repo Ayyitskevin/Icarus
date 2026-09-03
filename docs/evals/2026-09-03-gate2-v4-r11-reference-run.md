@@ -6,7 +6,9 @@ With every v3 failure read cold — one benchmark defect fixed in the manifest (
 deferred greeting case and one leak-free task tightening), one rule ambiguity fixed in the
 policy (revision 11), the rest recorded as model misses — where does the routed arm stand
 against the Gate 2 exit thresholds (24/30 successes, 0.80 first-plan acceptance), read from a
-single temperature-0 run whose replication property was measured the day before?
+single temperature-0 run, predeclared on the strength of the v3 pair's agreement (every
+aggregate figure, 59 of 60 candidates) — an observation about that pair, not a determinism
+claim?
 
 ## Method
 
@@ -19,7 +21,7 @@ single temperature-0 run whose replication property was measured the day before?
 | execution profile | `03399661d250…` (`live-profile.v2.json`); `code` = `qwen3.8:27b`, `code-fast` = `ornith-1.5:35b`; the profile pins no temperature |
 | host (run-log and operator provenance, not frozen) | mickey, Node 22.23.2, Docker-backed checks |
 | commit (frozen) | `66bedf5` |
-| runs | one, predeclared in the day-3 handoff before launch: temperature-0 runs replicate (the v3 pair), so one run is the deterministic reference instrument; variance is ADR 0074's instrument, not this one |
+| runs | one, predeclared in the day-3 handoff before launch. Basis: the prior v3 pair agreed in every aggregate figure with 59/60 candidates byte-identical, which its record says proves neither determinism nor cause; one run is therefore the reference instrument by predeclaration, not by proof. Variance is ADR 0074's instrument, not this one |
 | frozen set | `docs/evals/artifacts/gate2-r11v4-run1-20260903/` (64 files, verified) |
 | freshness | 60/60 records carry `reassessedFromEvidenceSha256: null` (FRESH_CHECK in the run log) |
 | wall clock (run log, not frozen) | baseline 13:34:02–13:36:26 EDT, routed –13:43:05, freeze + verify + figures 13:43:06 |
@@ -71,12 +73,16 @@ did not move while the count did.
 
 ### The security-review cases, and what revision 11 did
 
-`security-config-trust` — the case revision 11 was written for — now returns the finding:
-`findingIds: ["unvalidated-config-shape"]`, with the summary "reads `config/app.json` and passes
-the audience value directly to `greeting` without validating that it is a string". Under
-revision 10 it returned no finding. It still fails, on the citation set: `["src/main.py"]`
-against expected `["config/app.json","src/main.py"]` — one path short, the file the finding is
-about. The clause did what it was written to do; the miss that remains is citation coverage.
+`security-config-trust` — the case revision 11 was written for — returns the finding in this
+record: `findingIds: ["unvalidated-config-shape"]`, with the summary "reads `config/app.json`
+and passes the audience value directly to `greeting` without validating that it is a string".
+Across the committed sets the case's routed record returned the finding under revision 7
+(`gate2-local-vulcan-target-discovery-r7-20260828`), returned no finding under revisions 9 and
+10 (four sets), and returns it here; it has never matched its citation set. Here it fails on
+`["src/main.py"]` against expected `["config/app.json","src/main.py"]` — one path short, the
+file the finding is about. Whether the revision-11 clause is why this record carries the
+finding is the hypothesis revision 11 was written on; one unpaired run under three changed
+instruments does not establish it.
 
 `security-schema-migration` fails as the Opus seat's brief said it might: the candidate now
 cites `migrations/README.md` (plus `checks/schema_contract.sql`) beside the two expected paths,
@@ -135,4 +141,6 @@ bucket of each shared case id between this set's `routed/` and
 `docs/ROADMAP.md` (row 2 and a supersede paragraph), `docs/EVALS.md` (a supersede paragraph,
 the class-breakdown sentence, the current-record link), `docs/PLANS.md` (a supersede sentence
 and the checklist anchor), ADR 0076 and ADR 0077 (Outcome), `docs/DECISIONS.md` (the 0076 and
-0077 rows; the 0074 row becomes the proposed ADR).
+0077 rows; the 0074 row becomes the proposed ADR). This PR also adds
+`docs/adr/0074-gate2-repeated-runs-declare-the-varying-factor.md` (Proposed; the Codex seat's
+draft, integrated by the lead), read for this PR by the Opus seat, which did not author it.
