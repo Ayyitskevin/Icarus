@@ -361,11 +361,18 @@ const gate2PolicyDeclarationSource = await readFile(
   "scripts/gate2-live-instruction-policy.d.mts",
   "utf8",
 );
-const gate2PolicyDeclaredRevision = Number(
-  /export const GATE2_LIVE_INSTRUCTION_POLICY_REVISION: (\d+);/.exec(
-    gate2PolicyDeclarationSource,
-  )?.[1],
-);
+// Anchored to a line start and required to match exactly once: a review planted a commented
+// copy carrying the runtime value ahead of a stale real declaration and the first-match form
+// read the comment. A commented line starts with "//", never with "export".
+const gate2PolicyDeclarationMatches = [
+  ...gate2PolicyDeclarationSource.matchAll(
+    /^export const GATE2_LIVE_INSTRUCTION_POLICY_REVISION: (\d+);$/gm,
+  ),
+];
+const gate2PolicyDeclaredRevision =
+  gate2PolicyDeclarationMatches.length === 1
+    ? Number(gate2PolicyDeclarationMatches[0]?.[1])
+    : Number.NaN;
 const packageSource = await readFile("package.json", "utf8");
 const packageJson = JSON.parse(packageSource);
 const gate1BenchmarkManifest = parseStrictJson(gate1BenchmarkManifestSource);
