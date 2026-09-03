@@ -43,8 +43,10 @@ are no expected path's stem and no finding id.
 Same run ([record](../evals/2026-09-03-gate2-v4-r11-reference-run.md)): the
 `security-config-trust` record returns `unvalidated-config-shape`, with a summary naming the
 unvalidated audience field, and still misses on citations (`src/main.py` alone against
-`config/app.json` + `src/main.py`). For the history: the revision-7 record also returned that
-finding; the revision-9 and revision-10 records (four sets) did not. Whether this clause is why
+`config/app.json` + `src/main.py`). For the history: the instruction-policy revision-8
+target-discovery record (`gate2-local-vulcan-target-discovery-r7-20260828`; the `r7` in the
+name is not the policy revision) also returned that finding; the 2026-08-28 code-routing set
+and the revision-9 and revision-10 records (four sets) did not. Whether this clause is why
 is the hypothesis it was written on, not a result this unpaired run proves — three instruments
 moved at once. One unchanged case,
 `repair-cart-empty-list`, fenced its output under the revision-11 prompt after passing under

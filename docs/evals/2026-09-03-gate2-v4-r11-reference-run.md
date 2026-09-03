@@ -76,9 +76,11 @@ did not move while the count did.
 `security-config-trust` — the case revision 11 was written for — returns the finding in this
 record: `findingIds: ["unvalidated-config-shape"]`, with the summary "reads `config/app.json`
 and passes the audience value directly to `greeting` without validating that it is a string".
-Across the committed sets the case's routed record returned the finding under revision 7
-(`gate2-local-vulcan-target-discovery-r7-20260828`), returned no finding under revisions 9 and
-10 (four sets), and returns it here; it has never matched its citation set. Here it fails on
+Across the six committed sets the case's routed record returned the finding under
+instruction-policy revision 8 (the target-discovery record,
+`gate2-local-vulcan-target-discovery-r7-20260828` — the `r7` in that name is not the policy
+revision), returned no finding in the 2026-08-28 code-routing set, under revision 9, and under
+revision 10 (three sets), and returns it here; it has never matched its citation set. Here it fails on
 `["src/main.py"]` against expected `["config/app.json","src/main.py"]` — one path short, the
 file the finding is about. Whether the revision-11 clause is why this record carries the
 finding is the hypothesis revision 11 was written on; one unpaired run under three changed
