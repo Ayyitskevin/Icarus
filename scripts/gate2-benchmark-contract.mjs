@@ -166,7 +166,7 @@ export const GATE2_V3_MANIFEST_SHA256 =
   "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134";
 // Pinned from the committed bytes; a change to manifest.v4.json is a new revision, not an edit.
 export const GATE2_V4_MANIFEST_SHA256 =
-  "8f98919e6a55d7f2b7b538e30cf735277d11acdbad8933ad270b613ea2146be6";
+  "da1f9e0b71ed1cc91cc66c1908920efdab51be325d6e1637188e6daa93924dfb";
 const GATE2_V3_CASE_IDS = Object.freeze(
   GATE2_V2_CASE_IDS.map((caseId) => {
     if (caseId === "refactor-cart-money-module") return "refactor-cart-money-extraction";
@@ -375,7 +375,7 @@ const GATE2_V4_SUCCESSOR_CASES = Object.freeze([
     repositoryId: "unfamiliar",
     task: Object.freeze({
       path: "fixtures/evals/gate2/tasks/repair-lantern-config-contract.md",
-      sha256: "9cce0b60312b58c5cb0dd8d9bc14d08fd851fea15e062328c1b41f7bb1f04772",
+      sha256: "2b8a52633b0550cc642036e181fb422d1d65470b562ba9b0b7e4700add95afe8",
     }),
     expectedContextPaths: Object.freeze(["config/app.json", "README.md", "src/main.py"]),
     expectedOutcome: Object.freeze({
@@ -419,7 +419,7 @@ const GATE2_V4_SUCCESSOR_CASES = Object.freeze([
     repositoryId: "basic",
     task: Object.freeze({
       path: "fixtures/evals/gate2/tasks/scaffold-greeting-command-check.md",
-      sha256: "800503138852a24f8d69ae28c43ebdc614536ebdb292ea5e3ca7452565ded7aa",
+      sha256: "bd0274ef7b42e3ad5ba5ececc69c33fde5203b535c3fe21a1d1efb5dd6a558eb",
     }),
     expectedContextPaths: Object.freeze([
       "AGENTS.md",

@@ -362,7 +362,7 @@ the target set the manifest expected — `refactor-cart-money-module` →
 `scaffold-json-output-mode`. The sharpening is in the task documents, never in
 the instruction policy, whose digest is unchanged. Manifest v3 SHA-256 is
 `e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134`; the live
-runner reads v3, and a frozen set's figures resolve its manifest from the digest
+runner read v3 until v4 (2026-09-03), and a frozen set's figures resolve its manifest from the digest
 the set's own result files carry, so v2-era sets recompute unchanged. Figures
 under v3 are a new measurement and are never presented as a delta against a
 v2-era figure.
@@ -376,7 +376,7 @@ task never stated), `scaffold-greeting-command` →
 fixture), and `explain-schema-contract` → `explain-task-schema-contract` (two
 documentation referents where the expected set holds one). Policy digest
 unchanged. Manifest v4 SHA-256 is
-`8f98919e6a55d7f2b7b538e30cf735277d11acdbad8933ad270b613ea2146be6`; the live
+`da1f9e0b71ed1cc91cc66c1908920efdab51be325d6e1637188e6daa93924dfb`; the live
 runner reads v4. Figures under v4 are a new measurement, never a delta against
 19/30.
 

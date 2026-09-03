@@ -353,7 +353,7 @@
       "repositoryId": "unfamiliar",
       "task": {
         "path": "fixtures/evals/gate2/tasks/repair-lantern-config-contract.md",
-        "sha256": "9cce0b60312b58c5cb0dd8d9bc14d08fd851fea15e062328c1b41f7bb1f04772"
+        "sha256": "2b8a52633b0550cc642036e181fb422d1d65470b562ba9b0b7e4700add95afe8"
       },
       "expectedContextPaths": ["config/app.json", "README.md", "src/main.py"],
       "expectedOutcome": {
@@ -776,7 +776,7 @@
       "repositoryId": "basic",
       "task": {
         "path": "fixtures/evals/gate2/tasks/scaffold-greeting-command-check.md",
-        "sha256": "800503138852a24f8d69ae28c43ebdc614536ebdb292ea5e3ca7452565ded7aa"
+        "sha256": "bd0274ef7b42e3ad5ba5ececc69c33fde5203b535c3fe21a1d1efb5dd6a558eb"
       },
       "expectedContextPaths": ["AGENTS.md", "checks/verify.py", "README.md", "src/greeting.txt"],
       "expectedOutcome": {

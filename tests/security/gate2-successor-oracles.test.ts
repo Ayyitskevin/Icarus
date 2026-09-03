@@ -19,7 +19,7 @@ import { GATE2_V4_SUCCESSOR_ORACLES } from "../../scripts/gate2-v4-successor-ora
 const manifestUrl = new URL(`../../${GATE2_CURRENT_MANIFEST_PATH}`, import.meta.url);
 
 // The live runner resolves a mutation case's registered check and approved targets by case
-// id from these six lists. A v3 successor whose oracle disagreed with its manifest entry
+// id from these seven lists. A successor whose oracle disagreed with its manifest entry
 // would run the wrong check or fence the wrong targets, and score a benchmark defect as a
 // model miss -- the very thing v3 exists to stop.
 describe("Gate 2 manifest v3 successor oracles", () => {
