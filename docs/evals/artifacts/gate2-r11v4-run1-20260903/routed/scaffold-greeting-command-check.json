@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 7,
+  "instructionPolicySha256": "434340b13c43488aa5f2797f9da03e7b19cd76817146571508f591f26f1ac532",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "da1f9e0b71ed1cc91cc66c1908920efdab51be325d6e1637188e6daa93924dfb",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "scaffold-greeting-command-check",
+  "modelId": "code",
+  "generatedAt": "2026-09-03T17:43:05.874Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "698075f5ca0747820e498bb1b3e65c4a5c772577",
+    "digestSha256": "3dc9c9476d709ce341c331061feee540398bfbe709ca32afe18374c75132ffdb",
+    "repositoryDigestSha256": "eea916c04927c9236ad5f517ccbdf4ac4e8127eced8bb778697e7cfd7475382f",
+    "matchedFiles": 3,
+    "selectedFiles": 3,
+    "selectedQueryMatches": 3,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"AGENTS.md\",\n    \"checks/verify.py\",\n    \"src/greeting.txt\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"checks/test_greet.py\",\n      \"src/greet.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"greeting-command\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/greet.py\",\n        \"content\": \"from pathlib import Path\\n\\n\\ndef main() -> None:\\n    greeting = Path(\\\"src/greeting.txt\\\").read_text(encoding=\\\"utf-8\\\")\\n    print(greeting, end=\\\"\\\")\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    main()\\n\"\n      },\n      {\n        \"path\": \"checks/test_greet.py\",\n        \"content\": \"import subprocess\\nimport sys\\nfrom pathlib import Path\\n\\n\\ndef test_greet_prints_repository_greeting() -> None:\\n    expected = Path(\\\"src/greeting.txt\\\").read_text(encoding=\\\"utf-8\\\")\\n    result = subprocess.run(\\n        [sys.executable, \\\"src/greet.py\\\"],\\n        capture_output=True,\\n        text=True,\\n        check=True,\\n    )\\n    assert result.stdout == expected\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Added a dependency-free `greet` command in `src/greet.py` that prints the repository greeting from `src/greeting.txt`, and added its check in `checks/test_greet.py`.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["AGENTS.md", "checks/verify.py", "src/greeting.txt"],
+    "plan": {
+      "mutationTargets": ["checks/test_greet.py", "src/greet.py"],
+      "requestedCheckIds": ["greeting-command"]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "checks/test_greet.py",
+          "content": "import subprocess\nimport sys\nfrom pathlib import Path\n\n\ndef test_greet_prints_repository_greeting() -> None:\n    expected = Path(\"src/greeting.txt\").read_text(encoding=\"utf-8\")\n    result = subprocess.run(\n        [sys.executable, \"src/greet.py\"],\n        capture_output=True,\n        text=True,\n        check=True,\n    )\n    assert result.stdout == expected\n"
+        },
+        {
+          "path": "src/greet.py",
+          "content": "from pathlib import Path\n\n\ndef main() -> None:\n    greeting = Path(\"src/greeting.txt\").read_text(encoding=\"utf-8\")\n    print(greeting, end=\"\")\n\n\nif __name__ == \"__main__\":\n    main()\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Added a dependency-free `greet` command in `src/greet.py` that prints the repository greeting from `src/greeting.txt`, and added its check in `checks/test_greet.py`."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-greeting-command-check",
+    "evaluatorId": "scaffold-greeting-command-check-evaluator",
+    "candidateSha256": "7827eadc61499745f17ceb04b4c84653a0ec88a753c09a1c2cb48ad850f075e6",
+    "instructionPolicySha256": "434340b13c43488aa5f2797f9da03e7b19cd76817146571508f591f26f1ac532",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["checks/test_greet.py", "src/greet.py"],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "greeting-command",
+        "argv": ["python", "-m", "checks.test_greet"],
+        "exitCode": 0,
+        "signal": null,
+        "stdout": "",
+        "stderr": "",
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-greeting-command-check",
+    "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+    "taskSha256": "bd0274ef7b42e3ad5ba5ececc69c33fde5203b535c3fe21a1d1efb5dd6a558eb",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+      },
+      {
+        "path": "src/greeting.txt",
+        "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["checks/test_greet.py", "src/greet.py"],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-greeting-command-check-evaluator",
+    "scenarioEvidenceSha256": "8743d70ec84743eb4410eada984bf7eed5cc2e5b9b7a3227c0266f33436c1930",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 970,
+      "outputTokens": 397,
+      "estimatedCostUsd": 0.0010724115,
+      "actualBilledUsd": null,
+      "latencyMs": 18281
+    }
+  }
+}

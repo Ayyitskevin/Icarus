@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 7,
+  "instructionPolicySha256": "434340b13c43488aa5f2797f9da03e7b19cd76817146571508f591f26f1ac532",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "da1f9e0b71ed1cc91cc66c1908920efdab51be325d6e1637188e6daa93924dfb",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "repair-lantern-config-contract",
+  "modelId": "code",
+  "generatedAt": "2026-09-03T17:37:50.654Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "550719149461e8e70b97e798a91dd0e7b29930830cc5a51b3f4449452eb7307f",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff",
+    "matchedFiles": 3,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 3,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"config/app.json\",\n    \"README.md\",\n    \"src/greeting.py\",\n    \"src/main.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"src/main.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"lantern-missing-config\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/main.py\",\n        \"content\": \"import json\\nimport sys\\nfrom pathlib import Path\\n\\nfrom src.greeting import greeting\\n\\ntry:\\n    config = json.loads(Path(\\\"config/app.json\\\").read_text())\\nexcept (OSError, ValueError):\\n    print(\\\"Lantern configuration is unavailable.\\\", file=sys.stderr)\\n    sys.exit(1)\\n\\nprint(greeting(config[\\\"audience\\\"]))\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Catch missing or invalid config in src/main.py, print the required stderr line, and exit with status 1 while preserving the present-config behavior.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+    "plan": {
+      "mutationTargets": ["src/main.py"],
+      "requestedCheckIds": ["lantern-missing-config"]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "src/main.py",
+          "content": "import json\nimport sys\nfrom pathlib import Path\n\nfrom src.greeting import greeting\n\ntry:\n    config = json.loads(Path(\"config/app.json\").read_text())\nexcept (OSError, ValueError):\n    print(\"Lantern configuration is unavailable.\", file=sys.stderr)\n    sys.exit(1)\n\nprint(greeting(config[\"audience\"]))\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Catch missing or invalid config in src/main.py, print the required stderr line, and exit with status 1 while preserving the present-config behavior."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-lantern-config-contract",
+    "evaluatorId": "repair-lantern-config-contract-evaluator",
+    "candidateSha256": "0ea5a5c494ed2a0d719de028b2d5d471ef87e968e5bf49a55e8ad7224162f077",
+    "instructionPolicySha256": "434340b13c43488aa5f2797f9da03e7b19cd76817146571508f591f26f1ac532",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["src/main.py"],
+    "citations": [],
+    "findingIds": [],
+    "checks": [
+      {
+        "checkId": "lantern-missing-config",
+        "argv": [
+          "python",
+          "-c",
+          "import os,subprocess,sys,tempfile; happy=subprocess.run([sys.executable,\"-m\",\"src.main\"],capture_output=True,text=True); assert happy.returncode == 0 and happy.stdout == \"Welcome, traveler.\\n\" and happy.stderr == \"\"; temporary=tempfile.TemporaryDirectory(); environment=os.environ.copy(); environment[\"PYTHONPATH\"]=os.getcwd(); missing=subprocess.run([sys.executable,\"-m\",\"src.main\"],cwd=temporary.name,env=environment,capture_output=True,text=True); assert missing.returncode == 1 and missing.stdout == \"\" and missing.stderr == \"Lantern configuration is unavailable.\\n\"; temporary.cleanup()"
+        ],
+        "exitCode": 0,
+        "signal": null,
+        "stdout": "",
+        "stderr": "",
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "truncated": false,
+        "outcome": "passed"
+      }
+    ],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-lantern-config-contract",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "2b8a52633b0550cc642036e181fb422d1d65470b562ba9b0b7e4700add95afe8",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": ["src/main.py"],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-lantern-config-contract-evaluator",
+    "scenarioEvidenceSha256": "190af5f7a4d7ab1214b780e4db5e11feb47b0587a4ad039a0c6ce8b52af90682",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 895,
+      "outputTokens": 280,
+      "estimatedCostUsd": 0.0009217875,
+      "actualBilledUsd": null,
+      "latencyMs": 13697
+    }
+  }
+}

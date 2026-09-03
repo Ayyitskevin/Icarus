@@ -478,10 +478,19 @@ threshold is met on this instrument; the success threshold and the pair's cost-r
 threshold are not. Three cases changed identity, so this is a new measurement and never a
 delta against 17/30; the two runs agree in every figure, with 59 of 60 candidates
 byte-identical under the instruction policy's temperature-0 pin — a replication, not a variance estimate.
+Superseded as the current measurement 2026-09-03: under manifest v4 (ADR 0076), instruction-policy
+revision 11 (ADR 0077), and evidence record revision 7 (ADR 0075), one predeclared
+temperature-0 reference run measured fixed `code-fast` 3/30 with acceptance `0.2667` and
+routed `code` 21/30 with acceptance `0.8333`
+([evaluation](evals/2026-09-03-gate2-v4-r11-reference-run.md), evidence frozen at
+`evals/artifacts/gate2-r11v4-run1-20260903/`). The acceptance threshold is met; the success
+threshold and the pair's cost-reduction threshold are not. Three instruments moved at once,
+so this is a new measurement and never a delta against 19/30; every check's stdout and stderr
+is now in the record.
 Routed class success under revision 8 was repair 7/10, refactor 4/5, explanation 3/5,
 security review 2/5, and scaffold 0/5; under revision 9 it was repair 7/10, refactor 0/5,
 explanation 3/5, security review 2/5, and scaffold 0/5; under revision 10 it is repair
-7/10, refactor 4/5, explanation 3/5, security review 3/5, and scaffold 0/5; under manifest v3 (revision 10 unchanged, both runs) it is repair 7/10, refactor 5/5, explanation 3/5, security review 3/5, and scaffold 1/5. Both revision-8 arms retained macro recall `0.9917`, precision
+7/10, refactor 4/5, explanation 3/5, security review 3/5, and scaffold 0/5; under manifest v3 (revision 10 unchanged, both runs) it is repair 7/10, refactor 5/5, explanation 3/5, security review 3/5, and scaffold 1/5; under manifest v4 with revision 11 it is repair 7/10, refactor 5/5, explanation 4/5, security review 3/5, and scaffold 2/5. Both revision-8 arms retained macro recall `0.9917`, precision
 `0.8083`, provenance `1.0`, and zero incorrect edits. The routed run improved
 the success count and lowered median estimated proxy cost per success by
 `0.554217121588`, but it still missed the predeclared 24/30 and 0.80 absolute
@@ -499,7 +508,10 @@ artifact-size proxy, not billed USD; all actual billed cost fields remain null.
 These unkeyed records establish reviewable self-consistency, not runner
 authentication, multi-seed generalization, new runtime authority, or Gate 2
 completion. The current dated record is
-[`docs/evals/2026-09-02-gate2-manifest-v3-two-runs.md`](evals/2026-09-02-gate2-manifest-v3-two-runs.md);
+[`docs/evals/2026-09-03-gate2-v4-r11-reference-run.md`](evals/2026-09-03-gate2-v4-r11-reference-run.md);
+the manifest-v3 two-run record
+[`docs/evals/2026-09-02-gate2-manifest-v3-two-runs.md`](evals/2026-09-02-gate2-manifest-v3-two-runs.md)
+is superseded by it;
 the revision-10-on-v2 record
 [`docs/evals/2026-09-02-gate2-revision-10.md`](evals/2026-09-02-gate2-revision-10.md)
 is superseded by it;

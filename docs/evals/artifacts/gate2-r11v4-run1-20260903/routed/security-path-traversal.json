@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 7,
+  "instructionPolicySha256": "434340b13c43488aa5f2797f9da03e7b19cd76817146571508f591f26f1ac532",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "da1f9e0b71ed1cc91cc66c1908920efdab51be325d6e1637188e6daa93924dfb",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "security-path-traversal",
+  "modelId": "code",
+  "generatedAt": "2026-09-03T17:40:36.022Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "7485f907c0d8627bd67b050b1da5050d5999dcdf",
+    "digestSha256": "044779a5224502366bdc2e3b42bd50dc38facf635309801ec640f4305e765c8d",
+    "repositoryDigestSha256": "0091120cc1019d8c7e48935b1f0a41bf5925098210cdb4e7b3d2fd60af3c3849",
+    "matchedFiles": 3,
+    "selectedFiles": 3,
+    "selectedQueryMatches": 3,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"src/files.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [],\n    \"requestedCheckIds\": []\n  },\n  \"answer\": {\n    \"kind\": \"read_only\",\n    \"files\": [],\n    \"citations\": [\n      \"src/files.py\"\n    ],\n    \"findingIds\": [\n      \"path-traversal\"\n    ],\n    \"summary\": \"read_public concatenates the unvalidated user_path directly to root and reads the result, allowing traversal sequences to escape the intended public root.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["src/files.py"],
+    "plan": {
+      "mutationTargets": [],
+      "requestedCheckIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": ["src/files.py"],
+      "findingIds": ["path-traversal"],
+      "summary": "read_public concatenates the unvalidated user_path directly to root and reads the result, allowing traversal sequences to escape the intended public root."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "security-path-traversal",
+    "evaluatorId": "security-path-traversal-evaluator",
+    "candidateSha256": "f809099ad7f14f3cef6455ca171c7840162d021930545e831852eea8c729f06d",
+    "instructionPolicySha256": "434340b13c43488aa5f2797f9da03e7b19cd76817146571508f591f26f1ac532",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["src/files.py"],
+    "findingIds": ["path-traversal"],
+    "checks": [],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "security-path-traversal",
+    "repositoryRevisionSha256": "131ff18d492a97bbab9a590d5a0a9ef9e21fd25baadf648bab4bbbd5b200e132",
+    "taskSha256": "05195873393e3d60e0fe4b34f1becf20a80522ce0ca2b3f4a1fa98a935496c96",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/expected_finding.md",
+        "sha256": "2fdc9c401165ab469355887fe2b44069a6e7d231d2c4406e516c72fd872dbbd1"
+      },
+      {
+        "path": "README.md",
+        "sha256": "078e8880de0bfd549d6dcd9e16967d35693988c38343c5b6ad6f231f2aac426f"
+      },
+      {
+        "path": "src/files.py",
+        "sha256": "3eda58ebbbfae5a26e17236f93ac39972969c121baec2b2897f4703101062af2"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["src/files.py"],
+    "findingIds": ["path-traversal"],
+    "scenarioEvaluatorId": "security-path-traversal-evaluator",
+    "scenarioEvidenceSha256": "fae8107fe27cd2e4583045376e9a612d49462860ffee537c17bf220632e60102",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 879,
+      "outputTokens": 146,
+      "estimatedCostUsd": 0.0008041125,
+      "actualBilledUsd": null,
+      "latencyMs": 9862
+    }
+  }
+}

@@ -47,6 +47,16 @@ which fixes every read-only case at once and creates no new case identity.
 is expected context but not an expected citation); no candidate has cited it, so it is noted,
 not changed.
 
+## Outcome (2026-09-03)
+
+One predeclared reference run under v4 + revision 11 + record revision 7
+([record](../evals/2026-09-03-gate2-v4-r11-reference-run.md)): all three successors passed
+(`repair-lantern-config-contract`, `scaffold-greeting-command-check`,
+`explain-task-schema-contract`); routed 21/30 at acceptance 0.8333, baseline 3/30. The
+`security-schema-migration` fragility this ADR noted materialised: the candidate cites
+`migrations/README.md`; that expected set is a v5 decision item. A new measurement, never a
+delta against 19/30.
+
 ## Consequences
 
 - Figures under v4 are a new measurement; three cases changed identity. Never a delta against
