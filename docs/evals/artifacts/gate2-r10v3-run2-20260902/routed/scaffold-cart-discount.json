@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "scaffold-cart-discount",
+  "modelId": "code",
+  "generatedAt": "2026-09-02T23:40:16.334Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "2d010282b415aa4f58947ed5dc3003b62593deee6fcaee1d6709937aeb9b57cc",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n  \"schemaVersion\": 1,\n  \"selectedContextPaths\": [\n    \"checks/test_cart.py\",\n    \"checks/verify.py\",\n    \"src/cart.py\"\n  ],\n  \"plan\": {\n    \"mutationTargets\": [\n      \"checks/test_cart.py\",\n      \"src/cart.py\"\n    ],\n    \"requestedCheckIds\": [\n      \"cart-discount\"\n    ]\n  },\n  \"answer\": {\n    \"kind\": \"mutation\",\n    \"files\": [\n      {\n        \"path\": \"src/cart.py\",\n        \"content\": \"def subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the cart subtotal in cents.\\\"\\\"\\\"\\n    return sum(cents) - 1\\n\\n\\ndef discount(cents: int, min_cents: int = 0, max_cents: int = 10000) -> int:\\n    \\\"\\\"\\\"Return an integer-cents discount clamped to the explicit bounds.\\n\\n    The discount is clamped to ``min_cents`` and ``max_cents`` inclusive.\\n    \\\"\\\"\\\"\\n    if min_cents > max_cents:\\n        raise ValueError(\\\"min_cents must be less than or equal to max_cents\\\")\\n    return max(min_cents, min(max_cents, cents))\\n\"\n      },\n      {\n        \"path\": \"checks/test_cart.py\",\n        \"content\": \"from src.cart import subtotal, discount\\n\\nassert subtotal([100, 200]) == 300\\n\\nassert discount(50) == 50\\nassert discount(-10) == 0\\nassert discount(20000) == 10000\\nassert discount(50, min_cents=10, max_cents=100) == 50\\nassert discount(5, min_cents=10, max_cents=100) == 10\\nassert discount(150, min_cents=10, max_cents=100) == 100\\nassert discount(50, min_cents=0, max_cents=0) == 0\\ntry:\\n    discount(50, min_cents=10, max_cents=5)\\nexcept ValueError:\\n    pass\\nelse:\\n    raise AssertionError(\\\"expected ValueError for inverted bounds\\\")\\n\"\n      }\n    ],\n    \"citations\": [],\n    \"findingIds\": [],\n    \"summary\": \"Added an integer-cents discount helper with explicit inclusive bounds and ValueError on inverted bounds, plus tests; left the existing subtotal API unchanged.\"\n  }\n}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["checks/test_cart.py", "checks/verify.py", "src/cart.py"],
+    "plan": {
+      "mutationTargets": ["checks/test_cart.py", "src/cart.py"],
+      "requestedCheckIds": ["cart-discount"]
+    },
+    "answer": {
+      "kind": "mutation",
+      "files": [
+        {
+          "path": "checks/test_cart.py",
+          "content": "from src.cart import subtotal, discount\n\nassert subtotal([100, 200]) == 300\n\nassert discount(50) == 50\nassert discount(-10) == 0\nassert discount(20000) == 10000\nassert discount(50, min_cents=10, max_cents=100) == 50\nassert discount(5, min_cents=10, max_cents=100) == 10\nassert discount(150, min_cents=10, max_cents=100) == 100\nassert discount(50, min_cents=0, max_cents=0) == 0\ntry:\n    discount(50, min_cents=10, max_cents=5)\nexcept ValueError:\n    pass\nelse:\n    raise AssertionError(\"expected ValueError for inverted bounds\")\n"
+        },
+        {
+          "path": "src/cart.py",
+          "content": "def subtotal(cents: list[int]) -> int:\n    \"\"\"Return the cart subtotal in cents.\"\"\"\n    return sum(cents) - 1\n\n\ndef discount(cents: int, min_cents: int = 0, max_cents: int = 10000) -> int:\n    \"\"\"Return an integer-cents discount clamped to the explicit bounds.\n\n    The discount is clamped to ``min_cents`` and ``max_cents`` inclusive.\n    \"\"\"\n    if min_cents > max_cents:\n        raise ValueError(\"min_cents must be less than or equal to max_cents\")\n    return max(min_cents, min(max_cents, cents))\n"
+        }
+      ],
+      "citations": [],
+      "findingIds": [],
+      "summary": "Added an integer-cents discount helper with explicit inclusive bounds and ValueError on inverted bounds, plus tests; left the existing subtotal API unchanged."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-cart-discount",
+    "evaluatorId": "scaffold-cart-discount-evaluator",
+    "candidateSha256": "3c1ce86531c4b40012b0989da7c4b42b842d7cdc7852f5d76f601e784d4567c5",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-cart-discount",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "5ada358e6249ba212040762c7612184a9af7a6ff39d53c30ed7dd671f864fa26",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-cart-discount-evaluator",
+    "scenarioEvidenceSha256": "66b717c8a19a857ca9067eaa0c1b8550f1f5c813f033e8a90a2aa7f9ce93cc79",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1063,
+      "outputTokens": 594,
+      "estimatedCostUsd": 0.0012999165,
+      "actualBilledUsd": null,
+      "latencyMs": 29654
+    }
+  }
+}

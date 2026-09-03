@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "gate2-context-agent-quality",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "baselineModelId": "code-fast",
+  "routedModelIds": ["code"],
+  "baselineSuccessCount": 3,
+  "routedSuccessCount": 19,
+  "successCountRatio": 6.333333333333,
+  "baselineMedianEstimatedCostPerSuccess": 0.001029,
+  "routedMedianEstimatedCostPerSuccess": 0.0008966835,
+  "costReduction": 0.128587463557,
+  "passed": false,
+  "assessment": "gate2-routing-comparison-failed"
+}

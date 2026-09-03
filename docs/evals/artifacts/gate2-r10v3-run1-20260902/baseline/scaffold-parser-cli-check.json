@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "scaffold-parser-cli-check",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-02T23:22:32.253Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "6980aad15d1a2fd1aa0669ee11249aa4e0150a19",
+    "digestSha256": "bf5741f5c56832eff7deceecb948f2fb0d1294ec5cd85c199c91a00174864a24",
+    "repositoryDigestSha256": "62db2c3a3313ecd7558a9a60312671fcc14a6bbffdba8123f691d38eb41718d2",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\n\"schemaVersion\":1,\n\"selectedContextPaths\":[\n\"checks/test_parser.py\",\n\"checks/verify.py\",\n\"README.md\",\n\"src/parser.py\"\n],\n\"plan\":{\n\"mutationTargets\":[\n\"src/cli.py\",\n\"src/parser.py\"\n],\n\"requestedCheckIds\":[\n\"parser-cli\"\n]\n},\n\"answer\":{\n\"kind\":\"mutation\",\n\"files\":[\n{\n\"path\":\"src/parser.py\",\n\"content\":\"def parse_enabled(value: str) -> bool:\\n    return value.strip().lower() == \\\"true\\\"\\n\"\n},\n{\n\"path\":\"src/cli.py\",\n\"content\":\"import sys\\n\\nfrom src.parser import parse_enabled\\n\\n\\ndef main(argv=None) -> int:\\n    argv = list(sys.argv[1:] if argv is None else argv)\\n    if len(argv) != 1:\\n        print(\\\"usage: cli <value>\\\", file=sys.stderr)\\n        return 2\\n    return 0 if parse_enabled(argv[0]) else 1\\n\\n\\nif __name__ == \\\"__main__\\\":\\n    raise SystemExit(main())\\n\"\n}\n],\n\"citations\":[],\n\"findingIds\":[],\n\"summary\":\"Added a dependency-free cli entry point in src/cli.py that wraps parse_enabled and returns deterministic exit codes (0 for true, 1 for false, 2 for misuse). Fixed parse_enabled to recognize explicit true/false strings instead of truthiness. The parser-cli check runs the cli module against true and false inputs and asserts the exit codes.\"\n}",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON (truncated)",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-parser-cli-check",
+    "evaluatorId": "scaffold-parser-cli-check-evaluator",
+    "candidateSha256": "04bcfa6e04a922affa11f420d271dbad433851df3b6c7bcbaf52be793791e57d",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-parser-cli-check",
+    "repositoryRevisionSha256": "a7a23e58699a89cb73ffd67e6c0b5ac5e6912d663e2806ab172e7b9d095195de",
+    "taskSha256": "9112ed62adbb5215b577531e7eb78b43470b69d22d49f55cfa121b2e155df01b",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_parser.py",
+        "sha256": "684928c3d32de7b95cdd1573c09b22c787b5bf8af1e1f06a048dee2021c1873e"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "825a08423af178084bb31b28d2f4f789da242d13c2210a61531594ccf96c7edc"
+      },
+      {
+        "path": "README.md",
+        "sha256": "eab7be604c19f30872cfa9ad00fb6de6287087af32b8dd9cd9e71dc92f01b5ee"
+      },
+      {
+        "path": "src/parser.py",
+        "sha256": "2acb1ffabff0506b5c8b96db69b27203eef3d579db7ac8f5ffc8d1e84e82786e"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-parser-cli-check-evaluator",
+    "scenarioEvidenceSha256": "db8a11571f4f96799621e382af6d85e00851380c84559241419a662f131009cc",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 1039,
+      "outputTokens": 344,
+      "estimatedCostUsd": 0.001383,
+      "actualBilledUsd": null,
+      "latencyMs": 7430
+    }
+  }
+}

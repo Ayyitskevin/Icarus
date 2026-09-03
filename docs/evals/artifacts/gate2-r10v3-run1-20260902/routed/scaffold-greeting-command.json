@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "routed",
+  "caseId": "scaffold-greeting-command",
+  "modelId": "code",
+  "generatedAt": "2026-09-02T23:30:11.936Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "698075f5ca0747820e498bb1b3e65c4a5c772577",
+    "digestSha256": "bca8bd584b6997340db5a67fd056dd7a50cca5c33026119c8997fe50eea4d589",
+    "repositoryDigestSha256": "eea916c04927c9236ad5f517ccbdf4ac4e8127eced8bb778697e7cfd7475382f",
+    "matchedFiles": 3,
+    "selectedFiles": 3,
+    "selectedQueryMatches": 3,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"AGENTS.md\",\"README.md\",\"checks/verify.py\",\"src/greeting.txt\"],\"plan\":{\"mutationTargets\":[\"src/greeting.txt\"],\"requestedCheckIds\":[\"greeting-command\"]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/greeting.txt\",\"content\":\"Hello, Icarus!\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Updated the greeting source of truth to the expected one-line value so the registered greeting-command check passes.\"}}",
+  "candidate": null,
+  "candidateError": "Gate 2 live candidate: selectedContextPaths must stay inside the host retrieval receipt",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "scaffold-greeting-command",
+    "evaluatorId": "scaffold-greeting-command-evaluator",
+    "candidateSha256": "446f6d73323bf311a681ea2458d82cbb93d4fb9591d528f3b4508246a73b3460",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "scaffold-greeting-command",
+    "repositoryRevisionSha256": "137eab0656ac0480cbf213c05283f68a982487e79ad63f9ed95df7a8d0e8f95a",
+    "taskSha256": "3adc6bd07f3a8e5943dc18eb80c07fb1267f597e1875a31dd6f2ae1f9ba7c882",
+    "modelId": "code",
+    "retrievedContext": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "202bcc6638b370fe1e5e803f736371ef0d29c50ac226a0fad95294b552386dd9"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "a64c5b12d2c1d040caebccd3e6f178d103a32d4e4235d2733f4059c2c4c20e31"
+      },
+      {
+        "path": "src/greeting.txt",
+        "sha256": "d9014c4624844aa5bac314773d6b689ad467fa4e1d1a50a1b8a99d5a95f72ff5"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "scaffold-greeting-command-evaluator",
+    "scenarioEvidenceSha256": "31bce991a944606beb599bec491397a0beb367305d40ed6f09e8f29ce26e1236",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 942,
+      "outputTokens": 104,
+      "estimatedCostUsd": 0.000820587,
+      "actualBilledUsd": null,
+      "latencyMs": 8031
+    }
+  }
+}

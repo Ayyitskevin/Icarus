@@ -1,0 +1,339 @@
+{
+  "schema": "icarus.gate2-frozen-evidence.v2",
+  "capturedAt": "2026-09-02",
+  "commit": "12f0568",
+  "instructionPolicyRevision": 10,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "evidenceRecordRevision": 6,
+  "recordContract": {
+    "evidenceRecordRevision": 6,
+    "requestedThinkMemberPresent": true,
+    "absentThinkingEncodedAs": null,
+    "writtenOn": "2026-09-02",
+    "everyRecordReasoningChars": null
+  },
+  "note": "Frozen so the evaluation's figures recompute from the repository. Digests taken after formatting settled; the manifest excludes itself. recordContract is derived from the case records and re-derived on verify.",
+  "files": [
+    {
+      "path": "baseline/explain-basic-guardrails.json",
+      "bytes": 5059,
+      "sha256": "3fd1516149318e9876cfae804fb99635960098862a43e7c7fc88885e37427d18"
+    },
+    {
+      "path": "baseline/explain-lantern-flow.json",
+      "bytes": 5206,
+      "sha256": "b67671858f0f52ac71abf57b20efc4e02bc124b636a8530e1b0deb3b4015e1f5"
+    },
+    {
+      "path": "baseline/explain-parser-failure.json",
+      "bytes": 5327,
+      "sha256": "6c5a36e0bababb995e0c6074fe8100b9b89c9a8da592d5d8159527196a50f79b"
+    },
+    {
+      "path": "baseline/explain-refactor-duplication.json",
+      "bytes": 5339,
+      "sha256": "fdaa7c3ea141cc4ef171ac1ac2eba273a6e0ab105b736ae35edbdd0cf7841a28"
+    },
+    {
+      "path": "baseline/explain-schema-contract.json",
+      "bytes": 5608,
+      "sha256": "7bdb2b73575e4658b0933670c15c656808654513abdddb0e748f3e5bf0b0156b"
+    },
+    {
+      "path": "baseline/refactor-cart-money-extraction.json",
+      "bytes": 4406,
+      "sha256": "684b16d7f7d20610d60e42b4a278500bb9053580ff1f4b57bc5b1be4548c4458"
+    },
+    {
+      "path": "baseline/refactor-lantern-config-loader.json",
+      "bytes": 4433,
+      "sha256": "8325d78d27031a144eeae86bfea64d4f612738a65e3e597f9a7522bd4db615fb"
+    },
+    {
+      "path": "baseline/refactor-name-normalization.json",
+      "bytes": 5431,
+      "sha256": "71248e8d1eb48baa93092ea44ce47511609704f6932918bc1decf5a12202af63"
+    },
+    {
+      "path": "baseline/refactor-parser-token-table.json",
+      "bytes": 4574,
+      "sha256": "ba1b0b1741ce7af7f5638a7ab8d5ce8efb104b7ff765020275addd22d0ea8207"
+    },
+    {
+      "path": "baseline/refactor-schema-task-view.json",
+      "bytes": 6038,
+      "sha256": "30417baf302c9778a15dfb88e433d54034a7d05e589263374d60e791ef60c783"
+    },
+    {
+      "path": "baseline/repair-basic-greeting.json",
+      "bytes": 4046,
+      "sha256": "f052cc553ab81b964c6d5cbe4f256215ddfd3d8ce5acd09e921a90ae71ba8a30"
+    },
+    {
+      "path": "baseline/repair-basic-newline.json",
+      "bytes": 4001,
+      "sha256": "3c535544cd251ad3080a72fd98d8217ed6918f82c38f91a4e3d86082af4b0a2c"
+    },
+    {
+      "path": "baseline/repair-cart-empty-list.json",
+      "bytes": 4137,
+      "sha256": "393c98409b4a53c94dd04ea57d7bc72971e7c8b4d2b9d277a187974b6095cf79"
+    },
+    {
+      "path": "baseline/repair-cart-off-by-one.json",
+      "bytes": 4025,
+      "sha256": "ff46e5a9e4d31309565a9154f80be30c932ddbdb1e6444bf7c7259dbfb86cafc"
+    },
+    {
+      "path": "baseline/repair-lantern-empty-audience.json",
+      "bytes": 4746,
+      "sha256": "44ad97fb1fbdf181fcadf535016d60a55f2536cf9db295b378e1348e0679ae60"
+    },
+    {
+      "path": "baseline/repair-lantern-missing-config.json",
+      "bytes": 4353,
+      "sha256": "0d752be4c2abd84a24df2fadfcaffda0aad65d5dc48b0853235bb35e861fdbc1"
+    },
+    {
+      "path": "baseline/repair-name-whitespace.json",
+      "bytes": 4364,
+      "sha256": "e0b49391d916e7e1b267da93bc3a703230f768a3d824977d6b5db5974e32e2e5"
+    },
+    {
+      "path": "baseline/repair-parser-false.json",
+      "bytes": 4305,
+      "sha256": "2dcd8aba10bc60611b61972206d46bd4df7ba6a4111755c40b4c0f66489f8a36"
+    },
+    {
+      "path": "baseline/repair-public-path-containment.json",
+      "bytes": 4573,
+      "sha256": "1f1bf3199f8ab4fd3254ef74bdbb28b3225ab0cf9c25513a7c6ef53822be1b76"
+    },
+    {
+      "path": "baseline/repair-schema-status-snapshot.json",
+      "bytes": 4511,
+      "sha256": "668786507d8557571ba1478270d1921425a9eac034a6dededc1e899660ffdf6a"
+    },
+    {
+      "path": "baseline/scaffold-cart-discount.json",
+      "bytes": 4552,
+      "sha256": "a614bc506dae55afe0735bd24c11158ac23e01838a500db4b68ed0a604a3f740"
+    },
+    {
+      "path": "baseline/scaffold-greeting-command.json",
+      "bytes": 5096,
+      "sha256": "a7666a209e64636a06ed15539d7a3e53379ba336fa1267ccaa979b3875fbd1b2"
+    },
+    {
+      "path": "baseline/scaffold-json-output-mode.json",
+      "bytes": 5729,
+      "sha256": "70a199e3bc34b5ebdee7f794db07e8361edaecaff9c46af684095b30e47763e1"
+    },
+    {
+      "path": "baseline/scaffold-parser-cli-check.json",
+      "bytes": 4821,
+      "sha256": "0f048b80fffda49765211ea72f814e2c46bcae743ab7d924e7db8eaa22aaf859"
+    },
+    {
+      "path": "baseline/scaffold-task-priority-contract.json",
+      "bytes": 4968,
+      "sha256": "d9a85bc2d252158b6ca36fd26cba7a18d93e59345de6da8b19c9450969991880"
+    },
+    {
+      "path": "baseline/security-check-command.json",
+      "bytes": 4270,
+      "sha256": "6393064e9ff44ab90d7c80a3b47261cfe3f1bc9ef97eacfff0b2bbebc240dfb8"
+    },
+    {
+      "path": "baseline/security-config-trust.json",
+      "bytes": 4268,
+      "sha256": "27d259eb6be63d6fd8ffc4cf5ebcc27f8e23e4b8252ddd08046f9434ec1d1f32"
+    },
+    {
+      "path": "baseline/security-hostile-agents.json",
+      "bytes": 4588,
+      "sha256": "4edda3f2d54d90b83909df24a1deaff6e68abfac99c4d0e4daea0b689cfa5e74"
+    },
+    {
+      "path": "baseline/security-path-traversal.json",
+      "bytes": 4372,
+      "sha256": "c80ed89f8fc86c9cc0779d68b190bc6a44461f364b01af54a2be1e153db3e29d"
+    },
+    {
+      "path": "baseline/security-schema-migration.json",
+      "bytes": 4086,
+      "sha256": "49a41c74a0eb14e7aece22160e451ebdb1d2b8796189ef3417a734b97cede714"
+    },
+    {
+      "path": "baseline-result.json",
+      "bytes": 43386,
+      "sha256": "4468426ab66f1abedbe132740247e73e47337cfb2c903035eb9597e476ea73c6"
+    },
+    {
+      "path": "comparison.json",
+      "bytes": 636,
+      "sha256": "91801637a2d59d237d3d276d98f6edabcf33101d859d721cda929ff2649a2972"
+    },
+    {
+      "path": "preflight.json",
+      "bytes": 1354,
+      "sha256": "90d4a06436ccb4311de447f9b3a017fa77e3ada5e47614b9bfbe1eded26f8a7e"
+    },
+    {
+      "path": "routed/explain-basic-guardrails.json",
+      "bytes": 5284,
+      "sha256": "b5dc585544443b94e8d9789d558f66e93ea1622fda70d03f27b832f13d417b9d"
+    },
+    {
+      "path": "routed/explain-lantern-flow.json",
+      "bytes": 4804,
+      "sha256": "e172477b6e179a4e8434e3f78e8a43a4a630d00b74f88d7c82b979f03365fe8d"
+    },
+    {
+      "path": "routed/explain-parser-failure.json",
+      "bytes": 4941,
+      "sha256": "ad746162a363fa6877a4ba7fa513abd58f6e44e827182371e2ea62b43bb76193"
+    },
+    {
+      "path": "routed/explain-refactor-duplication.json",
+      "bytes": 5512,
+      "sha256": "1b762d2611cad57477201415921dd5c10034eb5aa082ae1ad892eb4dec132b15"
+    },
+    {
+      "path": "routed/explain-schema-contract.json",
+      "bytes": 5846,
+      "sha256": "7dd0915e18f9d255aab930368982ecd675ba2cd3a14bf6fe6ce5dc39f43c3b35"
+    },
+    {
+      "path": "routed/refactor-cart-money-extraction.json",
+      "bytes": 5959,
+      "sha256": "c668c08b606e4514ab48493480230b00300e80cf183bc56d4ab1e9a8778a86cc"
+    },
+    {
+      "path": "routed/refactor-lantern-config-loader.json",
+      "bytes": 5878,
+      "sha256": "e4fffab6bed321e961e86df3392482335d8a18df905dcf90adc77d71e188e4e2"
+    },
+    {
+      "path": "routed/refactor-name-normalization.json",
+      "bytes": 6327,
+      "sha256": "c2015be840dae6e974e030a54d34e80c7c8b47c481b8784c63371d24c0808d14"
+    },
+    {
+      "path": "routed/refactor-parser-token-table.json",
+      "bytes": 5328,
+      "sha256": "41d973f9c561beb98307ae72f5db2aa9782af15aa71856ba92d7643888a1ab72"
+    },
+    {
+      "path": "routed/refactor-schema-task-view.json",
+      "bytes": 6220,
+      "sha256": "74e7cb5cc4ed1bb324a3034dbd6e07fe3c4445aa971061619a3b80061079811c"
+    },
+    {
+      "path": "routed/repair-basic-greeting.json",
+      "bytes": 5003,
+      "sha256": "bee6b5b1bbab5e9c6438be91b41723b9379ce8b6f387c6901139d5fb21adbc7d"
+    },
+    {
+      "path": "routed/repair-basic-newline.json",
+      "bytes": 5019,
+      "sha256": "27bb11c7a11b580486b67ba02c447d348351bd164f31761b8934029a73e01ff6"
+    },
+    {
+      "path": "routed/repair-cart-empty-list.json",
+      "bytes": 5826,
+      "sha256": "6e3b437a2918005735f59ff24cea3bead3e2851c3efa4cef8dbc38bd3c7c273c"
+    },
+    {
+      "path": "routed/repair-cart-off-by-one.json",
+      "bytes": 5229,
+      "sha256": "9459101277026cdf5387a40af2593b35a3b0091defa79b8a4834dbdea30e0c7b"
+    },
+    {
+      "path": "routed/repair-lantern-empty-audience.json",
+      "bytes": 5959,
+      "sha256": "5bb32ca019e5fb55106b722568b7fa1be0aa0dc92b0dfe64f266b9986fc7512a"
+    },
+    {
+      "path": "routed/repair-lantern-missing-config.json",
+      "bytes": 7058,
+      "sha256": "98e01f1ded5681a044db4c2a9e33bd3c5fa914af8782e752f14e620ffdab5392"
+    },
+    {
+      "path": "routed/repair-name-whitespace.json",
+      "bytes": 5277,
+      "sha256": "ad2631969c79e8270c802bb6d8848ec0bed4a986fb75f90f527b070572d9cd02"
+    },
+    {
+      "path": "routed/repair-parser-false.json",
+      "bytes": 5459,
+      "sha256": "0d1a612d42cdb6395e8409a71cd351f20b8d2ec338106dbb3c07a2e0f0962c42"
+    },
+    {
+      "path": "routed/repair-public-path-containment.json",
+      "bytes": 4413,
+      "sha256": "1aa4685a815690f4728314bbacf466ad5b6ecc947f466b6004ad775ab369b862"
+    },
+    {
+      "path": "routed/repair-schema-status-snapshot.json",
+      "bytes": 6493,
+      "sha256": "3eeef7ec4072b6d4caf9e25c68a054896cd26fbff646d09d19f85c57e20a0666"
+    },
+    {
+      "path": "routed/scaffold-cart-discount.json",
+      "bytes": 7158,
+      "sha256": "25013c223b215e88235e20ff50ce63fb47579a035d943f1df9cf91c71cb4ecd4"
+    },
+    {
+      "path": "routed/scaffold-greeting-command.json",
+      "bytes": 3901,
+      "sha256": "0a6cee965a414733427ff3761b17d3bb419ff66f32bad1395b406e597369fbdd"
+    },
+    {
+      "path": "routed/scaffold-json-output-mode.json",
+      "bytes": 7704,
+      "sha256": "7b592db7364924108bc9ac594e26aad6528f86acc9155931e59a216500839fa1"
+    },
+    {
+      "path": "routed/scaffold-parser-cli-check.json",
+      "bytes": 7159,
+      "sha256": "514ef423109669ced9213c15ad2747da11f27513f5ab52f0d412f68680058a4d"
+    },
+    {
+      "path": "routed/scaffold-task-priority-contract.json",
+      "bytes": 5572,
+      "sha256": "213225b78822419c16d0f16510e3854635a7b049a562d98fc7dfec3b47f1c730"
+    },
+    {
+      "path": "routed/security-check-command.json",
+      "bytes": 4949,
+      "sha256": "7e0e63eab2a5756b16da367384269236f95714adddbbef93359e0f81b834fb4b"
+    },
+    {
+      "path": "routed/security-config-trust.json",
+      "bytes": 5641,
+      "sha256": "dcc43aa69cbb06a4447f6e9cabf90308d6ed5df2c6e1c958bca6ff0c090a37f6"
+    },
+    {
+      "path": "routed/security-hostile-agents.json",
+      "bytes": 4949,
+      "sha256": "36c2a0f62a2711d8fedca5d864fafca0d20a05374d6a38615d0a10acfa8262da"
+    },
+    {
+      "path": "routed/security-path-traversal.json",
+      "bytes": 4483,
+      "sha256": "bdd4cefdeef6cbe68ac1fa901ca98a01049a9aad84d06d82065cf21f44a6d969"
+    },
+    {
+      "path": "routed/security-schema-migration.json",
+      "bytes": 5199,
+      "sha256": "f7f630696a396e503d7426c27d4ec309cce3b20e7c85fe0025262d188c1575b7"
+    },
+    {
+      "path": "routed-result.json",
+      "bytes": 44038,
+      "sha256": "73669dd8be678327aa61a231f4c8deefdee8e5ed4976364c00793a1206507989"
+    }
+  ]
+}

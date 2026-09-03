@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 6,
+  "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "repair-cart-empty-list",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-02T23:21:01.738Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "87937c54c938749e723f430d3528401958eba2fb",
+    "digestSha256": "3f4872e01ba7def1b6797a5ceacc3e31e86086b0166f9d6de559e1dd39981259",
+    "repositoryDigestSha256": "62ce8f768c4dfa4f242f878d51e912a96ebd3b182820de316370a972edd8345d",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\"schemaVersion\":1,\"selectedContextPaths\":[\"src/cart.py\",\"checks/test_cart.py\"],\"plan\":{\"mutationTargets\":[\"src/cart.py\"],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/cart.py\",\"content\":\"def subtotal(cents: list[int]) -> int:\\n    \\\"\\\"\\\"Return the cart subtotal in cents.\\\"\\\"\\\"\\n    return sum(cents)\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Fixed the deliberate one-cent defect in subtotal so it returns the exact sum of item prices, making an empty cart zero while preserving correct sums for populated carts.\"}}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON (markdown_fenced)",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "repair-cart-empty-list",
+    "evaluatorId": "repair-cart-empty-list-evaluator",
+    "candidateSha256": "c7a5d362759d516aa91d5718fe0202a1c914d75ee92ea35353aa3aa45bd98c9a",
+    "instructionPolicySha256": "116168c999834a3b7717ae6c344255c349e6a7ae8591c6bd9fbc5f2d4229d252",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "repair-cart-empty-list",
+    "repositoryRevisionSha256": "7c5547814197031c2e3373c211a40829f89f88e674df324cff385a92befffc22",
+    "taskSha256": "b663cdf70ad8934e8068f3c1619324945802e6f3b13ec5c74a754cc8dd9d2f61",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/test_cart.py",
+        "sha256": "fa8a6764cea7649e0d431a7250c8e923ab6a665a151e076e91351d47a4ca535f"
+      },
+      {
+        "path": "checks/verify.py",
+        "sha256": "46516f4d1dda5f0109ec9b50832d56d844ae5ef25cf5544cac819b5896ea6747"
+      },
+      {
+        "path": "README.md",
+        "sha256": "346ec19335c66eb603a17c8a1180b1b3bb1a0a405199fae9c2571a9d071e17d5"
+      },
+      {
+        "path": "src/cart.py",
+        "sha256": "0f0e67b7b5632a86f49a906d5b150c90fbddeeb496a0802e72b9367e3528f382"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "repair-cart-empty-list-evaluator",
+    "scenarioEvidenceSha256": "8b8438539f7ab49aad43ed18c09da56ba07a4c4f57b0addbd2b3ea2a748475fc",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 943,
+      "outputTokens": 133,
+      "estimatedCostUsd": 0.001076,
+      "actualBilledUsd": null,
+      "latencyMs": 3075
+    }
+  }
+}
