@@ -259,3 +259,28 @@ describe("Gate 2 fixture boundary, repository fixtures", () => {
     ).rejects.toThrow("repository basic: src/greeting.txt is hard-linked");
   });
 });
+
+describe("Gate 2 fixture boundary, manifest v4", () => {
+  const manifestV4Path = path.join(repositoryRoot, "fixtures/evals/gate2/manifest.v4.json");
+
+  it("loads v4 only with its exact committed v3 predecessor, and an edited v1 three links down refuses it", async () => {
+    const result = await loadGate2BenchmarkContract(manifestV4Path, repositoryRoot);
+    expect(result.manifest.benchmarkRevision).toBe("gate2-thirty-task-v4-stated-contracts");
+    expect(result.predecessorManifestSha256).toBe(
+      "e1411ab97ee64c8dccb39868ae29a6774c3281c21a7bc81061c31ab22fae3134",
+    );
+    const root = await fixtureCopy();
+    const predecessor = path.join(root, "fixtures/evals/gate2/manifest.v3.json");
+    await writeFile(predecessor, `${await readFile(predecessor, "utf8")} `, "utf8");
+    await expect(
+      loadGate2BenchmarkContract(path.join(root, "fixtures/evals/gate2/manifest.v4.json"), root),
+    ).rejects.toThrow("predecessor manifest digest");
+
+    const deep = await fixtureCopy();
+    const origin = path.join(deep, "fixtures/evals/gate2/manifest.v1.json");
+    await writeFile(origin, `${await readFile(origin, "utf8")} `, "utf8");
+    await expect(
+      loadGate2BenchmarkContract(path.join(deep, "fixtures/evals/gate2/manifest.v4.json"), deep),
+    ).rejects.toThrow("predecessor manifest digest");
+  });
+});

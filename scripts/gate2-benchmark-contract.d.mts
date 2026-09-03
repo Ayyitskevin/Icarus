@@ -63,6 +63,7 @@ export const GATE2_CASE_IDS: readonly string[];
 export const GATE2_V1_MANIFEST_SHA256: string;
 export const GATE2_V2_MANIFEST_SHA256: string;
 export const GATE2_V3_MANIFEST_SHA256: string;
+export const GATE2_V4_MANIFEST_SHA256: string;
 export const GATE2_CASE_IDS_BY_REVISION: Readonly<Record<string, readonly string[]>>;
 export const GATE2_CURRENT_BENCHMARK_REVISION: string;
 export const GATE2_CURRENT_MANIFEST_PATH: string;

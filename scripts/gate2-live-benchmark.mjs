@@ -57,6 +57,7 @@ import { GATE2_REPAIR_B_ORACLES } from "./gate2-repair-cohort-b-contract.mjs";
 import { GATE2_SCAFFOLD_A_ORACLES } from "./gate2-scaffold-cohort-a-contract.mjs";
 import { GATE2_SCHEMA_SUCCESSOR_ORACLES } from "./gate2-schema-successor-cohort-contract.mjs";
 import { GATE2_V3_SUCCESSOR_ORACLES } from "./gate2-v3-successor-oracles.mjs";
+import { GATE2_V4_SUCCESSOR_ORACLES } from "./gate2-v4-successor-oracles.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(scriptPath), "..");
@@ -471,13 +472,14 @@ function oracleRegistry() {
     ...GATE2_SCAFFOLD_A_ORACLES,
     ...GATE2_SCHEMA_SUCCESSOR_ORACLES,
     ...GATE2_V3_SUCCESSOR_ORACLES,
+    ...GATE2_V4_SUCCESSOR_ORACLES,
   ];
   const registry = new Map(entries.map((entry) => [entry.caseId, entry]));
-  // Twenty mutation cases across v1 and v2, plus the three v3 successors; a manifest
-  // selects its own twenty by id, so superseded entries are never reached.
+  // Twenty mutation cases across v1 and v2, plus the three v3 and two v4 successors; a
+  // manifest selects its own twenty by id, so superseded entries are never reached.
   assertCondition(
-    registry.size === 23 && entries.length === 23,
-    "mutation evaluator registry must contain 23 distinct cases",
+    registry.size === 25 && entries.length === 25,
+    "mutation evaluator registry must contain 25 distinct cases",
   );
   return registry;
 }

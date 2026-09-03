@@ -14,6 +14,7 @@ import {
   GATE2_MANIFEST_SHA256_BY_REVISION,
   GATE2_V2_MANIFEST_SHA256,
   GATE2_V3_MANIFEST_SHA256,
+  GATE2_V4_MANIFEST_SHA256,
   MAX_GATE2_JSON_BYTES,
   describeNonStrictGate2Json,
   parseStrictGate2Json,
@@ -272,8 +273,6 @@ describe("Gate 2 benchmark manifest v3 lineage", () => {
 
     expect(predecessorSha256).toBe(GATE2_V2_MANIFEST_SHA256);
     expect(sha256Raw(successorBytes)).toBe(GATE2_V3_MANIFEST_SHA256);
-    expect(GATE2_CURRENT_BENCHMARK_REVISION).toBe(successor.benchmarkRevision);
-    expect(GATE2_CURRENT_MANIFEST_PATH).toBe("fixtures/evals/gate2/manifest.v3.json");
     expect(validateGate2BenchmarkManifest(successor)).toBe(successor);
     expect(validateGate2BenchmarkSuccessor(successor, predecessorBytes)).toBe(successor);
     expect(successor.cases.map((entry: Record<string, unknown>) => entry.id)).toEqual(
@@ -324,7 +323,7 @@ describe("Gate 2 benchmark manifest v3 lineage", () => {
 
   it("maps every registered digest to bytes that hash to it", async () => {
     const entries = Object.entries(GATE2_MANIFEST_PATHS_BY_SHA256);
-    expect(entries).toHaveLength(3);
+    expect(entries).toHaveLength(4);
     for (const [digest, relative] of entries) {
       const bytes = await readFile(new URL(`../../${relative}`, import.meta.url));
       expect(sha256Raw(bytes)).toBe(digest);
@@ -379,6 +378,79 @@ describe("Gate 2 benchmark manifest v3 lineage", () => {
     successorDrift.cases[cartIndex].expectedOutcome.expectedChangedPaths = ["src/cart.py"];
     expect(() => validateGate2BenchmarkSuccessor(successorDrift, predecessorBytes)).toThrow(
       "replacement case drifted at refactor-cart-money-extraction",
+    );
+  });
+});
+
+describe("Gate 2 benchmark manifest v4 lineage", () => {
+  const manifestV3Url = new URL("../../fixtures/evals/gate2/manifest.v3.json", import.meta.url);
+  const manifestV4Url = new URL("../../fixtures/evals/gate2/manifest.v4.json", import.meta.url);
+
+  it("accepts the immutable v4 successor only against the exact v3 bytes, and v4 is current", async () => {
+    const [successor, predecessorBytes, successorBytes] = await Promise.all([
+      loadManifest(manifestV4Url),
+      readFile(manifestV3Url),
+      readFile(manifestV4Url),
+    ]);
+    expect(sha256Raw(predecessorBytes)).toBe(GATE2_V3_MANIFEST_SHA256);
+    expect(sha256Raw(successorBytes)).toBe(GATE2_V4_MANIFEST_SHA256);
+    expect(GATE2_CURRENT_BENCHMARK_REVISION).toBe(successor.benchmarkRevision);
+    expect(GATE2_CURRENT_MANIFEST_PATH).toBe("fixtures/evals/gate2/manifest.v4.json");
+    expect(GATE2_MANIFEST_SHA256_BY_REVISION[successor.benchmarkRevision]).toBe(
+      GATE2_V4_MANIFEST_SHA256,
+    );
+    expect(validateGate2BenchmarkManifest(successor)).toBe(successor);
+    expect(validateGate2BenchmarkSuccessor(successor, predecessorBytes)).toBe(successor);
+    expect(successor.cases.map((entry: Record<string, unknown>) => entry.id)).toEqual(
+      GATE2_CASE_IDS_BY_REVISION["gate2-thirty-task-v4-stated-contracts"],
+    );
+    expect(
+      successor.replacements.map((entry: Record<string, string>) => entry.successorCaseId),
+    ).toEqual([
+      "repair-lantern-config-contract",
+      "scaffold-greeting-command-check",
+      "explain-task-schema-contract",
+    ]);
+    for (const benchmarkCase of successor.cases) {
+      for (const changedPath of benchmarkCase.expectedOutcome.expectedChangedPaths) {
+        expect(assertAllowedTarget(changedPath)).toBe(changedPath);
+      }
+    }
+    // v2 bytes are two links down, not v4's predecessor.
+    const v2Bytes = await readFile(manifestV2Url);
+    expect(() => validateGate2BenchmarkSuccessor(successor, v2Bytes)).toThrow(
+      "predecessor benchmarkRevision",
+    );
+  });
+
+  it("rejects v4 lineage drift and a retained replaced identity", async () => {
+    const [predecessor, source, predecessorBytes] = await Promise.all([
+      loadManifest(manifestV3Url),
+      loadManifest(manifestV4Url),
+      readFile(manifestV3Url),
+    ]);
+    const inheritedDrift = copy(source);
+    inheritedDrift.cases[0].expectedContextPaths = ["AGENTS.md", "src/greeting.txt"];
+    expect(() => validateGate2BenchmarkSuccessor(inheritedDrift, predecessorBytes)).toThrow(
+      "27 unchanged cases",
+    );
+    const lineageDrift = copy(source);
+    lineageDrift.replacements[0].reason = "cosmetic";
+    expect(() => validateGate2BenchmarkManifest(lineageDrift)).toThrow("replacement lineage");
+    const index = source.cases.findIndex(
+      (entry: Record<string, unknown>) => entry.id === "repair-lantern-config-contract",
+    );
+    const retainedIdentity = copy(source);
+    retainedIdentity.cases[index] = copy(
+      predecessor.cases.find(
+        (entry: Record<string, unknown>) => entry.id === "repair-lantern-missing-config",
+      ),
+    );
+    expect(() => validateGate2BenchmarkManifest(retainedIdentity)).toThrow("cases[");
+    const successorDrift = copy(source);
+    successorDrift.cases[index].expectedOutcome.expectedChangedPaths = ["src/config.py"];
+    expect(() => validateGate2BenchmarkSuccessor(successorDrift, predecessorBytes)).toThrow(
+      "replacement case drifted at repair-lantern-config-contract",
     );
   });
 });
