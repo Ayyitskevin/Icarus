@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 7,
+  "instructionPolicySha256": "434340b13c43488aa5f2797f9da03e7b19cd76817146571508f591f26f1ac532",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "da1f9e0b71ed1cc91cc66c1908920efdab51be325d6e1637188e6daa93924dfb",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "explain-task-schema-contract",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-03T17:35:20.974Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "ef0d0ebbc5b42e5bb30129357f84a3b4bd7ea961",
+    "digestSha256": "4ae1b6c809dd3a221fce16e982e21a6711bc916972e2d65a7006b6eddfe303aa",
+    "repositoryDigestSha256": "4d77ac244f7aa3cbd1a1c1ee76a94664b9bed7b06412dc3b040d739ad7bee54d",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"checks/schema_contract.sql\",\"migrations/README.md\",\"README.md\",\"schema/current.sql\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"checks/schema_contract.sql\",\"migrations/README.md\",\"README.md\",\"schema/current.sql\"],\"findingIds\":[],\"summary\":\"The tasks table (schema/current.sql) has two columns: id (INTEGER PRIMARY KEY) and title (TEXT NOT NULL). The offline contract query (checks/schema_contract.sql) asserts the table remains readable by selecting id and title with LIMIT 0, without applying any migration to live state. The top-level README (README.md) states this is an offline application schema fixture where evaluation must never apply a migration to live state, and migrations/README.md reserves the directory for future numbered migrations after explicit schema approval.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
+      "README.md",
+      "schema/current.sql"
+    ],
+    "plan": {
+      "mutationTargets": [],
+      "requestedCheckIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": [
+        "checks/schema_contract.sql",
+        "migrations/README.md",
+        "README.md",
+        "schema/current.sql"
+      ],
+      "findingIds": [],
+      "summary": "The tasks table (schema/current.sql) has two columns: id (INTEGER PRIMARY KEY) and title (TEXT NOT NULL). The offline contract query (checks/schema_contract.sql) asserts the table remains readable by selecting id and title with LIMIT 0, without applying any migration to live state. The top-level README (README.md) states this is an offline application schema fixture where evaluation must never apply a migration to live state, and migrations/README.md reserves the directory for future numbered migrations after explicit schema approval."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "explain-task-schema-contract",
+    "evaluatorId": "explain-task-schema-contract-evaluator",
+    "candidateSha256": "05b850a90c96f3bc446d74ed682deb83eccdd410b777f7796703e63a30619b4c",
+    "instructionPolicySha256": "434340b13c43488aa5f2797f9da03e7b19cd76817146571508f591f26f1ac532",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
+      "README.md",
+      "schema/current.sql"
+    ],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "explain-task-schema-contract",
+    "repositoryRevisionSha256": "fa57f8499c0744f65998643e1b5d1d764ec858d127586ddb4bee0fa3b2189190",
+    "taskSha256": "a00de70ffd192d6c1d7b0e15becab54536aa533310cb101e48b38e4c01f15a9f",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "checks/schema_contract.sql",
+        "sha256": "517e0e3f8c13aa76186cd70bcf4e5070ccba3942c3ffa1bbc47622cfc1a786b9"
+      },
+      {
+        "path": "migrations/README.md",
+        "sha256": "2390e0b745806f3e7b781a024deaef62db3a54df81e49d159a50ee68d1813642"
+      },
+      {
+        "path": "README.md",
+        "sha256": "85fcb72e52b972d35151c355e21570f834f88f4e61e40ae81104ad118f5c9fb7"
+      },
+      {
+        "path": "schema/current.sql",
+        "sha256": "198ad40968f54f04050abb9b294bbe645b97e26d6f13c4624e75a8372d417150"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": [
+      "checks/schema_contract.sql",
+      "migrations/README.md",
+      "README.md",
+      "schema/current.sql"
+    ],
+    "findingIds": [],
+    "scenarioEvaluatorId": "explain-task-schema-contract-evaluator",
+    "scenarioEvidenceSha256": "96a3ef3f08cc2068e1a3ce3930648a9c7706c5aa126f62b057b9d327c49b5a3b",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 845,
+      "outputTokens": 181,
+      "estimatedCostUsd": 0.001026,
+      "actualBilledUsd": null,
+      "latencyMs": 4277
+    }
+  }
+}

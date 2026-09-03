@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 7,
+  "instructionPolicySha256": "434340b13c43488aa5f2797f9da03e7b19cd76817146571508f591f26f1ac532",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "da1f9e0b71ed1cc91cc66c1908920efdab51be325d6e1637188e6daa93924dfb",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "refactor-lantern-config-loader",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-03T17:34:51.939Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "7af0354a3a2e9149ad67952e0dae63dd24c39075c1d32c16aa14ba230fe14aea",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "```json\n{\"schemaVersion\":1,\"selectedContextPaths\":[\"src/main.py\"],\"plan\":{\"mutationTargets\":[\"src/lantern_config.py\",\"src/main.py\"],\"requestedCheckIds\":[\"lantern-output\"],\"answer\":{\"kind\":\"mutation\",\"files\":[{\"path\":\"src/lantern_config.py\",\"content\":\"import json\\nfrom pathlib import Path\\n\\n\\ndef load_audience() -> str:\\n    return json.loads(Path(\\\"config/app.json\\\").read_text())[\\\"audience\\\"]\\n\"},{\"path\":\"src/main.py\",\"content\":\"from src.greeting import greeting\\nfrom src.lantern_config import load_audience\\n\\nprint(greeting(load_audience()))\\n\"}],\"citations\":[],\"findingIds\":[],\"summary\":\"Extracted configuration loading from src/main.py into a new src/lantern_config.py module exposing load_audience; src/main.py now delegates to it. The printed greeting and config file format are unchanged.\"}}\n```",
+  "candidate": null,
+  "candidateError": "Gate 2 benchmark contract: manifest must be strict JSON (markdown_fenced)",
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "refactor-lantern-config-loader",
+    "evaluatorId": "refactor-lantern-config-loader-evaluator",
+    "candidateSha256": "f8b1f69a6720b4c6f4e9aa0c0e1998f60a9ef9675c2dbcc78ed4a9100960f2e2",
+    "instructionPolicySha256": "434340b13c43488aa5f2797f9da03e7b19cd76817146571508f591f26f1ac532",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "failed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "refactor-lantern-config-loader",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "b2ffdb36663853bd4f05ac949c2a34b4ca016b070b03189a25a327dcab884189",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": false,
+    "changedPaths": [],
+    "citations": [],
+    "findingIds": [],
+    "scenarioEvaluatorId": "refactor-lantern-config-loader-evaluator",
+    "scenarioEvidenceSha256": "49d930d39804d602137388f3d01c5f91d916853c3ae453a4f77f252fce88863d",
+    "scenarioStatus": "failed",
+    "usage": {
+      "inputTokens": 941,
+      "outputTokens": 197,
+      "estimatedCostUsd": 0.001138,
+      "actualBilledUsd": null,
+      "latencyMs": 4077
+    }
+  }
+}

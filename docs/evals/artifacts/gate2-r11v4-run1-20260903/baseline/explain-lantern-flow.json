@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "candidateContractRevision": 5,
+  "evidenceRecordRevision": 7,
+  "instructionPolicySha256": "434340b13c43488aa5f2797f9da03e7b19cd76817146571508f591f26f1ac532",
+  "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+  "manifestSha256": "da1f9e0b71ed1cc91cc66c1908920efdab51be325d6e1637188e6daa93924dfb",
+  "executionProfileDigestSha256": "03399661d25002304f160f2e4959fe1a0e2be826bb752671e1234c8e34496169",
+  "mode": "baseline",
+  "caseId": "explain-lantern-flow",
+  "modelId": "code-fast",
+  "generatedAt": "2026-09-03T17:35:08.777Z",
+  "finishReason": "stop",
+  "providerFailure": null,
+  "usageBasis": "provider_reported",
+  "reassessedFromEvidenceSha256": null,
+  "reasoningChars": null,
+  "requestedThink": false,
+  "retrieval": {
+    "baseCommit": "9e0630daa784056d050b4d1db1bc348ec5d858dd",
+    "digestSha256": "d4cb891c3bf3ec7ffe141669bfab3f917c2faee9b957e733ef31a813d1d890b2",
+    "repositoryDigestSha256": "44aa9bb10e4853fb2a45dc66afd627a4ca8ab328a84f80ad6506f12a0b52f0ff",
+    "matchedFiles": 4,
+    "selectedFiles": 4,
+    "selectedQueryMatches": 4,
+    "omittedMatches": [],
+    "omittedReferences": [],
+    "excludedFiles": {
+      "byPolicy": 0,
+      "nonText": 0,
+      "secretShaped": 0,
+      "unsupportedEntry": 0
+    }
+  },
+  "rawCandidate": "{\"schemaVersion\":1,\"selectedContextPaths\":[\"config/app.json\",\"README.md\",\"src/greeting.py\",\"src/main.py\"],\"plan\":{\"mutationTargets\":[],\"requestedCheckIds\":[]},\"answer\":{\"kind\":\"read_only\",\"files\":[],\"citations\":[\"config/app.json\",\"README.md\",\"src/greeting.py\",\"src/main.py\"],\"findingIds\":[],\"summary\":\"Lantern's execution begins in src/main.py, which the README identifies as the entry point. main.py reads config/app.json, parses the JSON, and extracts the 'audience' field (set to 'traveler'). It passes that audience value to the greeting() function in src/greeting.py, which returns the string 'Welcome, traveler.'. main.py then prints that greeting to stdout via print(), so the configured audience reaches stdout as the text 'Welcome, traveler.'.\"}}",
+  "candidate": {
+    "schemaVersion": 1,
+    "selectedContextPaths": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+    "plan": {
+      "mutationTargets": [],
+      "requestedCheckIds": []
+    },
+    "answer": {
+      "kind": "read_only",
+      "files": [],
+      "citations": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+      "findingIds": [],
+      "summary": "Lantern's execution begins in src/main.py, which the README identifies as the entry point. main.py reads config/app.json, parses the JSON, and extracts the 'audience' field (set to 'traveler'). It passes that audience value to the greeting() function in src/greeting.py, which returns the string 'Welcome, traveler.'. main.py then prints that greeting to stdout via print(), so the configured audience reaches stdout as the text 'Welcome, traveler.'."
+    }
+  },
+  "candidateError": null,
+  "evaluatorEvidence": {
+    "schemaVersion": 1,
+    "caseId": "explain-lantern-flow",
+    "evaluatorId": "explain-lantern-flow-evaluator",
+    "candidateSha256": "e3761a6e9d440031f2b71782bbb738740ef132c039d8742745bc3fcdae371735",
+    "instructionPolicySha256": "434340b13c43488aa5f2797f9da03e7b19cd76817146571508f591f26f1ac532",
+    "routingPolicySha256": "01c96e8eedc4376cae8aab5fb1c354e9fe84f8fa18ae1a77ed93875724ccd54a",
+    "finishReason": "stop",
+    "providerFailure": null,
+    "usageBasis": "provider_reported",
+    "providerOutputComplete": true,
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+    "findingIds": [],
+    "checks": [],
+    "scenarioStatus": "passed",
+    "sourceCheckoutUnchanged": true
+  },
+  "observation": {
+    "caseId": "explain-lantern-flow",
+    "repositoryRevisionSha256": "839b1571be3495c34634a9c14e1718624f1d86c536669d48bf0b7e1e07cd9555",
+    "taskSha256": "0ef3a4df7ececa629cbe750e8e4cb23afc69d9bfe58c331f78f0cd82b2a7bae0",
+    "modelId": "code-fast",
+    "retrievedContext": [
+      {
+        "path": "config/app.json",
+        "sha256": "7c4a9046b3f7a1a1494e40f7d52a572afe8736d229b7957ac346e41258cd3f64"
+      },
+      {
+        "path": "README.md",
+        "sha256": "3b746976ab76ae04ac4792a3bef002cf01f422148ba9116c2b0c66b100bc34c1"
+      },
+      {
+        "path": "src/greeting.py",
+        "sha256": "1b948ec2cecd293b4daaaeff462afebe337b9f98f1fd808ffdef7e5a7477261a"
+      },
+      {
+        "path": "src/main.py",
+        "sha256": "bf3e5393b6beb170edd16432ada75a932d652cefee83bb8ffada031f98f69440"
+      }
+    ],
+    "firstPassPlanAccepted": true,
+    "changedPaths": [],
+    "citations": ["config/app.json", "README.md", "src/greeting.py", "src/main.py"],
+    "findingIds": [],
+    "scenarioEvaluatorId": "explain-lantern-flow-evaluator",
+    "scenarioEvidenceSha256": "8830ee2d8d0679ae31f0803fa820d7b4150f02511ff29b5d3a28e4fa3ec5eb9d",
+    "scenarioStatus": "passed",
+    "usage": {
+      "inputTokens": 857,
+      "outputTokens": 172,
+      "estimatedCostUsd": 0.001029,
+      "actualBilledUsd": null,
+      "latencyMs": 3582
+    }
+  }
+}
