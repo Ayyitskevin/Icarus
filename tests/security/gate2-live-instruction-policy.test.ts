@@ -112,16 +112,18 @@ describe("Gate 2 live instruction policy", () => {
     // into its prose ("the middle word of unvalidated-config-shape") had the stem inside
     // the ID erased before the scan while the model still read it.
     //
-    // So the guard scans the policy's PROSE STRINGS themselves -- common, kind, and class
-    // rules, and the taxonomy definitions -- as token sequences: every expected changed,
-    // cited, or context path's stem, taken from the manifest rather than a hand-kept
-    // list, split on its separators, may not appear as consecutive words in any of them,
-    // however separated. Nothing is cut out of prose and no word is exempt. The only text
-    // not scanned is what the builder owns structurally: the class/kind line, the JSON
-    // template, and the taxonomy IDs as identifiers -- and a structural check below
-    // asserts the assembled instructions contain nothing beyond those pieces. A
-    // convention speaks in roles ("the extracted module"); an answer speaks in names.
-    // Paraphrase is not caught here and is held by the authoring rule in ADR 0071.
+    // So the guard derives every expected changed, cited, or context path's stem from the
+    // manifest rather than a hand-kept list, and treats a name as any consecutive run of
+    // whole tokens whose concatenation equals the stem's letters. Separator changes, word
+    // splits, glued lowercase, camelCase, PascalCase, and case changes therefore collide.
+    // It scans every policy prose string -- common, kind, and class rules, plus taxonomy
+    // definitions -- and then scans the final assembled text with each token tagged by its
+    // origin. Nothing is cut out: the builder-owned class/kind and label text, canonical
+    // template, and taxonomy IDs are scanned too. Spans wholly inside the template are
+    // allowed; a span wholly inside one taxonomy ID is allowed only by the class-aware
+    // identifier rule below. Builder text has no blanket exemption. A convention speaks
+    // in roles ("the extracted module"); an answer speaks in names. Paraphrase is not
+    // caught here and is held by the authoring rule in ADR 0071.
     const repositoryRoot = decodeURIComponent(new URL("../../", import.meta.url).pathname);
     const manifest = JSON.parse(
       readFileSync(path.join(repositoryRoot, GATE2_CURRENT_MANIFEST_PATH), "utf8"),
