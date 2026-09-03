@@ -76,7 +76,7 @@ did not move while the count did.
 `security-config-trust` — the case revision 11 was written for — returns the finding in this
 record: `findingIds: ["unvalidated-config-shape"]`, with the summary "reads `config/app.json`
 and passes the audience value directly to `greeting` without validating that it is a string".
-Across the six committed sets the case's routed record returned the finding under
+Across the seven committed sets (six prior and this one) the case's routed record returned the finding under
 instruction-policy revision 8 (the target-discovery record,
 `gate2-local-vulcan-target-discovery-r7-20260828` — the `r7` in that name is not the policy
 revision), returned no finding in the 2026-08-28 code-routing set, under revision 9, and under
