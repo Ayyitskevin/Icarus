@@ -130,9 +130,12 @@ Baseline failures are dominated by markdown fences (20 of 27), as under revision
   91,780 output tokens over 30 cases); under every reasoning-suppressed instrument since it
   emits more (revision 9: 7,807 / 9,390; revision 10: 6,517 / 7,474; v3: 6,652 / 7,547 and
   7,548). Across those instruments baseline output is lower by more than routed output. The
-  revision 9 → 10 step changed policy, evidence writer (record revision 5 → 6), and freezer
-  while retaining manifest v2; the revision 10 → v3 step changed only the manifest, with
-  policy (`116168c9…`), writer, and freezer unchanged. No step was paired with a
+  revision 9 → 10 step changed policy, evidence record and writer (record revision 5 → 6),
+  and freezer while retaining manifest v2; the revision 10 → v3 step retained the policy
+  digest `116168c9…`, evidence-record revision 6, and the freezer's schema and source, while
+  changing the manifest and task inputs and the live runner's manifest resolution and
+  oracle registry (`scripts/gate2-live-benchmark.mjs`, 14 additions and 3 deletions between
+  the producing commits `96d88ee` and `12f0568`). No step was paired with a
   reasoning-enabled arm, so the bytes do not establish why (ADR 0070 makes the same point
   about suppression).
   Whether 0.3 is the right bar for this pair of models is a question for the
