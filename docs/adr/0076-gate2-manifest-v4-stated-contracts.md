@@ -28,8 +28,8 @@ digest `e1411ab9…`, keeps 27 cases byte-identical, replaces three.
 
 | predecessor | successor | what the new task says | expected set |
 | --- | --- | --- | --- |
-| `repair-lantern-missing-config` | `repair-lantern-config-contract` | exit 1, nothing on stdout, exactly `Lantern configuration is unavailable.` on stderr; present-config behaviour unchanged | `src/main.py` (unchanged) |
-| `scaffold-greeting-command` | `scaffold-greeting-command-check` | a command named `greet` reading the greeting file; its check "beside the existing check, following that check's naming" | `checks/test_greet.py`, `src/greet.py` |
+| `repair-lantern-missing-config` | `repair-lantern-config-contract` | exit 1, nothing on stdout, exactly the line `Lantern configuration is unavailable.` on stderr; present-config behaviour unchanged | `src/main.py` (unchanged) |
+| `scaffold-greeting-command` | `scaffold-greeting-command-check` | a command named `greet` reading the greeting file; its check "beside the existing check as `checks/test_greet.py`" — stated, because `basic`'s only check is `checks/verify.py` and no `test_` exemplar exists to infer from | `checks/test_greet.py`, `src/greet.py` |
 | `explain-schema-contract` | `explain-task-schema-contract` | cite "the schema snapshot, the contract query, and the repository's top-level README" | citations unchanged |
 
 The sharpening is in the tasks, never the policy: revision 10's digest `116168c9…` is unchanged
