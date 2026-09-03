@@ -29,9 +29,11 @@ const RECORD_DIRECTORIES = ["baseline", "routed"];
 // How each evidence record revision writes a provider response that carried no `thinking`
 // member. Revision 5 wrote 0, indistinguishable from a measured zero; revision 6 writes null.
 // A revision missing here has no known encoding, and the freeze refuses rather than guess.
+// Revision 7 keeps revision 6's encoding and adds check stdout/stderr as recorded text.
 const ABSENT_THINKING_ENCODING = new Map([
   [5, 0],
   [6, null],
+  [7, null],
 ]);
 
 function fail(message) {

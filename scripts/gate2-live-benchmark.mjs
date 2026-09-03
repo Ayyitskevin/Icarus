@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -100,7 +101,7 @@ export function buildGate2ChatRequestBody({ modelId, instructions, input, genera
   };
 }
 
-export const LIVE_EVIDENCE_RECORD_REVISION = 6;
+export const LIVE_EVIDENCE_RECORD_REVISION = 7;
 
 const OMISSION_REASONS = Object.freeze(["byte_ceiling", "file_ceiling"]);
 
@@ -139,6 +140,11 @@ function selectedPathsOf(record) {
   return paths.every((entry) => typeof entry === "string") ? paths : null;
 }
 
+function checksOf(record) {
+  const checks = record?.evaluatorEvidence?.checks;
+  return Array.isArray(checks) ? checks : null;
+}
+
 function isRepositoryRelativePath(value) {
   return (
     typeof value === "string" &&
@@ -150,7 +156,7 @@ function isRepositoryRelativePath(value) {
 }
 
 /**
- * Revision 6's closed shape, one independently violable rule per line, so a test can
+ * Revision 7's closed shape, one independently violable rule per line, so a test can
  * delete a rule and watch a record that violates only that rule become acceptable.
  * A single `&&` chain cannot be mutation-tested that way: every deletion is invisible
  * unless a record exists that the remaining conjuncts accept.
@@ -251,6 +257,48 @@ export const GATE2_EVIDENCE_RECORD_RULES = Object.freeze(
         const paths = omissionsOf(record).map((omission) => omission?.path);
         return new Set(paths).size === paths.length;
       },
+    },
+    {
+      // Revision 7: every check the evaluator ran carries its output as text. A record
+      // whose checks array is missing, or whose entry lacks either stream, cannot say why
+      // a check failed, which is the claim revision 6 could not record.
+      id: "check-entries-carry-output-text",
+      holds: (record) =>
+        checksOf(record) !== null &&
+        checksOf(record).every(
+          (check) =>
+            check !== null &&
+            typeof check === "object" &&
+            typeof check.stdout === "string" &&
+            typeof check.stderr === "string",
+        ),
+    },
+    {
+      // The text is bound to the digest it sits beside, so neither can drift from the
+      // other: a reader of the digest and a reader of the text see the same bytes.
+      id: "check-output-is-digest-bound",
+      holds: (record) =>
+        (checksOf(record) ?? []).every(
+          (check) =>
+            // Text-presence is the previous rule's job; this one owns the binding alone.
+            typeof check?.stdout !== "string" ||
+            typeof check?.stderr !== "string" ||
+            (check.stdoutSha256 === sha256(check.stdout) &&
+              check.stderrSha256 === sha256(check.stderr)),
+        ),
+    },
+    {
+      // The sandbox bounds each stream by the ceiling; a record that exceeds it was not
+      // written by this runner under this ceiling.
+      id: "check-output-within-ceiling",
+      holds: (record) =>
+        (checksOf(record) ?? []).every(
+          (check) =>
+            typeof check?.stdout !== "string" ||
+            typeof check?.stderr !== "string" ||
+            (Buffer.byteLength(check.stdout, "utf8") <= DEFAULT_CEILING.maxCommandOutputBytes &&
+              Buffer.byteLength(check.stderr, "utf8") <= DEFAULT_CEILING.maxCommandOutputBytes),
+        ),
     },
     {
       // A path cannot be both returned and withheld; a record claiming both describes a
@@ -656,12 +704,19 @@ function changedPaths(before, after) {
     .sort((left, right) => left.localeCompare(right));
 }
 
+// Revision 7: the check's stdout and stderr are recorded as text, not only as digests.
+// Revision 6 froze the digests and dropped the text, so "why did this check fail" was a
+// claim with no recorded field — two of thirty cases on 2026-09-02 had to be replayed in a
+// sandbox to be read at all. The sandbox already bounds each stream by the ceiling's
+// maxCommandOutputBytes; the digests stay, and a record rule binds text to digest.
 function summarizeChecks(checks) {
   return checks.map((check) => ({
     checkId: check.checkId,
     argv: check.argv,
     exitCode: check.exitCode,
     signal: check.signal,
+    stdout: check.stdout,
+    stderr: check.stderr,
     stdoutSha256: sha256(check.stdout),
     stderrSha256: sha256(check.stderr),
     truncated: check.truncated,

@@ -1,4 +1,8 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
+
+import { DEFAULT_CEILING } from "../../packages/core/src/policy.js";
 import {
   GATE2_EVIDENCE_RECORD_RULES,
   hasCurrentEvidenceShape,
@@ -11,7 +15,7 @@ type EvidenceRecord = Record<string, unknown>;
 const PINNED_THINK = GATE2_LIVE_INSTRUCTION_POLICY.generation.think;
 
 /**
- * A revision-6 record shaped like the ones the runner writes: four selected files, of
+ * A revision-7 record shaped like the ones the runner writes: four selected files, of
  * which three matched the query and one arrived by the reference hop. That gap is why
  * `selectedFiles` cannot stand in for the query-match count in the reconciliation.
  */
@@ -36,7 +40,28 @@ function validRecord(): EvidenceRecord {
         { path: "src/hop.ts", sha256: "d".repeat(64) },
       ],
     },
+    evaluatorEvidence: { checks: [recordedCheck("ok\n", "")] },
   };
+}
+
+/** A revision-7 check entry: the text beside the digest of exactly that text. */
+function recordedCheck(stdout: string, stderr: string): Record<string, unknown> {
+  return {
+    checkId: "unit",
+    argv: ["python", "-m", "checks.unit"],
+    exitCode: 0,
+    signal: null,
+    stdout,
+    stderr,
+    stdoutSha256: createHash("sha256").update(stdout).digest("hex"),
+    stderrSha256: createHash("sha256").update(stderr).digest("hex"),
+    truncated: false,
+    outcome: "passed",
+  };
+}
+
+function withChecks(checks: unknown): EvidenceRecord {
+  return { ...validRecord(), evaluatorEvidence: { checks } };
 }
 
 /**
@@ -163,11 +188,29 @@ const VIOLATIONS: ReadonlyArray<{
     ruleId: "coverage-reconciles-with-omissions",
     record: withRetrieval({ matchedFiles: 7 }),
   },
+  {
+    // Revision 6's shape: digests present, text absent. Exactly what revision 7 refuses.
+    name: "a check entry that carries digests but no output text",
+    ruleId: "check-entries-carry-output-text",
+    record: withChecks([
+      (({ stdout: _o, stderr: _e, ...rest }) => rest)(recordedCheck("ok\n", "")),
+    ]),
+  },
+  {
+    name: "a check whose recorded text is not the text its digest names",
+    ruleId: "check-output-is-digest-bound",
+    record: withChecks([{ ...recordedCheck("ok\n", ""), stdout: "edited\n" }]),
+  },
+  {
+    name: "a check whose recorded stdout exceeds the sandbox ceiling",
+    ruleId: "check-output-within-ceiling",
+    record: withChecks([recordedCheck("x".repeat(DEFAULT_CEILING.maxCommandOutputBytes + 1), "")]),
+  },
 ];
 
-describe("Gate 2 revision-6 evidence record shape", () => {
+describe("Gate 2 revision-7 evidence record shape", () => {
   it("accepts the shape the runner writes", () => {
-    expect(LIVE_EVIDENCE_RECORD_REVISION).toBe(6);
+    expect(LIVE_EVIDENCE_RECORD_REVISION).toBe(7);
     expect(hasCurrentEvidenceShape(validRecord())).toBe(true);
   });
 
