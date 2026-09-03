@@ -7,6 +7,7 @@ import {
   validateWorkflowAttributes,
 } from "./ci-workflow-policy.mjs";
 import { validateGate1BenchmarkManifest } from "./gate1-benchmark-contract.mjs";
+import { GATE2_LIVE_INSTRUCTION_POLICY_REVISION } from "./gate2-live-instruction-policy.mjs";
 import {
   GATE2_V2_MANIFEST_SHA256,
   GATE2_V3_MANIFEST_SHA256,
@@ -353,6 +354,18 @@ const gate2BenchmarkV4ManifestSource = await readFile(
   "utf8",
 );
 const inheritedWorkflowSource = await readFile(".github/workflows/opencode.yml", "utf8");
+// A review found the policy's runtime revision at 11 while its .d.mts still declared the
+// literal type 10; pnpm typecheck cannot see that split. The declaration is read as source and
+// compared with the runtime export so a future bump cannot leave the two apart.
+const gate2PolicyDeclarationSource = await readFile(
+  "scripts/gate2-live-instruction-policy.d.mts",
+  "utf8",
+);
+const gate2PolicyDeclaredRevision = Number(
+  /export const GATE2_LIVE_INSTRUCTION_POLICY_REVISION: (\d+);/.exec(
+    gate2PolicyDeclarationSource,
+  )?.[1],
+);
 const packageSource = await readFile("package.json", "utf8");
 const packageJson = JSON.parse(packageSource);
 const gate1BenchmarkManifest = parseStrictJson(gate1BenchmarkManifestSource);
@@ -2847,6 +2860,9 @@ const assertions = {
     !/(?:node:http|node:https|fetch\(|api\.github\.com|process\.env\.(?:GH|GITHUB))/.test(
       gate2RetrievalRunnerSource,
     ),
+  gate2InstructionPolicyDeclarationMatchesRuntimeRevision:
+    Number.isSafeInteger(gate2PolicyDeclaredRevision) &&
+    gate2PolicyDeclaredRevision === GATE2_LIVE_INSTRUCTION_POLICY_REVISION,
   gate2BenchmarkContractOfflineAndIntegrated:
     packageJson.scripts["benchmark:gate2:contract"] ===
       "node scripts/gate2-benchmark-contract.mjs" &&

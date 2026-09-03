@@ -41,8 +41,14 @@ are no expected path's stem and no finding id.
 ## Consequences
 
 - A new instrument: figures under revision 11 are a new measurement, never a delta against
-  revision 10's 19/30 (under v3) — and the first run under revision 11 is also the first under
-  manifest v4, so two instruments move at once; the record says so.
+  revision 10's 19/30 (under v3). The first run under revision 11 is also the first under
+  manifest v4 and the first written by evidence record revision 7 (#107, the writer that now
+  records check output), so three instruments move at once; the freezer's schema is unchanged
+  (`icarus.gate2-frozen-evidence.v2`). The record says so.
+- The task-side phrasing is unchanged by design: `security-config-trust`'s task still asks for
+  "only concrete trust-boundary risks supported by the repository" (ADR 0076 declined to
+  change it). If the case returns no-finding again under revision 11, that phrasing is the
+  next thing to read, and the lever would be a task successor, not another policy clause.
 - The change is deliberately narrow. It does not lower the bar for a finding — the bytes must
   still demonstrate the taxonomy entry's condition — it removes a stricter reading the rule
   never intended.
