@@ -117,8 +117,8 @@ acceptance 0.8333 in both, baseline 3/30 in both. `refactor-cart-money-extractio
 `scaffold-json-output-mode` passed; `scaffold-parser-cli-check` proposed exactly its expected
 set and failed its check — the benchmark defect is gone and the case measures the model. The
 acceptance threshold is met on this instrument; the success threshold is not. The two runs
-agree in every figure, with 59 of 60 candidates byte-identical under the profile's
-temperature-0 pin, so they replicate rather than sample. A new measurement, never a delta
+agree in every figure, with 59 of 60 candidates byte-identical under the instruction
+policy's temperature-0 pin, so they replicate rather than sample. A new measurement, never a delta
 against 17/30.
 
 ## Verification

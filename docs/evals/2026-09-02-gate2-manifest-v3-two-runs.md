@@ -16,7 +16,7 @@ are the model's to win or lose.
 | instruction policy | revision 10, digest `116168c9…` — unchanged by v3 |
 | generation pins (from the policy) | `temperature: 0`, `maxTokens: 8192`, `think: false` |
 | evidence record revision | 6 (`requestedThink` recorded; absent thinking is `null`) |
-| execution profile | `03399661d250…`, identical for both runs; `code` = `qwen3.8:27b`, `code-fast` = `ornith-1.5:35b` |
+| execution profile | `03399661d250…` (`fixtures/evals/gate2/live-profile.v2.json`), identical for both runs; `code` = `qwen3.8:27b`, `code-fast` = `ornith-1.5:35b`; the profile pins no temperature — the policy does |
 | host (run-log and operator provenance, not frozen) | mickey, Node 22.23.2, Docker-backed checks; the sets freeze no host, Node, or Docker marker |
 | commit (frozen) | `12f0568` for both runs |
 | arms | baseline (`code-fast`) then routed (`code`), 30 cases each, per run |
@@ -91,8 +91,9 @@ all 60. The one exception is routed `security-schema-migration`: 764 versus 772 
 versus 205 output tokens (input 931 in both; estimated cost `0.0008904075` versus
 `0.000891192`), with the same four selected context paths, the same three citations, the same
 `findingIds: []`, and the same outcome (plan accepted, read-only mismatch, failed) in both
-runs. Under this profile's pins (`temperature: 0`, `think: false`) the second run reproduced
-the first in 59 of 60 candidates and in every aggregate figure — down to a cost reduction of
+runs. Under the instruction policy's generation pins (`temperature: 0`, `think: false`) the
+second run reproduced the first in 59 of 60 candidates and in every aggregate figure — down
+to a cost reduction of
 `0.128587463557`. Two observations do not prove the provider deterministic or that the pins
 caused the agreement; what they do establish is that these two runs are a replication of one
 sample, and that their agreement says nothing about how the instrument would vary under
@@ -126,9 +127,12 @@ Baseline failures are dominated by markdown fences (20 of 27), as under revision
   (revision 10), 0.1286 (v3, both runs) — while the success ratio passes on every instrument
   (3.2 → 6.0 → 5.67 → 6.33). What moved is the within-instrument relation of the two arms'
   output: under revision 7 the routed arm emitted less than its baseline (38,366 versus
-  91,780 output tokens over 30 cases); under v3 it emits more (7,547 / 7,548 versus 6,652),
-  because the suppressed-reasoning budget shrank the baseline's output far more than the
-  routed arm's. Whether 0.3 is the right bar for this pair of models is a question for the
+  91,780 output tokens over 30 cases); under every reasoning-suppressed instrument since it
+  emits more (revision 9: 7,807 / 9,390; revision 10: 6,517 / 7,474; v3: 6,652 / 7,547 and
+  7,548). Across those instruments baseline output is lower by more than routed output; the
+  instruments changed policy and manifest together, so the bytes do not establish why (ADR
+  0070 makes the same point about suppression without a paired reasoning-enabled arm).
+  Whether 0.3 is the right bar for this pair of models is a question for the
   threshold's owner, not for the next policy revision. (Ratios and reductions from each
   frozen set's `comparison.json`; token totals summed from the records.)
 

@@ -464,7 +464,7 @@ and routed `code` 19/30 with acceptance `0.8333`
 threshold is met on this instrument; the success threshold and the pair's cost-reduction
 threshold are not. Three cases changed identity, so this is a new measurement and never a
 delta against 17/30; the two runs agree in every figure, with 59 of 60 candidates
-byte-identical under the profile's temperature-0 pin — a replication, not a variance estimate.
+byte-identical under the instruction policy's temperature-0 pin — a replication, not a variance estimate.
 Routed class success under revision 8 was repair 7/10, refactor 4/5, explanation 3/5,
 security review 2/5, and scaffold 0/5; under revision 9 it was repair 7/10, refactor 0/5,
 explanation 3/5, security review 2/5, and scaffold 0/5; under revision 10 it is repair

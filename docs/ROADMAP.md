@@ -131,7 +131,7 @@ with retrieval 0.9917 / 0.8083, zero incorrect edits, and the pair comparison fa
 reduction (0.1286 against 0.3) ([evaluation](evals/2026-09-02-gate2-manifest-v3-two-runs.md),
 evidence frozen at `evals/artifacts/gate2-r10v3-run1-20260902/` and `…-run2-20260902/`).
 `refactor` 5/5, `scaffold` 1/5 (the first scaffold success). The two runs agree in every
-figure and 59 of 60 candidates are byte-identical under the profile's temperature-0 pin, so
+figure and 59 of 60 candidates are byte-identical under the instruction policy's temperature-0 pin, so
 the pair reads as a replication, not a variance estimate. A new measurement, never a delta
 against 17/30: three cases changed identity.
 Gate 2 remains open for
