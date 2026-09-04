@@ -194,6 +194,28 @@ describe("Gate 2 published live evidence", () => {
     });
   });
 
+  it("refuses a frozen record that contradicts the contract its manifest declares", async () => {
+    // Carried forward from the publisher-v2 lane. Its sibling on `main`
+    // ("refuses a manifest whose record contract says what the records contradict")
+    // mutates the MANIFEST and leaves the bytes; this one mutates the BYTES and repairs
+    // the manifest, so the digest comparison cannot object and only the declared record
+    // contract is left to catch it. The guard needs binding from both sides: a check that
+    // compared the manifest against itself would pass the manifest-side test alone.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const recordPath = path.join(artifactDirectory, "routed/explain-lantern-flow.json");
+      const record = JSON.parse(await readFile(recordPath, "utf8"));
+      // A nonzero reading in a set whose manifest says every reading is an encoded absence.
+      record.reasoningChars = 5;
+      await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+      await repairManifest(artifactDirectory);
+      // The declared contract claims every record reads 0; the freezer derives no such
+      // claim from bytes that now disagree, so the two sides cannot be reconciled.
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        /recordContract: manifest .* != bytes /,
+      );
+    });
+  });
+
   it("refuses a file the frozen manifest never listed", async () => {
     await withFrozenCopy(async (temporary, artifactDirectory) => {
       // An unlisted file is screened by nothing: not the digest comparison it is absent
@@ -537,26 +559,6 @@ describe("Gate 2 published live evidence", () => {
     });
   });
 
-  it("calls a directory named like a record a verdict, in the freezer's words, on both APIs", async () => {
-    // Sol's P2 fixture, on its third answer, each one a layer earlier than the last. It
-    // began as an EISDIR fault at the record read; then the record read lstat-checked each
-    // record and it became a verdict there; now the walk refuses it first, because an
-    // EMPTY directory holds no listed file (#100). Whichever layer speaks, the publisher
-    // must carry its wording and must not surface an I/O error for a question the freezer
-    // can answer about the directory.
-    await withFrozenCopy(async (temporary, artifactDirectory) => {
-      await mkdir(path.join(artifactDirectory, "routed", "fault.json"));
-      const wording = "Gate 2 evidence freeze: routed/fault.json holds no files";
-      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([wording]);
-      const error = await verifyGate2PublishedEvidence(temporary, "reasoning-suppressed").then(
-        () => null,
-        (thrown: Error) => thrown,
-      );
-      expect(error?.message).toContain(wording);
-      expect(error?.message).not.toMatch(/EISDIR/);
-    });
-  });
-
   it("still refuses a NON-empty directory named like a record, from the record read", async () => {
     // The empty-directory rule must not swallow the record read's own type check, and the
     // publisher must carry that verdict too: give the directory a file and only the layer
@@ -728,6 +730,150 @@ describe("Gate 2 published live evidence", () => {
       await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
         /fixture .* holds a link at/,
       );
+    });
+  });
+
+  it("treats an absent reasoning-size claim as no claim, and a present one as binding", () => {
+    // The freezer derives `everyRecordReasoningChars` from the records and omits it when
+    // they disagree -- the ordinary case for a reasoning-enabled arm. Requiring the member
+    // regardless compared every record against `undefined` and refused exactly the sets it
+    // was omitted from. An absent member must bind nothing; a present one must bind all.
+    // Shaped like the frozen set's records: `requestedThink` is ABSENT, which is what its
+    // contract declares.
+    const record = (reasoningChars: number | null) => ({
+      reasoningChars,
+      generatedAt: "2026-09-01T03:31:00.000Z",
+    });
+    const shared = { requestedThinkMemberPresent: false, writtenOn: "2026-09-01" };
+    const claims = { recordContract: { ...shared, everyRecordReasoningChars: 0 } };
+    const noClaim = { recordContract: { ...shared } };
+
+    expect(recordContractBound(record(0), claims)).toBe(true);
+    expect(recordContractBound(record(41), claims)).toBe(false);
+    expect(recordContractBound(record(null), claims)).toBe(false);
+
+    // Records that disagree on reasoning size are all accepted when nothing was claimed.
+    for (const reasoningChars of [0, 41, 8192, null]) {
+      expect(recordContractBound(record(reasoningChars), noClaim)).toBe(true);
+    }
+
+    // "No claim" is scoped to that one member: every other member still binds, under both
+    // contracts. A record carrying `requestedThink` at all contradicts a contract that says
+    // the member is absent, even when its value is the pinned one.
+    for (const contract of [claims, noClaim]) {
+      expect(recordContractBound({ ...record(0), requestedThink: false }, contract)).toBe(false);
+      expect(
+        recordContractBound({ ...record(0), generatedAt: "2026-08-31T23:59:59.999Z" }, contract),
+      ).toBe(false);
+      expect(recordContractBound({ ...record(0), generatedAt: 20260901 }, contract)).toBe(false);
+      expect(recordContractBound(null, contract)).toBe(false);
+    }
+
+    // A config that declares no contract at all is unchanged: it binds nothing.
+    expect(recordContractBound(record(41), {})).toBe(true);
+  });
+
+  it("agrees with the freezer on the same bytes, verdict for verdict", async () => {
+    // Review of PR #78 found the two verifiers accepting different inputs: the freezer
+    // walked only *.json, so a stray text file passed it while this publisher refused it.
+    // Both now read the same universe, and the point of this test is that neither verdict
+    // is read alone -- each case asserts what BOTH say, so a future divergence fails here
+    // rather than being discovered when a published set disagrees with its own manifest.
+    const frozenDirectory = path.join(repositoryRoot, FROZEN_ARTIFACT_RELATIVE);
+
+    // (a) the untouched committed set: both accept.
+    expect(await verifyFrozenEvidence(frozenDirectory)).toEqual([]);
+    expect(
+      (await verifyGate2PublishedEvidence(repositoryRoot, "reasoning-suppressed")).files,
+    ).toHaveLength(64);
+
+    // (b) a non-JSON stray: both refuse, and name the same file.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      await writeFile(path.join(artifactDirectory, "stray.txt"), "not evidence\n");
+      expect(await verifyFrozenEvidence(artifactDirectory)).toContain(
+        "stray.txt: present but unlisted",
+      );
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        "stray.txt: present but unlisted",
+      );
+    });
+
+    // (c) one listed file's bytes corrupted, manifest untouched: both refuse, and name it.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const relative = "routed/repair-parser-false.json";
+      const recordPath = path.join(artifactDirectory, relative);
+      const record = JSON.parse(await readFile(recordPath, "utf8"));
+      record.generatedAt = "2026-09-01T23:59:59.999Z";
+      await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+      const problems = await verifyFrozenEvidence(artifactDirectory);
+      expect(problems.some((problem: string) => problem.startsWith(`${relative}:`))).toBe(true);
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        relative,
+      );
+    });
+  });
+
+  it("refuses an unresolvable root before a conflicting failure underneath it can speak", async () => {
+    // Ordering, not just the eventual verdict. The set behind the link is intact except
+    // that its manifest.json is a DIRECTORY, so the read that would report it fails with
+    // EISDIR. Whichever check runs first decides what the operator is told, and "this root
+    // is not the directory it names" is the fact that explains the other one.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      const sibling = path.join(temporary, "intact-set-beside-the-expected-path");
+      await rename(artifactDirectory, sibling);
+      await symlink(sibling, artifactDirectory);
+      await rm(path.join(sibling, "manifest.json"));
+      await mkdir(path.join(sibling, "manifest.json"));
+      await expect(verifyGate2PublishedEvidence(temporary, "reasoning-suppressed")).rejects.toThrow(
+        /resolves through a symlink/,
+      );
+      await expect(
+        verifyGate2PublishedEvidence(temporary, "reasoning-suppressed"),
+      ).rejects.not.toThrow(/EISDIR/);
+      // The freezer answers the same way, from its own entry point.
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([
+        expect.stringMatching(/resolves through a symlink/),
+      ]);
+    });
+  });
+
+  it("refuses an unresolvable repository root before the fixtures it would read", async () => {
+    // The benchmark manifest and the execution profile are read from the caller's root
+    // before the artifact directory is even named. A fixture manifest that is a directory
+    // threw a raw EISDIR from that read while the link that made it reachable went
+    // unmentioned; the root is asserted before the first read that trusts it.
+    await withFrozenCopy(async (temporary) => {
+      const alias = path.join(temporary, "alias-to-the-checkout");
+      await symlink(temporary, alias);
+      const fixtureManifest = path.join(temporary, "fixtures/evals/gate2/manifest.v2.json");
+      await rm(fixtureManifest);
+      await mkdir(fixtureManifest);
+      await expect(verifyGate2PublishedEvidence(alias, "reasoning-suppressed")).rejects.toThrow(
+        /resolves through a symlink/,
+      );
+      await expect(verifyGate2PublishedEvidence(alias, "reasoning-suppressed")).rejects.not.toThrow(
+        /EISDIR/,
+      );
+    });
+  });
+
+  it("calls a directory named like a record a verdict, in the freezer's words, on both APIs", async () => {
+    // Sol's P2 fixture, on its third answer, each one a layer earlier than the last. It
+    // began as an EISDIR fault at the record read; then the record read lstat-checked each
+    // record and it became a verdict there; now the walk refuses it first, because an
+    // EMPTY directory holds no listed file (#100). Whichever layer speaks, the publisher
+    // must carry its wording and must not surface an I/O error for a question the freezer
+    // can answer about the directory.
+    await withFrozenCopy(async (temporary, artifactDirectory) => {
+      await mkdir(path.join(artifactDirectory, "routed", "fault.json"));
+      const wording = "Gate 2 evidence freeze: routed/fault.json holds no files";
+      expect(await verifyFrozenEvidence(artifactDirectory)).toEqual([wording]);
+      const error = await verifyGate2PublishedEvidence(temporary, "reasoning-suppressed").then(
+        () => null,
+        (thrown: Error) => thrown,
+      );
+      expect(error?.message).toContain(wording);
+      expect(error?.message).not.toMatch(/EISDIR/);
     });
   });
 

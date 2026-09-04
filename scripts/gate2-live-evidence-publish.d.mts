@@ -28,3 +28,12 @@ export function recordContractBound(
   record: unknown,
   config: { recordContract?: Record<string, unknown> },
 ): boolean;
+
+/**
+ * The published-evidence configs, exported read-only so a test can assert each set's pinned
+ * identities against its own committed bytes. Every value is a literal or derived from a
+ * frozen copy: none is read from a live module constant.
+ */
+export const GATE2_PUBLISHED_EVIDENCE_CONFIGS: Readonly<
+  Record<string, Readonly<Record<string, unknown>>>
+>;
